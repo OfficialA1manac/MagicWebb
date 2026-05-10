@@ -1,0 +1,23 @@
+[profile.default]
+src = "src"
+out = "out"
+libs = ["lib"]
+test = "test"
+script = "script"
+solc = "0.8.24"
+evm_version = "shanghai"
+optimizer = true
+optimizer_runs = 1_000_000
+via_ir = false
+fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./broadcast" }]
+
+[fmt]
+line_length = 110
+tab_width = 4
+bracket_spacing = false
+
+[rpc_endpoints]
+coston2 = "https://coston2-api.flare.network/ext/C/rpc"
+
+[etherscan]
+coston2 = { key = "${ROUTESCAN_API_KEY}", chain = 114, url = "https://api.routescan.io/v2/network/testnet/evm/114/etherscan" }

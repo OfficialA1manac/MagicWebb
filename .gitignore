@@ -1,0 +1,57 @@
+# Secrets / env
+.env
+.env.*
+!.env.example
+*.pem
+*.key
+*.p12
+*.pfx
+logs/
+
+# Foundry
+contracts/out/
+contracts/cache/
+contracts/broadcast/
+contracts/lib/
+
+# Go generated / build
+backend/internal/graph/generated.go
+backend/internal/graph/model/
+backend/internal/grpc/gen/
+backend/internal/db/gen/
+backend/internal/chain/Marketplace.go
+backend/internal/chain/AuctionHouse.go
+backend/internal/chain/OfferBook.go
+backend/internal/chain/FeeVault.go
+backend/bin/
+backend/dist/
+
+# Zig
+backend/zig/zig-out/
+backend/zig/.zig-cache/
+
+# Frontend (Next.js)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/dist/
+frontend/.vite/
+frontend/.turbo/
+frontend/.env.local
+
+# Dead Vite scaffold (kept on disk for reference)
+frontend.vite.bak/
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Editor / IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+
+# Claude / agent
+.claude/settings.local.json

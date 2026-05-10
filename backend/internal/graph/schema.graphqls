@@ -1,0 +1,104 @@
+scalar Time
+
+enum ListingStatus { ACTIVE SOLD CANCELLED EXPIRED }
+enum AuctionStatus { ACTIVE SETTLED CANCELLED EXPIRED }
+enum OfferStatus   { ACTIVE ACCEPTED CANCELLED EXPIRED }
+
+type User {
+  address:    String!
+  username:   String
+  bio:        String
+  avatarUrl:  String
+}
+
+type Collection {
+  address:  String!
+  name:     String!
+  symbol:   String
+  verified: Boolean!
+}
+
+type Token {
+  collection:     Collection!
+  tokenId:        String!
+  owner:          User!
+  name:           String
+  imageUrl:       String
+  metadataUri:    String
+  activeListing:  Listing
+  activeOffers:   [Offer!]!
+  activeAuction:  Auction
+}
+
+type Listing {
+  id:         ID!
+  token:      Token!
+  seller:     User!
+  priceWei:   String!
+  expiresAt:  Time!
+  status:     ListingStatus!
+}
+
+type Bid {
+  id:        ID!
+  bidder:    User!
+  amountWei: String!
+  createdAt: Time!
+}
+
+type Auction {
+  id:              ID!
+  onchainId:       String!
+  token:           Token!
+  seller:          User!
+  reserveWei:      String!
+  highestBidWei:   String
+  highestBidder:   User
+  startsAt:        Time!
+  endsAt:          Time!
+  status:          AuctionStatus!
+  bids:            [Bid!]!
+}
+
+type Offer {
+  id:         ID!
+  collection: Collection!
+  tokenId:    String
+  bidder:     User!
+  amountWei:  String!
+  expiresAt:  Time!
+  signature:  String!
+  nonce:      String!
+  status:     OfferStatus!
+}
+
+input OfferInput {
+  collection: String!
+  tokenId:    String         # null = collection-wide
+  amountWei:  String!
+  expiresAt:  Time!
+  signature:  String!
+  nonce:      String!
+}
+
+input ProfileInput {
+  username:  String
+  bio:       String
+  avatarUrl: String
+}
+
+type Query {
+  user(address: String!): User
+  collection(address: String!): Collection
+  searchCollections(q: String!, limit: Int = 20): [Collection!]!
+  token(collection: String!, tokenId: String!): Token
+  activeListings(collection: String, limit: Int = 50, offset: Int = 0): [Listing!]!
+  liveAuctions(limit: Int = 50): [Auction!]!
+  activeOffersForToken(collection: String!, tokenId: String!): [Offer!]!
+}
+
+type Mutation {
+  upsertProfile(input: ProfileInput!): User!
+  submitOffer(input: OfferInput!): Offer!
+  cancelOffer(id: ID!): Boolean!
+}
