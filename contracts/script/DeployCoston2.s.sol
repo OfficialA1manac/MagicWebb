@@ -14,7 +14,7 @@ contract DeployCoston2 is Script {
     function run() external {
         uint256 pk      = vm.envUint("PRIVATE_KEY");
         address creator = vm.envAddress("CREATOR_ADDR");
-        uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(250)));
+        uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(150)));
 
         require(creator != address(0), "CREATOR_ADDR required (set in .env.local; never commit keys)");
 

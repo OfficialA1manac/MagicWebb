@@ -106,8 +106,8 @@ contract OfferBook is MarketplaceCore, EIP712 {
         )));
     }
 
-    /// @notice Token owner accepts a signed offer. FINAL on success — `tokenIdActual` must equal
-    ///         `o.tokenId` unless `o.tokenId == 0`. Fee → `feeVault`, remainder → seller.
+/// @notice Token owner accepts a signed offer. FINAL on success — `tokenIdActual` must equal
+///         `o.tokenId` unless `o.tokenId == 0`. NFT transfers first, then fee → `feeVault` and remainder → seller.
     function acceptOffer(Offer calldata o, bytes calldata sig, uint256 tokenIdActual)
         external nonReentrant
     {
@@ -143,6 +143,7 @@ contract OfferBook is MarketplaceCore, EIP712 {
     }
 
     /// @notice Seller accepts a signed ERC-1155 offer for `o.units` units of `o.tokenId`. FINAL on success.
+///         NFT transfers first, then fee → `feeVault` and remainder → seller.
     function acceptOffer1155(Offer1155 calldata o, bytes calldata sig)
         external nonReentrant
     {
