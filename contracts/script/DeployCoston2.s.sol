@@ -11,14 +11,12 @@ import {OfferBook} from "../src/OfferBook.sol";
 ///         creator EOA receives platform fees directly (one CALL hop saved per trade).
 ///         `feeVault` is an IMMUTABLE constructor argument: once deployed it CANNOT be changed.
 contract DeployCoston2 is Script {
-    address constant DEFAULT_CREATOR = 0x78993B71051de91C2D2595BC3475F07748927dc0;
-
     function run() external {
         uint256 pk      = vm.envUint("PRIVATE_KEY");
-        address creator = vm.envOr("CREATOR_ADDR", DEFAULT_CREATOR);
+        address creator = vm.envAddress("CREATOR_ADDR");
         uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(250)));
 
-        require(creator != address(0), "CREATOR_ADDR=0");
+        require(creator != address(0), "CREATOR_ADDR required (set in .env.local; never commit keys)");
 
         vm.startBroadcast(pk);
         Marketplace  marketplace = new Marketplace (creator, fee);

@@ -8,6 +8,7 @@ import {MarketplaceAbi, ERC721Abi} from "@/lib/abi";
 import {BuyButton} from "@/components/BuyButton";
 import {OfferModal} from "@/components/OfferModal";
 import {OwnerActions} from "@/components/OwnerActions";
+import {FavoriteToggle} from "@/components/FavoriteToggle";
 
 export default function TokenPage() {
   const {addr, id} = useParams<{addr: string; id: string}>();
@@ -23,8 +24,8 @@ export default function TokenPage() {
     address: ADDR.marketplace, abi: MarketplaceAbi, functionName: "listings", args: [coll, tokenId]
   });
 
-  const [seller, expiresAt, price] = (listing as [Address, bigint, bigint] | undefined) ??
-    ["0x0000000000000000000000000000000000000000" as Address, 0n, 0n];
+  const [seller, expiresAt, , price] = (listing as [Address, bigint, number, bigint, bigint] | undefined) ??
+    ["0x0000000000000000000000000000000000000000" as Address, 0n, 0, 0n, 0n];
   const isListed = seller !== "0x0000000000000000000000000000000000000000";
   const isOwner = !!address && address.toLowerCase() === (owner as string | undefined)?.toLowerCase();
   const expired = isListed && expiresAt > 0n && BigInt(Math.floor(Date.now() / 1000)) > expiresAt;
@@ -37,7 +38,10 @@ export default function TokenPage() {
       <div className="space-y-4">
         <div>
           <div className="text-xs text-neutral-400 break-all">{coll}</div>
-          <h1 className="text-2xl md:text-3xl font-bold">Token #{tokenId.toString()}</h1>
+          <div className="mt-1 flex flex-wrap items-center gap-3">
+            <h1 className="text-2xl md:text-3xl font-bold">Token #{tokenId.toString()}</h1>
+            <FavoriteToggle coll={coll} id={tokenId} />
+          </div>
           <div className="text-sm text-neutral-400 mt-1">
             Owner: {ownerLoading ? "…" : <span className="break-all">{(owner as string) ?? "—"}</span>}
           </div>
@@ -50,8 +54,7 @@ export default function TokenPage() {
             <div className="text-xs text-neutral-500">
               {expired ? "Expired " : "Expires "}{new Date(Number(expiresAt) * 1000).toLocaleString()}
             </div>
-            {!isOwner && !expired && <BuyButton coll={coll} id={tokenId} price={price} />}
-            {expired && <div className="text-sm text-yellow-400">Listing expired. Ask the seller to re-list.</div>}
+            {!isOwner && <BuyButton coll={coll} id={tokenId} price={price} expiresAt={expiresAt} />}
           </div>
         )}
 

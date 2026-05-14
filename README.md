@@ -24,9 +24,10 @@ Sellers keep custody until trade settles. Platform fee (default 2.5%) routes dir
 
 ```bash
 npm install --prefix frontend   # first time (or: npm run install:web)
-npm start                     # same as: npm --prefix frontend run dev
-npm run dev:clean             # wipe .next then dev (fixes stale webpack chunks)
-npm run build                 # production build (outputs standalone under frontend/.next)
+npm start                       # same as: npm --prefix frontend run dev
+npm run dev:clean               # wipe .next then dev (fixes stale webpack chunks)
+npm run clean                   # wipe frontend/.next only (stop dev server first)
+npm run build                   # production build (outputs standalone under frontend/.next)
 ```
 
 On Windows, these `npm` scripts work in PowerShell. `make` targets still expect Git Bash / WSL.
@@ -106,9 +107,7 @@ After `make deploy`, the new contract addresses are written back into `frontend/
 | AuctionHouse | `0x6016688AfFAF5427E1f8100160A6378Da2B1476a` |
 | OfferBook    | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
 
-- Admin / creator: `0x78993B71051de91C2D2595BC3475F07748927dc0`
-- Fee: 250 bps (2.5%)
-- All three verified on Routescan; 49/49 forge tests pass.
+Fee recipient (`feeVault` in each contract) is **immutable** at deploy time — read it on [Coston2 explorer](https://coston2-explorer.flare.network) from the contract you interact with; do not trust a copy-pasted EOA from this README alone. Default platform fee is **250 bps (2.5%)** on-chain (`feeBps()`). All three contracts are verified on Routescan; **49/49** `forge test` pass.
 
 ## User flows
 
@@ -140,12 +139,14 @@ After `make deploy`, the new contract addresses are written back into `frontend/
 
 ## Troubleshooting
 
-- **`Cannot find module './NNNN.js'` or missing webpack chunks** — stop the dev server, run `cd frontend && npm run clean`, then `npm run dev` again (or `npm run dev:clean`). Do not mix `next dev` and `next start` against the same `.next` folder without a rebuild. If the repo lives under **OneDrive**, exclude `frontend/.next` from sync or move the project out of OneDrive; partial sync often corrupts chunk files.
-- **"Wrong network" banner** — switch to chain 114 in your wallet.
-- **`NotApproved` on list / accept** — call `setApprovalForAll(<contract>, true)` on the NFT first.
-- **`Expired` on buy** — the listing's `expiresAt` passed; ask the seller to re-list.
-- **`OfferUsed`** — the bidder cancelled this nonce or it was already accepted.
-- **Auction outbid succeeded but no refund visible** — claim it on Profile (`withdrawRefund`).
+See **[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)** for full detail (webpack chunks, chain **114** / Coston2 RPC, `NotApproved`, `Expired`, `OfferUsed`, auction refunds). Quick reminders:
+
+- **Chunks / `./NNNN.js`:** `npm run dev:clean` from repo root, or `cd frontend && npm run clean && npm run dev`. Do not mix `next dev` and `next start` on the same `.next` without rebuilding; exclude `frontend/.next` from OneDrive sync.
+- **Wrong network:** use the in-app banner — **Switch** or **Add Coston2** (chain id **114**).
+- **NotApproved:** `setApprovalForAll` on the NFT for **Marketplace**, **AuctionHouse**, or **OfferBook** depending on the action (see troubleshooting doc).
+- **Expired listing / offer:** seller re-lists or bidder re-signs with a new expiry.
+- **OfferUsed:** new nonce + new signature.
+- **Auction refund:** **Profile → Withdraw refund** (`withdrawRefund` on `AuctionHouse`).
 
 ## License
 
