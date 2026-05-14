@@ -1,128 +1,99 @@
 SHELL := /bin/bash
--include .env
+
+# MagicWebb — marketplace app (frontend + contracts). See docs/PLATFORM.md.
+ENV_FILE := frontend/.env.local
+-include $(ENV_FILE)
+
+CHAIN_ID := $(if $(strip $(NEXT_PUBLIC_CHAIN_ID)),$(strip $(NEXT_PUBLIC_CHAIN_ID)),114)
+DEPLOY_RPC := $(if $(strip $(NEXT_PUBLIC_RPC_URL)),$(strip $(NEXT_PUBLIC_RPC_URL)),https://coston2-api.flare.network/ext/C/rpc)
+
+PORT        ?= 3000
+PID_FILE    := frontend/.next/.web.pid
+LOG_FILE    := frontend/.next/web.log
+
 export
 
-CHAIN_ID         ?= 114
-COSTON2_RPC      ?= https://coston2-api.flare.network/ext/C/rpc
-COSTON2_WS       ?= wss://coston2-api.flare.network/ext/bc/C/ws
-DATABASE_URL     ?= postgres://postgres:postgres@localhost:5432/webbplace?sslmode=disable
-HTTP_LISTEN      ?= :8080
-GRPC_LISTEN      ?= :9090
+.PHONY: help install build start stop restart status health \
+        contracts-build contracts-test deploy load-addrs clean
 
-.PHONY: help setup check-tools install-deps env db-up db-down migrate migrate-down \
-        contracts-build contracts-test deploy-coston2 load-addrs \
-        codegen codegen-graphql codegen-grpc codegen-sqlc codegen-abi \
-        zig-build api indexer matcher web dev stop clean
+help: ## show targets
+	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
 
-help:
-	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-22s %s\n", $$1, $$2}'
+# --- App lifecycle ------------------------------------------------------------
 
-# 0. one-shot bootstrap
-setup: check-tools install-deps env db-up migrate contracts-build codegen zig-build ## first-time setup
+install: ## one-time: node modules + forge libs
+	cd frontend && npm install --no-audit --no-fund
+	cd contracts && forge install --no-commit OpenZeppelin/openzeppelin-contracts foundry-rs/forge-std
 
-check-tools: ## verify host has go, node, pnpm, forge, goose, sqlc, protoc, zig, psql
-	@for t in go node pnpm forge goose sqlc protoc zig psql; do \
-	  command -v $$t >/dev/null || { echo "missing: $$t"; exit 1; }; \
-	done
-	@echo "all tools present"
+build: ## production build of the Next.js app
+	cd frontend && npm run build
 
-install-deps: ## install backend + frontend + foundry deps
-	cd backend  && go mod download
-	cd frontend && pnpm install
-	cd contracts && forge install --no-commit \
-	  OpenZeppelin/openzeppelin-contracts \
-	  foundry-rs/forge-std
+start: ## start the marketplace (prod build, background)
+	@test -f $(ENV_FILE) || { echo "FATAL: $(ENV_FILE) missing — cp frontend/.env.example frontend/.env.local"; exit 1; }
+	@mkdir -p frontend/.next
+	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then \
+	  echo "  already running pid=$$(cat $(PID_FILE))"; exit 0; \
+	fi
+	@cd frontend && ( [ -d .next ] && [ -f .next/BUILD_ID ] || npm run build )
+	@cd frontend && setsid nohup npm run start -- -p $(PORT) >> ../$(LOG_FILE) 2>&1 & echo $$! > ../$(PID_FILE)
+	@sleep 2
+	@echo "  web pid=$$(cat $(PID_FILE))  url=http://127.0.0.1:$(PORT)  log=$(LOG_FILE)"
 
-env: ## copy .env.example to .env if missing
-	@test -f .env || cp .env.example .env
-	@echo "review .env (PRIVATE_KEY, DATABASE_URL, addresses populated by 'make load-addrs')"
+stop: ## stop the marketplace
+	@if [ -f $(PID_FILE) ]; then \
+	  pid=$$(cat $(PID_FILE)); \
+	  pgid=$$(ps -o pgid= -p $$pid 2>/dev/null | tr -d ' '); \
+	  if [ -n "$$pgid" ]; then kill -TERM -$$pgid 2>/dev/null || true; sleep 2; kill -KILL -$$pgid 2>/dev/null || true; \
+	  else kill -TERM $$pid 2>/dev/null || true; sleep 2; kill -KILL $$pid 2>/dev/null || true; fi; \
+	  rm -f $(PID_FILE); echo "  stopped"; \
+	else echo "  not running"; fi
 
-# 1. database
-db-up: ## create local db if missing
-	@psql "postgres://postgres:postgres@localhost:5432/postgres" -tAc \
-	  "SELECT 1 FROM pg_database WHERE datname='webbplace'" | grep -q 1 \
-	  || psql "postgres://postgres:postgres@localhost:5432/postgres" -c "CREATE DATABASE webbplace"
+restart: stop start ## restart the marketplace
 
-db-down: ## drop local db (DESTRUCTIVE)
-	psql "postgres://postgres:postgres@localhost:5432/postgres" -c "DROP DATABASE IF EXISTS webbplace"
+status: ## show pid + port + RPC health
+	@if [ -f $(PID_FILE) ] && kill -0 $$(cat $(PID_FILE)) 2>/dev/null; then echo "  pid=$$(cat $(PID_FILE)) (up)"; else echo "  pid=- (down)"; fi
+	@(echo > /dev/tcp/127.0.0.1/$(PORT)) 2>/dev/null && echo "  port $(PORT) open" || echo "  port $(PORT) closed"
+	@cast block-number --rpc-url $(DEPLOY_RPC) >/dev/null 2>&1 && echo "  rpc ok" || echo "  rpc down"
 
-migrate: ## goose up
-	cd backend && goose -dir migrations postgres "$(DATABASE_URL)" up
+health: ## HTTP + RPC checks (expects app on $(PORT))
+	@command -v curl >/dev/null || { echo "FATAL: curl required for health"; exit 1; }
+	@curl -sf "http://127.0.0.1:$(PORT)/" >/dev/null && echo "  http $(PORT) ok" || echo "  http $(PORT) down"
+	@cast block-number --rpc-url $(DEPLOY_RPC) >/dev/null 2>&1 && echo "  rpc ok" || echo "  rpc down"
 
-migrate-down: ## goose down 1
-	cd backend && goose -dir migrations postgres "$(DATABASE_URL)" down
+# --- Contracts ----------------------------------------------------------------
 
-# 2. contracts
 contracts-build: ## forge build
 	cd contracts && forge build --sizes
 
-contracts-test: ## forge test with gas report
-	cd contracts && forge test -vvv --gas-report
+contracts-test: ## forge test
+	cd contracts && forge test -vvv
 
-deploy-coston2: ## deploy all contracts to Coston2 (PRIVATE_KEY funded via faucet)
-	cd contracts && forge script script/DeployCoston2.s.sol \
-	  --rpc-url $(COSTON2_RPC) \
-	  --broadcast \
-	  --private-key $(PRIVATE_KEY) \
-	  --slow
+deploy: ## deploy contracts (uses NEXT_PUBLIC_RPC_URL + PRIVATE_KEY from $(ENV_FILE))
+	@test -n "$(PRIVATE_KEY)" || { echo "FATAL: PRIVATE_KEY missing in $(ENV_FILE)"; exit 1; }
+	@addr=$$(cast wallet address --private-key "$(PRIVATE_KEY)"); \
+	  bal=$$(cast balance $$addr --rpc-url $(DEPLOY_RPC)); \
+	  echo "  deployer=$$addr balance=$$bal wei"; \
+	  [ "$$bal" != "0" ] || { echo "FATAL: deployer unfunded — https://faucet.flare.network"; exit 1; }
+	cd contracts && forge script script/DeployCoston2.s.sol --rpc-url $(DEPLOY_RPC) --broadcast --private-key $(PRIVATE_KEY) --slow
+	@"$(MAKE)" load-addrs
 
-load-addrs: ## parse Foundry broadcast JSON → .env + frontend/src/lib/contracts.ts
-	./tools/load_contract_addrs.sh
+load-addrs: ## sync deployed addresses from broadcast → $(ENV_FILE)
+	@bc=contracts/broadcast/DeployCoston2.s.sol/$(CHAIN_ID)/run-latest.json; \
+	  test -f "$$bc" || { echo "FATAL: $$bc not found — run 'make deploy' first"; exit 1; }; \
+	  command -v jq >/dev/null || { echo "FATAL: jq required"; exit 1; }; \
+	  m=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="Marketplace")|.contractAddress' "$$bc" | head -n1); \
+	  a=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="AuctionHouse")|.contractAddress' "$$bc" | head -n1); \
+	  o=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="OfferBook")|.contractAddress'    "$$bc" | head -n1); \
+	  test -n "$$m" -a -n "$$a" -a -n "$$o" || { echo "FATAL: missing address(es) in broadcast"; exit 1; }; \
+	  for kv in NEXT_PUBLIC_MARKETPLACE_ADDR=$$m NEXT_PUBLIC_AUCTION_ADDR=$$a NEXT_PUBLIC_OFFER_ADDR=$$o; do \
+	    k=$${kv%%=*}; v=$${kv#*=}; \
+	    if grep -qE "^$$k=" $(ENV_FILE); then sed -i "s|^$$k=.*|$$k=$$v|" $(ENV_FILE); \
+	    else printf '%s=%s\n' "$$k" "$$v" >> $(ENV_FILE); fi; \
+	    echo "  $$k=$$v"; \
+	  done
 
-# 3. codegen
-codegen: codegen-graphql codegen-grpc codegen-sqlc codegen-abi ## run all generators
+# --- Housekeeping -------------------------------------------------------------
 
-codegen-graphql:
-	cd backend && go run github.com/99designs/gqlgen generate
-
-codegen-grpc:
-	cd backend && protoc --go_out=. --go-grpc_out=. proto/*.proto
-
-codegen-sqlc:
-	cd backend && sqlc generate
-
-codegen-abi: ## abigen Go bindings from forge artifacts
-	cd backend && for c in Marketplace AuctionHouse OfferBook FeeVault; do \
-	  abigen --abi ../contracts/out/$$c.sol/$$c.json --pkg chain --type $$c \
-	    --out internal/chain/$$c.go ; \
-	done
-
-zig-build: ## build libwebbplace_perf.a for CGo
-	cd backend/zig && zig build -Doptimize=ReleaseFast
-
-# 4. run services in foreground
-api: ## run GraphQL gateway on :8080
-	cd backend && go run ./cmd/api
-
-indexer: ## run chain indexer
-	cd backend && go run ./cmd/indexer
-
-matcher: ## run gRPC matcher on :9090
-	cd backend && go run ./cmd/matcher
-
-web: ## run frontend on :5173
-	cd frontend && pnpm dev
-
-# 5. orchestrated dev (background)
-dev: ## start matcher, indexer, api, web in background; logs in ./logs/
-	@mkdir -p logs
-	@echo "==> matcher"  ; (cd backend && go run ./cmd/matcher  > ../logs/matcher.log  2>&1 &)
-	@sleep 1
-	@echo "==> indexer"  ; (cd backend && go run ./cmd/indexer  > ../logs/indexer.log  2>&1 &)
-	@echo "==> api"      ; (cd backend && go run ./cmd/api      > ../logs/api.log      2>&1 &)
-	@sleep 1
-	@echo "==> web"      ; (cd frontend && pnpm dev             > ../logs/web.log      2>&1 &)
-	@echo "tail -f logs/*.log to follow. 'make stop' to kill."
-
-stop: ## kill background dev processes
-	-pkill -f "cmd/matcher"   || true
-	-pkill -f "cmd/indexer"   || true
-	-pkill -f "cmd/api"       || true
-	-pkill -f "vite"          || true
-
-clean: ## remove generated artifacts
-	rm -rf backend/internal/graph/generated backend/internal/grpc/gen backend/internal/db/gen
+clean: ## remove all build artifacts
 	rm -rf contracts/out contracts/cache contracts/broadcast
-	rm -rf backend/zig/zig-out backend/zig/.zig-cache
-	rm -rf frontend/dist frontend/node_modules/.vite
-	rm -rf logs
+	rm -rf frontend/.next frontend/dist

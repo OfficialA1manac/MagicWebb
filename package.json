@@ -1,0 +1,15 @@
+{
+  "name": "magicwebb",
+  "private": true,
+  "description": "MagicWebb — Flare NFT marketplace (Next.js + Foundry). Run from repo root without cd frontend.",
+  "scripts": {
+    "start": "npm --prefix frontend run dev",
+    "dev": "npm --prefix frontend run dev",
+    "dev:clean": "npm --prefix frontend run dev:clean",
+    "build": "npm --prefix frontend run build",
+    "start:prod": "npm --prefix frontend run start",
+    "install:web": "npm install --prefix frontend",
+    "lint": "npm --prefix frontend run lint",
+    "typecheck": "npm --prefix frontend run typecheck"
+  }
+}

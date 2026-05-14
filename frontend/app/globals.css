@@ -2,6 +2,29 @@
 @tailwind components;
 @tailwind utilities;
 
-@import "@rainbow-me/rainbowkit/styles.css";
+/* Base look without relying on utility purge (Tailwind still powers components) */
+html {
+  scroll-behavior: smooth;
+}
 
-html, body { background: #0a0a0a; color: #f5f5f5; }
+html,
+body {
+  min-height: 100%;
+  background-color: #0a0a0a;
+  color: #f5f5f5;
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+body {
+  margin: 0;
+}
+
+a {
+  color: #34d399;
+  text-decoration: none;
+}
+
+a:hover {
+  color: #6ee7b7;
+}

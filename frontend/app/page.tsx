@@ -2,22 +2,75 @@ import Link from "next/link";
 
 export default function Home() {
   return (
-    <div className="space-y-8">
-      <section className="text-center py-12">
-        <h1 className="text-4xl font-bold">Non-custodial NFT marketplace on Flare Coston2.</h1>
-        <p className="mt-3 text-neutral-400">Buy, sell, auction, or make signed offers — without giving up custody.</p>
-        <div className="mt-6 flex justify-center gap-3">
-          <Link href="/search" className="px-4 py-2 rounded bg-emerald-600 hover:bg-emerald-500">Browse</Link>
-          <Link href="/profile/me" className="px-4 py-2 rounded border border-neutral-700">My NFTs</Link>
+    <div className="space-y-10 sm:space-y-12">
+      <section className="py-8 text-center sm:py-12">
+        <p className="text-sm font-medium uppercase tracking-wide text-emerald-400/90">MagicWebb</p>
+        <h1 className="mt-2 text-3xl font-bold sm:text-4xl md:text-5xl">Non-custodial NFT marketplace on Flare</h1>
+        <p className="mx-auto mt-3 max-w-2xl text-sm text-neutral-400 sm:text-base">
+          Buy at a fixed price, run English auctions, or use EIP-712 signed offers — your NFTs stay in your wallet until
+          a transaction settles on-chain. Built for Coston2 today; the same contracts can target Flare mainnet when you
+          deploy there.
+        </p>
+        <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
+          <Link href="/list" className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-neutral-950 hover:bg-emerald-500">
+            List your NFT
+          </Link>
+          <Link href="/search" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
+            Browse by collection
+          </Link>
+          <Link href="/auctions" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
+            Live auctions
+          </Link>
+          <Link href="/profile/me" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
+            My profile
+          </Link>
         </div>
       </section>
       <section>
-        <h2 className="text-xl font-semibold mb-3">How it works</h2>
-        <ul className="grid grid-cols-1 md:grid-cols-3 gap-3 text-sm">
-          <li className="p-4 border border-neutral-800 rounded">List with one approval. Buyers pay; you keep custody until purchase.</li>
-          <li className="p-4 border border-neutral-800 rounded">Auctions use English bidding with pull-pattern refunds.</li>
-          <li className="p-4 border border-neutral-800 rounded">Offers are signed off-chain (EIP-712) on any token, listed or not.</li>
+        <h2 className="mb-3 text-xl font-semibold">How it works</h2>
+        <ul className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
+          <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
+            <div className="mb-1 font-semibold text-emerald-400/90">List</div>
+            Approve the marketplace once, set price and expiry. Buyers call <code className="text-xs text-neutral-500">buy</code> with
+            value — custody transfers in one tx.
+          </li>
+          <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
+            <div className="mb-1 font-semibold text-emerald-400/90">Auction</div>
+            Reserve, duration, min bid step. Outbids accrue as withdrawable balance; anti-snipe extends the clock in the
+            final minutes.
+          </li>
+          <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
+            <div className="mb-1 font-semibold text-emerald-400/90">Offer</div>
+            Deposit once in OfferBook, sign offers off-chain, share JSON with the owner; they accept on-chain when ready.
+          </li>
         </ul>
+      </section>
+      <section>
+        <h2 className="mb-3 text-xl font-semibold">Contracts on Coston2</h2>
+        <ul className="space-y-1 break-all font-mono text-xs sm:text-sm">
+          <li>
+            Marketplace{" "}
+            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x767f7ff7c66673488a30053c025c153e13b6bfaa" target="_blank" rel="noreferrer">
+              0x767F…BfAa
+            </a>
+          </li>
+          <li>
+            AuctionHouse{" "}
+            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x6016688affaf5427e1f8100160a6378da2b1476a" target="_blank" rel="noreferrer">
+              0x6016…476a
+            </a>
+          </li>
+          <li>
+            OfferBook{" "}
+            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x0c7112ec22262d1e423132e35bc87e33abf64a22" target="_blank" rel="noreferrer">
+              0x0C71…4a22
+            </a>
+          </li>
+        </ul>
+        <p className="mt-3 text-xs text-neutral-500">
+          See <Link href="https://github.com/OfficialA1manac/MagicWebb" className="text-emerald-400/90 underline">docs on GitHub</Link> for
+          architecture and roles (creators, collectors, devs).
+        </p>
       </section>
     </div>
   );

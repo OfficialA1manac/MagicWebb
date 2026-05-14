@@ -2,7 +2,7 @@ import type {Address} from "viem";
 import {ADDR, CHAIN_ID} from "./addresses";
 
 export const offerDomain = {
-  name: "WebbPlaceOfferBook",
+  name: "MagicWebbOfferBook",
   version: "1",
   chainId: CHAIN_ID,
   verifyingContract: ADDR.offer

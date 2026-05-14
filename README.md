@@ -1,6 +1,6 @@
-# WebbPlace
+# MagicWebb
 
-Non-custodial NFT marketplace on **Flare Coston2** testnet.
+Non-custodial NFT marketplace on **Flare Coston2** testnet. Pure on-chain — wallet talks straight to the contracts via wagmi/viem. No backend, no database, no indexer.
 
 - **Buy / sell** at fixed price (`Marketplace`)
 - **English auctions** with reserve, increment, and **pull-pattern refunds** (`AuctionHouse`)
@@ -13,137 +13,139 @@ Sellers keep custody until trade settles. Platform fee (default 2.5%) routes dir
 | Layer | Tech |
 |---|---|
 | Contracts | Solidity 0.8.24, Foundry, OpenZeppelin |
-| Frontend  | Next.js 15 (App Router), React 19, wagmi v2, viem v2, RainbowKit v2, TailwindCSS |
-| Backend (optional indexer / API) | Go + Fiber + GraphQL (gqlgen) + gRPC, Postgres + sqlc + Goose, Zig (CGo) for log decode + EIP-712 batch verify |
-| Network | Flare Coston2 (chain id 114), C2FLR |
+| Frontend  | Next.js 15 (App Router), React 19, wagmi v2, viem v2, TailwindCSS |
+| Network   | Flare Coston2 (chain id 114), C2FLR |
 
-## Architecture
+`MarketplaceCore` is the shared base (fee config, NFT transfer, fee splitter). The three trade contracts inherit it.
 
+**Who this is for** — See [`docs/PLATFORM.md`](docs/PLATFORM.md) for a full walkthrough: collectors, sellers/creators, developers, and community operators.
+
+## Run from repository root (no `cd frontend`)
+
+```bash
+npm install --prefix frontend   # first time (or: npm run install:web)
+npm start                     # same as: npm --prefix frontend run dev
+npm run dev:clean             # wipe .next then dev (fixes stale webpack chunks)
+npm run build                 # production build (outputs standalone under frontend/.next)
 ```
-                 ┌──── Marketplace ─────┐
-   wallet ──RPC──┤                      ├── creator EOA (fee)
-                 ├──── AuctionHouse ────┤        │
-                 │                      │        └── seller EOA (proceeds)
-                 └──── OfferBook ───────┘
-                              ▲
-                       EIP-712 signed offer
-                       (off-chain, redeemable on-chain)
+
+On Windows, these `npm` scripts work in PowerShell. `make` targets still expect Git Bash / WSL.
+
+## Prereqs
+
+- `foundry` (forge, cast)
+- `node` ≥ 20 + `npm`
+- `jq` (for `make load-addrs`)
+
+## Setup
+
+```bash
+cp frontend/.env.example frontend/.env.local
+make install                  # node modules + forge libs
+# Edit frontend/.env.local — set PRIVATE_KEY only if you intend to deploy.
+make start                    # builds (if needed) and serves http://127.0.0.1:3000
 ```
 
-`MarketplaceCore` is the shared base — fee config, role-based admin, pause, NFT transfer, fee splitter. Trade contracts inherit it. `feeVault` storage points directly at the creator wallet to skip a CALL hop per trade. Use the optional `DeployFeeVault.s.sol` + `setFeeVault(...)` to switch to a contract sink later.
+**Single env file:** `frontend/.env.local` is the only file Next.js and the Makefile read. Copy from `frontend/.env.example` once, then edit. `NEXT_PUBLIC_*` vars are inlined at build time; `PRIVATE_KEY` / `ROUTESCAN_API_KEY` stay server-side and are used only by `make deploy` / verify.
 
-## Coston2 setup
+**WalletConnect (Reown):** create a project at [cloud.reown.com](https://cloud.reown.com), then set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local`. Set `NEXT_PUBLIC_APP_URL` to the URL users open (e.g. `https://yourdomain.com` in production). Restart `npm run dev` after changing env.
+
+## Lifecycle
+
+```bash
+make start      # start the marketplace
+make stop       # stop the marketplace
+make restart    # stop + start
+make status     # pid / port + RPC reachability
+make health     # HTTP 200 on / + RPC (needs curl)
+make clean      # remove build artifacts
+```
+
+## Production (same Coston2 contracts, one env file)
+
+Ship the same `frontend/.env.local` to the server (keep chain id **114** and your Coston2 contract addresses until you redeploy elsewhere). Then:
+
+```bash
+cd frontend
+npm ci
+npm run build
+npm run start -- -p 3000
+```
+
+The app is built with `output: "standalone"` plus baseline security headers (frame, MIME sniffing, referrer). Add **HSTS** only at your HTTPS reverse proxy (e.g. nginx, Cloudflare), not over plain HTTP.
+
+**Standalone output:** after `npm run build`, run `node .next/standalone/frontend/server.js` from the `frontend` directory (or copy `frontend/.next/static` → `frontend/.next/standalone/frontend/.next/static` and `frontend/public` → `frontend/.next/standalone/frontend/public` per [Next.js standalone](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)). `outputFileTracingRoot` is set to the repo root so tracing does not pick a parent-folder lockfile by mistake.
+
+**Windows:** use Git Bash or WSL for `make start` / `make deploy`; for local dev, `npm start` from repo root or `cd frontend && npm run dev` in PowerShell.
+
+## Deploy contracts (optional)
+
+```bash
+make contracts-build
+make contracts-test
+make deploy        # broadcasts via NEXT_PUBLIC_RPC_URL (Coston2 by default), then load-addrs → .env.local
+```
+
+After `make deploy`, the new contract addresses are written back into `frontend/.env.local` automatically; the next `make restart` picks them up.
+
+## Coston2 reference
 
 | Field | Value |
 |---|---|
 | Chain ID | 114 |
-| Native | C2FLR |
-| RPC | `https://coston2-api.flare.network/ext/C/rpc` |
-| WS | `wss://coston2-api.flare.network/ext/bc/C/ws` |
+| Native   | C2FLR |
+| RPC      | `https://coston2-api.flare.network/ext/C/rpc` |
 | Explorer | `https://coston2-explorer.flare.network` |
-| Faucet | `https://faucet.flare.network` (select Coston2) |
+| Faucet   | `https://faucet.flare.network` (select Coston2) |
 
-## Prereqs
+## Live deployment (chain id 114)
 
-- `foundry` (forge)
-- `node` ≥ 20 + `npm`
-- `jq` (for `tools/load_contract_addrs.sh`)
-- (optional, for backend indexer) `go`, `pnpm`, `goose`, `sqlc`, `protoc`, `zig`, `psql`
+| Contract | Address |
+|---|---|
+| Marketplace  | `0x767F7fF7c66673488a30053C025C153E13b6BfAa` |
+| AuctionHouse | `0x6016688AfFAF5427E1f8100160A6378Da2B1476a` |
+| OfferBook    | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
 
-## Deploy contracts
-
-```bash
-cd contracts
-forge install                           # first time only
-forge build
-forge test -vvv --gas-report
-```
-
-Then deploy to Coston2 (operator funds `PRIVATE_KEY` at the faucet first):
-
-```bash
-export PRIVATE_KEY=0x...
-export CREATOR_ADDR=0x78993B71051de91C2D2595BC3475F07748927dc0
-export ADMIN_ADDR=$CREATOR_ADDR
-export FEE_BPS=250
-export ROUTESCAN_API_KEY=...
-
-forge script script/DeployCoston2.s.sol --rpc-url coston2 --broadcast --verify
-```
-
-If `--verify` fails, re-verify each contract explicitly:
-
-```bash
-forge verify-contract <ADDR> Marketplace  --chain coston2 \
-  --constructor-args $(cast abi-encode "constructor(address,address,uint16)" "$ADMIN_ADDR" "$CREATOR_ADDR" "$FEE_BPS")
-forge verify-contract <ADDR> AuctionHouse --chain coston2 --constructor-args ...
-forge verify-contract <ADDR> OfferBook    --chain coston2 --constructor-args ...
-```
-
-Pull addresses into `.env` + `frontend/.env.local`:
-
-```bash
-bash tools/load_contract_addrs.sh
-```
-
-## Run frontend
-
-```bash
-cd frontend
-cp .env.local.example .env.local
-# Fill NEXT_PUBLIC_*_ADDR (or run load_contract_addrs.sh first) and NEXT_PUBLIC_WC_PROJECT_ID
-# Get a WalletConnect project id at https://cloud.walletconnect.com
-npm install
-npm run dev      # http://localhost:3000
-```
+- Admin / creator: `0x78993B71051de91C2D2595BC3475F07748927dc0`
+- Fee: 250 bps (2.5%)
+- All three verified on Routescan; 49/49 forge tests pass.
 
 ## User flows
 
 ### Buy listed token
 1. Connect wallet → switch to Coston2 if prompted.
-2. Search by collection address → token detail page.
+2. Search by collection → token detail page.
 3. Click **Buy now**. Tx submits with `msg.value == price`.
 4. Seller receives `price * (1 - feeBps/10000)`; creator wallet gets the fee.
 
 ### Auction
 1. Seller `setApprovalForAll(AuctionHouse, true)` and calls `create(...)`.
 2. Bidders call `bid` on `/auction/:id`. Each outbid credits the prior bidder via `pendingReturns`.
-3. Outbid bidders claim their refund via **Profile → Withdraw refund** (`withdrawRefund()`).
+3. Outbid bidders claim their refund on **Profile → Withdraw refund** (`withdrawRefund()`).
 4. After `endsAt`, anyone calls **Settle**. NFT moves; fee routes to creator.
 
 ### Signed offer (works on unlisted tokens)
 1. Bidder funds deposit (`OfferBook.deposit` payable).
 2. Bidder fills the offer modal → wallet signs EIP-712 typed data → `{offer, sig}` JSON copied to clipboard.
-3. Bidder sends JSON to the token owner (DM, off-chain channel).
+3. Bidder sends JSON to the token owner off-chain.
 4. Owner approves `OfferBook` for the token, then submits `acceptOffer(offer, sig, tokenIdActual)`.
-5. NFT transfers; deposit is debited; fee routes to creator. Bidder can pre-emptively `cancelOffer(nonce)` at any time.
+5. NFT transfers; deposit is debited; fee routes to creator. Bidder can pre-emptively `cancelOffer(nonce)`.
 
-## Gas (forge test --gas-report)
+## Gas notes
 
-Filled in after `forge test`. Notable hot paths:
-- `Marketplace.buy` — fee push direct to EOA, no FeeVault hop.
-- `AuctionHouse.bid` outbid — pull refund (no external call), DOS-resistant.
-- `OfferBook.acceptOffer` — single `_splitAndPay` call, deposit decrement.
-
-## Backend (optional)
-
-A Go indexer + GraphQL/gRPC API exists under `backend/`. It is not required for trade flows — every UI action calls contracts directly. To run:
-
-```bash
-make setup     # tool check, db, migrations, codegen, zig build
-make dev       # matcher → indexer → api → web (logs in ./logs)
-```
-
-See `Makefile` and `backend/README` for details.
+- `feeVault` is the creator EOA — `buy / settle / acceptOffer` push the fee via one `.call{value:}`. No FeeVault contract hop.
+- **Pull-pattern refunds** on outbids — one storage write, re-entrancy-safe.
+- **EIP-712 signed offers off-chain** — chain spend is `O(matches)`, not `O(offers)`.
+- Solidity 0.8.24 / Cancun target — uses `MCOPY` and `PUSH0`.
 
 ## Troubleshooting
 
-- **"Wrong network" banner** — switch to chain 114 in your wallet (the banner has a button).
+- **`Cannot find module './NNNN.js'` or missing webpack chunks** — stop the dev server, run `cd frontend && npm run clean`, then `npm run dev` again (or `npm run dev:clean`). Do not mix `next dev` and `next start` against the same `.next` folder without a rebuild. If the repo lives under **OneDrive**, exclude `frontend/.next` from sync or move the project out of OneDrive; partial sync often corrupts chunk files.
+- **"Wrong network" banner** — switch to chain 114 in your wallet.
 - **`NotApproved` on list / accept** — call `setApprovalForAll(<contract>, true)` on the NFT first.
 - **`Expired` on buy** — the listing's `expiresAt` passed; ask the seller to re-list.
-- **`OfferUsed`** — the bidder cancelled this nonce, or it was already accepted.
-- **Auction outbid succeeded but no refund visible** — claim it on the profile page; refunds use the pull pattern (`withdrawRefund`).
-- **Routescan verify fails** — set `ROUTESCAN_API_KEY` and re-run `forge verify-contract` per the explicit form above.
+- **`OfferUsed`** — the bidder cancelled this nonce or it was already accepted.
+- **Auction outbid succeeded but no refund visible** — claim it on Profile (`withdrawRefund`).
 
 ## License
 
