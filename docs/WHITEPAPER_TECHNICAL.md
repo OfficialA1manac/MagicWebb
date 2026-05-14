@@ -1,6 +1,6 @@
 # MagicWebb — Technical Whitepaper
 
-**Version 1.3 — 2026-05-14**  
+**Version 1.4 — 2026-05-14**  
 **Network:** Flare Coston2 (testnet), mainnet-ready architecture  
 **License:** MIT
 
@@ -17,6 +17,7 @@ MagicWebb is a non-custodial NFT marketplace built as a single application with 
 | Hybrid 721/1155 | One marketplace surface for both token standards. |
 | Off-chain signatures, on-chain settlement | Offers are signed off-chain and accepted atomically on-chain. |
 | Predictable operations | Single env file (`frontend/.env.local`) and one Makefile lifecycle (`start`, `stop`, `restart`, `status`, `health`). |
+| Wallet-only surface area | The app submits transactions when chain state requires it; users **connect and confirm** (or reject) in the wallet — no separate manual “claim” or “settle” hunting except on failure retry. |
 
 ## 3. System architecture
 
@@ -44,15 +45,27 @@ On each child contract (`Marketplace`, `AuctionHouse`, `OfferBook`), **`feeVault
 
 Deploy scripts read `CREATOR_ADDR` as the fee vault and `FEE_BPS` for basis points; operators must set these to the intended immutable values **before** broadcasting, because they cannot be corrected post-deploy without new contracts.
 
-### 3.3 Fees, refunds, and failed transfers (all surfaces)
+### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
-**Where the immutable bps applies.** The same `feeBps` / `feeVault` applies to every **successful, final settlement** that moves an NFT and pays the seller from trade proceeds: `Marketplace.buy`, `AuctionHouse.settle` (winning bid only), and `OfferBook.acceptOffer` / `acceptOffer1155`. There is **no** separate listing fee, auction-creation fee, or offer-signature fee—**listing, relisting, cancelling an unsold listing, cancelling a zero-bid auction, and offer cancellation (nonce burn) do not call `_splitAndPay`**, so the platform fee is never assessed on those actions.
+**Where the immutable bps is applied.** The same `feeBps` / `feeVault` **applies** (is **charged from trade proceeds** and sent to `feeVault`) on every **successful, final settlement** that moves an NFT and pays the seller: `Marketplace.buy`, `AuctionHouse.settle` (winning bid only), and `OfferBook.acceptOffer` / `acceptOffer1155`. There is **no** separate listing fee, auction-creation fee, or offer-signature fee—**listing, relisting, cancelling an unsold listing, cancelling a zero-bid auction, and offer cancellation (nonce burn) do not call `_splitAndPay`**, so the platform fee is **not applied** on those actions.
 
-**Auction bids (no fee on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
+**Auction bids (no fee applied on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
 
-**When the fee runs (after NFT transfer).** On every settlement path, the implementation performs the standard-aware **NFT transfer first**, then `_splitAndPay` to `feeVault` and seller. If the transfer reverts, the whole transaction reverts: **no fee is taken** and no sale state is finalized.
+**When the fee is applied (after NFT transfer).** On every settlement path, the implementation performs the standard-aware **NFT transfer first**, then `_splitAndPay` so the platform fee is **applied** to the seller’s proceeds. If the transfer reverts, the whole transaction reverts: **the fee is not applied** and no sale state is finalized.
 
-**Expired or cancelled listings / unsold auctions.** If nothing sells, **no trade proceeds exist** and **no platform fee is due**—there is nothing held as a “fee escrow” to release back to sellers. `buy` on an expired listing simply reverts (`Expired`). A seller-cancelled listing is deleted with no payment flow.
+**Expired or cancelled listings / unsold auctions.** If nothing sells, **no trade proceeds exist** and **the platform fee is not applied**—there is no separate “fee escrow” to unwind. `buy` on an expired listing simply reverts (`Expired`). A seller-cancelled listing is deleted with no payment flow.
+
+### 3.4 Wallet confirmations only (product automation)
+
+On-chain rules still require transactions for settlement and pull refunds, but the **MagicWebb app** is responsible for **submitting** those transactions when reads show they are needed, so users normally only **connect the wallet** and **approve or reject** the prompts—no hunting for extra buttons like “settle” or “claim refund” unless a submission fails and a one-tap **retry** is shown.
+
+Concrete behavior (reference implementation):
+
+- **Auction end:** When an auction has bids and has passed `endsAt`, opening the auction page with a connected wallet triggers `settle` automatically (wallet confirmation).
+- **Outbid refunds:** Opening your profile when `pendingReturns` is positive triggers `withdrawRefund` automatically (wallet confirmation). After a successful refund, state resets so a future outbid can prompt again.
+- **OfferBook deposit:** “Withdraw all” withdraws the full on-chain deposit with one confirmation; partial amounts remain an optional path.
+
+Optional operations hardening (not required by contracts): a small **relayer** balance can call `settle` on users’ behalf so winners receive the NFT with **zero** signatures from them; that is a deployment choice and does not change fee **application** rules.
 
 ## 4. Data flow
 
@@ -72,8 +85,8 @@ Deploy scripts read `CREATOR_ADDR` as the fee vault and `FEE_BPS` for basis poin
 ### 4.3 Auction settlement
 
 1. Seller creates an auction with reserve and end time (and optional minimum bid increment / anti-snipe behavior per contract rules).
-2. Bidders place bids. Outbid losers receive **full** prior-bid balances in `pendingReturns` (no fee on bids). The leader may **compound** a higher bid by sending only the **increment**; other bidders send the **full** new high amount. Losers withdraw via `withdrawRefund`.
-3. After `endsAt`, **anyone** may call `settle` once (permissionless finalizer). That transaction transfers the NFT to the highest bidder, **then** applies the immutable platform fee to the winning `highestBid` and pays the seller—**fee is charged only on this winning settlement**, not on intermediate bids. **Product UX** should treat settlement as automatic (e.g. prompt immediately after expiry or use a relayer); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
+2. Bidders place bids. Outbid losers receive **full** prior-bid balances in `pendingReturns` (no fee **applied** on bids). The leader may **compound** a higher bid by sending only the **increment**; other bidders send the **full** new high amount. The app prompts `withdrawRefund` when appropriate (see §3.4).
+3. After `endsAt`, **anyone** may call `settle` once (permissionless finalizer). That transaction transfers the NFT to the highest bidder, **then** **applies** the immutable platform fee to the winning `highestBid` and pays the seller—**fee is applied only on this winning settlement**, not on intermediate bids. The app prompts `settle` when you view the auction (see §3.4); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
 
 ## 5. Security model
 

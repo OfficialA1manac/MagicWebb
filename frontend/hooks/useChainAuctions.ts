@@ -19,22 +19,25 @@ export type AuctionRow = {
   highestBidder: Address;
 };
 
+/** Matches `AuctionHouse.auctions` public getter field order (12 values). */
 function parseAuctionTuple(
   id: bigint,
-  row: readonly [Address, bigint, number, boolean, Address, bigint, bigint, bigint, bigint, Address]
+  row: readonly [
+    Address,
+    bigint,
+    number,
+    boolean,
+    number,
+    Address,
+    bigint,
+    bigint,
+    bigint,
+    bigint,
+    Address,
+    bigint
+  ]
 ): AuctionRow | null {
-  const [
-    seller,
-    startsAt,
-    ,
-    settled,
-    collection,
-    endsAt,
-    tokenId,
-    reserve,
-    highestBid,
-    highestBidder
-  ] = row;
+  const [seller, startsAt, , settled, , collection, endsAt, tokenId, reserve, highestBid, highestBidder] = row;
   if (seller === zeroAddress) return null;
   return {
     id,

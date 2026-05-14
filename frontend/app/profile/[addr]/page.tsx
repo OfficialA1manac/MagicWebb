@@ -3,7 +3,7 @@ import Link from "next/link";
 import {useParams} from "next/navigation";
 import {useAccount, useReadContract} from "wagmi";
 import {formatEther, type Address, type Hex} from "viem";
-import {useEffect, useMemo, useState} from "react";
+import {useEffect, useMemo, useRef, useState} from "react";
 import {ADDR} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
 import {useWithdrawRefund} from "@/hooks/useWithdrawRefund";
@@ -36,11 +36,55 @@ export default function Profile() {
     query: {enabled: !!target}
   });
 
-  const refundTx = useTx();
+  const {
+    hash: refundHash,
+    setHash: setRefundHash,
+    isConfirming: refundConfirming,
+    isConfirmed: refundConfirmed,
+    reset: resetRefundTx
+  } = useTx();
   const depositTx = useTx();
+  const refundAutoAttempted = useRef(false);
+  const [refundPhase, setRefundPhase] = useState<"idle" | "awaiting_wallet" | "done" | "error">("idle");
+
+  const isSelfProfile =
+    !!address && !!target && address.toLowerCase() === target.toLowerCase();
+
   useEffect(() => {
-    if (refundTx.isConfirmed) refetch();
-  }, [refundTx.isConfirmed, refetch]);
+    if (!isSelfProfile || pending === 0n) return;
+    if (refundPhase === "error") return;
+    if (refundAutoAttempted.current || isPending || refundConfirming || refundHash) return;
+    refundAutoAttempted.current = true;
+    setRefundPhase("awaiting_wallet");
+    void withdraw()
+      .then(h => {
+        setRefundHash(h as Hex);
+        setRefundPhase("done");
+      })
+      .catch(() => {
+        setRefundPhase("error");
+      });
+  }, [
+    isSelfProfile,
+    pending,
+    refundPhase,
+    isPending,
+    refundConfirming,
+    refundHash,
+    withdraw,
+    setRefundHash
+  ]);
+
+  useEffect(() => {
+    if (pending !== 0n) return;
+    refundAutoAttempted.current = false;
+    setRefundPhase("idle");
+    resetRefundTx();
+  }, [pending, resetRefundTx]);
+
+  useEffect(() => {
+    if (refundConfirmed) refetch();
+  }, [refundConfirmed, refetch]);
   useEffect(() => {
     if (depositTx.isConfirmed) refetchOffer();
   }, [depositTx.isConfirmed, refetchOffer]);
@@ -180,26 +224,54 @@ export default function Profile() {
       <div className="grid gap-6 lg:grid-cols-2">
         <section className="flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/30 p-5">
           <h2 className="text-lg font-semibold text-neutral-100">Auction refunds</h2>
-          <p className="mt-1 text-xs text-neutral-500">Outbid amounts use a pull pattern — claim here when you have a balance.</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            Outbid amounts use a pull pattern on-chain; when you open your profile with a refund balance, we request a
+            single wallet confirmation to return everything — no separate &quot;claim&quot; flow to hunt for.
+          </p>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-3xl font-mono font-semibold tracking-tight">{formatEther(pending)}</span>
             <span className="text-sm text-neutral-500">C2FLR</span>
           </div>
-          <button
-            className="mt-4 w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-neutral-950 hover:bg-emerald-500 disabled:opacity-40 sm:w-auto sm:px-6"
-            disabled={isPending || refundTx.isConfirming || pending === 0n}
-            onClick={async () => {
-              const h = await withdraw();
-              refundTx.setHash(h as Hex);
-            }}
-          >
-            {isPending ? "Confirm in wallet…" : refundTx.isConfirming ? "Withdrawing…" : "Withdraw refund"}
-          </button>
+          {isSelfProfile && pending > 0n && (
+            <p className="mt-3 text-sm text-neutral-300">
+              {refundPhase === "error"
+                ? "Wallet rejected or the transaction failed. Retry below — only a confirmation is required."
+                : isPending || refundPhase === "awaiting_wallet"
+                  ? "Confirm the refund in your wallet."
+                  : refundConfirming
+                    ? "Refund confirming on-chain…"
+                    : refundConfirmed
+                      ? "Refund complete."
+                      : "Preparing refund…"}
+            </p>
+          )}
+          {refundPhase === "error" && isSelfProfile && pending > 0n && (
+            <button
+              type="button"
+              className="mt-3 w-full rounded-lg bg-emerald-600 py-2.5 text-sm font-medium text-neutral-950 hover:bg-emerald-500 disabled:opacity-40 sm:w-auto sm:px-6"
+              disabled={isPending || refundConfirming}
+              onClick={async () => {
+                setRefundPhase("awaiting_wallet");
+                try {
+                  const h = await withdraw();
+                  setRefundHash(h as Hex);
+                  setRefundPhase("done");
+                } catch {
+                  setRefundPhase("error");
+                }
+              }}
+            >
+              {isPending ? "Confirm in wallet…" : "Retry refund"}
+            </button>
+          )}
+          {!isSelfProfile && pending > 0n && (
+            <p className="mt-3 text-xs text-neutral-500">This address has a pending refund on-chain (view only).</p>
+          )}
           <div className="mt-3">
             <TxBanner
-              hash={refundTx.hash}
-              isConfirming={refundTx.isConfirming}
-              isConfirmed={refundTx.isConfirmed}
+              hash={refundHash}
+              isConfirming={refundConfirming}
+              isConfirmed={refundConfirmed}
               error={error}
               label="Refund withdrawal"
             />
@@ -208,12 +280,15 @@ export default function Profile() {
 
         <section className="flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/30 p-5">
           <h2 className="text-lg font-semibold text-neutral-100">OfferBook deposit</h2>
-          <p className="mt-1 text-xs text-neutral-500">Escrow for signed offers. Withdraw unused balance anytime.</p>
+          <p className="mt-1 text-xs text-neutral-500">
+            Escrow for signed offers. Withdraw unused balance — use &quot;Withdraw all&quot; for a single wallet confirmation
+            without typing an amount.
+          </p>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-3xl font-mono font-semibold tracking-tight">{formatEther(depBal)}</span>
             <span className="text-sm text-neutral-500">C2FLR</span>
           </div>
-          <div className="mt-4 flex flex-col gap-2 sm:flex-row">
+          <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <input
               className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm"
               placeholder="Amount to withdraw (C2FLR)"
@@ -221,6 +296,7 @@ export default function Profile() {
               onChange={e => setAmount(e.target.value)}
             />
             <button
+              type="button"
               className="rounded-lg border border-neutral-600 px-4 py-2 text-sm font-medium hover:border-emerald-500/50 hover:bg-neutral-800 disabled:opacity-40"
               disabled={!amount || depPending || depositTx.isConfirming}
               onClick={async () => {
@@ -230,6 +306,17 @@ export default function Profile() {
               }}
             >
               {depPending ? "Confirm…" : depositTx.isConfirming ? "Withdrawing…" : "Withdraw from deposit"}
+            </button>
+            <button
+              type="button"
+              className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-950/50 disabled:opacity-40"
+              disabled={depBal === 0n || depPending || depositTx.isConfirming}
+              onClick={async () => {
+                const h = await withdrawDep(depBal);
+                depositTx.setHash(h as Hex);
+              }}
+            >
+              {depPending ? "Confirm…" : depositTx.isConfirming ? "Withdrawing…" : "Withdraw all"}
             </button>
           </div>
           <div className="mt-3">

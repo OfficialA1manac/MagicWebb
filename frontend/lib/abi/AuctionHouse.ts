@@ -23,12 +23,14 @@ export const AuctionHouseAbi = [
       {name: "startsAt", type: "uint64"},
       {name: "minIncrementBps", type: "uint16"},
       {name: "settled", type: "bool"},
+      {name: "standard", type: "uint8"},
       {name: "collection", type: "address"},
       {name: "endsAt", type: "uint64"},
       {name: "tokenId", type: "uint256"},
       {name: "reserve", type: "uint128"},
       {name: "highestBid", type: "uint128"},
-      {name: "highestBidder", type: "address"}
+      {name: "highestBidder", type: "address"},
+      {name: "amount", type: "uint128"}
     ]},
   {type: "function", name: "pendingReturns", stateMutability: "view",
     inputs: [{name: "", type: "address"}], outputs: [{type: "uint256"}]},
