@@ -81,6 +81,8 @@ The app is built with `output: "standalone"` plus baseline security headers (fra
 
 ## Deploy contracts (optional)
 
+Before the first deploy on a fresh machine, set **`CREATOR_ADDR`** (fee recipient EOA, immutable in the new contracts) and **`PRIVATE_KEY`** (deployer) in **`frontend/.env.local` only** — never commit real values. `DeployCoston2.s.sol` requires `CREATOR_ADDR`; there is no baked-in default in the repo.
+
 ```bash
 make contracts-build
 make contracts-test
@@ -127,7 +129,7 @@ Fee recipient (`feeVault` in each contract) is **immutable** at deploy time — 
 1. Bidder funds deposit (`OfferBook.deposit` payable).
 2. Bidder fills the offer modal → wallet signs EIP-712 typed data → `{offer, sig}` JSON copied to clipboard.
 3. Bidder sends JSON to the token owner off-chain.
-4. Owner approves `OfferBook` for the token, then submits `acceptOffer(offer, sig, tokenIdActual)`.
+4. Owner imports the JSON under **Offers → Received**, approves `OfferBook` for the token, then **Accept offer**.
 5. NFT transfers; deposit is debited; fee routes to creator. Bidder can pre-emptively `cancelOffer(nonce)`.
 
 ## Gas notes

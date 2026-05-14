@@ -28,7 +28,7 @@ Anything that looks like a “backend” in other marketplaces (order books, rel
 
 - **Buy a listed NFT** — Search → collection → token. If listed and not expired, **Buy now** sends `msg.value` equal to the list price. The marketplace transfers the NFT and splits the fee.
 - **Bid in an auction** — Auctions page or token flow. Each bid must beat the previous by the minimum increment. If you are outbid, your funds move to **pending returns**; withdraw them from **Profile**.
-- **Make a signed offer** — On a token page (even if not listed), connect, optionally **deposit** into OfferBook, then **Make offer**. You sign EIP-712 data; copy the JSON and send it to the owner off-chain. They can accept on-chain from **Accept offer** when they agree.
+- **Make a signed offer** — On a token page (even if not listed), connect, optionally **deposit** into OfferBook, then **Make offer**. You sign EIP-712 data; copy the JSON and send it to the owner off-chain. They import it under **Offers → Received** and accept on-chain when they agree.
 
 **Networks** — Default deployment targets **Flare Coston2** (chain id 114). Use a Coston2–funded wallet and the in-app network switcher when prompted.
 
