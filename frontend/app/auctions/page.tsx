@@ -1,7 +1,7 @@
 "use client";
 import {useState} from "react";
 import Link from "next/link";
-import {formatEther, type Address} from "viem";
+import {formatEther} from "viem";
 import {useChainAuctions, type AuctionRow} from "@/hooks/useChainAuctions";
 
 function AuctionCard({row, meta}: {row: AuctionRow; meta?: {name: string; symbol: string}}) {
