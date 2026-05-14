@@ -1,6 +1,13 @@
 export const ERC721Abi = [
+  {type: "function", name: "balanceOf", stateMutability: "view",
+    inputs: [{name: "owner", type: "address"}], outputs: [{type: "uint256"}]},
   {type: "function", name: "ownerOf", stateMutability: "view",
     inputs: [{name: "id", type: "uint256"}], outputs: [{type: "address"}]},
+  {type: "function", name: "supportsInterface", stateMutability: "view",
+    inputs: [{name: "id", type: "bytes4"}], outputs: [{type: "bool"}]},
+  {type: "function", name: "tokenOfOwnerByIndex", stateMutability: "view",
+    inputs: [{name: "owner", type: "address"}, {name: "index", type: "uint256"}], outputs: [{type: "uint256"}]},
+  {type: "function", name: "totalSupply", stateMutability: "view", inputs: [], outputs: [{type: "uint256"}]},
   {type: "function", name: "approve", stateMutability: "nonpayable",
     inputs: [{name: "to", type: "address"}, {name: "id", type: "uint256"}], outputs: []},
   {type: "function", name: "setApprovalForAll", stateMutability: "nonpayable",

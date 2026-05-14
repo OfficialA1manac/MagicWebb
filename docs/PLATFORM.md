@@ -62,7 +62,7 @@ Anything that looks like a “backend” in other marketplaces (order books, rel
 
 - **Open source** — MIT. Issues and PRs welcome on [GitHub](https://github.com/OfficialA1manac/MagicWebb).
 - **Security** — Non-custodial design reduces platform risk but not smart-contract risk. Treat testnet as experimental; mainnet requires your own audit and key custody plan.
-- **Transparency** — Contract addresses for Coston2 are shown on the home page and in `README.md`; verify bytecode on a Flare explorer before large flows.
+- **Transparency** — Contract addresses for Coston2 are shown on the home page and in `README.md`; verify bytecode on a Flare explorer before large flows. Operational fixes (chunks, chain 114, approvals, refunds) live in [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
 
 ---
 

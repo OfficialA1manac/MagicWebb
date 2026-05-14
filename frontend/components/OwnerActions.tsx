@@ -13,10 +13,16 @@ import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "./TxBanner";
 
 export function OwnerActions({
-  coll, tokenId, isListed
-}: {coll: Address; tokenId: bigint; isListed: boolean}) {
+  coll, tokenId, isListed, defaultTab = null
+}: {
+  coll: Address;
+  tokenId: bigint;
+  isListed: boolean;
+  /** When set, opens the sell or auction form immediately (e.g. List NFT page). */
+  defaultTab?: "list" | "auction" | null;
+}) {
   const {address} = useAccount();
-  const [tab, setTab] = useState<"list" | "auction" | null>(null);
+  const [tab, setTab] = useState<"list" | "auction" | null>(defaultTab ?? null);
 
   const {data: mpApproved} = useReadContract({
     address: coll, abi: ERC721Abi, functionName: "isApprovedForAll",
@@ -28,8 +34,13 @@ export function OwnerActions({
   });
 
   return (
-    <div className="border border-neutral-800 rounded p-4 space-y-3">
+    <div className="border border-neutral-800 rounded-xl p-4 space-y-3 bg-neutral-900/20">
       <div className="font-semibold">You own this token</div>
+      <p className="text-xs text-neutral-500">
+        Approvals are per contract: <span className="font-mono text-neutral-400">Marketplace</span> for fixed-price,{" "}
+        <span className="font-mono text-neutral-400">AuctionHouse</span> for auctions. If a tx reverts with{" "}
+        <span className="font-mono">NotApproved</span>, approve the correct operator first.
+      </p>
       <div className="flex flex-wrap gap-2">
         {isListed ? (
           <CancelBtn coll={coll} tokenId={tokenId} />
@@ -37,12 +48,12 @@ export function OwnerActions({
           <button
             className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
             onClick={() => setTab(tab === "list" ? null : "list")}
-          >List for sale</button>
+          >Sell (fixed price)</button>
         )}
         <button
           className="px-3 py-2 rounded border border-neutral-700 hover:border-neutral-500 text-sm"
           onClick={() => setTab(tab === "auction" ? null : "auction")}
-        >Create auction</button>
+        >Auction</button>
       </div>
       {tab === "list" && (
         <ListForm coll={coll} tokenId={tokenId} approved={!!mpApproved} />
@@ -102,6 +113,10 @@ function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; ap
         <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
           value={days} onChange={e => setDays(e.target.value)} />
       </label>
+      <p className="text-xs text-neutral-500">
+        After this time, if the NFT has not sold, the listing ends and the token stays in your wallet — you can list again
+        with a new expiry.
+      </p>
       <button
         className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm disabled:opacity-50"
         disabled={appPending || listPending || isConfirming || (!approved ? false : !price)}
@@ -154,6 +169,10 @@ function AuctionForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint;
             value={incBps} onChange={e => setIncBps(e.target.value)} />
         </label>
       </div>
+      <p className="text-xs text-neutral-500">
+        After the end time, a winning bid can be settled; if there were no bids you can cancel and keep the NFT. The NFT is
+        not escrowed until settlement.
+      </p>
       <button
         className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm disabled:opacity-50"
         disabled={appPending || createPending || isConfirming}

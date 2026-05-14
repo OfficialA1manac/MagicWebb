@@ -38,6 +38,8 @@ export const AuctionHouseAbi = [
     {indexed: true, name: "coll", type: "address"},
     {indexed: true, name: "tokenId", type: "uint256"},
     {indexed: false, name: "seller", type: "address"},
+    {indexed: false, name: "standard", type: "uint8"},
+    {indexed: false, name: "amount", type: "uint128"},
     {indexed: false, name: "reserve", type: "uint128"},
     {indexed: false, name: "startsAt", type: "uint64"},
     {indexed: false, name: "endsAt", type: "uint64"}

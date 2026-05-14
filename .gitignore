@@ -6,6 +6,8 @@
 *.key
 *.p12
 *.pfx
+**/.env.local
+**/secrets.*
 
 # Foundry
 contracts/out/

@@ -9,6 +9,7 @@ import {useSignOffer} from "@/hooks/useSignOffer";
 import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "./TxBanner";
 import type {Offer} from "@/lib/eip712";
+import {appendSentOffer} from "@/lib/offerInbox";
 
 export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bigint; onClose: () => void}) {
   const {address} = useAccount();
@@ -55,7 +56,14 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
       },
       sig
     }, null, 2);
-    try { await navigator.clipboard.writeText(payload); setCopied(true); } catch {}
+    try {
+      await navigator.clipboard.writeText(payload);
+      setCopied(true);
+    } catch {
+      /* ignore */
+    }
+    appendSentOffer(payload);
+    window.dispatchEvent(new Event("magicwebb-offers-changed"));
   };
 
   const needsDeposit = amount ? parseEther(amount) > depositBalance : false;
@@ -103,7 +111,11 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
         {sigErr && <div className="text-sm text-red-400">{sigErr.message.split("\n")[0]}</div>}
         {signature && (
           <div className="text-xs text-emerald-400 break-all">
-            Offer signed{copied ? " and copied to clipboard" : ""}. Send the JSON to the token owner; they accept on /offer/accept.
+            Offer signed{copied ? " and copied to clipboard" : ""}. Saved under{" "}
+            <a href="/offers" className="underline text-emerald-300">
+              Offers → Sent
+            </a>
+            ; share the JSON with the seller so they can import it under Offers → Received.
           </div>
         )}
       </div>

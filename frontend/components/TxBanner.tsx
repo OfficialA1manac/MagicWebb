@@ -1,5 +1,6 @@
 "use client";
 import type {Hex} from "viem";
+import {humanizeTxError} from "@/lib/txErrors";
 
 export function TxBanner({
   hash, isConfirming, isConfirmed, error, label = "Transaction"
@@ -13,9 +14,14 @@ export function TxBanner({
   if (!hash && !error) return null;
   const explorer = hash ? `https://coston2-explorer.flare.network/tx/${hash}` : undefined;
   if (error) {
+    const raw = error.message.split("\n")[0];
+    const hint = humanizeTxError(error.message);
     return (
-      <div className="rounded border border-red-700 bg-red-900/30 p-2 text-sm text-red-300 break-words">
-        {label} failed: {error.message.split("\n")[0]}
+      <div className="rounded border border-red-700 bg-red-900/30 p-2 text-sm text-red-300 break-words space-y-1">
+        <div>
+          {label} failed: {raw}
+        </div>
+        {hint && <div className="text-xs text-red-200/90 border-t border-red-800/60 pt-1">{hint}</div>}
       </div>
     );
   }

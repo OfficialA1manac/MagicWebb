@@ -13,7 +13,6 @@ const marketplaceRaw = process.env.NEXT_PUBLIC_MARKETPLACE_ADDR;
 const auctionRaw = process.env.NEXT_PUBLIC_AUCTION_ADDR;
 const offerRaw = process.env.NEXT_PUBLIC_OFFER_ADDR;
 const chainIdRaw = process.env.NEXT_PUBLIC_CHAIN_ID;
-const creatorRaw = process.env.NEXT_PUBLIC_CREATOR_ADDR;
 const rpcRaw = process.env.NEXT_PUBLIC_RPC_URL;
 
 const reqAddress = (label: string, v: string | undefined): Address => {
@@ -48,5 +47,4 @@ export const ADDR = {
 } as const;
 
 export const CHAIN_ID = reqNumber("NEXT_PUBLIC_CHAIN_ID", chainIdRaw);
-export const CREATOR = reqAddress("NEXT_PUBLIC_CREATOR_ADDR", creatorRaw);
 export const RPC_URL = reqNonEmpty("NEXT_PUBLIC_RPC_URL", rpcRaw);

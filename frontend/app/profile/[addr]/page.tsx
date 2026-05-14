@@ -3,13 +3,18 @@ import Link from "next/link";
 import {useParams} from "next/navigation";
 import {useAccount, useReadContract} from "wagmi";
 import {formatEther, type Address, type Hex} from "viem";
-import {useEffect, useState} from "react";
+import {useEffect, useMemo, useState} from "react";
 import {ADDR} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
 import {useWithdrawRefund} from "@/hooks/useWithdrawRefund";
 import {useWithdrawDeposit} from "@/hooks/useWithdrawDeposit";
 import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "@/components/TxBanner";
+import {useChainListings} from "@/hooks/useChainListings";
+import {useWalletHoldings} from "@/hooks/useWalletHoldings";
+import {useFavorites} from "@/context/FavoritesContext";
+import {NftTile} from "@/components/NftTile";
+import type {ActiveListing} from "@/lib/marketIndex";
 
 function shortAddr(a: string) {
   return `${a.slice(0, 6)}…${a.slice(-4)}`;
@@ -39,6 +44,19 @@ export default function Profile() {
   useEffect(() => {
     if (depositTx.isConfirmed) refetchOffer();
   }, [depositTx.isConfirmed, refetchOffer]);
+
+  const {items: favorites, favoritesKey} = useFavorites();
+  const {data: walletPack, isPending: walletPending, error: walletErr} = useWalletHoldings(target, favoritesKey);
+  const {data: marketData} = useChainListings();
+
+  const favListingLookup = useMemo(() => {
+    const m = new Map<string, ActiveListing>();
+    if (!marketData?.listings) return m;
+    for (const l of marketData.listings) {
+      m.set(`${l.coll.toLowerCase()}:${l.id.toString()}`, l);
+    }
+    return m;
+  }, [marketData?.listings]);
 
   if (!target) {
     return (
@@ -81,23 +99,82 @@ export default function Profile() {
             className="rounded-xl border border-neutral-800 bg-neutral-950/50 p-4 transition hover:border-neutral-600"
           >
             <div className="text-sm font-semibold text-neutral-200">Search</div>
-            <p className="mt-1 text-xs text-neutral-500">Open a collection and token by address.</p>
+            <p className="mt-1 text-xs text-neutral-500">Live listings, name search, and favorites.</p>
           </Link>
           <Link
             href="/auctions"
             className="rounded-xl border border-neutral-800 bg-neutral-950/50 p-4 transition hover:border-neutral-600"
           >
             <div className="text-sm font-semibold text-neutral-200">Auctions</div>
-            <p className="mt-1 text-xs text-neutral-500">Browse live English auctions.</p>
+            <p className="mt-1 text-xs text-neutral-500">Open and closed auctions from chain state.</p>
           </Link>
           <Link
-            href="/offer/accept"
+            href="/offers"
             className="rounded-xl border border-neutral-800 bg-neutral-950/50 p-4 transition hover:border-neutral-600"
           >
-            <div className="text-sm font-semibold text-neutral-200">Accept offer</div>
-            <p className="mt-1 text-xs text-neutral-500">Redeem a signed EIP-712 offer on-chain.</p>
+            <div className="text-sm font-semibold text-neutral-200">Offers</div>
+            <p className="mt-1 text-xs text-neutral-500">Sent offers, import received JSON, accept or dismiss.</p>
           </Link>
         </div>
+      </section>
+
+      <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/20 p-6">
+        <h2 className="text-lg font-semibold text-neutral-100">In your wallet</h2>
+        <p className="text-xs text-neutral-500">
+          ERC-721 balances are checked on collections that appear in active listings, your saved favorites, or{" "}
+          <span className="font-mono">NEXT_PUBLIC_TRACKED_COLLECTIONS</span>. Enumerable contracts list every token; others
+          use a capped <span className="font-mono">ownerOf</span> scan (see env).
+        </p>
+        {walletPending && <div className="text-sm text-neutral-500">Scanning collections…</div>}
+        {walletErr && <div className="text-sm text-red-400">{(walletErr as Error).message}</div>}
+        {!walletPending && walletPack && walletPack.tokens.length === 0 && (
+          <p className="text-sm text-neutral-500">No ERC-721 balances found in indexed collections.</p>
+        )}
+        {walletPack && walletPack.tokens.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {walletPack.tokens.map(t => {
+              const m = walletPack.meta[t.coll.toLowerCase()];
+              return (
+                <NftTile
+                  key={`${t.coll}-${t.id}`}
+                  coll={t.coll}
+                  id={t.id}
+                  collectionName={m?.name}
+                  symbol={m?.symbol}
+                  showFavorite
+                />
+              );
+            })}
+          </div>
+        )}
+      </section>
+
+      <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/20 p-6">
+        <h2 className="text-lg font-semibold text-neutral-100">Saved favorites</h2>
+        <p className="text-xs text-neutral-500">
+          Star tokens from search or a token page. Saved only in this browser (localStorage).
+        </p>
+        {favorites.length === 0 && <p className="text-sm text-neutral-500">No favorites yet.</p>}
+        {favorites.length > 0 && (
+          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+            {favorites.map(f => {
+              const hit = favListingLookup.get(`${f.coll.toLowerCase()}:${f.id.toString()}`);
+              const metaKey = f.coll.toLowerCase();
+              const m = marketData?.meta[metaKey] ?? walletPack?.meta[metaKey];
+              return (
+                <NftTile
+                  key={`fav-${f.coll}-${f.id}`}
+                  coll={f.coll}
+                  id={f.id}
+                  priceWei={hit?.price}
+                  collectionName={m?.name}
+                  symbol={m?.symbol}
+                  showFavorite
+                />
+              );
+            })}
+          </div>
+        )}
       </section>
 
       <div className="grid gap-6 lg:grid-cols-2">
@@ -168,9 +245,9 @@ export default function Profile() {
       </div>
 
       <section className="rounded-xl border border-dashed border-neutral-700 bg-neutral-950/40 p-5 text-sm text-neutral-400">
-        <strong className="text-neutral-300">Tip:</strong> To make an offer on someone else&apos;s NFT, open the token page from Search and use{" "}
-        <span className="text-neutral-200">Make offer</span>. Your profile is for balances and quick navigation — listings
-        and buys happen on collection/token routes.
+        <strong className="text-neutral-300">Tip:</strong> Use <span className="text-neutral-200">Search</span> for live
+        listings, <span className="text-neutral-200">★</span> on a token to save it here, and open any tile to buy or make an
+        offer. Refunds and OfferBook balances stay above.
       </section>
     </div>
   );
