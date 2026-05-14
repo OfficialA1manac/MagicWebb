@@ -109,8 +109,9 @@ contract Marketplace is MarketplaceCore {
         emit Cancelled(coll, id, msg.sender);
     }
 
-    /// @notice Buy a listed token at the listing price. Reverts if expired, missing, or wrong msg.value.
-    /// @dev Final on success: NFT moves to buyer, fee goes to `feeVault`, remainder to seller. No reversal path.
+/// @notice Buy a listed token at the listing price. Reverts if expired, missing, or wrong msg.value.
+/// @dev Final on success: NFT moves to buyer, then fee → `feeVault` and remainder → seller (same atomic tx).
+///      If the transfer reverts, the whole transaction reverts — no fee is taken and the listing remains valid until expiry.
     function buy(address coll, uint256 id) external payable nonReentrant {
         Listing memory l = listings[coll][id];
         if (l.seller == address(0)) revert NotListed();

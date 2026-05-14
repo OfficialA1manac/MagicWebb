@@ -21,7 +21,8 @@ error BadIncrement();
 /// @title AuctionHouse
 /// @notice English auctions with reserve, bid increment, and pull-refund pattern.
 /// @dev IMMUTABLE: no admin, no pause. Once a bid is placed, the auction cannot be cancelled; once
-///      `settle` runs, the outcome is FINAL — NFT to highest bidder, fee → `feeVault`, remainder → seller.
+///      `settle` runs, the outcome is FINAL — NFT to highest bidder, then fee → `feeVault` and remainder → seller
+///      (platform fee applies only on this winning settlement, after the NFT transfer succeeds in the same tx).
 ///      NFT is NOT escrowed — seller keeps custody until `settle`. If seller transfers
 ///      or revokes approval mid-auction, `settle` will revert. Acceptable non-custodial
 ///      trade-off; the bidder can recover their bid via `withdrawRefund`.
@@ -136,32 +137,43 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
     }
 
-    /// @notice Place a bid. Outbid bid is credited to the prior bidder via `pendingReturns`.
-    /// @dev Pull pattern: a malicious bidder cannot block outbids by reverting on `receive()`.
+    /// @notice Place a bid. Outbid losers are credited **100%** of their prior bid in `pendingReturns` (no fee on bids).
+    /// @dev **New bidder:** send the full new winning amount as `msg.value` (must be ≥ `minNext`). Previous high bidder
+    ///      is credited their old bid in `pendingReturns` (pull `withdrawRefund`). **Current high bidder raising:**
+    ///      send only the **increment** as `msg.value`; it is **compounded** onto your existing high bid (no round-trip
+    ///      through `pendingReturns`). Pull pattern: a malicious outbidder cannot block others by reverting on `receive()`.
     function bid(uint256 id) external payable nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.startsAt || block.timestamp >= a.endsAt) revert AuctionEnded();
 
-        if (msg.value > type(uint128).max) revert BidOverflow();
-        uint128 amount = uint128(msg.value);
+        address prevBidder = a.highestBidder;
+        uint128 prevHigh = a.highestBid;
+
+        uint128 newBid;
+        if (prevBidder != address(0) && msg.sender == prevBidder) {
+            uint256 sum = uint256(prevHigh) + msg.value;
+            if (sum > type(uint128).max) revert BidOverflow();
+            newBid = uint128(sum);
+        } else {
+            if (msg.value > type(uint128).max) revert BidOverflow();
+            newBid = uint128(msg.value);
+        }
+
         // Increment math: when highestBid is small, (highestBid * bps) / 10_000 may round to 0.
         // Force a strict-greater-than rule so equal bids never displace the prior bidder.
-        uint256 incRaw = uint256(a.highestBid) * a.minIncrementBps / 10_000;
+        uint256 incRaw = uint256(prevHigh) * a.minIncrementBps / 10_000;
         uint128 minNext;
-        if (a.highestBid == 0) {
+        if (prevHigh == 0) {
             minNext = a.reserve == 0 ? 1 : a.reserve;
         } else {
-            uint256 next = uint256(a.highestBid) + (incRaw == 0 ? 1 : incRaw);
+            uint256 next = uint256(prevHigh) + (incRaw == 0 ? 1 : incRaw);
             if (next > type(uint128).max) revert BidOverflow();
             minNext = uint128(next);
         }
-        if (amount < minNext) revert BidTooLow();
+        if (newBid < minNext) revert BidTooLow();
 
-        address prev    = a.highestBidder;
-        uint128 prevAmt = a.highestBid;
-
-        a.highestBid    = amount;
+        a.highestBid = newBid;
         a.highestBidder = msg.sender;
 
         // Anti-snipe: extend endsAt if a winning bid arrives within the snipe window.
@@ -174,10 +186,10 @@ contract AuctionHouse is MarketplaceCore {
             emit AuctionExtended(id, newEnd);
         }
 
-        if (prev != address(0)) {
-            pendingReturns[prev] += prevAmt;
+        if (prevBidder != address(0) && prevBidder != msg.sender) {
+            pendingReturns[prevBidder] += prevHigh;
         }
-        emit BidPlaced(id, msg.sender, amount);
+        emit BidPlaced(id, msg.sender, newBid);
     }
 
     /// @notice Withdraw any accumulated refund balance from prior outbids.

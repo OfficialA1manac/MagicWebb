@@ -16,7 +16,7 @@ contract DeployFlare is Script {
 
         uint256 pk      = vm.envUint("PRIVATE_KEY");
         address creator = vm.envAddress("CREATOR_ADDR");
-        uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(250)));
+        uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(150)));
 
         require(creator != address(0), "CREATOR_ADDR=0");
         require(fee <= 1_000, "FEE_BPS_OVER_CAP");
