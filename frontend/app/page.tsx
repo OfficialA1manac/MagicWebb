@@ -1,4 +1,5 @@
 import Link from "next/link";
+import {MarketDiscovery} from "@/components/MarketDiscovery";
 
 export default function Home() {
   return (
@@ -12,27 +13,44 @@ export default function Home() {
           deploy there.
         </p>
         <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
-          <Link href="/list" className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-neutral-950 hover:bg-emerald-500">
+          <Link
+            href="/list"
+            className="rounded-lg bg-emerald-600 px-4 py-2.5 text-sm font-medium text-neutral-950 hover:bg-emerald-500"
+          >
             List your NFT
           </Link>
-          <Link href="/search" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
-            Browse by collection
+          <Link
+            href="/#discover"
+            className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40"
+          >
+            Browse listings
           </Link>
-          <Link href="/auctions" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
+          <Link
+            href="/auctions"
+            className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40"
+          >
             Live auctions
           </Link>
-          <Link href="/profile/me" className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40">
+          <Link
+            href="/profile/me"
+            className="rounded-lg border border-neutral-600 px-4 py-2.5 text-sm hover:border-emerald-500/40"
+          >
             My profile
           </Link>
         </div>
       </section>
+
+      <section id="discover" className="scroll-mt-24">
+        <MarketDiscovery />
+      </section>
+
       <section>
         <h2 className="mb-3 text-xl font-semibold">How it works</h2>
         <ul className="grid grid-cols-1 gap-3 text-sm md:grid-cols-3">
           <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
             <div className="mb-1 font-semibold text-emerald-400/90">List</div>
-            Approve the marketplace once, set price and expiry. Buyers call <code className="text-xs text-neutral-500">buy</code> with
-            value — custody transfers in one tx.
+            Approve the marketplace once, set price and expiry. Buyers call{" "}
+            <code className="text-xs text-neutral-500">buy</code> with value — custody transfers in one tx.
           </li>
           <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
             <div className="mb-1 font-semibold text-emerald-400/90">Auction</div>
@@ -50,26 +68,44 @@ export default function Home() {
         <ul className="space-y-1 break-all font-mono text-xs sm:text-sm">
           <li>
             Marketplace{" "}
-            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x767f7ff7c66673488a30053c025c153e13b6bfaa" target="_blank" rel="noreferrer">
+            <a
+              className="text-emerald-400/90 underline"
+              href="https://coston2-explorer.flare.network/address/0x767f7ff7c66673488a30053c025c153e13b6bfaa"
+              target="_blank"
+              rel="noreferrer"
+            >
               0x767F…BfAa
             </a>
           </li>
           <li>
             AuctionHouse{" "}
-            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x6016688affaf5427e1f8100160a6378da2b1476a" target="_blank" rel="noreferrer">
+            <a
+              className="text-emerald-400/90 underline"
+              href="https://coston2-explorer.flare.network/address/0x6016688affaf5427e1f8100160a6378da2b1476a"
+              target="_blank"
+              rel="noreferrer"
+            >
               0x6016…476a
             </a>
           </li>
           <li>
             OfferBook{" "}
-            <a className="text-emerald-400/90 underline" href="https://coston2-explorer.flare.network/address/0x0c7112ec22262d1e423132e35bc87e33abf64a22" target="_blank" rel="noreferrer">
+            <a
+              className="text-emerald-400/90 underline"
+              href="https://coston2-explorer.flare.network/address/0x0c7112ec22262d1e423132e35bc87e33abf64a22"
+              target="_blank"
+              rel="noreferrer"
+            >
               0x0C71…4a22
             </a>
           </li>
         </ul>
         <p className="mt-3 text-xs text-neutral-500">
-          See <Link href="https://github.com/OfficialA1manac/MagicWebb" className="text-emerald-400/90 underline">docs on GitHub</Link> for
-          architecture and roles (creators, collectors, devs).
+          See{" "}
+          <Link href="https://github.com/OfficialA1manac/MagicWebb" className="text-emerald-400/90 underline">
+            docs on GitHub
+          </Link>{" "}
+          for architecture and roles (creators, collectors, devs).
         </p>
       </section>
     </div>

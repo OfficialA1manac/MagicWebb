@@ -6,7 +6,7 @@ import {
 } from "viem";
 import {MarketplaceAbi} from "@/lib/abi/Marketplace";
 import {ERC721Abi} from "@/lib/abi/ERC721";
-import {indexChunkBlocksEnv, indexFromBlockEnv} from "@/lib/trackedCollections";
+import {indexChunkBlocksEnv, indexFromBlockEnv, indexGetlogsBlockCapEnv} from "@/lib/trackedCollections";
 
 const listedEvent = parseAbiItem(
   "event Listed(address indexed coll, uint256 indexed id, address indexed seller, uint8 standard, uint128 amount, uint128 price, uint64 expiresAt)"
@@ -28,12 +28,14 @@ async function chunkForwardLogs(
   fromBlock: bigint,
   chunk: bigint
 ) {
+  const cap = indexGetlogsBlockCapEnv();
+  const step = cap === null ? chunk : chunk < cap ? chunk : cap;
   const latest = await client.getBlockNumber();
   if (fromBlock > latest) return [];
   const logs: {args?: Record<string, unknown> | null | undefined}[] = [];
   let from = fromBlock;
   while (from <= latest) {
-    const to = from + chunk - 1n > latest ? latest : from + chunk - 1n;
+    const to = from + step - 1n > latest ? latest : from + step - 1n;
     const batch = await client.getLogs({
       ...params,
       fromBlock: from,

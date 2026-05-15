@@ -139,11 +139,11 @@ export default function Profile() {
             <p className="mt-1 text-xs text-neutral-500">Fixed price or auction for a token you own.</p>
           </Link>
           <Link
-            href="/search"
+            href="/#discover"
             className="rounded-xl border border-neutral-800 bg-neutral-950/50 p-4 transition hover:border-neutral-600"
           >
-            <div className="text-sm font-semibold text-neutral-200">Search</div>
-            <p className="mt-1 text-xs text-neutral-500">Live listings, name search, and favorites.</p>
+            <div className="text-sm font-semibold text-neutral-200">Browse</div>
+            <p className="mt-1 text-xs text-neutral-500">Live listings on the home page, name filter, and favorites.</p>
           </Link>
           <Link
             href="/auctions"
@@ -196,7 +196,7 @@ export default function Profile() {
       <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/20 p-6">
         <h2 className="text-lg font-semibold text-neutral-100">Saved favorites</h2>
         <p className="text-xs text-neutral-500">
-          Star tokens from search or a token page. Saved only in this browser (localStorage).
+          Star tokens from the home page or a token page. Saved only in this browser (localStorage).
         </p>
         {favorites.length === 0 && <p className="text-sm text-neutral-500">No favorites yet.</p>}
         {favorites.length > 0 && (
@@ -332,7 +332,7 @@ export default function Profile() {
       </div>
 
       <section className="rounded-xl border border-dashed border-neutral-700 bg-neutral-950/40 p-5 text-sm text-neutral-400">
-        <strong className="text-neutral-300">Tip:</strong> Use <span className="text-neutral-200">Search</span> for live
+        <strong className="text-neutral-300">Tip:</strong> Use <span className="text-neutral-200">Browse listings</span> on the home page for live
         listings, <span className="text-neutral-200">★</span> on a token to save it here, and open any tile to buy or make an
         offer. Refunds and OfferBook balances stay above.
       </section>

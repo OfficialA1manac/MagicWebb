@@ -79,11 +79,24 @@ The offer’s **nonce** was already consumed (accepted) or **cancelled** by the 
 
 Outbids use a **pull pattern**: funds are credited to `pendingReturns[yourAddress]` in `AuctionHouse`. They are **not** sent automatically to your wallet.
 
-**Claim:** Open **Profile** (or `/profile/me`) → **Withdraw refund** — that calls `withdrawRefund()` on `AuctionHouse`.
+**Claim:** Open **Profile** (or `/profile/me`) with your wallet connected — the app requests **`withdrawRefund()`** automatically when you have a balance (wallet confirmation only).
 
 ---
 
-## 7. Still stuck?
+## 7. `eth_getLogs` “requested too many blocks … maximum is …” (Coston2 public RPC)
+
+**What it is:** The public Coston2 JSON-RPC endpoint limits how many blocks a single `eth_getLogs` call may span (often on the order of **30** blocks).
+
+**Fix:** The app defaults to small log chunks and caps range per request (see `frontend/lib/trackedCollections.ts` and `frontend/lib/marketIndex.ts`). In `frontend/.env.local` you can tune:
+
+- `NEXT_PUBLIC_INDEX_CHUNK_BLOCKS` (default **30**)
+- `NEXT_PUBLIC_INDEX_GETLOGS_BLOCK_CAP` (default **30**; set to **`0`** only if you use your own node with a higher limit)
+
+Scanning from block 0 therefore issues many small requests instead of one huge range.
+
+---
+
+## 8. Still stuck?
 
 - Confirm RPC and contract addresses in `frontend/.env.local` match your deployment.
 - Check the transaction on [Coston2 explorer](https://coston2-explorer.flare.network) for the revert reason.

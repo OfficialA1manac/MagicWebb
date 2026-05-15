@@ -50,8 +50,8 @@ export default function ListNftPage() {
       {isConnected && !walletPending && walletPack && walletPack.tokens.length === 0 && (
         <div className="rounded-xl border border-dashed border-neutral-700 p-8 text-center text-sm text-neutral-500">
           No ERC-721 balances found. Add your collection to{" "}
-          <span className="font-mono text-neutral-400">NEXT_PUBLIC_TRACKED_COLLECTIONS</span> or list a token from Search so
-          the contract address is indexed, then refresh.
+          <span className="font-mono text-neutral-400">NEXT_PUBLIC_TRACKED_COLLECTIONS</span> or list a token from the home
+          page so the contract address is indexed, then refresh.
         </div>
       )}
 
@@ -75,11 +75,11 @@ export default function ListNftPage() {
       <details className="rounded-xl border border-neutral-800 bg-neutral-950/40 p-4 text-sm text-neutral-400">
         <summary className="cursor-pointer font-medium text-neutral-300">Advanced: open by address</summary>
         <p className="mt-2 text-xs">
-          If you already know the collection and token ID, open the{" "}
-          <Link href="/search" className="text-emerald-400 underline">
-            Search
+          If you already know the collection and token ID, open{" "}
+          <Link href="/#discover" className="text-emerald-400 underline">
+            Browse listings
           </Link>{" "}
-          page or go directly to <span className="font-mono text-neutral-500">/token/0x…/id</span>.
+          on the home page or go directly to <span className="font-mono text-neutral-500">/token/0x…/id</span>.
         </p>
       </details>
 
