@@ -115,7 +115,7 @@ Fee recipient (`feeVault` in each contract) is **immutable** at deploy time — 
 
 ### Buy listed token
 1. Connect wallet → switch to Coston2 if prompted.
-2. Search by collection → token detail page.
+2. Browse listings on the home page → token detail page.
 3. Click **Buy now**. Tx submits with `msg.value == price`.
 4. Seller receives `price * (1 - feeBps/10000)`; creator wallet gets the fee.
 

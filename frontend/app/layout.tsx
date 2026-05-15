@@ -20,7 +20,7 @@ export default function RootLayout({children}: {children: React.ReactNode}) {
               MagicWebb
             </Link>
             <nav className="flex flex-1 flex-wrap items-center gap-x-4 gap-y-2 text-sm text-neutral-300 min-w-0">
-              <Link href="/search" className="hover:text-emerald-400 whitespace-nowrap">Search</Link>
+              <Link href="/#discover" className="hover:text-emerald-400 whitespace-nowrap">Browse</Link>
               <Link href="/list" className="hover:text-emerald-400 whitespace-nowrap">List NFT</Link>
               <Link href="/auctions" className="hover:text-emerald-400 whitespace-nowrap">Auctions</Link>
               <Link href="/offers" className="hover:text-emerald-400 whitespace-nowrap">Offers</Link>
