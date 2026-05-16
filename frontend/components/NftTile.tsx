@@ -1,7 +1,28 @@
 "use client";
+import {useState} from "react";
 import Link from "next/link";
 import {formatEther, type Address} from "viem";
 import {FavoriteToggle} from "./FavoriteToggle";
+import {useTokenImage} from "@/hooks/useTokenImage";
+
+function NftImage({src, id, alt}: {src?: string; id: bigint; alt: string}) {
+  const [err, setErr] = useState(false);
+  if (src && !err) {
+    return (
+      <img
+        src={src}
+        alt={alt}
+        className="w-full aspect-square object-cover"
+        onError={() => setErr(true)}
+      />
+    );
+  }
+  return (
+    <div className="w-full aspect-square flex items-center justify-center bg-neutral-800 text-3xl font-mono text-neutral-600 select-none">
+      #{id.toString()}
+    </div>
+  );
+}
 
 export function NftTile({
   coll,
@@ -20,6 +41,8 @@ export function NftTile({
 }) {
   const title = collectionName ?? "Collection";
   const sym = symbol ? ` · ${symbol}` : "";
+  const {data: imageUrl} = useTokenImage(coll, id);
+
   return (
     <div className="relative rounded-xl border border-neutral-800 bg-neutral-900/40 overflow-hidden transition hover:border-neutral-600 hover:bg-neutral-900/60">
       {showFavorite && (
@@ -27,16 +50,17 @@ export function NftTile({
           <FavoriteToggle coll={coll} id={id} />
         </div>
       )}
-      <Link href={`/token/${coll}/${id.toString()}`} className="block p-4">
-        <div className="text-xs text-neutral-500 break-all line-clamp-2">{coll}</div>
-        <div className="mt-1 text-sm font-semibold text-neutral-100 line-clamp-2">
-          {title}
-          <span className="font-normal text-neutral-500">{sym}</span>
+      <Link href={`/token/${coll}/${id.toString()}`} className="block">
+        <NftImage src={imageUrl} id={id} alt={`${title} #${id}`} />
+        <div className="p-3">
+          <div className="text-xs text-neutral-500 truncate">
+            {title}<span className="font-normal text-neutral-600">{sym}</span>
+          </div>
+          <div className="mt-0.5 text-sm font-mono font-semibold text-neutral-100">#{id.toString()}</div>
+          {priceWei !== undefined && (
+            <div className="mt-1.5 text-sm font-medium text-emerald-400">{formatEther(priceWei)} C2FLR</div>
+          )}
         </div>
-        <div className="mt-2 text-2xl font-mono text-neutral-200">#{id.toString()}</div>
-        {priceWei !== undefined && (
-          <div className="mt-3 text-sm font-medium text-emerald-400">{formatEther(priceWei)} C2FLR</div>
-        )}
       </Link>
     </div>
   );
