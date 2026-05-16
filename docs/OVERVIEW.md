@@ -25,7 +25,7 @@ All in `contracts/src/`:
 ### 1. `MarketplaceCore.sol` (the abstract base)
 
 Provides the things every trade contract needs:
-- **Fee handling** — `feeBps` (basis points), capped at 10%, plus the `_splitAndPay(seller, amount)` helper that sends fee to the vault and the rest to the seller.
+- **Fee handling** — `feeBps` (basis points), capped at 10%, plus the `_splitAndPay(seller, amount)` helper that collects the platform fee and sends the remainder to the seller.
 - **Pause switch** — admin can pause new trades (existing trades still settle).
 - **Roles** — `DEFAULT_ADMIN_ROLE`, `FEE_ROLE`, `PAUSER_ROLE`. Granted to the deployer at construction; should be moved to a multisig before mainnet.
 - **Standard-aware transfer** — `_transferToken(standard, coll, from, to, id, amount)` calls the right function for ERC-721 vs ERC-1155.
@@ -66,9 +66,9 @@ The most off-chain-heavy contract:
 
 Uses **EIP-712** for typed signatures so wallet UIs can render the offer in a human-readable way before signing.
 
-### 5. Fee recipient (`feeVault`)
+### 5. Platform fee
 
-There is no separate `FeeVault` contract in this repository. Each trade contract takes an immutable **creator / fee recipient** address at deploy time (`feeVault` in `MarketplaceCore`); fees are pushed to that address with a single low-level call per trade (typically the creator EOA).
+Each trade contract enforces an immutable platform fee (`feeBps` in `MarketplaceCore`). On each successful settlement, `_splitAndPay` collects the platform fee and forwards the remainder to the seller atomically.
 
 ---
 
@@ -106,7 +106,7 @@ Next.js 15 App Router. Notable pieces:
    - validates listing exists, not expired, msg.value == price,
    - deletes the listing slot (CEI),
    - `_transferToken` moves NFT from Alice → Bob,
-   - `_splitAndPay` sends 0.025 FLR to fee wallet, 0.975 FLR to Alice,
+   - `_splitAndPay` collects 0.025 FLR platform fee, 0.975 FLR to Alice,
    - emits `Bought`.
 8. Frontend refreshes from contract reads after receipt.
 
@@ -131,7 +131,7 @@ The whole sale is one Coston2 transaction. No partial state. If any step fails, 
    - validates Bob's ownership and approval,
    - debits Carol's deposit by 1.1 FLR,
    - `_transferToken` moves NFT from Bob → Carol,
-   - `_splitAndPay` sends 0.0275 FLR fee, 1.0725 FLR to Bob,
+   - `_splitAndPay` collects 0.0275 FLR platform fee, 1.0725 FLR to Bob,
    - emits `OfferAccepted`.
 7. Carol's remaining deposit (0.1 FLR) stays in `OfferBook`; she can `withdraw` any time.
 
@@ -147,7 +147,7 @@ The whole sale is one Coston2 transaction. No partial state. If any step fails, 
 6. No further bids. `endsAt` arrives.
 7. Anyone (Dave, Grace, a watcher script) calls `settle(id)`:
    - `_transferToken` moves NFT from Dave → Grace,
-   - `_splitAndPay` sends 0.0175 FLR fee, 0.6825 FLR to Dave,
+   - `_splitAndPay` collects 0.0175 FLR platform fee, 0.6825 FLR to Dave,
    - emits `AuctionSettled`.
 8. Frank's 0.6 FLR is in `pendingReturns`; he withdraws when convenient.
 

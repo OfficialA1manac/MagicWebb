@@ -132,7 +132,7 @@ Pre-mainnet, MagicWebb will commission an independent professional audit and mov
 
 ## 7. Token-economic model
 
-MagicWebb **does not have a token**. There is no ICO, no airdrop, no governance token. The platform fee accrues directly to the operator wallet in FLR.
+MagicWebb **does not have a token**. There is no ICO, no airdrop, no governance token. The platform fee is collected in FLR on each settled trade.
 
 This is a deliberate choice:
 
