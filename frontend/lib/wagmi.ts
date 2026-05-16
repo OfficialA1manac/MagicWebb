@@ -6,9 +6,13 @@ import {RPC_URL} from "./addresses";
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ?? "";
 const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
+// WalletConnect accesses localStorage during initialization; guard SSR to avoid
+// unhandledRejection errors in the Next.js server process.
+const isClient = typeof window !== "undefined";
+
 const connectors = [
   injected({shimDisconnect: true}),
-  ...(wcProjectId
+  ...(wcProjectId && isClient
     ? [
         walletConnect({
           projectId: wcProjectId,
