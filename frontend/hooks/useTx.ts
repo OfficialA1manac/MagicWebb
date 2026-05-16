@@ -8,5 +8,6 @@ export function useTx() {
   const {isLoading: isConfirming, isSuccess: isConfirmed, error: receiptError} =
     useWaitForTransactionReceipt({hash, query: {enabled: !!hash}});
   const reset = useCallback(() => setHash(undefined), []);
-  return {hash, setHash, isConfirming, isConfirmed, receiptError, reset};
+  // receiptError fires when tx is mined but reverted on-chain; expose as `txError` for TxBanner
+  return {hash, setHash, isConfirming, isConfirmed, receiptError, txError: receiptError, reset};
 }

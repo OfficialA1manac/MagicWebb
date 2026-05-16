@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {useEffect, useState} from "react";
 import {formatEther, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
@@ -21,16 +21,11 @@ export function ReceivedOfferCard({
   const {address} = useAccount();
   const [parseErr, setParseErr] = useState<string | null>(null);
   const parsed = (() => {
-    try {
-      return parseOfferPayload(entry.raw);
-    } catch {
-      return null;
-    }
+    try { return parseOfferPayload(entry.raw); } catch { return null; }
   })();
 
   useEffect(() => {
-    if (!parsed) setParseErr("Invalid JSON");
-    else setParseErr(null);
+    setParseErr(parsed ? null : "Invalid JSON");
   }, [parsed, entry.raw]);
 
   let tokenIdActual: bigint;
@@ -64,7 +59,7 @@ export function ReceivedOfferCard({
     query: {enabled: !!parsed}
   });
 
-  const {accept, isPending, error} = useAcceptOffer();
+  const {accept, isPending, error: acceptErr} = useAcceptOffer();
   const {approveAll, isPending: appPending, error: appErr} = useApproveNFT();
   const acceptTx = useTx();
   const approvalTx = useTx();
@@ -84,10 +79,7 @@ export function ReceivedOfferCard({
         <button
           type="button"
           className="mt-2 block text-xs underline"
-          onClick={() => {
-            removeReceivedOffer(entry.id);
-            onChanged();
-          }}
+          onClick={() => { removeReceivedOffer(entry.id); onChanged(); }}
         >
           Remove
         </button>
@@ -99,18 +91,15 @@ export function ReceivedOfferCard({
   const now = BigInt(Math.floor(Date.now() / 1000));
   const expired = now > offer.expiresAt;
   const isOwner =
-    !!address &&
-    !!owner &&
-    typeof owner === "string" &&
+    !!address && !!owner && typeof owner === "string" &&
     address.toLowerCase() === owner.toLowerCase();
-
   const wrongToken = offer.tokenId !== 0n && offer.tokenId !== tokenIdActual;
   const invalidDeliver = tokenIdActual === 0n;
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm space-y-3">
       {invalidDeliver && (
-        <p className="text-xs text-red-400">Invalid stored token ID. Remove this entry and re-import with a valid ID.</p>
+        <p className="text-xs text-red-400">Invalid stored token ID. Remove and re-import with a valid ID.</p>
       )}
       <div className="font-mono text-xs text-neutral-500 break-all">{offer.collection}</div>
       <div className="text-lg font-semibold text-emerald-400">{formatEther(offer.amount)} C2FLR</div>
@@ -125,11 +114,7 @@ export function ReceivedOfferCard({
         Expires {new Date(Number(offer.expiresAt) * 1000).toLocaleString()}
       </div>
 
-      {wrongToken && (
-        <p className="text-xs text-red-400">
-          Stored token ID does not match this offer (single-token offers must match).
-        </p>
-      )}
+      {wrongToken && <p className="text-xs text-red-400">Stored token ID does not match this offer.</p>}
       {expired && <p className="text-xs text-amber-400">Offer expiry has passed.</p>}
       {nonceUsed && <p className="text-xs text-amber-400">This nonce was already used or cancelled.</p>}
       {!address && <p className="text-xs text-yellow-600">Connect the seller wallet to accept.</p>}
@@ -141,11 +126,7 @@ export function ReceivedOfferCard({
         <button
           type="button"
           className="rounded-lg border border-neutral-600 px-3 py-1.5 text-xs hover:border-rose-500/50"
-          onClick={() => {
-            removeReceivedOffer(entry.id);
-            onChanged();
-            window.dispatchEvent(new Event("magicwebb-offers-changed"));
-          }}
+          onClick={() => { removeReceivedOffer(entry.id); onChanged(); window.dispatchEvent(new Event("magicwebb-offers-changed")); }}
         >
           Dismiss
         </button>
@@ -158,8 +139,10 @@ export function ReceivedOfferCard({
                 className="rounded-lg border border-yellow-700 px-3 py-1.5 text-xs text-yellow-200 hover:bg-yellow-950/30 disabled:opacity-40"
                 disabled={appPending || approvalTx.isConfirming}
                 onClick={async () => {
-                  const h = await approveAll(offer.collection, ADDR.offer);
-                  approvalTx.setHash(h as Hex);
+                  try {
+                    const h = await approveAll(offer.collection, ADDR.offer);
+                    approvalTx.setHash(h as Hex);
+                  } catch { /* wagmi handles display */ }
                 }}
               >
                 {appPending ? "Wallet…" : approvalTx.isConfirming ? "Approving…" : "Approve OfferBook"}
@@ -170,8 +153,10 @@ export function ReceivedOfferCard({
                 className="rounded-lg bg-emerald-600 px-3 py-1.5 text-xs font-medium text-neutral-950 hover:bg-emerald-500 disabled:opacity-40"
                 disabled={isPending || acceptTx.isConfirming}
                 onClick={async () => {
-                  const h = await accept(offer, sig, tokenIdActual);
-                  acceptTx.setHash(h as Hex);
+                  try {
+                    const h = await accept(offer, sig, tokenIdActual);
+                    acceptTx.setHash(h as Hex);
+                  } catch { /* wagmi handles display */ }
                 }}
               >
                 {isPending ? "Wallet…" : acceptTx.isConfirming ? "Accepting…" : "Accept offer"}
@@ -185,14 +170,14 @@ export function ReceivedOfferCard({
         hash={approvalTx.hash}
         isConfirming={approvalTx.isConfirming}
         isConfirmed={approvalTx.isConfirmed}
-        error={appErr}
+        error={appErr ?? approvalTx.txError}
         label="Approval"
       />
       <TxBanner
         hash={acceptTx.hash}
         isConfirming={acceptTx.isConfirming}
         isConfirmed={acceptTx.isConfirmed}
-        error={error}
+        error={acceptErr ?? acceptTx.txError}
         label="Accept"
       />
     </div>

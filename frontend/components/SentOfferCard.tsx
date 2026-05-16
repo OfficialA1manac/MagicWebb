@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 import {useEffect, useState} from "react";
 import {formatEther, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
@@ -13,27 +13,18 @@ import {parseOfferPayload, removeSentOffer} from "@/lib/offerInbox";
 export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChanged: () => void}) {
   const {address} = useAccount();
   const [err, setErr] = useState<string | null>(null);
-  let offerSummary: {amount: string; coll: string; tid: string; exp: string; nonce: string} | null = null;
-  try {
-    const {offer} = parseOfferPayload(entry.raw);
-    offerSummary = {
-      amount: formatEther(offer.amount),
-      coll: offer.collection,
-      tid: offer.tokenId.toString(),
-      exp: new Date(Number(offer.expiresAt) * 1000).toLocaleString(),
-      nonce: offer.nonce.toString()
-    };
-  } catch {
-    offerSummary = null;
-  }
 
   const parsed = (() => {
-    try {
-      return parseOfferPayload(entry.raw);
-    } catch {
-      return null;
-    }
+    try { return parseOfferPayload(entry.raw); } catch { return null; }
   })();
+
+  const offerSummary = parsed ? {
+    amount: formatEther(parsed.offer.amount),
+    coll: parsed.offer.collection,
+    tid: parsed.offer.tokenId.toString(),
+    exp: new Date(Number(parsed.offer.expiresAt) * 1000).toLocaleString(),
+    nonce: parsed.offer.nonce.toString()
+  } : null;
 
   const {data: nonceUsed} = useReadContract({
     address: ADDR.offer,
@@ -43,7 +34,7 @@ export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChan
     query: {enabled: !!parsed}
   });
 
-  const {cancelOffer, isPending, error} = useCancelOffer();
+  const {cancelOffer, isPending, error: writeError} = useCancelOffer();
   const cancelTx = useTx();
 
   const isBidder =
@@ -69,7 +60,7 @@ export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChan
         <>
           <div className="font-mono text-xs text-neutral-500 break-all">{offerSummary.coll}</div>
           <div className="mt-2 text-lg font-semibold text-neutral-100">
-            {offerSummary.amount} C2FLR · token {offerSummary.tid}
+            {offerSummary.amount} C2FLR {"·"} token {offerSummary.tid}
             {offerSummary.tid === "0" && <span className="text-xs text-amber-400"> (collection-wide)</span>}
           </div>
           <div className="mt-1 text-xs text-neutral-500">Expires {offerSummary.exp}</div>
@@ -106,9 +97,14 @@ export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChan
             disabled={isPending || cancelTx.isConfirming || !!nonceUsed}
             onClick={async () => {
               setErr(null);
-              const n = parsed.offer.nonce;
-              const h = await cancelOffer(n);
-              cancelTx.setHash(h as Hex);
+              try {
+                const n = parsed.offer.nonce;
+                const h = await cancelOffer(n);
+                cancelTx.setHash(h as Hex);
+              } catch (e) {
+                const msg = (e as Error)?.message?.split("\n")[0];
+                if (msg && !msg.toLowerCase().includes("rejected")) setErr(msg);
+              }
             }}
           >
             {isPending ? "Wallet…" : cancelTx.isConfirming ? "Cancelling…" : "Cancel on-chain (burn nonce)"}
@@ -121,7 +117,7 @@ export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChan
           hash={cancelTx.hash}
           isConfirming={cancelTx.isConfirming}
           isConfirmed={cancelTx.isConfirmed}
-          error={error}
+          error={writeError ?? cancelTx.txError}
           label="Cancel offer"
         />
       </div>
