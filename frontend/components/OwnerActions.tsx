@@ -1,8 +1,7 @@
-"use client";
+﻿"use client";
 import {useState} from "react";
 import {parseEther, type Address, type Hex} from "viem";
-import {useReadContract} from "wagmi";
-import {useAccount} from "wagmi";
+import {useReadContract, useAccount} from "wagmi";
 import {ADDR} from "@/lib/addresses";
 import {ERC721Abi} from "@/lib/abi";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
@@ -18,7 +17,6 @@ export function OwnerActions({
   coll: Address;
   tokenId: bigint;
   isListed: boolean;
-  /** When set, opens the sell or auction form immediately (e.g. List NFT page). */
   defaultTab?: "list" | "auction" | null;
 }) {
   const {address} = useAccount();
@@ -38,8 +36,7 @@ export function OwnerActions({
       <div className="font-semibold">You own this token</div>
       <p className="text-xs text-neutral-500">
         Approvals are per contract: <span className="font-mono text-neutral-400">Marketplace</span> for fixed-price,{" "}
-        <span className="font-mono text-neutral-400">AuctionHouse</span> for auctions. If a tx reverts with{" "}
-        <span className="font-mono">NotApproved</span>, approve the correct operator first.
+        <span className="font-mono text-neutral-400">AuctionHouse</span> for auctions.
       </p>
       <div className="flex flex-wrap gap-2">
         {isListed ? (
@@ -55,30 +52,28 @@ export function OwnerActions({
           onClick={() => setTab(tab === "auction" ? null : "auction")}
         >Auction</button>
       </div>
-      {tab === "list" && (
-        <ListForm coll={coll} tokenId={tokenId} approved={!!mpApproved} />
-      )}
-      {tab === "auction" && (
-        <AuctionForm coll={coll} tokenId={tokenId} approved={!!ahApproved} />
-      )}
+      {tab === "list" && <ListForm coll={coll} tokenId={tokenId} approved={!!mpApproved} />}
+      {tab === "auction" && <AuctionForm coll={coll} tokenId={tokenId} approved={!!ahApproved} />}
     </div>
   );
 }
 
 function CancelBtn({coll, tokenId}: {coll: Address; tokenId: bigint}) {
-  const {cancel, isPending, error} = useCancelListing();
-  const {hash, setHash, isConfirming, isConfirmed} = useTx();
+  const {cancel, isPending, error: writeError} = useCancelListing();
+  const {hash, setHash, isConfirming, isConfirmed, txError} = useTx();
   return (
     <div className="w-full space-y-2">
       <button
         className="px-3 py-2 rounded border border-red-700 hover:bg-red-900/30 text-sm disabled:opacity-50"
         disabled={isPending || isConfirming}
         onClick={async () => {
-          const h = await cancel(coll, tokenId);
-          setHash(h as Hex);
+          try {
+            const h = await cancel(coll, tokenId);
+            setHash(h as Hex);
+          } catch { /* wagmi error state handles display */ }
         }}
       >{isPending ? "Confirm in wallet…" : isConfirming ? "Cancelling…" : "Cancel listing"}</button>
-      <TxBanner hash={hash} isConfirming={isConfirming} isConfirmed={isConfirmed} error={error} label="Cancel" />
+      <TxBanner hash={hash} isConfirming={isConfirming} isConfirmed={isConfirmed} error={writeError ?? txError} label="Cancel" />
     </div>
   );
 }
@@ -88,17 +83,30 @@ function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; ap
   const [days, setDays] = useState("7");
   const {approveAll, isPending: appPending, error: appErr} = useApproveNFT();
   const {list, isPending: listPending, error: listErr} = useList();
-  const {hash, setHash, isConfirming, isConfirmed} = useTx();
+  const {hash, setHash, isConfirming, isConfirmed, txError} = useTx();
+
+  const parsedPrice = (() => {
+    try { return price ? parseEther(price) : null; } catch { return null; }
+  })();
+  const parsedDays = (() => {
+    const n = parseInt(days, 10);
+    return !isNaN(n) && n > 0 && n <= 365 ? n : null;
+  })();
+  const priceValid = parsedPrice !== null && parsedPrice > 0n;
+  const daysValid = parsedDays !== null;
 
   const submit = async () => {
-    if (!approved) {
-      const h = await approveAll(coll, ADDR.marketplace);
+    try {
+      if (!approved) {
+        const h = await approveAll(coll, ADDR.marketplace);
+        setHash(h as Hex);
+        return;
+      }
+      if (!priceValid || !daysValid) return;
+      const expiresAt = BigInt(Math.floor(Date.now() / 1000) + parsedDays! * 86400);
+      const h = await list(coll, tokenId, parsedPrice!, expiresAt);
       setHash(h as Hex);
-      return;
-    }
-    const expiresAt = BigInt(Math.floor(Date.now() / 1000) + Number(days) * 86400);
-    const h = await list(coll, tokenId, parseEther(price), expiresAt);
-    setHash(h as Hex);
+    } catch { /* wagmi error state handles display */ }
   };
 
   return (
@@ -108,24 +116,25 @@ function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; ap
         <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
           value={price} onChange={e => setPrice(e.target.value)} placeholder="1.5" />
       </label>
+      {price && !priceValid && <p className="text-xs text-red-400">Enter a valid price greater than 0.</p>}
       <label className="block">
         Expires in (days)
         <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
           value={days} onChange={e => setDays(e.target.value)} />
       </label>
+      {days && !daysValid && <p className="text-xs text-red-400">Enter a valid number of days (1-365).</p>}
       <p className="text-xs text-neutral-500">
-        After this time, if the NFT has not sold, the listing ends and the token stays in your wallet — you can list again
-        with a new expiry.
+        After this time the listing ends — you keep the NFT and can list again.
       </p>
       <button
         className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm disabled:opacity-50"
-        disabled={appPending || listPending || isConfirming || (!approved ? false : !price)}
+        disabled={appPending || listPending || isConfirming || (approved && (!priceValid || !daysValid))}
         onClick={submit}
       >{!approved
           ? (appPending ? "Approving…" : "Approve Marketplace")
           : (listPending ? "Confirm in wallet…" : isConfirming ? "Listing…" : "List")}</button>
       <TxBanner hash={hash} isConfirming={isConfirming} isConfirmed={isConfirmed}
-        error={appErr || listErr} label={!approved ? "Approval" : "List"} />
+        error={(appErr ?? listErr) ?? txError} label={!approved ? "Approval" : "List"} />
     </div>
   );
 }
@@ -136,18 +145,36 @@ function AuctionForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint;
   const [incBps, setIncBps] = useState("500");
   const {approveAll, isPending: appPending, error: appErr} = useApproveNFT();
   const {create, isPending: createPending, error: createErr} = useCreateAuction();
-  const {hash, setHash, isConfirming, isConfirmed} = useTx();
+  const {hash, setHash, isConfirming, isConfirmed, txError} = useTx();
+
+  const parsedReserve = (() => {
+    try { return parseEther(reserve || "0"); } catch { return null; }
+  })();
+  const parsedDays = (() => {
+    const n = parseInt(days, 10);
+    return !isNaN(n) && n > 0 && n <= 30 ? n : null;
+  })();
+  const parsedBps = (() => {
+    const n = parseInt(incBps, 10);
+    return !isNaN(n) && n >= 0 && n <= 5000 ? n : null;
+  })();
+  const reserveValid = parsedReserve !== null;
+  const daysValid = parsedDays !== null;
+  const bpsValid = parsedBps !== null;
 
   const submit = async () => {
-    if (!approved) {
-      const h = await approveAll(coll, ADDR.auction);
+    try {
+      if (!approved) {
+        const h = await approveAll(coll, ADDR.auction);
+        setHash(h as Hex);
+        return;
+      }
+      if (!reserveValid || !daysValid || !bpsValid) return;
+      const now = BigInt(Math.floor(Date.now() / 1000));
+      const endsAt = now + BigInt(parsedDays! * 86400);
+      const h = await create(coll, tokenId, parsedReserve!, now, endsAt, parsedBps!);
       setHash(h as Hex);
-      return;
-    }
-    const now = BigInt(Math.floor(Date.now() / 1000));
-    const endsAt = now + BigInt(Number(days) * 86400);
-    const h = await create(coll, tokenId, parseEther(reserve), now, endsAt, Number(incBps));
-    setHash(h as Hex);
+    } catch { /* wagmi error state handles display */ }
   };
 
   return (
@@ -162,26 +189,27 @@ function AuctionForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint;
           Duration (days)
           <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
             value={days} onChange={e => setDays(e.target.value)} />
+          {days && !daysValid && <p className="text-xs text-red-400">1-30 days.</p>}
         </label>
         <label className="block">
           Min increment (bps)
           <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
             value={incBps} onChange={e => setIncBps(e.target.value)} />
+          {incBps && !bpsValid && <p className="text-xs text-red-400">0-5000 bps.</p>}
         </label>
       </div>
       <p className="text-xs text-neutral-500">
-        After the end time, a winning bid can be settled; if there were no bids you can cancel and keep the NFT. The NFT is
-        not escrowed until settlement.
+        After end time, a winning bid can be settled. No bids: cancel and keep the NFT.
       </p>
       <button
         className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm disabled:opacity-50"
-        disabled={appPending || createPending || isConfirming}
+        disabled={appPending || createPending || isConfirming || (approved && (!reserveValid || !daysValid || !bpsValid))}
         onClick={submit}
       >{!approved
           ? (appPending ? "Approving…" : "Approve AuctionHouse")
           : (createPending ? "Confirm in wallet…" : isConfirming ? "Creating…" : "Create auction")}</button>
       <TxBanner hash={hash} isConfirming={isConfirming} isConfirmed={isConfirmed}
-        error={appErr || createErr} label={!approved ? "Approval" : "Auction"} />
+        error={(appErr ?? createErr) ?? txError} label={!approved ? "Approval" : "Auction"} />
     </div>
   );
 }

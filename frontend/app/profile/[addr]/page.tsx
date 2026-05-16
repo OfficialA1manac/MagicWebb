@@ -2,7 +2,7 @@
 import Link from "next/link";
 import {useParams} from "next/navigation";
 import {useAccount, useReadContract} from "wagmi";
-import {formatEther, type Address, type Hex} from "viem";
+import {formatEther, parseEther, type Address, type Hex} from "viem";
 import {useEffect, useMemo, useRef, useState} from "react";
 import {ADDR} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
@@ -300,9 +300,11 @@ export default function Profile() {
               className="rounded-lg border border-neutral-600 px-4 py-2 text-sm font-medium hover:border-emerald-500/50 hover:bg-neutral-800 disabled:opacity-40"
               disabled={!amount || depPending || depositTx.isConfirming}
               onClick={async () => {
-                const v = BigInt(Math.floor(Number(amount) * 1e18));
-                const h = await withdrawDep(v);
-                depositTx.setHash(h as Hex);
+                try {
+                  const v = parseEther(amount);
+                  const h = await withdrawDep(v);
+                  depositTx.setHash(h as Hex);
+                } catch { /* wagmi error state handles display */ }
               }}
             >
               {depPending ? "Confirm…" : depositTx.isConfirming ? "Withdrawing…" : "Withdraw from deposit"}
@@ -312,8 +314,10 @@ export default function Profile() {
               className="rounded-lg border border-emerald-800/60 bg-emerald-950/30 px-4 py-2 text-sm font-medium text-emerald-200 hover:bg-emerald-950/50 disabled:opacity-40"
               disabled={depBal === 0n || depPending || depositTx.isConfirming}
               onClick={async () => {
-                const h = await withdrawDep(depBal);
-                depositTx.setHash(h as Hex);
+                try {
+                  const h = await withdrawDep(depBal);
+                  depositTx.setHash(h as Hex);
+                } catch { /* wagmi error state handles display */ }
               }}
             >
               {depPending ? "Confirm…" : depositTx.isConfirming ? "Withdrawing…" : "Withdraw all"}

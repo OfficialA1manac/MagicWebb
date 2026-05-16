@@ -15,8 +15,9 @@ export default function Collection() {
   const {data: symbol} = useReadContract({address: coll, abi: ERC721Abi, functionName: "symbol"});
 
   const go = () => {
-    if (!tid || isNaN(Number(tid))) return;
-    router.push(`/token/${coll}/${tid}`);
+    const n = parseInt(tid, 10);
+    if (!tid || isNaN(n) || n <= 0) return;
+    router.push(`/token/${coll}/${n}`);
   };
 
   return (
