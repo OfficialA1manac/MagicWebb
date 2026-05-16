@@ -13,7 +13,7 @@ import {TxBanner} from "@/components/TxBanner";
 import {useChainListings} from "@/hooks/useChainListings";
 import {useWalletHoldings} from "@/hooks/useWalletHoldings";
 import {useFavorites} from "@/context/FavoritesContext";
-import {NftTile} from "@/components/NftTile";
+import {ProfileNftCard} from "@/components/ProfileNftCard";
 import type {ActiveListing} from "@/lib/marketIndex";
 
 function shortAddr(a: string) {
@@ -90,10 +90,10 @@ export default function Profile() {
   }, [depositTx.isConfirmed, refetchOffer]);
 
   const {items: favorites, favoritesKey} = useFavorites();
-  const {data: walletPack, isPending: walletPending, error: walletErr} = useWalletHoldings(target, favoritesKey);
-  const {data: marketData} = useChainListings();
+  const {data: walletPack, isPending: walletPending, error: walletErr, refetch: refetchWallet} = useWalletHoldings(target, favoritesKey);
+  const {data: marketData, refetch: refetchListings} = useChainListings();
 
-  const favListingLookup = useMemo(() => {
+  const listingLookup = useMemo(() => {
     const m = new Map<string, ActiveListing>();
     if (!marketData?.listings) return m;
     for (const l of marketData.listings) {
@@ -101,6 +101,29 @@ export default function Profile() {
     }
     return m;
   }, [marketData?.listings]);
+
+  const [hiddenKeys, setHiddenKeys] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
+    try {
+      const s = localStorage.getItem("mw:hidden-tokens");
+      return new Set(s ? (JSON.parse(s) as string[]) : []);
+    } catch { return new Set(); }
+  });
+
+  const toggleHide = (coll: Address, id: bigint) => {
+    setHiddenKeys(prev => {
+      const k = `${coll.toLowerCase()}:${id.toString()}`;
+      const next = new Set(prev);
+      if (next.has(k)) next.delete(k); else next.add(k);
+      try { localStorage.setItem("mw:hidden-tokens", JSON.stringify([...next])); } catch {}
+      return next;
+    });
+  };
+
+  const refreshAfterAction = () => {
+    void refetchWallet();
+    void refetchListings();
+  };
 
   if (!target) {
     return (
@@ -163,29 +186,38 @@ export default function Profile() {
       </section>
 
       <section className="space-y-4 rounded-2xl border border-neutral-800 bg-neutral-900/20 p-6">
-        <h2 className="text-lg font-semibold text-neutral-100">In your wallet</h2>
-        <p className="text-xs text-neutral-500">
-          ERC-721 balances are checked on collections that appear in active listings, your saved favorites, or{" "}
-          <span className="font-mono">NEXT_PUBLIC_TRACKED_COLLECTIONS</span>. Enumerable contracts list every token; others
-          use a capped <span className="font-mono">ownerOf</span> scan (see env).
-        </p>
-        {walletPending && <div className="text-sm text-neutral-500">Scanning collections…</div>}
+        <div className="flex items-center justify-between gap-4 flex-wrap">
+          <h2 className="text-lg font-semibold text-neutral-100">In your wallet</h2>
+          {walletPack && walletPack.tokens.length > 0 && hiddenKeys.size > 0 && (
+            <span className="text-xs text-neutral-500">{hiddenKeys.size} hidden</span>
+          )}
+        </div>
+        {walletPending && (
+          <div className="flex items-center gap-2 text-sm text-neutral-500">
+            <span className="inline-block h-4 w-4 animate-spin rounded-full border-2 border-neutral-600 border-t-emerald-400" />
+            Loading tokens from indexed collections…
+          </div>
+        )}
         {walletErr && <div className="text-sm text-red-400">{(walletErr as Error).message}</div>}
         {!walletPending && walletPack && walletPack.tokens.length === 0 && (
-          <p className="text-sm text-neutral-500">No ERC-721 balances found in indexed collections.</p>
+          <p className="text-sm text-neutral-500">No ERC-721 tokens found in indexed collections.</p>
         )}
         {walletPack && walletPack.tokens.length > 0 && (
-          <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
+          <div className="grid gap-4 grid-cols-2 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-5">
             {walletPack.tokens.map(t => {
+              const k = `${t.coll.toLowerCase()}:${t.id.toString()}`;
               const m = walletPack.meta[t.coll.toLowerCase()];
+              const listing = listingLookup.get(k);
               return (
-                <NftTile
-                  key={`${t.coll}-${t.id}`}
+                <ProfileNftCard
+                  key={k}
                   coll={t.coll}
                   id={t.id}
                   collectionName={m?.name}
-                  symbol={m?.symbol}
-                  showFavorite
+                  listing={listing}
+                  hidden={hiddenKeys.has(k)}
+                  onToggleHide={() => toggleHide(t.coll, t.id)}
+                  onActionDone={refreshAfterAction}
                 />
               );
             })}
@@ -202,18 +234,19 @@ export default function Profile() {
         {favorites.length > 0 && (
           <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4">
             {favorites.map(f => {
-              const hit = favListingLookup.get(`${f.coll.toLowerCase()}:${f.id.toString()}`);
+              const hit = listingLookup.get(`${f.coll.toLowerCase()}:${f.id.toString()}`);
               const metaKey = f.coll.toLowerCase();
               const m = marketData?.meta[metaKey] ?? walletPack?.meta[metaKey];
               return (
-                <NftTile
+                <ProfileNftCard
                   key={`fav-${f.coll}-${f.id}`}
                   coll={f.coll}
                   id={f.id}
-                  priceWei={hit?.price}
                   collectionName={m?.name}
-                  symbol={m?.symbol}
-                  showFavorite
+                  listing={hit}
+                  hidden={hiddenKeys.has(`${f.coll.toLowerCase()}:${f.id.toString()}`)}
+                  onToggleHide={() => toggleHide(f.coll, f.id)}
+                  onActionDone={refreshAfterAction}
                 />
               );
             })}
