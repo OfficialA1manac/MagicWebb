@@ -6,7 +6,7 @@ Non-custodial NFT marketplace on **Flare Coston2** testnet. Pure on-chain — wa
 - **English auctions** with reserve, increment, and **pull-pattern refunds** (`AuctionHouse`)
 - **Off-chain signed offers** on listed *or unlisted* tokens (`OfferBook`, EIP-712)
 
-Sellers keep custody until trade settles. Platform fee (default 2.5%) routes directly to the creator wallet.
+Sellers keep custody until trade settles. A platform fee is applied on each settled trade.
 
 ## Stack
 
@@ -81,7 +81,7 @@ The app is built with `output: "standalone"` plus baseline security headers (fra
 
 ## Deploy contracts (optional)
 
-Before the first deploy on a fresh machine, set **`CREATOR_ADDR`** (fee recipient EOA, immutable in the new contracts) and **`PRIVATE_KEY`** (deployer) in **`frontend/.env.local` only** — never commit real values. `DeployCoston2.s.sol` requires `CREATOR_ADDR`; there is no baked-in default in the repo.
+Before the first deploy on a fresh machine, set **`CREATOR_ADDR`** (fee vault address, immutable in the new contracts) and **`PRIVATE_KEY`** (deployer) in **`frontend/.env.local` only** — never commit real values. `DeployCoston2.s.sol` requires `CREATOR_ADDR`; there is no baked-in default in the repo.
 
 ```bash
 make contracts-build
@@ -109,7 +109,7 @@ After `make deploy`, the new contract addresses are written back into `frontend/
 | AuctionHouse | `0x6016688AfFAF5427E1f8100160A6378Da2B1476a` |
 | OfferBook    | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
 
-Fee recipient (`feeVault` in each contract) is **immutable** at deploy time — read it on [Coston2 explorer](https://coston2-explorer.flare.network) from the contract you interact with; do not trust a copy-pasted EOA from this README alone. Default platform fee is **250 bps (2.5%)** on-chain (`feeBps()`). All three contracts are verified on Routescan; **49/49** `forge test` pass.
+Default platform fee is **250 bps (2.5%)** on-chain (`feeBps()`). All three contracts are verified on Routescan; **49/49** `forge test` pass.
 
 ## User flows
 
@@ -117,24 +117,23 @@ Fee recipient (`feeVault` in each contract) is **immutable** at deploy time — 
 1. Connect wallet → switch to Coston2 if prompted.
 2. Browse listings on the home page → token detail page.
 3. Click **Buy now**. Tx submits with `msg.value == price`.
-4. Seller receives `price * (1 - feeBps/10000)`; creator wallet gets the fee.
+4. Seller receives `price * (1 - feeBps/10000)`; platform fee is applied.
 
 ### Auction
 1. Seller `setApprovalForAll(AuctionHouse, true)` and calls `create(...)`.
 2. Bidders call `bid` on `/auction/:id`. Each outbid credits the prior bidder via `pendingReturns`.
 3. Outbid bidders claim their refund on **Profile → Withdraw refund** (`withdrawRefund()`).
-4. After `endsAt`, anyone calls **Settle**. NFT moves; fee routes to creator.
+4. After `endsAt`, anyone calls **Settle**. NFT moves; platform fee is collected.
 
 ### Signed offer (works on unlisted tokens)
 1. Bidder funds deposit (`OfferBook.deposit` payable).
 2. Bidder fills the offer modal → wallet signs EIP-712 typed data → `{offer, sig}` JSON copied to clipboard.
 3. Bidder sends JSON to the token owner off-chain.
 4. Owner imports the JSON under **Offers → Received**, approves `OfferBook` for the token, then **Accept offer**.
-5. NFT transfers; deposit is debited; fee routes to creator. Bidder can pre-emptively `cancelOffer(nonce)`.
+5. NFT transfers; deposit is debited; platform fee is collected. Bidder can pre-emptively `cancelOffer(nonce)`.
 
 ## Gas notes
 
-- `feeVault` is the creator EOA — `buy / settle / acceptOffer` push the fee via one `.call{value:}`. No FeeVault contract hop.
 - **Pull-pattern refunds** on outbids — one storage write, re-entrancy-safe.
 - **EIP-712 signed offers off-chain** — chain spend is `O(matches)`, not `O(offers)`.
 - Solidity 0.8.24 / Cancun target — uses `MCOPY` and `PUSH0`.

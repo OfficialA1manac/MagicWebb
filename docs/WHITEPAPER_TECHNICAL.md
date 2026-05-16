@@ -36,18 +36,17 @@ Wallet <-> Frontend (Next.js + wagmi/viem) <-> Flare RPC <-> Contracts
 
 ### 3.2 Platform fee (immutable per deployment)
 
-On each child contract (`Marketplace`, `AuctionHouse`, `OfferBook`), **`feeVault` and `feeBps` are constructor arguments only**—there is no setter, upgrade path, or owner key that can redirect or rewrite them after deploy.
+On each child contract (`Marketplace`, `AuctionHouse`, `OfferBook`), the platform fee settings are constructor arguments only—there is no setter, upgrade path, or owner key that can change them after deploy.
 
 **Canonical production parameters (documented target):**
 
-- **Platform fee amount:** `150` bps (1.5% of the trade `msg.value` / accepted bid / offer amount).  
-- **Platform fee address (`feeVault`):** `0x78993B71051de91C2D2595BC3475F07748927dc0`
+- **Platform fee amount:** `150` bps (1.5% of the trade `msg.value` / accepted bid / offer amount).
 
-Deploy scripts read `CREATOR_ADDR` as the fee vault and `FEE_BPS` for basis points; operators must set these to the intended immutable values **before** broadcasting, because they cannot be corrected post-deploy without new contracts.
+Deploy scripts read `CREATOR_ADDR` and `FEE_BPS`; operators must set these to the intended immutable values **before** broadcasting, because they cannot be corrected post-deploy without new contracts.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
-**Where the immutable bps is applied.** The same `feeBps` / `feeVault` **applies** (is **charged from trade proceeds** and sent to `feeVault`) on every **successful, final settlement** that moves an NFT and pays the seller: `Marketplace.buy`, `AuctionHouse.settle` (winning bid only), and `OfferBook.acceptOffer` / `acceptOffer1155`. There is **no** separate listing fee, auction-creation fee, or offer-signature fee—**listing, relisting, cancelling an unsold listing, cancelling a zero-bid auction, and offer cancellation (nonce burn) do not call `_splitAndPay`**, so the platform fee is **not applied** on those actions.
+**Where the immutable bps is applied.** The platform fee **applies** (is **charged from trade proceeds**) on every **successful, final settlement** that moves an NFT and pays the seller: `Marketplace.buy`, `AuctionHouse.settle` (winning bid only), and `OfferBook.acceptOffer` / `acceptOffer1155`. There is **no** separate listing fee, auction-creation fee, or offer-signature fee—**listing, relisting, cancelling an unsold listing, cancelling a zero-bid auction, and offer cancellation (nonce burn) do not call `_splitAndPay`**, so the platform fee is **not applied** on those actions.
 
 **Auction bids (no fee applied on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
 
@@ -73,7 +72,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 
 1. Seller lists an NFT on `Marketplace` (on-chain listing acts as the seller’s **offer to sell** for the listed price until expiry).
 2. Buyer calls `buy` with **exact** `msg.value` equal to the list price (buyer **accepts** that listing; the buyer becomes the NFT recipient and the listed amount is taken from the buyer’s wallet in the same transaction).
-3. Contract validates the listing, transfers the NFT, then splits payment (fee → `feeVault`, remainder → seller) in the same atomic transaction, emits events.
+3. Contract validates the listing, transfers the NFT, then splits payment (platform fee collected, remainder → seller) in the same atomic transaction, emits events.
 4. Frontend refreshes chain-backed reads after transaction receipt.
 
 ### 4.2 Signed offer acceptance
@@ -95,7 +94,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 | Reentrancy on payable flows | `ReentrancyGuard` + checks-effects-interactions |
 | Auction griefing via refund callback | Pull-pattern refunds (`withdrawRefund`) |
 | Signature replay | EIP-712 domain includes `chainId` and `verifyingContract`; nonce burn map |
-| Fee abuse | `MAX_FEE_BPS` (10%) enforced at **constructor**; `feeBps` and `feeVault` are **immutable** (no admin fee changes) |
+| Fee abuse | `MAX_FEE_BPS` (10%) enforced at **constructor**; platform fee settings are **immutable** (no admin fee changes) |
 | Listing overwrite by third party | Seller collision checks (`AlreadyListed`) |
 
 Residual accepted risks:

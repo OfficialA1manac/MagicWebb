@@ -15,7 +15,7 @@ MarketplaceCore (abstract)
    └── OfferBook          — EIP-712 signed offers (ERC721 + ERC1155)
 ```
 
-Fees route to an immutable **`feeVault`** address passed at construction (the creator EOA in the default deploy). There is **no** separate `FeeVault.sol` in this repository.
+Platform fees route to an immutable address passed at construction. There is **no** separate `FeeVault.sol` in this repository.
 
 Each child reuses fee handling, pausing, and the standard-aware `_transferToken` from `MarketplaceCore`. NFTs are **never custodied** by these contracts (except the auto-`ERC1155Holder` ack interface) — the seller retains custody until a buyer settles.
 
@@ -80,7 +80,7 @@ Each child reuses fee handling, pausing, and the standard-aware `_transferToken`
 31:   address public feeVault;
 ```
 **Line 29** — Current fee in basis points. Public auto-getter so frontends can read without an ABI helper.
-**Line 31** — Destination wallet/contract for fee payments. On Coston2, the production deploy sets this to the creator EOA so the fee transfer is a direct CALL to an EOA (≈2300 gas) rather than to `FeeVault.receive()` (≈22000 gas). `setFeeVault` can switch this to a smart-contract sink later.
+**Line 31** — Destination address for platform fee payments. The fee transfer uses a low-level call so the recipient can be either an EOA (≈2300 gas) or a contract (≈22000 gas). `setFeeVault` can update this to a smart-contract sink via `FEE_ROLE`.
 
 ```solidity
 33:   event FeeUpdated(uint16 oldBps, uint16 newBps);
@@ -799,7 +799,7 @@ Public so frontends can recompute the digest for debug; deterministic.
 
 ## 5. `FeeVault.sol` (removed from tree)
 
-An optional standalone fee sink contract existed in earlier iterations; it is **not** in `contracts/src/` today. Default deploys set `feeVault` to the **creator EOA** so each trade pays the platform fee with one low-level call. A dedicated vault contract can still be wired later by deploying one separately and calling `setFeeVault` (guarded by `FEE_ROLE`) — the line-by-line walkthrough of the old file has been dropped to avoid doc drift.
+An optional standalone fee sink contract existed in earlier iterations; it is **not** in `contracts/src/` today. Each trade pays the platform fee with one low-level call to the configured `feeVault` address. A dedicated vault contract can be wired later by deploying one separately and calling `setFeeVault` (guarded by `FEE_ROLE`) — the line-by-line walkthrough of the old file has been dropped to avoid doc drift.
 
 ---
 

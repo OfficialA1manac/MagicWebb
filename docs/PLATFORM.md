@@ -40,7 +40,7 @@ Anything that looks like a “backend” in other marketplaces (order books, rel
 - **Run an auction** — Same flow; approve **AuctionHouse**, set reserve, duration, and min increment (bps). Public settlement after `endsAt`.
 - **Offers** — You do not “list” an offer on-chain. Bidders sign; you **accept** when you like the price. Keep your OfferBook approval in mind when you are ready to accept.
 
-**Fees** — Platform fee is enforced in the contracts (default 2.5%, hard-capped). The fee recipient is set at deploy time (`feeVault` / creator EOA pattern — see technical docs).
+**Fees** — A platform fee is enforced in the contracts (default 2.5%, hard-capped at 10%). The fee is applied on each settled trade.
 
 **ERC-1155** — Contracts support 1155; the `/list` wizard currently focuses on **ERC-721** first. Advanced flows can use the same ABIs with amount parameters from the contracts.
 
