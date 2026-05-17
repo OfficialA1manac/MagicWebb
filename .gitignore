@@ -35,3 +35,11 @@ desktop.ini
 
 # Claude / agent
 .claude/settings.local.json
+
+# Devtools / one-shot scripts (not part of the app)
+main.go
+go.mod
+go.sum
+devtools/
+magicwebb.exe
+magicwebb_win.exe
