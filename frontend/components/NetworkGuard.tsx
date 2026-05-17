@@ -1,10 +1,13 @@
 "use client";
-import {useState} from "react";
+import {useEffect, useState} from "react";
 import {useAccount, useChainId, useSwitchChain, useWalletClient} from "wagmi";
 import {CHAIN_ID, RPC_URL, CHAIN_NAME, CURRENCY_SYMBOL, EXPLORER_URL} from "@/lib/addresses";
 import {coston2} from "@/lib/chains";
 
 export function NetworkGuard() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => { setMounted(true); }, []);
+
   const {isConnected} = useAccount();
   const cid = useChainId();
   const {switchChainAsync, isPending: switchPending} = useSwitchChain();
@@ -12,6 +15,8 @@ export function NetworkGuard() {
   const [addPending, setAddPending] = useState(false);
   const [lastErr, setLastErr] = useState<string | null>(null);
 
+  // Defer all rendering until after hydration — prevents "update while rendering Hydrate".
+  if (!mounted) return null;
   if (!isConnected || cid === CHAIN_ID) return null;
 
   const onSwitch = async () => {
@@ -61,8 +66,10 @@ export function NetworkGuard() {
           {addPending ? "Adding…" : `Add ${CHAIN_NAME} to wallet`}
         </button>
       </div>
-      {lastErr && <div className="mt-2 max-w-xl mx-auto text-xs text-red-300 break-words">{lastErr}</div>}
-      <details className="mt-3 text-left text-xs text-yellow-200/80 max-w-xl mx-auto">
+      {lastErr && (
+        <div className="mt-2 mx-auto max-w-xl text-xs text-red-300 break-words">{lastErr}</div>
+      )}
+      <details className="mt-3 max-w-xl mx-auto text-left text-xs text-yellow-200/80">
         <summary className="cursor-pointer select-none text-yellow-300">Manual RPC (if buttons fail)</summary>
         <ul className="mt-2 list-inside list-disc space-y-1 font-mono text-[11px] text-yellow-100/90">
           <li>Network name: {CHAIN_NAME}</li>

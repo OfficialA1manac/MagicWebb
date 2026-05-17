@@ -7,10 +7,13 @@ import {useState, type ReactNode} from "react";
 
 export function Providers({children}: {children: ReactNode}) {
   const [qc] = useState(() => new QueryClient({
-    defaultOptions: {queries: {staleTime: 10_000, refetchOnWindowFocus: false}}
+    defaultOptions: {
+      queries: {staleTime: 10_000, refetchOnWindowFocus: false, retry: 2}
+    }
   }));
+
   return (
-    <WagmiProvider config={wagmiConfig}>
+    <WagmiProvider config={wagmiConfig} reconnectOnMount={false}>
       <QueryClientProvider client={qc}>
         <FavoritesProvider>{children}</FavoritesProvider>
       </QueryClientProvider>
