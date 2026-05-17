@@ -3,9 +3,12 @@ import {useQuery} from "@tanstack/react-query";
 import {usePublicClient} from "wagmi";
 import {ADDR} from "@/lib/addresses";
 import {fetchActiveErc721Listings, fetchCollectionMeta} from "@/lib/marketIndex";
+import {useRealtime} from "./useRealtime";
 
 export function useChainListings() {
+  useRealtime(["listings"]);
   const client = usePublicClient();
+
   return useQuery({
     queryKey: ["chain-listings", ADDR.marketplace],
     queryFn: async () => {
@@ -16,6 +19,7 @@ export function useChainListings() {
       return {listings, meta};
     },
     enabled: !!client,
-    staleTime: 25_000
+    staleTime: 30_000,
+    // No refetchInterval — invalidated by useRealtime on Listed/Bought/Cancelled events.
   });
 }
