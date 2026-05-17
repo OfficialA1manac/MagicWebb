@@ -3,7 +3,7 @@ import {useParams} from "next/navigation";
 import {useReadContract, useAccount} from "wagmi";
 import {formatEther, type Address, type Hex} from "viem";
 import {useEffect, useMemo, useRef, useState} from "react";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {AuctionHouseAbi} from "@/lib/abi";
 import {BidForm} from "@/components/BidForm";
 import {TxBanner} from "@/components/TxBanner";
@@ -90,9 +90,9 @@ export default function AuctionPage() {
         <div>
           Seller: <span className="break-all">{seller}</span>
         </div>
-        <div>Reserve: {formatEther(reserve)} C2FLR</div>
+        <div>Reserve: {formatEther(reserve)} {CURRENCY_SYMBOL}</div>
         <div>
-          Highest bid: {formatEther(highestBid)} C2FLR{" "}
+          Highest bid: {formatEther(highestBid)} {CURRENCY_SYMBOL}{" "}
           {hasBid && (
             <>
               by <span className="break-all">{highestBidder}</span>

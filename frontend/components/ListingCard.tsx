@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import {formatEther, type Address} from "viem";
+import {CURRENCY_SYMBOL} from "@/lib/addresses";
 
 export function ListingCard({coll, id, price}: {coll: Address; id: bigint; price: bigint}) {
   return (
@@ -10,7 +11,7 @@ export function ListingCard({coll, id, price}: {coll: Address; id: bigint; price
     >
       <div className="text-xs text-neutral-400 break-all">{coll}</div>
       <div className="text-lg font-mono mt-1">#{id.toString()}</div>
-      <div className="mt-2 text-sm">{formatEther(price)} C2FLR</div>
+      <div className="mt-2 text-sm">{formatEther(price)} {CURRENCY_SYMBOL}</div>
     </Link>
   );
 }

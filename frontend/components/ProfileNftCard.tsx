@@ -3,7 +3,7 @@ import {useEffect, useState} from "react";
 import {parseEther, formatEther, type Address, type Hex} from "viem";
 import {useReadContract, useAccount} from "wagmi";
 import Link from "next/link";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {ERC721Abi} from "@/lib/abi";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
 import {useList} from "@/hooks/useList";
@@ -81,7 +81,7 @@ function ListForm({
     <div className="space-y-2 pt-2 border-t border-neutral-800">
       <input
         className="w-full rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-xs"
-        placeholder="Price in C2FLR"
+        placeholder={`Price in ${CURRENCY_SYMBOL}`}
         value={price}
         onChange={e => setPrice(e.target.value)}
       />
@@ -168,7 +168,7 @@ export function ProfileNftCard({
           <div className="text-sm font-mono font-semibold text-neutral-100">#{id.toString()}</div>
           {isListed && (
             <div className="mt-0.5 text-xs font-medium text-emerald-400">
-              Listed · {formatEther(listing.price)} C2FLR
+              Listed · {formatEther(listing.price)} {CURRENCY_SYMBOL}
             </div>
           )}
           {!isListed && (

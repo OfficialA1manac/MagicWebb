@@ -1,6 +1,7 @@
 "use client";
 import type {Hex} from "viem";
 import {humanizeTxError} from "@/lib/txErrors";
+import {EXPLORER_URL} from "@/lib/addresses";
 
 export function TxBanner({
   hash, isConfirming, isConfirmed, error, label = "Transaction"
@@ -12,7 +13,7 @@ export function TxBanner({
   label?: string;
 }) {
   if (!hash && !error) return null;
-  const explorer = hash ? `https://coston2-explorer.flare.network/tx/${hash}` : undefined;
+  const explorer = hash ? `${EXPLORER_URL}/tx/${hash}` : undefined;
   if (error) {
     const raw = error.message.split("\n")[0];
     const hint = humanizeTxError(error.message);

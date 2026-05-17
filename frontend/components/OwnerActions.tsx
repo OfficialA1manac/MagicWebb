@@ -2,7 +2,7 @@
 import {useState} from "react";
 import {parseEther, type Address, type Hex} from "viem";
 import {useReadContract, useAccount} from "wagmi";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {ERC721Abi} from "@/lib/abi";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
 import {useList} from "@/hooks/useList";
@@ -112,7 +112,7 @@ function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; ap
   return (
     <div className="space-y-2 text-sm">
       <label className="block">
-        Price (C2FLR)
+        Price ({CURRENCY_SYMBOL})
         <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
           value={price} onChange={e => setPrice(e.target.value)} placeholder="1.5" />
       </label>
@@ -180,7 +180,7 @@ function AuctionForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint;
   return (
     <div className="space-y-2 text-sm">
       <label className="block">
-        Reserve (C2FLR)
+        Reserve ({CURRENCY_SYMBOL})
         <input className="mt-1 w-full bg-neutral-950 border border-neutral-700 rounded px-2 py-1"
           value={reserve} onChange={e => setReserve(e.target.value)} />
       </label>

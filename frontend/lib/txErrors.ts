@@ -28,10 +28,10 @@ export function humanizeTxError(raw: string): string | null {
     return "This token already has an active listing slot. Cancel the existing listing or use a different flow.";
   }
   if (s.includes("insufficient funds") || s.includes("insufficient balance")) {
-    return "Wallet does not have enough native token (C2FLR on Coston2) for this call plus gas. Fund the wallet from the Flare faucet.";
+    return "Wallet does not have enough native token for this call plus gas. Fund the wallet from the faucet.";
   }
   if (s.includes("wrong chain") || s.includes("chain mismatch")) {
-    return "Wallet is on the wrong chain. Switch to Flare Coston2 (chain id 114) using the yellow banner or your wallet’s network menu.";
+    return "Wallet is on the wrong chain. Use the yellow banner or your wallet’s network menu to switch.";
   }
 
   return null;

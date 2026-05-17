@@ -2,7 +2,7 @@
 import {useEffect, useState} from "react";
 import {formatEther, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
 import {useCancelOffer} from "@/hooks/useCancelOffer";
 import {useTx} from "@/hooks/useTx";
@@ -60,7 +60,7 @@ export function SentOfferCard({entry, onChanged}: {entry: SentOfferEntry; onChan
         <>
           <div className="font-mono text-xs text-neutral-500 break-all">{offerSummary.coll}</div>
           <div className="mt-2 text-lg font-semibold text-neutral-100">
-            {offerSummary.amount} C2FLR {"·"} token {offerSummary.tid}
+            {offerSummary.amount} {CURRENCY_SYMBOL} {"·"} token {offerSummary.tid}
             {offerSummary.tid === "0" && <span className="text-xs text-amber-400"> (collection-wide)</span>}
           </div>
           <div className="mt-1 text-xs text-neutral-500">Expires {offerSummary.exp}</div>

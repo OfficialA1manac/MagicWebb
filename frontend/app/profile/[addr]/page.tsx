@@ -4,7 +4,7 @@ import {useParams} from "next/navigation";
 import {useAccount, useReadContract} from "wagmi";
 import {formatEther, parseEther, type Address, type Hex} from "viem";
 import {useEffect, useMemo, useRef, useState} from "react";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL, CHAIN_NAME} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
 import {useWithdrawRefund} from "@/hooks/useWithdrawRefund";
 import {useWithdrawDeposit} from "@/hooks/useWithdrawDeposit";
@@ -142,7 +142,7 @@ export default function Profile() {
         <div className="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between">
           <div>
             <p className="text-xs font-medium uppercase tracking-wider text-emerald-400/90">Profile</p>
-            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Your hub on Coston2</h1>
+            <h1 className="mt-1 text-2xl font-bold sm:text-3xl">Your hub on {CHAIN_NAME}</h1>
             <p className="mt-2 max-w-xl text-sm text-neutral-400">
               Withdraw auction refunds, manage OfferBook deposits, and jump to listing or discovery — everything here
               talks to the chain through your wallet.
@@ -263,7 +263,7 @@ export default function Profile() {
           </p>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-3xl font-mono font-semibold tracking-tight">{formatEther(pending)}</span>
-            <span className="text-sm text-neutral-500">C2FLR</span>
+            <span className="text-sm text-neutral-500">{CURRENCY_SYMBOL}</span>
           </div>
           {isSelfProfile && pending > 0n && (
             <p className="mt-3 text-sm text-neutral-300">
@@ -319,12 +319,12 @@ export default function Profile() {
           </p>
           <div className="mt-4 flex items-baseline gap-2">
             <span className="text-3xl font-mono font-semibold tracking-tight">{formatEther(depBal)}</span>
-            <span className="text-sm text-neutral-500">C2FLR</span>
+            <span className="text-sm text-neutral-500">{CURRENCY_SYMBOL}</span>
           </div>
           <div className="mt-4 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
             <input
               className="min-w-0 flex-1 rounded-lg border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm"
-              placeholder="Amount to withdraw (C2FLR)"
+              placeholder={`Amount to withdraw (${CURRENCY_SYMBOL})`}
               value={amount}
               onChange={e => setAmount(e.target.value)}
             />

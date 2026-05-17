@@ -1,7 +1,7 @@
 "use client";
 import {useState} from "react";
 import {useAccount, useChainId, useSwitchChain, useWalletClient} from "wagmi";
-import {CHAIN_ID, RPC_URL} from "@/lib/addresses";
+import {CHAIN_ID, RPC_URL, CHAIN_NAME, CURRENCY_SYMBOL, EXPLORER_URL} from "@/lib/addresses";
 import {coston2} from "@/lib/chains";
 
 export function NetworkGuard() {
@@ -40,7 +40,7 @@ export function NetworkGuard() {
     <div className="border-y border-yellow-700 bg-yellow-950/50 px-3 py-3 text-center text-sm text-yellow-100">
       <div className="font-medium">
         Wrong network — wallet is on chain <span className="font-mono">{cid}</span>; MagicWebb needs{" "}
-        <span className="font-mono">Flare Coston2 ({CHAIN_ID})</span>.
+        <span className="font-mono">{CHAIN_NAME} ({CHAIN_ID})</span>.
       </div>
       <div className="mt-2 flex flex-wrap items-center justify-center gap-2">
         <button
@@ -49,27 +49,27 @@ export function NetworkGuard() {
           disabled={switchPending}
           onClick={onSwitch}
         >
-          {switchPending ? "Switching…" : "Switch to Coston2"}
+          {switchPending ? "Switching…" : `Switch to ${CHAIN_NAME}`}
         </button>
         <button
           type="button"
           className="rounded-md border border-yellow-600/80 px-3 py-1.5 text-sm hover:bg-yellow-900/40 disabled:opacity-50"
           disabled={addPending || !walletClient}
           onClick={onAddChain}
-          title="If Coston2 is missing in your wallet, add it first"
+          title={`If ${CHAIN_NAME} is missing in your wallet, add it first`}
         >
-          {addPending ? "Adding…" : "Add Coston2 to wallet"}
+          {addPending ? "Adding…" : `Add ${CHAIN_NAME} to wallet`}
         </button>
       </div>
       {lastErr && <div className="mt-2 max-w-xl mx-auto text-xs text-red-300 break-words">{lastErr}</div>}
       <details className="mt-3 text-left text-xs text-yellow-200/80 max-w-xl mx-auto">
         <summary className="cursor-pointer select-none text-yellow-300">Manual RPC (if buttons fail)</summary>
         <ul className="mt-2 list-inside list-disc space-y-1 font-mono text-[11px] text-yellow-100/90">
-          <li>Network name: Flare Coston2</li>
+          <li>Network name: {CHAIN_NAME}</li>
           <li>Chain ID: {CHAIN_ID}</li>
-          <li>Currency: C2FLR (18 decimals)</li>
+          <li>Currency: {CURRENCY_SYMBOL} (18 decimals)</li>
           <li className="break-all">RPC URL: {RPC_URL}</li>
-          <li>Explorer: https://coston2-explorer.flare.network</li>
+          <li className="break-all">Explorer: {EXPLORER_URL}</li>
         </ul>
       </details>
     </div>
