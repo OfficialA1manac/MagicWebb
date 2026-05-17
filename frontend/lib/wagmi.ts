@@ -6,12 +6,11 @@ import {RPC_URL} from "./addresses";
 const wcProjectId = process.env.NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID?.trim() ?? "";
 const appUrl = (process.env.NEXT_PUBLIC_APP_URL ?? "http://localhost:3000").replace(/\/$/, "");
 
-// WalletConnect accesses localStorage during initialization; guard SSR to avoid
-// unhandledRejection errors in the Next.js server process.
+// WalletConnect accesses localStorage during initialization; guard SSR.
 const isClient = typeof window !== "undefined";
 
 const connectors = [
-  injected({shimDisconnect: true}),
+  injected(),
   ...(wcProjectId && isClient
     ? [
         walletConnect({
@@ -32,5 +31,5 @@ export const wagmiConfig = createConfig({
   chains: [coston2],
   connectors,
   transports: {[coston2.id]: http(RPC_URL, {batch: true})},
-  ssr: false
+  ssr: true, // Required for Next.js App Router — prevents hydration mismatch
 });
