@@ -4,6 +4,7 @@ import Link from "next/link";
 import {formatEther, type Address} from "viem";
 import {FavoriteToggle} from "./FavoriteToggle";
 import {useTokenImage} from "@/hooks/useTokenImage";
+import {CURRENCY_SYMBOL} from "@/lib/addresses";
 
 function NftImage({src, id, alt}: {src?: string; id: bigint; alt: string}) {
   const [err, setErr] = useState(false);
@@ -58,7 +59,7 @@ export function NftTile({
           </div>
           <div className="mt-0.5 text-sm font-mono font-semibold text-neutral-100">#{id.toString()}</div>
           {priceWei !== undefined && (
-            <div className="mt-1.5 text-sm font-medium text-emerald-400">{formatEther(priceWei)} C2FLR</div>
+            <div className="mt-1.5 text-sm font-medium text-emerald-400">{formatEther(priceWei)} {CURRENCY_SYMBOL}</div>
           )}
         </div>
       </Link>

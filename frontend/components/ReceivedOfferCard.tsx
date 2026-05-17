@@ -2,7 +2,7 @@
 import {useEffect, useState} from "react";
 import {formatEther, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {ERC721Abi, OfferBookAbi} from "@/lib/abi";
 import {useAcceptOffer} from "@/hooks/useAcceptOffer";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
@@ -102,7 +102,7 @@ export function ReceivedOfferCard({
         <p className="text-xs text-red-400">Invalid stored token ID. Remove and re-import with a valid ID.</p>
       )}
       <div className="font-mono text-xs text-neutral-500 break-all">{offer.collection}</div>
-      <div className="text-lg font-semibold text-emerald-400">{formatEther(offer.amount)} C2FLR</div>
+      <div className="text-lg font-semibold text-emerald-400">{formatEther(offer.amount)} {CURRENCY_SYMBOL}</div>
       <div className="text-xs text-neutral-400">
         Bidder <span className="break-all font-mono text-neutral-300">{offer.bidder}</span>
       </div>

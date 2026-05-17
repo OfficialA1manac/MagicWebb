@@ -1,6 +1,7 @@
 "use client";
 import Link from "next/link";
 import {formatEther, type Address} from "viem";
+import {CURRENCY_SYMBOL} from "@/lib/addresses";
 
 export function AuctionCard({
   id, coll, tokenId, highestBid, endsAt
@@ -13,7 +14,7 @@ export function AuctionCard({
     >
       <div className="text-xs text-neutral-400 break-all">{coll}</div>
       <div className="text-lg font-mono mt-1">#{tokenId.toString()}</div>
-      <div className="mt-2 text-sm">High bid: {formatEther(highestBid)} C2FLR</div>
+      <div className="mt-2 text-sm">High bid: {formatEther(highestBid)} {CURRENCY_SYMBOL}</div>
       <div className="text-xs text-neutral-400">Ends {ends.toLocaleString()}</div>
     </Link>
   );

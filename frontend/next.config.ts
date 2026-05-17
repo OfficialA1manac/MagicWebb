@@ -13,13 +13,17 @@ const walletConnectSrc = [
   "wss://*.reown.com",
 ].join(" ");
 
+const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL ?? "";
+const explorerUrl = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "";
+const chainConnectSrc = [rpcUrl, explorerUrl].filter(Boolean).join(" ");
+
 const csp = [
   "default-src 'self'",
   "script-src 'self' 'unsafe-eval' 'unsafe-inline'",
   "style-src 'self' 'unsafe-inline'",
-  "img-src 'self' data: blob: https:",
+  "img-src 'self' data: blob: https: ipfs:",
   "font-src 'self' data:",
-  "connect-src 'self' https://coston2-api.flare.network https://coston2-explorer.flare.network " + walletConnectSrc,
+  "connect-src 'self' " + chainConnectSrc + " https://ipfs.io https://cloudflare-ipfs.com https://nftstorage.link " + walletConnectSrc,
   "frame-src 'none'",
   "object-src 'none'",
   "base-uri 'self'",

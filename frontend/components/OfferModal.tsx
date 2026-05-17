@@ -2,7 +2,7 @@
 import {useState} from "react";
 import {parseEther, formatEther, type Address, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
-import {ADDR} from "@/lib/addresses";
+import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {OfferBookAbi} from "@/lib/abi";
 import {useDeposit} from "@/hooks/useDeposit";
 import {useSignOffer} from "@/hooks/useSignOffer";
@@ -100,12 +100,12 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
           <button type="button" className="text-sm text-neutral-400 hover:text-white" onClick={onClose}>{"✕"}</button>
         </div>
         <div>
-          <label className="text-sm">Amount (C2FLR)</label>
+          <label className="text-sm">Amount ({CURRENCY_SYMBOL})</label>
           <input className="w-full bg-neutral-950 border border-neutral-700 rounded px-3 py-2"
             value={amount} onChange={e => setAmount(e.target.value)} placeholder="0.5" />
           {amount && !amountValid && <p className="text-xs text-red-400 mt-1">Enter a valid amount.</p>}
           <div className="text-xs text-neutral-500 mt-1">
-            Your OfferBook deposit: {formatEther(depositBalance)} C2FLR
+            Your OfferBook deposit: {formatEther(depositBalance)} {CURRENCY_SYMBOL}
           </div>
         </div>
         <div>
@@ -125,7 +125,7 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
               className="w-full px-3 py-2 rounded border border-yellow-700 hover:bg-yellow-900/30 text-sm disabled:opacity-50"
               disabled={depPending || depositTx.isConfirming || !amountValid}
               onClick={fund}
-            >{depPending ? "Confirm in wallet…" : depositTx.isConfirming ? "Funding…" : `Deposit ${amount} C2FLR`}</button>
+            >{depPending ? "Confirm in wallet…" : depositTx.isConfirming ? "Funding…" : `Deposit ${amount} ${CURRENCY_SYMBOL}`}</button>
             <TxBanner hash={depositTx.hash} isConfirming={depositTx.isConfirming} isConfirmed={depositTx.isConfirmed} error={depErr ?? depositTx.txError} label="Deposit" />
           </div>
         )}

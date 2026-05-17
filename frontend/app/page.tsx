@@ -1,5 +1,6 @@
 import Link from "next/link";
 import {MarketDiscovery} from "@/components/MarketDiscovery";
+import {ADDR, EXPLORER_URL, CHAIN_NAME} from "@/lib/addresses";
 
 export default function Home() {
   return (
@@ -9,8 +10,7 @@ export default function Home() {
         <h1 className="mt-2 text-3xl font-bold sm:text-4xl md:text-5xl">Non-custodial NFT marketplace on Flare</h1>
         <p className="mx-auto mt-3 max-w-2xl text-sm text-neutral-400 sm:text-base">
           Buy at a fixed price, run English auctions, or use EIP-712 signed offers — your NFTs stay in your wallet until
-          a transaction settles on-chain. Built for Coston2 today; the same contracts can target Flare mainnet when you
-          deploy there.
+          a transaction settles on-chain. Non-custodial and chain-agnostic by design.
         </p>
         <div className="mt-6 flex flex-col justify-center gap-3 sm:flex-row sm:flex-wrap">
           <Link
@@ -64,39 +64,39 @@ export default function Home() {
         </ul>
       </section>
       <section>
-        <h2 className="mb-3 text-xl font-semibold">Contracts on Coston2</h2>
+        <h2 className="mb-3 text-xl font-semibold">Contracts on {CHAIN_NAME}</h2>
         <ul className="space-y-1 break-all font-mono text-xs sm:text-sm">
           <li>
             Marketplace{" "}
             <a
               className="text-emerald-400/90 underline"
-              href="https://coston2-explorer.flare.network/address/0x767f7ff7c66673488a30053c025c153e13b6bfaa"
+              href={`${EXPLORER_URL}/address/${ADDR.marketplace}`}
               target="_blank"
               rel="noreferrer"
             >
-              0x767F…BfAa
+              {ADDR.marketplace.slice(0, 6)}…{ADDR.marketplace.slice(-4)}
             </a>
           </li>
           <li>
             AuctionHouse{" "}
             <a
               className="text-emerald-400/90 underline"
-              href="https://coston2-explorer.flare.network/address/0x6016688affaf5427e1f8100160a6378da2b1476a"
+              href={`${EXPLORER_URL}/address/${ADDR.auction}`}
               target="_blank"
               rel="noreferrer"
             >
-              0x6016…476a
+              {ADDR.auction.slice(0, 6)}…{ADDR.auction.slice(-4)}
             </a>
           </li>
           <li>
             OfferBook{" "}
             <a
               className="text-emerald-400/90 underline"
-              href="https://coston2-explorer.flare.network/address/0x0c7112ec22262d1e423132e35bc87e33abf64a22"
+              href={`${EXPLORER_URL}/address/${ADDR.offer}`}
               target="_blank"
               rel="noreferrer"
             >
-              0x0C71…4a22
+              {ADDR.offer.slice(0, 6)}…{ADDR.offer.slice(-4)}
             </a>
           </li>
         </ul>

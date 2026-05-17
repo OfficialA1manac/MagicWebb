@@ -1,6 +1,7 @@
 "use client";
 import {useMemo, useState} from "react";
-import {useAccount, type Address} from "wagmi";
+import {useAccount} from "wagmi";
+import {type Address} from "viem";
 import {useFavorites} from "@/context/FavoritesContext";
 import {useWalletHoldings} from "@/hooks/useWalletHoldings";
 import {useChainListings} from "@/hooks/useChainListings";

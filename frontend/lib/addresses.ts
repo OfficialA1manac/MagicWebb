@@ -14,6 +14,9 @@ const auctionRaw = process.env.NEXT_PUBLIC_AUCTION_ADDR;
 const offerRaw = process.env.NEXT_PUBLIC_OFFER_ADDR;
 const chainIdRaw = process.env.NEXT_PUBLIC_CHAIN_ID;
 const rpcRaw = process.env.NEXT_PUBLIC_RPC_URL;
+const explorerRaw = process.env.NEXT_PUBLIC_EXPLORER_URL;
+const currencySymbolRaw = process.env.NEXT_PUBLIC_CURRENCY_SYMBOL;
+const chainNameRaw = process.env.NEXT_PUBLIC_CHAIN_NAME;
 
 const reqAddress = (label: string, v: string | undefined): Address => {
   if (!v || v.trim() === "") {
@@ -48,3 +51,6 @@ export const ADDR = {
 
 export const CHAIN_ID = reqNumber("NEXT_PUBLIC_CHAIN_ID", chainIdRaw);
 export const RPC_URL = reqNonEmpty("NEXT_PUBLIC_RPC_URL", rpcRaw);
+export const EXPLORER_URL = reqNonEmpty("NEXT_PUBLIC_EXPLORER_URL", explorerRaw);
+export const CURRENCY_SYMBOL = reqNonEmpty("NEXT_PUBLIC_CURRENCY_SYMBOL", currencySymbolRaw);
+export const CHAIN_NAME = reqNonEmpty("NEXT_PUBLIC_CHAIN_NAME", chainNameRaw);

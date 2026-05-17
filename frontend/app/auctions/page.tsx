@@ -3,6 +3,7 @@ import {useState} from "react";
 import Link from "next/link";
 import {formatEther} from "viem";
 import {useChainAuctions, type AuctionRow} from "@/hooks/useChainAuctions";
+import {CURRENCY_SYMBOL} from "@/lib/addresses";
 
 function AuctionCard({row, meta}: {row: AuctionRow; meta?: {name: string; symbol: string}}) {
   const now = BigInt(Math.floor(Date.now() / 1000));
@@ -50,7 +51,7 @@ function AuctionCard({row, meta}: {row: AuctionRow; meta?: {name: string; symbol
       </div>
       <div className="mt-3 flex flex-wrap items-baseline justify-between gap-2 border-t border-neutral-800/80 pt-3 text-sm">
         <span className="text-neutral-500">High bid</span>
-        <span className="font-mono text-emerald-400">{formatEther(row.highestBid)} C2FLR</span>
+        <span className="font-mono text-emerald-400">{formatEther(row.highestBid)} {CURRENCY_SYMBOL}</span>
       </div>
       <div className="mt-1 text-xs text-neutral-500">
         Reserve {formatEther(row.reserve)} · Ends {new Date(Number(row.endsAt) * 1000).toLocaleString()}
