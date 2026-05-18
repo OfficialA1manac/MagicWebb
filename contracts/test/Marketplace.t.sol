@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {Marketplace} from "../src/Marketplace.sol";
@@ -184,5 +184,31 @@ contract MarketplaceTest is Test {
         vm.prank(buyer);
         vm.expectRevert();
         mp.buy{value: 1 ether}(address(multi), 6);
+    }
+
+    // Listing expiry must not exceed MAX_LISTING_DURATION (365 days)
+    function test_listExpiryBeyondMaxReverts() public {
+        vm.startPrank(seller);
+        uint256 id = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
+        vm.expectRevert();
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 366 days));
+        vm.stopPrank();
+    }
+
+    // Listing at exactly MAX_LISTING_DURATION should succeed
+    function test_listExpiryAtMaxOk() public {
+        vm.startPrank(seller);
+        uint256 id = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 365 days));
+        vm.stopPrank();
+        (address s,,,,) = mp.listings(address(nft), id);
+        assertEq(s, seller);
+    }
+
+    // Invariant: Marketplace contract itself never holds ETH
+    function invariant_marketplaceBalanceZero() public view {
+        assertEq(address(mp).balance, 0);
     }
 }

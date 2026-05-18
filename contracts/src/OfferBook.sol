@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.26;
 
 import {MarketplaceCore, TokenStandard, WithdrawFailed} from "./MarketplaceCore.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -111,6 +111,7 @@ contract OfferBook is MarketplaceCore, EIP712 {
     function acceptOffer(Offer calldata o, bytes calldata sig, uint256 tokenIdActual)
         external nonReentrant
     {
+        if (o.collection == address(0) || o.bidder == address(0)) revert ZeroOffer();
         if (o.amount == 0) revert ZeroOffer();
         if (block.timestamp > o.expiresAt) revert OfferExpired();
         if (usedNonce[o.bidder][o.nonce]) revert OfferUsed();
