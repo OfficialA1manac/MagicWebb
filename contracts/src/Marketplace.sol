@@ -1,5 +1,5 @@
 // SPDX-License-Identifier: MIT
-pragma solidity 0.8.24;
+pragma solidity 0.8.26;
 
 import {MarketplaceCore, TokenStandard} from "./MarketplaceCore.sol";
 import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
@@ -13,6 +13,9 @@ error NotApproved();
 error InvalidExpiry();
 error InvalidAmount();
 error AlreadyListed();
+
+/// @dev Max listing duration. Prevents listings expiring decades in the future.
+uint64 constant MAX_LISTING_DURATION = 365 days;
 
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
@@ -76,6 +79,7 @@ contract Marketplace is MarketplaceCore {
     ) internal {
         if (price == 0) revert WrongPrice();
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
+        if (expiresAt > block.timestamp + MAX_LISTING_DURATION) revert InvalidExpiry();
 
         // Prevent a second seller from overwriting another active listing for the same (coll,id).
         // Original seller can always overwrite (re-list with new params); anyone else is blocked.

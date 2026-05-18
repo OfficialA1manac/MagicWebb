@@ -4,11 +4,11 @@ out = "out"
 libs = ["lib"]
 test = "test"
 script = "script"
-solc = "0.8.24"
+solc = "0.8.26"
 evm_version = "cancun"
 optimizer = true
 optimizer_runs = 1_000_000
-via_ir = false
+via_ir = true
 fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./broadcast" }]
 
 [fmt]
