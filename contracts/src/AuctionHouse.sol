@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {MarketplaceCore, TokenStandard, WithdrawFailed} from "./MarketplaceCore.sol";
-import {IERC721} from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 error NotSeller();
@@ -19,55 +19,77 @@ error BidOverflow();
 error BadIncrement();
 error TooEarly();
 error NotWinner();
+error CommitMismatch();
+error CommitTooFresh();
+error NoCommit();
 
 /// @title AuctionHouse
-/// @notice English auctions with reserve, bid increment, anti-snipe, and pull-refund pattern.
-/// @dev IMMUTABLE: no admin, no pause. Once a bid is placed, the auction cannot be cancelled; once
-///      `settle` runs, the outcome is FINAL — NFT to highest bidder, then fee → `feeVault` and remainder → seller.
-///      NFT is NOT escrowed — seller keeps custody until `settle`. If seller transfers
-///      or revokes approval mid-auction, `settle` will revert. Acceptable non-custodial trade-off;
-///      the bidder can recover their bid via `withdrawRefund` (outbid) or `reclaimBid` (stuck auction).
+/// @notice English auctions with reserve, bid increment, anti-snipe, commit-reveal MEV protection,
+///         and pull-refund pattern.
+///
+/// MEV protection rationale — commit-reveal chosen over batched settlement:
+///   Batched settlement adds per-bid block-window latency, ruining the live auction feel.
+///   Commit-reveal has 2-tx UX cost but keeps continuous bidding. On Flare (~1.8s blocks),
+///   commit+reveal completes in ≈4 s. Front-runners can't act on a revealed bid amount until
+///   it's already in the same block, eliminating profitable sandwich attacks on bid transactions.
+///
+/// Commit-reveal flow:
+///   1. Bidder calls `commitBid(id, keccak256(abi.encode(id, bidder, fullBidAmount, salt)))`.
+///   2. After COMMIT_DELAY_BLOCKS, bidder calls `bid(id, fullBidAmount, salt)` with
+///      msg.value = increment (fullBidAmount - existingBid, or fullBidAmount for first bid).
+///   3. Contract verifies hash, enforces delay, applies bid logic.
+///
+/// Non-custodial: seller keeps NFT until `settle`. If approval revoked mid-auction,
+/// `settle` reverts but bidder can `withdrawRefund` (outbid) or `reclaimBid` (stuck auction).
 contract AuctionHouse is MarketplaceCore {
     /// @notice Cap on `minIncrementBps` (50%). Prevents seller griefing via absurd increments.
-    uint16 public constant MAX_MIN_INCREMENT_BPS = 5_000;
-    /// @notice Anti-snipe: bids within this window of `endsAt` extend the auction.
-    uint64 public constant ANTI_SNIPE_WINDOW = 5 minutes;
-    /// @notice Maximum total extension via anti-snipe past `originalEndsAt`.
-    uint64 public constant ANTI_SNIPE_MAX_EXTENSION = 2 days;
-    /// @notice After `endsAt + SETTLE_DEADLINE` with no settlement, the winner may reclaim their bid.
-    /// @dev Safety valve: prevents ETH lockup if seller's receive() permanently reverts.
-    uint64 public constant SETTLE_DEADLINE = 7 days;
+    uint16  public constant MAX_MIN_INCREMENT_BPS  = 5_000;
+    /// @notice Anti-snipe: bids within this window extend the auction.
+    uint64  public constant ANTI_SNIPE_WINDOW      = 5 minutes;
+    /// @notice Maximum total anti-snipe extension past `originalEndsAt`.
+    uint64  public constant ANTI_SNIPE_MAX_EXTENSION = 2 days;
+    /// @notice After `endsAt + SETTLE_DEADLINE` with no settlement the winner may reclaim.
+    uint64  public constant SETTLE_DEADLINE        = 7 days;
+    /// @notice Minimum blocks between commit and reveal. Prevents same-block front-running.
+    ///         At Flare's ~1.8s block time: 2 blocks ≈ 3.6 s delay.
+    uint8   public constant COMMIT_DELAY_BLOCKS    = 2;
 
     /// @notice Auction record.
-    /// Slot layout (no wasted space):
-    ///   slot 0: seller(20) + startsAt(8) + minIncrementBps(2) + settled(1) + standard(1) = 32 bytes
-    ///   slot 1: collection(20) + endsAt(8) + originalEndsAt(4) = 32 bytes
+    /// Slot layout (packed, 6 storage slots):
+    ///   slot 0: seller(20) + startsAt(8) + minIncrementBps(2) + settled(1) + standard(1)
+    ///   slot 1: collection(20) + endsAt(8) + originalEndsAt(4)
     ///   slot 2: tokenId(32)
     ///   slot 3: reserve(16) + highestBid(16)
-    ///   slot 4: highestBidder(20) [12 bytes padding]
-    ///   slot 5: amount(16) [16 bytes padding]
+    ///   slot 4: highestBidder(20)
+    ///   slot 5: amount(16)
     struct Auction {
-        address       seller;          // slot 0 lower 20 bytes
-        uint64        startsAt;        // slot 0 next 8 bytes
-        uint16        minIncrementBps; // slot 0 next 2 bytes
-        bool          settled;         // slot 0 next 1 byte
-        TokenStandard standard;        // slot 0 next 1 byte  — slot 0 full
-        address       collection;      // slot 1 lower 20 bytes
-        uint64        endsAt;          // slot 1 next 8 bytes
-        uint32        originalEndsAt;  // slot 1 next 4 bytes — slot 1 full (anti-snipe cap baseline)
-        uint256       tokenId;         // slot 2
-        uint128       reserve;         // slot 3 lower 16 bytes
-        uint128       highestBid;      // slot 3 upper 16 bytes
-        address       highestBidder;   // slot 4 lower 20 bytes
-        uint128       amount;          // slot 5 lower 16 bytes (1 for ERC721)
+        address       seller;
+        uint64        startsAt;
+        uint16        minIncrementBps;
+        bool          settled;
+        TokenStandard standard;
+        address       collection;
+        uint64        endsAt;
+        uint32        originalEndsAt;
+        uint256       tokenId;
+        uint128       reserve;
+        uint128       highestBid;
+        address       highestBidder;
+        uint128       amount;
     }
 
-    /// @notice Auto-incrementing auction id. First valid id is 1.
     uint256 public nextAuctionId;
-    /// @notice Auction storage by id.
     mapping(uint256 => Auction) public auctions;
-    /// @notice Pull-pattern refund balances. Outbid bidders accumulate here; call `withdrawRefund` to claim.
+
+    /// @notice Pull-pattern refund balances from outbid events.
     mapping(address => uint256) public pendingReturns;
+
+    /// @notice Commit-reveal: commitment hash per (auction, bidder).
+    mapping(uint256 => mapping(address => bytes32)) public commitments;
+    /// @notice Block number at which the commitment was made.
+    mapping(uint256 => mapping(address => uint256)) public commitBlock;
+
+    // ── Events ────────────────────────────────────────────────────────────
 
     event AuctionCreated(
         uint256 indexed id,
@@ -77,35 +99,43 @@ contract AuctionHouse is MarketplaceCore {
         TokenStandard standard,
         uint128 amount,
         uint128 reserve,
-        uint64 startsAt,
-        uint64 endsAt
+        uint64  startsAt,
+        uint64  endsAt
     );
+    event BidCommitted(uint256 indexed id, address indexed bidder, bytes32 commitment);
     event BidPlaced(uint256 indexed id, address indexed bidder, uint128 amount);
-    event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 amount, uint256 fee);
+    event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 amount, uint256 fee, uint256 royalty);
     event AuctionCancelled(uint256 indexed id);
     event RefundWithdrawn(address indexed bidder, uint256 amount);
     event AuctionExtended(uint256 indexed id, uint64 newEndsAt);
     event BidReclaimed(uint256 indexed id, address indexed winner, uint256 amount);
 
-    constructor(address vault, uint16 fee) MarketplaceCore(vault, fee) {}
+    constructor(address vault, uint16 fee, address admin)
+        MarketplaceCore(vault, fee, admin)
+    {}
 
-    /// @notice Create an ERC-721 English auction.
-    function create(address coll, uint256 tokenId, uint128 reserve, uint64 startsAt, uint64 endsAt, uint16 minIncBps)
-        external returns (uint256 id)
-    {
+    // ── Create ────────────────────────────────────────────────────────────
+
+    function create(
+        address coll,
+        uint256 tokenId,
+        uint128 reserve,
+        uint64  startsAt,
+        uint64  endsAt,
+        uint16  minIncBps
+    ) external whenNotPaused returns (uint256 id) {
         return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, startsAt, endsAt, minIncBps);
     }
 
-    /// @notice Create an ERC-1155 English auction for `amount` units of `tokenId`.
     function create1155(
         address coll,
         uint256 tokenId,
         uint128 amount,
         uint128 reserve,
-        uint64 startsAt,
-        uint64 endsAt,
-        uint16 minIncBps
-    ) external returns (uint256 id) {
+        uint64  startsAt,
+        uint64  endsAt,
+        uint16  minIncBps
+    ) external whenNotPaused returns (uint256 id) {
         if (amount == 0) revert InvalidAmount();
         return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, startsAt, endsAt, minIncBps);
     }
@@ -116,9 +146,9 @@ contract AuctionHouse is MarketplaceCore {
         uint256 tokenId,
         uint128 amount,
         uint128 reserve,
-        uint64 startsAt,
-        uint64 endsAt,
-        uint16 minIncBps
+        uint64  startsAt,
+        uint64  endsAt,
+        uint16  minIncBps
     ) internal returns (uint256 id) {
         if (endsAt <= startsAt || startsAt < block.timestamp) revert InvalidWindow();
         if (minIncBps > MAX_MIN_INCREMENT_BPS) revert BadIncrement();
@@ -151,9 +181,36 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
     }
 
-    /// @notice Place a bid. Outbid losers are credited 100% of their prior bid in `pendingReturns`.
-    /// @dev Current high bidder raising: send only the increment as `msg.value`; compounded onto existing bid.
-    function bid(uint256 id) external payable nonReentrant {
+    // ── Commit-Reveal Bid ─────────────────────────────────────────────────
+
+    /// @notice Phase 1: submit a commitment. No ETH required.
+    ///         `commitment = keccak256(abi.encode(id, msg.sender, fullBidAmount, salt))`
+    ///         where `fullBidAmount` is your total bid (not the increment).
+    function commitBid(uint256 id, bytes32 commitment) external whenNotPaused {
+        Auction storage a = auctions[id];
+        if (a.seller == address(0) || a.settled) revert NotActive();
+        if (block.timestamp < a.startsAt || block.timestamp >= a.endsAt) revert AuctionEnded();
+        commitments[id][msg.sender] = commitment;
+        commitBlock[id][msg.sender] = block.number;
+        emit BidCommitted(id, msg.sender, commitment);
+    }
+
+    /// @notice Phase 2: reveal and apply bid.
+    ///         `fullBidAmount`: your total intended bid.
+    ///         `msg.value`: for a new bidder = fullBidAmount; for the existing high bidder = fullBidAmount - existingBid.
+    ///         Must be called at least COMMIT_DELAY_BLOCKS after `commitBid`.
+    function bid(uint256 id, uint128 fullBidAmount, bytes32 salt)
+        external payable nonReentrant whenNotPaused
+    {
+        // Verify commitment
+        bytes32 expected = keccak256(abi.encode(id, msg.sender, fullBidAmount, salt));
+        if (commitments[id][msg.sender] == bytes32(0)) revert NoCommit();
+        if (commitments[id][msg.sender] != expected) revert CommitMismatch();
+        if (block.number <= commitBlock[id][msg.sender] + uint256(COMMIT_DELAY_BLOCKS) - 1) revert CommitTooFresh();
+
+        delete commitments[id][msg.sender];
+        delete commitBlock[id][msg.sender];
+
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.startsAt || block.timestamp >= a.endsAt) revert AuctionEnded();
@@ -161,14 +218,14 @@ contract AuctionHouse is MarketplaceCore {
         address prevBidder = a.highestBidder;
         uint128 prevHigh   = a.highestBid;
 
-        uint128 newBid;
+        // Compound bid: existing high bidder raises; msg.value is the increment only.
         if (prevBidder != address(0) && msg.sender == prevBidder) {
             uint256 sum = uint256(prevHigh) + msg.value;
             if (sum > type(uint128).max) revert BidOverflow();
-            newBid = uint128(sum);
+            if (uint128(sum) != fullBidAmount) revert CommitMismatch();
         } else {
             if (msg.value > type(uint128).max) revert BidOverflow();
-            newBid = uint128(msg.value);
+            if (uint128(msg.value) != fullBidAmount) revert CommitMismatch();
         }
 
         uint256 incRaw = uint256(prevHigh) * a.minIncrementBps / 10_000;
@@ -180,13 +237,12 @@ contract AuctionHouse is MarketplaceCore {
             if (next > type(uint128).max) revert BidOverflow();
             minNext = uint128(next);
         }
-        if (newBid < minNext) revert BidTooLow();
+        if (fullBidAmount < minNext) revert BidTooLow();
 
-        a.highestBid    = newBid;
+        a.highestBid    = fullBidAmount;
         a.highestBidder = msg.sender;
 
-        // Anti-snipe: extend endsAt if winning bid arrives within the snipe window.
-        // Extension is capped at originalEndsAt + ANTI_SNIPE_MAX_EXTENSION to prevent infinite auctions.
+        // Anti-snipe extension
         uint64 endsAt = a.endsAt;
         if (endsAt - block.timestamp < ANTI_SNIPE_WINDOW) {
             uint64 absoluteCap = uint64(a.originalEndsAt) + ANTI_SNIPE_MAX_EXTENSION;
@@ -201,10 +257,12 @@ contract AuctionHouse is MarketplaceCore {
         if (prevBidder != address(0) && prevBidder != msg.sender) {
             pendingReturns[prevBidder] += prevHigh;
         }
-        emit BidPlaced(id, msg.sender, newBid);
+        emit BidPlaced(id, msg.sender, fullBidAmount);
     }
 
-    /// @notice Withdraw any accumulated refund balance from prior outbids.
+    // ── Withdraw refund ───────────────────────────────────────────────────
+
+    /// @notice Withdraw accumulated refunds from outbid events. Works while paused.
     function withdrawRefund() external nonReentrant {
         uint256 amt = pendingReturns[msg.sender];
         if (amt == 0) revert NothingToWithdraw();
@@ -214,8 +272,10 @@ contract AuctionHouse is MarketplaceCore {
         emit RefundWithdrawn(msg.sender, amt);
     }
 
-    /// @notice Settle a finished auction. Anyone can call after `endsAt`. FINAL — sets `settled=true`,
-    ///         transfers NFT, routes fee + seller payout atomically.
+    // ── Settle ────────────────────────────────────────────────────────────
+
+    /// @notice Settle a finished auction. Anyone can call after `endsAt`. FINAL.
+    ///         NFT → winner, fee → feeVault, royalty → creator, remainder → seller.
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
@@ -224,22 +284,23 @@ contract AuctionHouse is MarketplaceCore {
         address highBidder = a.highestBidder;
         if (highBidder == address(0)) revert NoBids();
 
-        // Effect first, then cache remaining fields to memory before interactions.
         a.settled = true;
-        address       sel    = a.seller;
-        TokenStandard std    = a.standard;
-        address       coll   = a.collection;
-        uint256       tid    = a.tokenId;
-        uint128       amt    = a.amount;
+        address       sel   = a.seller;
+        TokenStandard std   = a.standard;
+        address       coll  = a.collection;
+        uint256       tid   = a.tokenId;
+        uint128       amt   = a.amount;
         uint128       hieBid = a.highestBid;
 
         _transferToken(std, coll, sel, highBidder, tid, amt);
-        (uint256 fee,) = _splitAndPay(sel, hieBid);
+        (uint256 fee, uint256 royalty,) = _splitAndPay(sel, hieBid, coll, tid);
 
-        emit AuctionSettled(id, highBidder, sel, hieBid, fee);
+        emit AuctionSettled(id, highBidder, sel, hieBid, fee, royalty);
     }
 
-    /// @notice Cancel an auction with zero bids. Seller only. Once any bid is placed this path is closed.
+    // ── Cancel ────────────────────────────────────────────────────────────
+
+    /// @notice Cancel an auction with zero bids. Seller only. Works while paused.
     function cancel(uint256 id) external {
         Auction storage a = auctions[id];
         if (a.seller != msg.sender) revert NotSeller();
@@ -248,9 +309,10 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionCancelled(id);
     }
 
-    /// @notice Safety valve: if `settle` has not been called within `SETTLE_DEADLINE` of auction end,
-    ///         the highest bidder may reclaim their ETH. Prevents permanent lockup when seller's
-    ///         receive() permanently reverts.
+    // ── Safety valve ──────────────────────────────────────────────────────
+
+    /// @notice If `settle` has not run within `SETTLE_DEADLINE` of auction end,
+    ///         the highest bidder may reclaim their ETH. Works while paused.
     function reclaimBid(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
