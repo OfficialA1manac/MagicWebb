@@ -1,0 +1,107 @@
+version: "3.9"
+
+# WebbPlace local dev stack.
+# Start: docker compose up -d
+# Stop:  docker compose down -v
+
+services:
+
+  # ── Postgres with pgvector ───────────────────────────────────────────────
+  postgres:
+    image: pgvector/pgvector:pg16
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB:       webbplace
+      POSTGRES_USER:     webbplace
+      POSTGRES_PASSWORD: webbplace_dev
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U webbplace"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  # ── Redis ─────────────────────────────────────────────────────────────────
+  redis:
+    image: redis:7-alpine
+    restart: unless-stopped
+    command: redis-server --maxmemory 256mb --maxmemory-policy allkeys-lru --appendonly yes
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+
+  # ── Indexer ───────────────────────────────────────────────────────────────
+  indexer:
+    build:
+      context: backend
+      dockerfile: Dockerfile.indexer
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    environment:
+      ENV:               development
+      POSTGRES_URL:      postgres://webbplace:webbplace_dev@postgres:5432/webbplace?sslmode=disable
+      REDIS_URL:         redis://redis:6379
+      RPC_URL:           ${RPC_URL:-https://coston2-api.flare.network/ext/C/rpc}
+      CHAIN_ID:          ${CHAIN_ID:-114}
+      MARKETPLACE_ADDR:  ${MARKETPLACE_ADDR}
+      AUCTION_ADDR:      ${AUCTION_ADDR}
+      OFFERBOOK_ADDR:    ${OFFERBOOK_ADDR}
+      ROYALTY_ADDR:      ${ROYALTY_ADDR}
+      # Score weights
+      SCORE_W_VIEWS:     ${SCORE_W_VIEWS:-0.3}
+      SCORE_W_BIDS:      ${SCORE_W_BIDS:-0.5}
+      SCORE_W_VOLUME:    ${SCORE_W_VOLUME:-0.2}
+      SCORE_DECAY:       ${SCORE_DECAY:-0.05}
+
+  # ── API (gRPC + GraphQL + WS) ─────────────────────────────────────────────
+  api:
+    build:
+      context: backend
+      dockerfile: Dockerfile.api
+    restart: unless-stopped
+    depends_on:
+      postgres: { condition: service_healthy }
+      redis:    { condition: service_healthy }
+    ports:
+      - "8080:8080"   # HTTP / GraphQL / WS
+      - "9090:9090"   # gRPC
+    environment:
+      ENV:             development
+      POSTGRES_URL:    postgres://webbplace:webbplace_dev@postgres:5432/webbplace?sslmode=disable
+      REDIS_URL:       redis://redis:6379
+      HTTP_ADDR:       :8080
+      GRPC_ADDR:       :9090
+      SIWE_DOMAIN:     localhost
+      JWT_SECRET:      ${JWT_SECRET:-dev_jwt_secret_change_me}
+      SENTRY_DSN:      ${SENTRY_DSN:-}
+      OTEL_EXPORTER_OTLP_ENDPOINT: ${OTEL_ENDPOINT:-}
+
+  # ── Frontend (Next.js) ────────────────────────────────────────────────────
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "3000:3000"
+    environment:
+      NODE_ENV: development
+    env_file:
+      - frontend/.env.local
+
+volumes:
+  pg_data:
+  redis_data:

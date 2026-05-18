@@ -1,0 +1,48 @@
+syntax = "proto3";
+
+package indexer.v1;
+
+import "common/v1/common.proto";
+import "google/protobuf/timestamp.proto";
+import "google/protobuf/empty.proto";
+
+option go_package = "github.com/OfficialA1manac/MagicWebb/backend/gen/indexer/v1;indexerv1";
+
+service IndexerService {
+  rpc GetStatus(google.protobuf.Empty)      returns (IndexerStatus);
+  rpc GetBlockHeight(google.protobuf.Empty) returns (BlockHeightResponse);
+
+  // Force re-index from a given block (admin only, requires service token)
+  rpc Reindex(ReindexRequest)               returns (ReindexResponse);
+}
+
+// ── Messages ───────────────────────────────────────────────────────────────
+
+message IndexerStatus {
+  uint64 indexed_block     = 1; // last fully processed block
+  uint64 chain_block       = 2; // latest block on chain
+  uint64 lag               = 3; // chain_block - indexed_block
+  bool   healthy           = 4; // lag < threshold (default 10 blocks)
+  google.protobuf.Timestamp last_indexed_at = 5;
+  uint64 events_indexed_total = 6;
+  uint64 events_indexed_1h    = 7;
+}
+
+message BlockHeightResponse {
+  uint64 block_number = 1;
+  google.protobuf.Timestamp block_time = 2;
+}
+
+// ── Requests / Responses ───────────────────────────────────────────────────
+
+message ReindexRequest {
+  uint64 from_block = 1;
+  // If omitted, re-indexes to chain head.
+  uint64 to_block   = 2;
+  // Comma-separated list of event types to re-process (empty = all)
+  repeated common.v1.EventType event_types = 3;
+}
+
+message ReindexResponse {
+  string job_id = 1;
+}
