@@ -1,0 +1,286 @@
+package db
+
+import (
+	"context"
+	"fmt"
+	"math/big"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgxpool"
+)
+
+// Q wraps a pgxpool.Pool and exposes typed query methods.
+type Q struct{ pool *pgxpool.Pool }
+
+func New(pool *pgxpool.Pool) *Q { return &Q{pool} }
+
+// ── Indexer state ─────────────────────────────────────────────────────────
+
+func (q *Q) GetIndexedBlock(ctx context.Context, chainID int) (uint64, error) {
+	var block uint64
+	err := q.pool.QueryRow(ctx,
+		`SELECT indexed_block FROM indexer_state WHERE chain_id = $1`, chainID).
+		Scan(&block)
+	if err == pgx.ErrNoRows {
+		return 0, nil
+	}
+	return block, err
+}
+
+func (q *Q) SetIndexedBlock(ctx context.Context, chainID int, block uint64) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO indexer_state(chain_id, indexed_block, updated_at)
+		 VALUES($1,$2,now())
+		 ON CONFLICT (chain_id) DO UPDATE
+		 SET indexed_block=EXCLUDED.indexed_block, updated_at=now()`,
+		chainID, block)
+	return err
+}
+
+// ── Collections ───────────────────────────────────────────────────────────
+
+func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO collections(address, name, symbol, standard, deploy_block)
+		 VALUES($1,$2,$3,$4,$5)
+		 ON CONFLICT(address) DO UPDATE
+		 SET name=EXCLUDED.name, symbol=EXCLUDED.symbol`,
+		addr, name, symbol, standard, deployBlock)
+	return err
+}
+
+// ── Listings ──────────────────────────────────────────────────────────────
+
+type ListingRow struct {
+	Collection string
+	TokenID    string // decimal uint256
+	Seller     string
+	PriceWei   string
+	Amount     int64
+	Standard   string
+	ExpiresAt  time.Time
+	ListedAt   time.Time
+	TxHash     string
+}
+
+func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO listings(collection, token_id, seller, price_wei, amount, standard, expires_at, listed_at, tx_hash, active)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
+		 ON CONFLICT(collection, token_id) DO UPDATE
+		 SET seller=EXCLUDED.seller, price_wei=EXCLUDED.price_wei, amount=EXCLUDED.amount,
+		     standard=EXCLUDED.standard, expires_at=EXCLUDED.expires_at, listed_at=EXCLUDED.listed_at,
+		     tx_hash=EXCLUDED.tx_hash, active=true`,
+		r.Collection, r.TokenID, r.Seller, r.PriceWei, r.Amount, r.Standard, r.ExpiresAt, r.ListedAt, r.TxHash)
+	return err
+}
+
+func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2`,
+		collection, tokenID)
+	return err
+}
+
+type ListingsFilter struct {
+	Collection string
+	Seller     string
+	Limit      int
+	Cursor     string // tokenID of last seen row for keyset pagination
+}
+
+func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]ListingRow, error) {
+	if f.Limit == 0 || f.Limit > 100 {
+		f.Limit = 50
+	}
+	args := []any{f.Limit}
+	where := "WHERE l.active=true AND l.expires_at > now()"
+	if f.Collection != "" {
+		args = append(args, f.Collection)
+		where += fmt.Sprintf(" AND l.collection=$%d", len(args))
+	}
+	if f.Seller != "" {
+		args = append(args, f.Seller)
+		where += fmt.Sprintf(" AND l.seller=$%d", len(args))
+	}
+
+	rows, err := q.pool.Query(ctx,
+		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
+		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash
+		 FROM listings l `+where+`
+		 ORDER BY l.listed_at DESC LIMIT $1`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []ListingRow
+	for rows.Next() {
+		var r ListingRow
+		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ── Auctions ──────────────────────────────────────────────────────────────
+
+type AuctionRow struct {
+	AuctionID        int64
+	Collection       string
+	TokenID          string
+	Seller           string
+	Standard         string
+	ReservePriceWei  string
+	HighestBidWei    string
+	HighestBidder    string
+	MinIncrementBps  int
+	StartsAt         time.Time
+	EndsAt           time.Time
+	Status           string
+	CreateTx         string
+}
+
+func (q *Q) UpsertAuction(ctx context.Context, r AuctionRow) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO auctions(auction_id, collection, token_id, seller, standard,
+		    reserve_price_wei, highest_bid_wei, highest_bidder, min_increment_bps,
+		    starts_at, ends_at, status, create_tx)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11,$12,$13)
+		 ON CONFLICT(auction_id) DO UPDATE
+		 SET highest_bid_wei=EXCLUDED.highest_bid_wei,
+		     highest_bidder=EXCLUDED.highest_bidder,
+		     ends_at=EXCLUDED.ends_at,
+		     status=EXCLUDED.status`,
+		r.AuctionID, r.Collection, r.TokenID, r.Seller, r.Standard,
+		r.ReservePriceWei, r.HighestBidWei, r.HighestBidder, r.MinIncrementBps,
+		r.StartsAt, r.EndsAt, r.Status, r.CreateTx)
+	return err
+}
+
+func (q *Q) SetAuctionStatus(ctx context.Context, auctionID int64, status string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE auctions SET status=$1 WHERE auction_id=$2`, status, auctionID)
+	return err
+}
+
+func (q *Q) UpdateAuctionBid(ctx context.Context, r AuctionRow) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE auctions SET highest_bid_wei=$1, highest_bidder=$2 WHERE auction_id=$3`,
+		r.HighestBidWei, r.HighestBidder, r.AuctionID)
+	return err
+}
+
+func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, error) {
+	if limit == 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT auction_id, collection, token_id::text, seller, standard::text,
+		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
+		        min_increment_bps, starts_at, ends_at, status::text, create_tx
+		 FROM auctions WHERE status='active'
+		 ORDER BY ends_at ASC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []AuctionRow
+	for rows.Next() {
+		var r AuctionRow
+		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
+			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
+			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ── Bids ──────────────────────────────────────────────────────────────────
+
+func (q *Q) InsertBid(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO bids(auction_id, bidder, amount_wei, tx_hash, placed_at)
+		 VALUES($1,$2,$3,$4,$5)
+		 ON CONFLICT(tx_hash) DO NOTHING`,
+		auctionID, bidder, amtWei, txHash, placedAt)
+	return err
+}
+
+// ── Sales ─────────────────────────────────────────────────────────────────
+
+func (q *Q) InsertSale(ctx context.Context,
+	collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash string,
+	blockNumber uint64, occurredAt time.Time,
+) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO sales(collection, token_id, seller, buyer, price_wei, fee_wei, royalty_wei, tx_hash, block_number, occurred_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
+		 ON CONFLICT(tx_hash) DO NOTHING`,
+		collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash, blockNumber, occurredAt)
+	return err
+}
+
+// ── Trending scores ───────────────────────────────────────────────────────
+
+type TrendingScore struct {
+	Collection string
+	Window     string
+	Score      float64
+	Views      int64
+	Bids       int64
+	VolumeWei  *big.Int
+}
+
+func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO trending_scores(collection, window, score, views, bids, volume_wei, computed_at)
+		 VALUES($1,$2,$3,$4,$5,$6,now())
+		 ON CONFLICT(collection, window) DO UPDATE
+		 SET score=EXCLUDED.score, views=EXCLUDED.views, bids=EXCLUDED.bids,
+		     volume_wei=EXCLUDED.volume_wei, computed_at=now()`,
+		s.Collection, s.Window, s.Score, s.Views, s.Bids, s.VolumeWei.String())
+	return err
+}
+
+func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int) ([]TrendingScore, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT collection, window, score, views, bids, volume_wei::text
+		 FROM trending_scores WHERE window=$1
+		 ORDER BY score DESC LIMIT $2`, window, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []TrendingScore
+	for rows.Next() {
+		var s TrendingScore
+		var volStr string
+		if err := rows.Scan(&s.Collection, &s.Window, &s.Score, &s.Views, &s.Bids, &volStr); err != nil {
+			return nil, err
+		}
+		s.VolumeWei = new(big.Int)
+		s.VolumeWei.SetString(volStr, 10)
+		out = append(out, s)
+	}
+	return out, rows.Err()
+}
+
+// ── NFT token owner ───────────────────────────────────────────────────────
+
+func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO nft_tokens(collection, token_id, owner)
+		 VALUES($1,$2,$3)
+		 ON CONFLICT(collection, token_id) DO UPDATE SET owner=EXCLUDED.owner`,
+		collection, tokenID, owner)
+	return err
+}
