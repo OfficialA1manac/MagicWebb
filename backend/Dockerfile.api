@@ -1,0 +1,30 @@
+FROM --platform=$BUILDPLATFORM golang:1.23-bookworm AS builder
+
+# Install Zig for hot-path compilation
+RUN apt-get update && apt-get install -y --no-install-recommends \
+        wget xz-utils \
+    && rm -rf /var/lib/apt/lists/*
+RUN wget -q https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz \
+    && tar -xf zig-linux-x86_64-0.13.0.tar.xz -C /usr/local \
+    && ln -s /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig
+
+WORKDIR /build
+COPY go.mod go.sum ./
+RUN go mod download
+
+COPY . .
+RUN make zig
+RUN CGO_ENABLED=1 make build-api
+
+# ── Runtime ──────────────────────────────────────────────────────────────
+FROM debian:bookworm-slim
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+COPY --from=builder /build/bin/api          ./api
+COPY --from=builder /build/internal/hot/lib ./internal/hot/lib
+
+ENV LD_LIBRARY_PATH=/app/internal/hot/lib
+EXPOSE 8080 9090
+ENTRYPOINT ["./api"]

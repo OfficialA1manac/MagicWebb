@@ -1,0 +1,12 @@
+version: v2
+modules:
+  - path: proto
+name: buf.build/officialA1manac/magicwebb
+lint:
+  use:
+    - DEFAULT
+  except:
+    - PACKAGE_DIRECTORY_MATCH   # monorepo layout differs from buf default
+breaking:
+  use:
+    - FILE

@@ -37,9 +37,17 @@ desktop.ini
 .claude/settings.local.json
 
 # Devtools / one-shot scripts (not part of the app)
-main.go
-go.mod
-go.sum
+/main.go
+/go.mod
+/go.sum
 devtools/
 magicwebb.exe
 magicwebb_win.exe
+
+# Backend build artefacts
+backend/bin/
+backend/gen/
+backend/internal/hot/lib/
+
+# Go dependencies (module cache lives in GOPATH)
+backend/vendor/
