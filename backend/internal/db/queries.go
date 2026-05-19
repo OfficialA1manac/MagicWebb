@@ -643,3 +643,57 @@ func (q *Q) GetEventCounts(ctx context.Context) (total, last1h uint64, err error
 	).Scan(&total, &last1h)
 	return total, last1h, err
 }
+
+// ── Search ────────────────────────────────────────────────────────────────
+
+type SearchResult struct {
+	Kind       string `json:"kind"`              // "nft" | "collection"
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id,omitempty"`
+	Name       string `json:"name"`
+	ImageURI   string `json:"image_uri,omitempty"`
+}
+
+// Search finds NFTs and collections matching query using Postgres full-text search.
+// Returns up to limit results per kind (nft + collection combined).
+func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
+	if limit <= 0 || limit > 50 {
+		limit = 20
+	}
+	rows, err := q.pool.Query(ctx, `
+		(
+			SELECT 'nft'::text,
+			       t.collection::text,
+			       t.token_id::text,
+			       coalesce(t.name, '') AS name,
+			       coalesce(t.image_uri, '') AS image_uri
+			FROM nft_tokens t
+			WHERE t.search_vec @@ plainto_tsquery('english', $1)
+			LIMIT $2
+		)
+		UNION ALL
+		(
+			SELECT 'collection'::text,
+			       c.address::text,
+			       ''::text,
+			       c.name,
+			       ''::text
+			FROM collections c
+			WHERE c.search_vec @@ plainto_tsquery('english', $1)
+			LIMIT $2
+		)
+	`, query, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SearchResult
+	for rows.Next() {
+		var r SearchResult
+		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

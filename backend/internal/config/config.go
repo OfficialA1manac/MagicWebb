@@ -116,6 +116,11 @@ func Load() {
 	C.AuctionAddr     = strings.ToLower(C.AuctionAddr)
 	C.OfferBookAddr   = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr     = strings.ToLower(C.RoyaltyAddr)
+
+	if len(C.JWTSecret) < 32 {
+		fmt.Fprintln(os.Stderr, "FATAL: JWT_SECRET must be at least 32 characters")
+		os.Exit(1)
+	}
 }
 
 func required(key string) string {

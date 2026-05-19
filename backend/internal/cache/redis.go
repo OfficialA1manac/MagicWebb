@@ -62,6 +62,29 @@ func (c *Client) GetServerTime(ctx context.Context) (int64, error) {
 	return c.rdb.Get(ctx, "server:time").Int64()
 }
 
+// ── Redis-backed rate limiter (sliding window) ────────────────────────────
+// Allow returns true if the caller is within the limit, false if rate-limited.
+// Uses a sorted set keyed by "rl:{key}" to count requests in [now-window, now].
+func (c *Client) Allow(ctx context.Context, key string, limit int, window time.Duration) (bool, error) {
+	rKey := "rl:" + key
+	now := time.Now()
+	windowStart := now.Add(-window).UnixMicro()
+
+	pipe := c.rdb.Pipeline()
+	// Remove old entries outside the window
+	pipe.ZRemRangeByScore(ctx, rKey, "0", fmt.Sprintf("%d", windowStart))
+	// Count remaining
+	countCmd := pipe.ZCard(ctx, rKey)
+	// Add current request
+	pipe.ZAdd(ctx, rKey, redis.Z{Score: float64(now.UnixMicro()), Member: now.UnixNano()})
+	pipe.Expire(ctx, rKey, window)
+	if _, err := pipe.Exec(ctx); err != nil {
+		// On Redis error, fail open (allow the request)
+		return true, err
+	}
+	return countCmd.Val() < int64(limit), nil
+}
+
 // ── Generic helpers ───────────────────────────────────────────────────────
 
 func (c *Client) Set(ctx context.Context, key string, val any, ttl time.Duration) error {

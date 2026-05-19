@@ -9,7 +9,6 @@ import (
 	"os"
 	"os/signal"
 	"strings"
-	"sync"
 	"syscall"
 	"time"
 
@@ -116,10 +115,10 @@ func main() {
 		w.WriteHeader(http.StatusOK)
 	})
 
-	// Auth endpoints with rate limiting (20 req/min per IP).
-	authRL := newAuthRateLimiter()
-	mux.HandleFunc("/auth/nonce", authRL.wrap(handleNonce(rdb)))
-	mux.HandleFunc("/auth/verify", authRL.wrap(handleVerify(rdb)))
+	// Auth endpoints with rate limiting (20 req/min per IP, Redis-backed).
+	arl := &authRL{rdb: rdb}
+	mux.HandleFunc("/auth/nonce", arl.wrap(handleNonce(rdb)))
+	mux.HandleFunc("/auth/verify", arl.wrap(handleVerify(rdb)))
 
 	// REST API + SSE (handles /api/v1/* and /events).
 	apiRouter := apiPkg.NewRouter(q, rdb, &config.C)
@@ -278,47 +277,21 @@ func corsMiddlewareWithURL(frontendURL string, next http.Handler) http.Handler {
 	})
 }
 
-// ── Auth rate limiter (20 req/min per IP) ─────────────────────────────────────
+// ── Auth rate limiter (20 req/min per IP, Redis-backed) ───────────────────────
 
 const (
 	authRateLimit  = 20
 	authRateWindow = time.Minute
 )
 
-type authRateLimiterState struct {
-	mu      sync.Mutex
-	buckets map[string]*authBucket
-}
+// authRL wraps the Redis client for auth endpoint rate limiting.
+type authRL struct{ rdb *cache.Client }
 
-type authBucket struct {
-	count   int
-	resetAt time.Time
-}
-
-func newAuthRateLimiter() *authRateLimiterState {
-	return &authRateLimiterState{buckets: make(map[string]*authBucket)}
-}
-
-func (rl *authRateLimiterState) allow(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	now := time.Now()
-	b, ok := rl.buckets[ip]
-	if !ok || now.After(b.resetAt) {
-		rl.buckets[ip] = &authBucket{count: 1, resetAt: now.Add(authRateWindow)}
-		return true
-	}
-	if b.count >= authRateLimit {
-		return false
-	}
-	b.count++
-	return true
-}
-
-func (rl *authRateLimiterState) wrap(next http.HandlerFunc) http.HandlerFunc {
+func (a *authRL) wrap(next http.HandlerFunc) http.HandlerFunc {
 	return func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIPFromRequest(r)
-		if !rl.allow(ip) {
+		ok, _ := a.rdb.Allow(r.Context(), "auth:"+ip, authRateLimit, authRateWindow)
+		if !ok {
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}
