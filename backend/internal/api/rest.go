@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"net/http"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
@@ -34,13 +33,16 @@ func NewRouter(q *db.Q, rdb *cache.Client, cfg *config.Config) http.Handler {
 	mux.HandleFunc("GET /api/v1/offers", handleListOffers(q))
 	mux.HandleFunc("POST /api/v1/offers", handleNotifyOffer(q))
 
+	// search
+	mux.HandleFunc("GET /api/v1/search", handleSearch(q))
+
 	// indexer status
 	mux.HandleFunc("GET /api/v1/indexer/status", handleIndexerStatus(q))
 
 	// SSE
 	mux.HandleFunc("GET /events", handleEvents(rdb))
 
-	return corsMiddleware(cfg.FrontendURL, rateLimitMiddleware(mux))
+	return corsMiddleware(cfg.FrontendURL, rateLimitMiddleware(rdb, mux))
 }
 
 // ── CORS ──────────────────────────────────────────────────────────────────────
@@ -64,48 +66,18 @@ func corsMiddleware(frontendURL string, next http.Handler) http.Handler {
 	})
 }
 
-// ── Rate limiter ──────────────────────────────────────────────────────────────
+// ── Rate limiter (Redis-backed sliding window) ────────────────────────────────
 
 const (
 	rateLimitRequests = 60
 	rateLimitWindow   = time.Minute
 )
 
-type rateLimiter struct {
-	mu      sync.Mutex
-	buckets map[string]*bucket
-}
-
-type bucket struct {
-	count   int
-	resetAt time.Time
-}
-
-func newRateLimiter() *rateLimiter {
-	return &rateLimiter{buckets: make(map[string]*bucket)}
-}
-
-func (rl *rateLimiter) allow(ip string) bool {
-	rl.mu.Lock()
-	defer rl.mu.Unlock()
-	now := time.Now()
-	b, ok := rl.buckets[ip]
-	if !ok || now.After(b.resetAt) {
-		rl.buckets[ip] = &bucket{count: 1, resetAt: now.Add(rateLimitWindow)}
-		return true
-	}
-	if b.count >= rateLimitRequests {
-		return false
-	}
-	b.count++
-	return true
-}
-
-func rateLimitMiddleware(next http.Handler) http.Handler {
-	rl := newRateLimiter()
+func rateLimitMiddleware(rdb *cache.Client, next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		ip := clientIP(r)
-		if !rl.allow(ip) {
+		ok, _ := rdb.Allow(r.Context(), "api:"+ip, rateLimitRequests, rateLimitWindow)
+		if !ok {
 			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
 			return
 		}

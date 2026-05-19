@@ -205,7 +205,7 @@ var domainTypeHash = crypto.Keccak256Hash([]byte(
 	"EIP712Domain(string name,string version,uint256 chainId,address verifyingContract)",
 ))
 
-var nameHash = crypto.Keccak256Hash([]byte("WebbPlace"))
+var nameHash = crypto.Keccak256Hash([]byte("MagicWebbOfferBook"))
 var versionHash = crypto.Keccak256Hash([]byte("1"))
 
 func domainSeparator(chainID uint64, offerBookAddr common.Address) common.Hash {

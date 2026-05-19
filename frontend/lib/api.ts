@@ -14,6 +14,14 @@ async function apiFetch(path: string, opts?: RequestInit) {
   return res.json()
 }
 
+export interface SearchItem {
+  kind: 'nft' | 'collection'
+  collection: string
+  token_id?: string
+  name: string
+  image_uri?: string
+}
+
 export interface OfferPayload {
   bidder: string
   collection: string
@@ -77,4 +85,7 @@ export const api = {
 
   getIndexerStatus: () =>
     apiFetch('/api/v1/indexer/status'),
+
+  search: (q: string, limit = 20): Promise<SearchItem[]> =>
+    apiFetch(`/api/v1/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 }
