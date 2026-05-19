@@ -1,0 +1,52 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend (Go)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.23"
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+  frontend:
+    name: Frontend (Node)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+      - name: Install
+        working-directory: frontend
+        run: npm ci
+      - name: Build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:8080
+          NEXT_PUBLIC_CHAIN_ID: "114"
+          NEXT_PUBLIC_RPC_URL: https://coston2-api.flare.network/ext/C/rpc
+          NEXT_PUBLIC_EXPLORER_URL: https://coston2-explorer.flare.network
+          NEXT_PUBLIC_CURRENCY_SYMBOL: FLR
+          NEXT_PUBLIC_CHAIN_NAME: Coston2
+          NEXT_PUBLIC_MARKETPLACE_ADDR: "0x0000000000000000000000000000000000000001"
+          NEXT_PUBLIC_AUCTION_ADDR: "0x0000000000000000000000000000000000000002"
+          NEXT_PUBLIC_OFFER_ADDR: "0x0000000000000000000000000000000000000003"
+        run: npm run build

@@ -2,12 +2,11 @@
 import {useEffect, useRef} from "react";
 import {useQueryClient} from "@tanstack/react-query";
 
-const WS_URL = process.env.NEXT_PUBLIC_WS_URL ?? "ws://localhost:4001/ws";
+const BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
-type WSMessage = {
+type SSEEvent = {
   type: string;
-  topic: string;
-  payload: unknown;
+  [key: string]: unknown;
 };
 
 export function useRealtime(topics: string[]) {
@@ -18,42 +17,56 @@ export function useRealtime(topics: string[]) {
   useEffect(() => {
     let dead = false;
     let reconnectTimer: ReturnType<typeof setTimeout>;
+    let es: EventSource | null = null;
 
     function connect() {
       if (dead) return;
-      let socket: WebSocket;
+
+      const params = new URLSearchParams();
+      for (const topic of topicsRef.current) {
+        params.append("topic", topic);
+      }
+
       try {
-        socket = new WebSocket(WS_URL);
+        es = new EventSource(`${BASE}/events?${params.toString()}`);
       } catch {
         reconnectTimer = setTimeout(connect, 3000);
         return;
       }
 
-      socket.onopen = () => {
-        for (const topic of topicsRef.current) {
-          socket.send(JSON.stringify({type: "subscribe", topic}));
-        }
-      };
-
-      socket.onmessage = (e) => {
+      es.onmessage = (e) => {
         try {
-          const msg = JSON.parse(e.data as string) as WSMessage;
-          if (msg.type !== "event") return;
+          const msg = JSON.parse(e.data as string) as SSEEvent;
+          const eventType = msg.type ?? "";
 
-          if (msg.topic === "listings") {
+          if (
+            eventType === "Listed" ||
+            eventType === "Bought" ||
+            eventType === "Cancelled"
+          ) {
             qc.invalidateQueries({queryKey: ["chain-listings"]});
             qc.invalidateQueries({queryKey: ["trending"]});
-          } else if (msg.topic.startsWith("auction")) {
-            const parts = msg.topic.split(":");
+          } else if (
+            eventType === "AuctionCreated" ||
+            eventType === "BidPlaced" ||
+            eventType === "AuctionSettled"
+          ) {
             qc.invalidateQueries({queryKey: ["chain-auctions"]});
-            if (parts[1]) qc.invalidateQueries({queryKey: ["auction", parts[1]]});
-          } else if (msg.topic === "offers") {
+            const id = msg.auction_id as string | undefined;
+            if (id) qc.invalidateQueries({queryKey: ["auction", id]});
+          } else if (
+            eventType === "OfferCreated" ||
+            eventType === "OfferAccepted" ||
+            eventType === "OfferCancelled"
+          ) {
             qc.invalidateQueries({queryKey: ["offers"]});
           }
         } catch {}
       };
 
-      socket.onclose = () => {
+      es.onerror = () => {
+        es?.close();
+        es = null;
         if (!dead) reconnectTimer = setTimeout(connect, 3000);
       };
     }
@@ -62,6 +75,7 @@ export function useRealtime(topics: string[]) {
     return () => {
       dead = true;
       clearTimeout(reconnectTimer);
+      es?.close();
     };
   }, [qc]);
 }

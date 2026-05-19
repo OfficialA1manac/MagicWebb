@@ -5,6 +5,7 @@ import (
 	"context"
 	"embed"
 	"fmt"
+	"net/url"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
@@ -17,9 +18,22 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// sanitizeDSN strips pgx-unknown query params (e.g. Supabase pool_mode) that
+// cause pgxpool.ParseConfig and the pgx stdlib adapter to reject the DSN.
+func sanitizeDSN(dsn string) string {
+	u, err := url.Parse(dsn)
+	if err != nil {
+		return dsn
+	}
+	q := u.Query()
+	q.Del("pool_mode")
+	u.RawQuery = q.Encode()
+	return u.String()
+}
+
 // Connect opens a pgxpool with default settings and runs Goose migrations.
 func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
-	cfg, err := pgxpool.ParseConfig(dsn)
+	cfg, err := pgxpool.ParseConfig(sanitizeDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)
 	}
@@ -42,7 +56,7 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 func Migrate(dsn string) error {
 	goose.SetBaseFS(migrations)
 
-	db, err := goose.OpenDBWithDriver("pgx", dsn)
+	db, err := goose.OpenDBWithDriver("pgx", sanitizeDSN(dsn))
 	if err != nil {
 		return fmt.Errorf("db: open for migration: %w", err)
 	}
