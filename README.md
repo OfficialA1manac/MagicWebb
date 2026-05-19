@@ -1,154 +1,202 @@
-# MagicWebb
+# WebbPlace
 
-Non-custodial NFT marketplace on **Flare Coston2** testnet. Pure on-chain — wallet talks straight to the contracts via wagmi/viem. No backend, no database, no indexer.
+Non-custodial NFT marketplace on Flare — buy, sell, bid, and make offers on ERC-721 tokens without giving up custody of your assets or your keys.
 
-- **Buy / sell** at fixed price (`Marketplace`)
-- **English auctions** with reserve, increment, and **pull-pattern refunds** (`AuctionHouse`)
-- **Off-chain signed offers** on listed *or unlisted* tokens (`OfferBook`, EIP-712)
+---
 
-Sellers keep custody until trade settles. A platform fee is applied on each settled trade.
+## What It Is
 
-## Stack
+WebbPlace is a marketplace, not a creation platform. It lets anyone trade NFTs that already exist on the Flare network (or Coston2 testnet). The smart contracts are non-custodial: your NFT stays in your wallet until the moment a sale settles.
 
-| Layer | Tech |
-|---|---|
-| Contracts | Solidity 0.8.24, Foundry, OpenZeppelin |
-| Frontend  | Next.js 15 (App Router), React 19, wagmi v2, viem v2, TailwindCSS |
-| Network   | Flare Coston2 (chain id 114), C2FLR |
+**What you can do:**
+- Browse listings and collections
+- Buy NFTs at a fixed price
+- List your own NFTs for sale
+- Create and bid in timed auctions
+- Make off-chain EIP-712 signed offers (no gas until acceptance)
+- Accept incoming offers on NFTs you own
 
-`MarketplaceCore` is the shared base (fee config, NFT transfer, fee splitter). The three trade contracts inherit it.
+**What this platform does not do:**
+- Mint new NFTs
+- Create or deploy collections
+- Bridge assets cross-chain
+- Accept fiat payment
 
-**Who this is for** — See [`docs/PLATFORM.md`](docs/PLATFORM.md) for a full walkthrough: collectors, sellers/creators, developers, and community operators.
+---
 
-## Run from repository root (no `cd frontend`)
+## Tech Stack
 
-```bash
-npm install --prefix frontend   # first time (or: npm run install:web)
-npm start                       # same as: npm --prefix frontend run dev
-npm run dev:clean               # wipe .next then dev (fixes stale webpack chunks)
-npm run clean                   # wipe frontend/.next only (stop dev server first)
-npm run build                   # production build (outputs standalone under frontend/.next)
+| Layer | Technology |
+|-------|-----------|
+| Frontend | Next.js 15, React 19, wagmi v2, Tailwind CSS |
+| Backend | Go 1.23, Fiber, gRPC (port 9090), REST + SSE (port 8080) |
+| Smart Contracts | Solidity 0.8.26, Forge test suite |
+| Database | Supabase Postgres (pgx + sqlc), Goose migrations |
+| Cache / Pub-Sub | Redis 7 |
+| Blockchain | Flare Network / Coston2 testnet (chain ID 114) |
+
+---
+
+## Architecture
+
+```
+Browser (Next.js)
+     |
+  REST API + SSE (/api/v1/*, /events)
+     |
+Go Backend (port 8080 HTTP | 9090 gRPC)
+  ├── MarketplaceService
+  ├── AuctionService
+  ├── OffersService
+  └── IndexerService
+       |
+  Blockchain Indexer ──── Flare RPC
+       |
+ Supabase Postgres ← Goose Migrations
+       |
+     Redis (pub/sub + SIWE nonces)
 ```
 
-On Windows, these `npm` scripts work in PowerShell. `make` targets still expect Git Bash / WSL.
+The frontend can also read directly from the chain via RPC for latency-sensitive operations (wallet holdings, live auction state). The Go backend provides indexed history, search, trending scores, and offer aggregation.
 
-## Prereqs
+---
 
-- `foundry` (forge, cast)
-- `node` ≥ 20 + `npm`
-- `jq` (for `make load-addrs`)
-
-## Setup
-
-```bash
-cp frontend/.env.example frontend/.env.local
-make install                  # node modules + forge libs
-# Edit frontend/.env.local — set PRIVATE_KEY only if you intend to deploy.
-make start                    # builds (if needed) and serves http://127.0.0.1:3000
-```
-
-**Single env file:** `frontend/.env.local` is the only file Next.js and the Makefile read. Copy from `frontend/.env.example` once, then edit. `NEXT_PUBLIC_*` vars are inlined at build time; `PRIVATE_KEY` / `ROUTESCAN_API_KEY` stay server-side and are used only by `make deploy` / verify.
-
-**WalletConnect (Reown):** create a project at [cloud.reown.com](https://cloud.reown.com), then set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` in `frontend/.env.local`. Set `NEXT_PUBLIC_APP_URL` to the URL users open (e.g. `https://yourdomain.com` in production). Restart `npm run dev` after changing env.
-
-## Lifecycle
-
-```bash
-make start      # start the marketplace
-make stop       # stop the marketplace
-make restart    # stop + start
-make status     # pid / port + RPC reachability
-make health     # HTTP 200 on / + RPC (needs curl)
-make clean      # remove build artifacts
-```
-
-## Production (same Coston2 contracts, one env file)
-
-Ship the same `frontend/.env.local` to the server (keep chain id **114** and your Coston2 contract addresses until you redeploy elsewhere). Then:
-
-```bash
-cd frontend
-npm ci
-npm run build
-npm run start -- -p 3000
-```
-
-The app is built with `output: "standalone"` plus baseline security headers (frame, MIME sniffing, referrer). Add **HSTS** only at your HTTPS reverse proxy (e.g. nginx, Cloudflare), not over plain HTTP.
-
-**Standalone output:** after `npm run build`, run `node .next/standalone/frontend/server.js` from the `frontend` directory (or copy `frontend/.next/static` → `frontend/.next/standalone/frontend/.next/static` and `frontend/public` → `frontend/.next/standalone/frontend/public` per [Next.js standalone](https://nextjs.org/docs/app/api-reference/config/next-config-js/output)). `outputFileTracingRoot` is set to the repo root so tracing does not pick a parent-folder lockfile by mistake.
-
-**Windows:** use Git Bash or WSL for `make start` / `make deploy`; for local dev, `npm start` from repo root or `cd frontend && npm run dev` in PowerShell.
-
-## Deploy contracts (optional)
-
-Before the first deploy on a fresh machine, set **`CREATOR_ADDR`** (fee vault address, immutable in the new contracts) and **`PRIVATE_KEY`** (deployer) in **`frontend/.env.local` only** — never commit real values. `DeployCoston2.s.sol` requires `CREATOR_ADDR`; there is no baked-in default in the repo.
-
-```bash
-make contracts-build
-make contracts-test
-make deploy        # broadcasts via NEXT_PUBLIC_RPC_URL (Coston2 by default), then load-addrs → .env.local
-```
-
-After `make deploy`, the new contract addresses are written back into `frontend/.env.local` automatically; the next `make restart` picks them up.
-
-## Coston2 reference
-
-| Field | Value |
-|---|---|
-| Chain ID | 114 |
-| Native   | C2FLR |
-| RPC      | `https://coston2-api.flare.network/ext/C/rpc` |
-| Explorer | `https://coston2-explorer.flare.network` |
-| Faucet   | `https://faucet.flare.network` (select Coston2) |
-
-## Live deployment (chain id 114)
+## Smart Contracts (Coston2 Testnet)
 
 | Contract | Address |
-|---|---|
-| Marketplace  | `0x767F7fF7c66673488a30053C025C153E13b6BfAa` |
+|----------|---------|
+| Marketplace | `0x767F7fF7c66673488a30053C025C153E13b6BfAa` |
 | AuctionHouse | `0x6016688AfFAF5427E1f8100160A6378Da2B1476a` |
-| OfferBook    | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
+| OfferBook | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
+| RoyaltyRegistry | deployed on Coston2 |
+| TreasuryVault | deployed on Coston2 |
 
-Default platform fee is **250 bps (2.5%)** on-chain (`feeBps()`). All three contracts are verified on Routescan; **49/49** `forge test` pass.
+All contracts are verified on [Coston2 Explorer](https://coston2-explorer.flare.network).
 
-## User flows
+---
 
-### Buy listed token
-1. Connect wallet → switch to Coston2 if prompted.
-2. Browse listings on the home page → token detail page.
-3. Click **Buy now**. Tx submits with `msg.value == price`.
-4. Seller receives `price * (1 - feeBps/10000)`; platform fee is applied.
+## Prerequisites
 
-### Auction
-1. Seller `setApprovalForAll(AuctionHouse, true)` and calls `create(...)`.
-2. Bidders call `bid` on `/auction/:id`. Each outbid credits the prior bidder via `pendingReturns`.
-3. Outbid bidders claim their refund on **Profile → Withdraw refund** (`withdrawRefund()`).
-4. After `endsAt`, anyone calls **Settle**. NFT moves; platform fee is collected.
+- A wallet: MetaMask, or any WalletConnect-compatible wallet
+- Coston2 FLR for gas — get free testnet tokens at the [Flare Faucet](https://faucet.flare.network)
+- **Frontend only:** Node 22+
+- **Backend (optional):** Go 1.23+, Redis, Supabase project
 
-### Signed offer (works on unlisted tokens)
-1. Bidder funds deposit (`OfferBook.deposit` payable).
-2. Bidder fills the offer modal → wallet signs EIP-712 typed data → `{offer, sig}` JSON copied to clipboard.
-3. Bidder sends JSON to the token owner off-chain.
-4. Owner imports the JSON under **Offers → Received**, approves `OfferBook` for the token, then **Accept offer**.
-5. NFT transfers; deposit is debited; platform fee is collected. Bidder can pre-emptively `cancelOffer(nonce)`.
+---
 
-## Gas notes
+## Quick Start (Local Dev)
 
-- **Pull-pattern refunds** on outbids — one storage write, re-entrancy-safe.
-- **EIP-712 signed offers off-chain** — chain spend is `O(matches)`, not `O(offers)`.
-- Solidity 0.8.24 / Cancun target — uses `MCOPY` and `PUSH0`.
+### Frontend only (no backend required)
 
-## Troubleshooting
+The frontend reads directly from the chain and needs no running backend.
 
-See **[`docs/TROUBLESHOOTING.md`](docs/TROUBLESHOOTING.md)** for full detail (webpack chunks, chain **114** / Coston2 RPC, `NotApproved`, `Expired`, `OfferUsed`, auction refunds). Quick reminders:
+```bash
+git clone https://github.com/your-org/webbplace
+cd webbplace/frontend
+cp .env.example .env.local
+# Fill in .env.local — chain vars and contract addresses are already populated for Coston2
+npm install
+npm run dev
+```
 
-- **Chunks / `./NNNN.js`:** `npm run dev:clean` from repo root, or `cd frontend && npm run clean && npm run dev`. Do not mix `next dev` and `next start` on the same `.next` without rebuilding; exclude `frontend/.next` from OneDrive sync.
-- **Wrong network:** use the in-app banner — **Switch** or **Add Coston2** (chain id **114**).
-- **NotApproved:** `setApprovalForAll` on the NFT for **Marketplace**, **AuctionHouse**, or **OfferBook** depending on the action (see troubleshooting doc).
-- **Expired listing / offer:** seller re-lists or bidder re-signs with a new expiry.
-- **OfferUsed:** new nonce + new signature.
-- **Auction refund:** **Profile → Withdraw refund** (`withdrawRefund` on `AuctionHouse`).
+Open http://localhost:3000.
+
+### Full stack
+
+```bash
+# 1. Clone
+git clone https://github.com/your-org/webbplace
+cd webbplace
+
+# 2. Backend env
+cp backend/.env.example backend/.env
+# Edit backend/.env — set POSTGRES_URL, REDIS_URL, JWT_SECRET, contract addresses
+
+# 3. Frontend env
+cp frontend/.env.example frontend/.env.local
+# Edit frontend/.env.local — set contract addresses and WalletConnect project ID
+
+# 4. Start Redis (and optionally Postgres via Docker)
+docker compose up redis -d
+
+# 5. Run the API server
+cd backend && go run ./cmd/api
+
+# 6. Run the indexer (separate terminal)
+cd backend && go run ./cmd/indexer
+
+# 7. Start the frontend
+cd frontend && npm install && npm run dev
+```
+
+---
+
+## Production Deploy
+
+```bash
+docker compose up --build
+```
+
+This builds and starts: `api` (port 8080/9090), `indexer`, `redis`, and `frontend` (port 3000). The `api` and `indexer` services read from the root `.env` file. The `frontend` service reads from `frontend/.env.local`.
+
+---
+
+## Environment Variables
+
+### Backend (`.env` or `backend/.env`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `POSTGRES_URL` | Yes | Supabase pooler DSN — port 6543, `pool_mode=transaction` |
+| `REDIS_URL` | Yes | Redis connection URL |
+| `RPC_URL` | Yes | Flare/Coston2 JSON-RPC endpoint |
+| `CHAIN_ID` | Yes | `114` for Coston2, `14` for Flare mainnet |
+| `MARKETPLACE_ADDR` | Yes | Deployed Marketplace contract address |
+| `AUCTION_ADDR` | Yes | Deployed AuctionHouse contract address |
+| `OFFERBOOK_ADDR` | Yes | Deployed OfferBook contract address |
+| `JWT_SECRET` | Yes | 32+ hex bytes — generate with `openssl rand -hex 32` |
+| `FRONTEND_URL` | Yes | Allowed CORS origin (e.g. `http://localhost:3000`) |
+| `ROYALTY_ADDR` | No | RoyaltyRegistry contract address |
+| `KEEPER_KEY` | No | Hex-encoded private key for auction auto-settlement bot |
+| `SERVICE_TOKEN` | No | Admin token for `IndexerService.Reindex` endpoint |
+| `SENTRY_DSN` | No | Sentry error tracking DSN |
+| `INDEX_FROM_BLOCK` | No | Starting block for indexer (default `0`) |
+| `GETLOGS_CHUNK` | No | Blocks per `eth_getLogs` request (default `30`) |
+| `GETLOGS_BLOCK_CAP` | No | Hard cap per range; `0` = unlimited (default `0`) |
+
+### Frontend (`frontend/.env.local`)
+
+| Variable | Required | Description |
+|----------|----------|-------------|
+| `NEXT_PUBLIC_CHAIN_ID` | Yes | `114` for Coston2 |
+| `NEXT_PUBLIC_RPC_URL` | Yes | Flare/Coston2 JSON-RPC endpoint |
+| `NEXT_PUBLIC_MARKETPLACE_ADDR` | Yes | Marketplace contract address |
+| `NEXT_PUBLIC_AUCTION_ADDR` | Yes | AuctionHouse contract address |
+| `NEXT_PUBLIC_OFFER_ADDR` | Yes | OfferBook contract address |
+| `NEXT_PUBLIC_EXPLORER_URL` | Yes | Block explorer base URL |
+| `NEXT_PUBLIC_CURRENCY_SYMBOL` | Yes | Native currency symbol (`FLR` or `C2FLR`) |
+| `NEXT_PUBLIC_CHAIN_NAME` | Yes | Human-readable chain name |
+| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | Reown/WalletConnect project ID (enables mobile wallets) |
+| `NEXT_PUBLIC_APP_URL` | No | App origin shown in WalletConnect modal |
+| `NEXT_PUBLIC_API_URL` | No | Backend API base URL (enables indexed data) |
+| `NEXT_PUBLIC_INDEX_FROM_BLOCK` | No | First block to scan for listings |
+| `NEXT_PUBLIC_INDEX_CHUNK_BLOCKS` | No | Block range per `eth_getLogs` chunk (default `30`) |
+
+> The frontend throws `"Refusing to launch"` at startup if any of the six required `NEXT_PUBLIC_*` vars are missing or empty. This is intentional — a misconfigured build is caught immediately.
+
+---
+
+## Switching to Flare Mainnet
+
+Only `frontend/.env.local` (and `backend/.env`) need to change. No code changes are required.
+
+1. Deploy contracts to Flare mainnet.
+2. Update `NEXT_PUBLIC_CHAIN_ID=14`, RPC URL, explorer URL, currency symbol, chain name, and all three contract addresses in `frontend/.env.local`.
+3. Update backend `.env` with mainnet RPC, chain ID, and contract addresses.
+4. Rebuild and redeploy.
+
+---
 
 ## License
 
-MIT.
+MIT

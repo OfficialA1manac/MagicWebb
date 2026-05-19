@@ -40,6 +40,14 @@ func (q *Q) SetIndexedBlock(ctx context.Context, chainID int, block uint64) erro
 
 // ── Collections ───────────────────────────────────────────────────────────
 
+type CollectionRow struct {
+	Address     string
+	Name        string
+	Symbol      string
+	Standard    string // "erc721" | "erc1155"
+	DeployBlock uint64
+}
+
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
 	_, err := q.pool.Exec(ctx,
 		`INSERT INTO collections(address, name, symbol, standard, deploy_block)
@@ -48,6 +56,76 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 		 SET name=EXCLUDED.name, symbol=EXCLUDED.symbol`,
 		addr, name, symbol, standard, deployBlock)
 	return err
+}
+
+func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
+	var c CollectionRow
+	err := q.pool.QueryRow(ctx,
+		`SELECT address, name, symbol, standard::text, deploy_block
+		 FROM collections WHERE address=$1`, address).
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("collection not found: %s", address)
+	}
+	return &c, err
+}
+
+func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, error) {
+	if limit == 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT address, name, symbol, standard::text, deploy_block
+		 FROM collections WHERE tracked=true ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollectionRow
+	for rows.Next() {
+		var c CollectionRow
+		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+func (q *Q) GetFloorPrice(ctx context.Context, collection string) (*big.Int, error) {
+	var priceStr string
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(MIN(price_wei)::text,'0') FROM listings
+		 WHERE collection=$1 AND active=true AND expires_at > now()`, collection).
+		Scan(&priceStr)
+	if err != nil {
+		return big.NewInt(0), nil
+	}
+	n := new(big.Int)
+	n.SetString(priceStr, 10)
+	return n, nil
+}
+
+func (q *Q) Get24hVolume(ctx context.Context, collection string) (*big.Int, error) {
+	var volStr string
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
+		 WHERE collection=$1 AND occurred_at > now()-interval '24 hours'`, collection).
+		Scan(&volStr)
+	if err != nil {
+		return big.NewInt(0), nil
+	}
+	n := new(big.Int)
+	n.SetString(volStr, 10)
+	return n, nil
+}
+
+func (q *Q) GetListedCount(ctx context.Context, collection string) (int, error) {
+	var count int
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM listings WHERE collection=$1 AND active=true AND expires_at > now()`,
+		collection).Scan(&count)
+	return count, err
 }
 
 // ── Listings ──────────────────────────────────────────────────────────────
@@ -62,6 +140,9 @@ type ListingRow struct {
 	ExpiresAt  time.Time
 	ListedAt   time.Time
 	TxHash     string
+	// Denormalised from nft_tokens (may be empty)
+	Name     string
+	ImageURI string
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -83,11 +164,29 @@ func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID string) e
 	return err
 }
 
+func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*ListingRow, error) {
+	var r ListingRow
+	err := q.pool.QueryRow(ctx,
+		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
+		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
+		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		 FROM listings l
+		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true`,
+		collection, tokenID).
+		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("listing not found")
+	}
+	return &r, err
+}
+
 type ListingsFilter struct {
 	Collection string
 	Seller     string
 	Limit      int
-	Cursor     string // tokenID of last seen row for keyset pagination
+	Cursor     string
 }
 
 func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]ListingRow, error) {
@@ -107,8 +206,11 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
-		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash
-		 FROM listings l `+where+`
+		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
+		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		 FROM listings l
+		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 `+where+`
 		 ORDER BY l.listed_at DESC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
@@ -119,7 +221,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	for rows.Next() {
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash); err != nil {
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -130,19 +232,19 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 // ── Auctions ──────────────────────────────────────────────────────────────
 
 type AuctionRow struct {
-	AuctionID        int64
-	Collection       string
-	TokenID          string
-	Seller           string
-	Standard         string
-	ReservePriceWei  string
-	HighestBidWei    string
-	HighestBidder    string
-	MinIncrementBps  int
-	StartsAt         time.Time
-	EndsAt           time.Time
-	Status           string
-	CreateTx         string
+	AuctionID       int64
+	Collection      string
+	TokenID         string
+	Seller          string
+	Standard        string
+	ReservePriceWei string
+	HighestBidWei   string
+	HighestBidder   string
+	MinIncrementBps int
+	StartsAt        time.Time
+	EndsAt          time.Time
+	Status          string
+	CreateTx        string
 }
 
 func (q *Q) UpsertAuction(ctx context.Context, r AuctionRow) error {
@@ -175,21 +277,79 @@ func (q *Q) UpdateAuctionBid(ctx context.Context, r AuctionRow) error {
 	return err
 }
 
-func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, error) {
-	if limit == 0 || limit > 100 {
-		limit = 50
+func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error) {
+	var r AuctionRow
+	err := q.pool.QueryRow(ctx,
+		`SELECT auction_id, collection, token_id::text, seller, standard::text,
+		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
+		        min_increment_bps, starts_at, ends_at, status::text, create_tx
+		 FROM auctions WHERE auction_id=$1`, auctionID).
+		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
+			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
+			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("auction not found: %d", auctionID)
+	}
+	return &r, err
+}
+
+type AuctionsFilter struct {
+	Collection string
+	Status     string // "active" | "settled" | "cancelled" | "" = all
+	Limit      int
+}
+
+func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, error) {
+	if f.Limit == 0 || f.Limit > 100 {
+		f.Limit = 50
+	}
+	args := []any{f.Limit}
+	where := "WHERE 1=1"
+	if f.Collection != "" {
+		args = append(args, f.Collection)
+		where += fmt.Sprintf(" AND collection=$%d", len(args))
+	}
+	if f.Status != "" {
+		args = append(args, f.Status)
+		where += fmt.Sprintf(" AND status=$%d", len(args))
 	}
 	rows, err := q.pool.Query(ctx,
 		`SELECT auction_id, collection, token_id::text, seller, standard::text,
 		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
 		        min_increment_bps, starts_at, ends_at, status::text, create_tx
-		 FROM auctions WHERE status='active'
-		 ORDER BY ends_at ASC LIMIT $1`, limit)
+		 FROM auctions `+where+` ORDER BY ends_at ASC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
+	var out []AuctionRow
+	for rows.Next() {
+		var r AuctionRow
+		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
+			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
+			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
 
+func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, error) {
+	return q.ListAuctions(ctx, AuctionsFilter{Status: "active", Limit: limit})
+}
+
+func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT auction_id, collection, token_id::text, seller, standard::text,
+		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
+		        min_increment_bps, starts_at, ends_at, status::text, create_tx
+		 FROM auctions WHERE status='active' AND ends_at < now()
+		 ORDER BY ends_at ASC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
 	var out []AuctionRow
 	for rows.Next() {
 		var r AuctionRow
@@ -226,6 +386,35 @@ func (q *Q) InsertSale(ctx context.Context,
 		 ON CONFLICT(tx_hash) DO NOTHING`,
 		collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash, blockNumber, occurredAt)
 	return err
+}
+
+func (q *Q) GetCollectionVolume(ctx context.Context, collection string, since time.Time) (*big.Int, error) {
+	var volStr string
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
+		 WHERE collection=$1 AND occurred_at >= $2`, collection, since).Scan(&volStr)
+	if err != nil {
+		return big.NewInt(0), nil
+	}
+	n := new(big.Int)
+	n.SetString(volStr, 10)
+	return n, nil
+}
+
+func (q *Q) GetCollectionBidCount(ctx context.Context, collection string, since time.Time) (int64, error) {
+	var count int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM bids b
+		 JOIN auctions a ON a.auction_id=b.auction_id
+		 WHERE a.collection=$1 AND b.placed_at >= $2`, collection, since).Scan(&count)
+	return count, err
+}
+
+func (q *Q) GetCollectionViews(ctx context.Context, collection string) (int64, error) {
+	var views int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(views),0) FROM nft_tokens WHERE collection=$1`, collection).Scan(&views)
+	return views, err
 }
 
 // ── Trending scores ───────────────────────────────────────────────────────
@@ -274,7 +463,7 @@ func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int
 	return out, rows.Err()
 }
 
-// ── NFT token owner ───────────────────────────────────────────────────────
+// ── NFT token owner & metadata ────────────────────────────────────────────
 
 func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string) error {
 	_, err := q.pool.Exec(ctx,
@@ -283,4 +472,174 @@ func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string
 		 ON CONFLICT(collection, token_id) DO UPDATE SET owner=EXCLUDED.owner`,
 		collection, tokenID, owner)
 	return err
+}
+
+func (q *Q) GetTokenMeta(ctx context.Context, collection, tokenID string) (name, imageURI string, err error) {
+	err = q.pool.QueryRow(ctx,
+		`SELECT COALESCE(name,''), COALESCE(image_uri,'') FROM nft_tokens
+		 WHERE collection=$1 AND token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
+	if err == pgx.ErrNoRows {
+		return "", "", nil
+	}
+	return name, imageURI, err
+}
+
+func (q *Q) IncrementTokenViews(ctx context.Context, collection, tokenID string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE nft_tokens SET views=views+1 WHERE collection=$1 AND token_id=$2`,
+		collection, tokenID)
+	return err
+}
+
+// ── Offers ────────────────────────────────────────────────────────────────
+
+type OfferRow struct {
+	OfferID    string
+	Bidder     string
+	Collection string
+	TokenID    string // empty = collection-wide offer
+	AmountWei  string
+	Nonce      string
+	ExpiresAt  time.Time
+	Signature  string
+	Status     string
+	CreatedAt  time.Time
+}
+
+type OffersFilter struct {
+	Collection string
+	TokenID    string
+	Bidder     string
+	Owner      string // join with nft_tokens to find offers on tokens owned by this address
+	Status     string
+	Limit      int
+}
+
+func (q *Q) InsertOffer(ctx context.Context, r OfferRow) (string, error) {
+	var id string
+	tokenIDParam := interface{}(nil)
+	if r.TokenID != "" {
+		tokenIDParam = r.TokenID
+	}
+	err := q.pool.QueryRow(ctx,
+		`INSERT INTO offers(bidder, collection, token_id, amount_wei, nonce, expires_at, signature, status)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
+		 RETURNING offer_id::text`,
+		r.Bidder, r.Collection, tokenIDParam, r.AmountWei, r.Nonce, r.ExpiresAt, r.Signature, r.Status).
+		Scan(&id)
+	return id, err
+}
+
+func (q *Q) GetOffer(ctx context.Context, offerID string) (*OfferRow, error) {
+	var r OfferRow
+	var tokenID *string
+	err := q.pool.QueryRow(ctx,
+		`SELECT offer_id::text, bidder, collection, token_id::text, amount_wei::text,
+		        nonce::text, expires_at, signature, status::text, created_at
+		 FROM offers WHERE offer_id=$1`, offerID).
+		Scan(&r.OfferID, &r.Bidder, &r.Collection, &tokenID,
+			&r.AmountWei, &r.Nonce, &r.ExpiresAt, &r.Signature, &r.Status, &r.CreatedAt)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("offer not found: %s", offerID)
+	}
+	if tokenID != nil {
+		r.TokenID = *tokenID
+	}
+	return &r, err
+}
+
+func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) {
+	if f.Limit == 0 || f.Limit > 100 {
+		f.Limit = 50
+	}
+	args := []any{f.Limit}
+	where := "WHERE o.expires_at > now()"
+	if f.Collection != "" {
+		args = append(args, f.Collection)
+		where += fmt.Sprintf(" AND o.collection=$%d", len(args))
+	}
+	if f.TokenID != "" {
+		args = append(args, f.TokenID)
+		where += fmt.Sprintf(" AND o.token_id=$%d", len(args))
+	}
+	if f.Bidder != "" {
+		args = append(args, f.Bidder)
+		where += fmt.Sprintf(" AND o.bidder=$%d", len(args))
+	}
+	if f.Status != "" {
+		args = append(args, f.Status)
+		where += fmt.Sprintf(" AND o.status=$%d", len(args))
+	}
+	if f.Owner != "" {
+		args = append(args, f.Owner)
+		where += fmt.Sprintf(` AND EXISTS (
+			SELECT 1 FROM nft_tokens t
+			WHERE t.collection=o.collection AND t.token_id=o.token_id AND t.owner=$%d
+		)`, len(args))
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text,
+		        o.amount_wei::text, o.nonce::text, o.expires_at, o.signature,
+		        o.status::text, o.created_at
+		 FROM offers o `+where+` ORDER BY o.created_at DESC LIMIT $1`, args...)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OfferRow
+	for rows.Next() {
+		var r OfferRow
+		var tokenID *string
+		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &tokenID,
+			&r.AmountWei, &r.Nonce, &r.ExpiresAt, &r.Signature, &r.Status, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		if tokenID != nil {
+			r.TokenID = *tokenID
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (q *Q) ExpireOffers(ctx context.Context) (int64, error) {
+	tag, err := q.pool.Exec(ctx,
+		`UPDATE offers SET status='expired' WHERE expires_at < now() AND status='pending'`)
+	if err != nil {
+		return 0, err
+	}
+	return tag.RowsAffected(), nil
+}
+
+func (q *Q) CancelOffer(ctx context.Context, offerID, bidder string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE offers SET status='cancelled'
+		 WHERE offer_id=$1 AND bidder=$2 AND status='pending'`,
+		offerID, bidder)
+	return err
+}
+
+// ── Users ─────────────────────────────────────────────────────────────────
+
+func (q *Q) UpsertUser(ctx context.Context, address string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO users(address, last_seen_at)
+		 VALUES($1, now())
+		 ON CONFLICT(address) DO UPDATE SET last_seen_at=now()`,
+		address)
+	return err
+}
+
+// ── Event counting (for IndexerService.GetStatus) ─────────────────────────
+
+func (q *Q) GetEventCounts(ctx context.Context) (total, last1h uint64, err error) {
+	err = q.pool.QueryRow(ctx,
+		`SELECT
+		    (SELECT COUNT(*) FROM sales) +
+		    (SELECT COUNT(*) FROM bids) +
+		    (SELECT COUNT(*) FROM listings) AS total,
+		    (SELECT COUNT(*) FROM sales WHERE occurred_at > now()-interval '1 hour') +
+		    (SELECT COUNT(*) FROM bids WHERE placed_at > now()-interval '1 hour') AS last1h`,
+	).Scan(&total, &last1h)
+	return total, last1h, err
 }

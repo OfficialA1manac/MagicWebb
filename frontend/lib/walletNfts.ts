@@ -53,7 +53,7 @@ async function scanCollection(
       const cap = total !== undefined ? Math.min(Number(total), scanCap) : scanCap;
       const ownerLc = owner.toLowerCase();
       const BATCH = 60;
-      for (let start = 1; start <= cap; start += BATCH) {
+      for (let start = 0; start <= cap; start += BATCH) {
         const calls = [];
         for (let tid = start; tid < start + BATCH && tid <= cap; tid++) {
           calls.push({

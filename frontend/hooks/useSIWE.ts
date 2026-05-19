@@ -1,6 +1,9 @@
 "use client";
-import {useState} from "react";
+import {useEffect, useState} from "react";
 import {useAccount, useSignMessage} from "wagmi";
+import {getToken, setToken, clearToken, isExpired} from "@/lib/auth";
+
+const API_BASE = process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:8080";
 
 function buildSIWEMessage(address: string, nonce: string, domain: string, chainId: number): string {
   const now = new Date();
@@ -27,12 +30,22 @@ export function useSIWE() {
   const [isLoading, setIsLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
+  // Restore session from localStorage on mount
+  useEffect(() => {
+    const stored = getToken();
+    if (stored && !isExpired(stored)) {
+      setSession(stored);
+    } else if (stored) {
+      clearToken();
+    }
+  }, []);
+
   const signIn = async () => {
     if (!address || !chainId) return;
     setIsLoading(true);
     setError(null);
     try {
-      const nonceRes = await fetch("/api/auth/nonce");
+      const nonceRes = await fetch(`${API_BASE}/auth/nonce?address=${address}`);
       if (!nonceRes.ok) throw new Error("Failed to get nonce");
       const {nonce} = await nonceRes.json() as {nonce: string};
 
@@ -40,16 +53,17 @@ export function useSIWE() {
       const message = buildSIWEMessage(address, nonce, domain, chainId);
       const signature = await signMessageAsync({message});
 
-      const verifyRes = await fetch("/api/auth/verify", {
+      const verifyRes = await fetch(`${API_BASE}/auth/verify`, {
         method: "POST",
         headers: {"Content-Type": "application/json"},
-        body: JSON.stringify({message, signature}),
+        body: JSON.stringify({address, message, signature}),
       });
       if (!verifyRes.ok) {
-        const {error: e} = await verifyRes.json() as {error: string};
-        throw new Error(e ?? "Verification failed");
+        const body = await verifyRes.json() as {error?: string};
+        throw new Error(body.error ?? "Verification failed");
       }
       const {token} = await verifyRes.json() as {token: string};
+      setToken(token);
       setSession(token);
     } catch (e) {
       setError((e as Error).message);
@@ -58,7 +72,10 @@ export function useSIWE() {
     }
   };
 
-  const signOut = () => setSession(null);
+  const signOut = () => {
+    clearToken();
+    setSession(null);
+  };
 
   return {session, signIn, signOut, isLoading, error, isSignedIn: !!session};
 }

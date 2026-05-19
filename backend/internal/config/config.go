@@ -59,6 +59,15 @@ type Config struct {
 
 	// Pinata (IPFS uploads)
 	PinataJWT string
+
+	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
+	KeeperKey string
+
+	// Admin token for IndexerService.Reindex (leave empty to disable)
+	ServiceToken string
+
+	// FrontendURL is the allowed CORS origin (e.g. https://webbplace.xyz).
+	FrontendURL string
 }
 
 // Load reads environment variables and panics on missing required values.
@@ -96,6 +105,11 @@ func Load() {
 		OtelEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 
 		PinataJWT: envOrDefault("PINATA_JWT", ""),
+
+		KeeperKey:    envOrDefault("KEEPER_KEY", ""),
+		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
+
+		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 	}
 
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)

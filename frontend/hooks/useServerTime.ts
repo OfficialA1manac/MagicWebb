@@ -1,14 +1,13 @@
 "use client";
 import {useQuery} from "@tanstack/react-query";
+import {api} from "@/lib/api";
 
 export function useServerTime() {
   const {data} = useQuery({
     queryKey: ["server-time"],
     queryFn: async () => {
-      const res = await fetch("/api/time");
-      if (!res.ok) throw new Error("time fetch failed");
-      const {now} = await res.json() as {now: number};
-      return {serverNow: now, fetchedAt: Date.now()};
+      const {unix_ms} = await api.getServerTime();
+      return {serverNow: Math.floor(unix_ms / 1000), fetchedAt: Date.now()};
     },
     staleTime: 60_000,
     refetchInterval: 60_000,
