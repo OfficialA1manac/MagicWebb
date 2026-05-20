@@ -105,7 +105,7 @@ export default function Home() {
           <Link href="https://github.com/OfficialA1manac/MagicWebb" className="text-emerald-400/90 underline">
             docs on GitHub
           </Link>{" "}
-          for architecture and roles (creators, collectors, devs).
+          for architecture and contract details.
         </p>
       </section>
     </div>
