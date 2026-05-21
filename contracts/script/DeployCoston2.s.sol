@@ -54,15 +54,23 @@ contract DeployCoston2 is Script {
         vm.stopBroadcast();
 
         // ── Print env block ───────────────────────────────────────────────
-        console2.log("# WebbPlace deploy output - paste into .env.local / backend/.env");
-        console2.log("CHAIN_ID=",                block.chainid);
-        console2.log("CREATOR_ADDR=",            creator);
-        console2.log("FEE_BPS=",                 uint256(fee));
-        console2.log("USE_TREASURY_VAULT=",       useVault);
-        console2.log("NEXT_PUBLIC_ROYALTY_ADDR=", address(registry));
-        console2.log("TREASURY_VAULT_ADDR=",      address(vault));
-        console2.log("NEXT_PUBLIC_MARKETPLACE_ADDR=", address(marketplace));
-        console2.log("NEXT_PUBLIC_AUCTION_ADDR=",     address(auction));
-        console2.log("NEXT_PUBLIC_OFFERBOOK_ADDR=",   address(offerBook));
+        console2.log("# WebbPlace Coston2 deploy output");
+        console2.log("# --- paste into backend/.env ---");
+        console2.log("CHAIN_ID=",            block.chainid);
+        console2.log("MARKETPLACE_ADDR=",    address(marketplace));
+        console2.log("AUCTION_ADDR=",        address(auction));
+        console2.log("OFFERBOOK_ADDR=",      address(offerBook));
+        console2.log("ROYALTY_ADDR=",        address(registry));
+        console2.log("# --- paste into frontend/.env.local ---");
+        console2.log("NEXT_PUBLIC_CHAIN_ID=",             block.chainid);
+        console2.log("NEXT_PUBLIC_MARKETPLACE_ADDR=",     address(marketplace));
+        console2.log("NEXT_PUBLIC_AUCTION_ADDR=",         address(auction));
+        console2.log("NEXT_PUBLIC_OFFER_ADDR=",           address(offerBook));
+        console2.log("NEXT_PUBLIC_ROYALTY_ADDR=",         address(registry));
+        console2.log("# --- informational ---");
+        console2.log("CREATOR_ADDR=",        creator);
+        console2.log("FEE_BPS=",             uint256(fee));
+        console2.log("USE_TREASURY_VAULT=",  useVault);
+        console2.log("TREASURY_VAULT_ADDR=", address(vault));
     }
 }
