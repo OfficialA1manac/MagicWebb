@@ -21,6 +21,7 @@ import {TreasuryVault}  from "../src/TreasuryVault.sol";
 /// Output: copy the printed env vars into frontend/.env.local and backend/.env
 contract DeployCoston2 is Script {
     function run() external {
+        require(block.chainid == 114, "WRONG_CHAIN: use DeployFlare.s.sol for mainnet");
         uint256 pk      = vm.envUint("PRIVATE_KEY");
         address creator = vm.envAddress("CREATOR_ADDR");
         uint16  fee     = uint16(vm.envOr("FEE_BPS", uint256(150)));

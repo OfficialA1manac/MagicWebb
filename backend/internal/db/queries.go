@@ -430,9 +430,9 @@ type TrendingScore struct {
 
 func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
 	_, err := q.pool.Exec(ctx,
-		`INSERT INTO trending_scores(collection, window, score, views, bids, volume_wei, computed_at)
+		`INSERT INTO trending_scores(collection, "window", score, views, bids, volume_wei, computed_at)
 		 VALUES($1,$2,$3,$4,$5,$6,now())
-		 ON CONFLICT(collection, window) DO UPDATE
+		 ON CONFLICT(collection, "window") DO UPDATE
 		 SET score=EXCLUDED.score, views=EXCLUDED.views, bids=EXCLUDED.bids,
 		     volume_wei=EXCLUDED.volume_wei, computed_at=now()`,
 		s.Collection, s.Window, s.Score, s.Views, s.Bids, s.VolumeWei.String())
@@ -441,8 +441,8 @@ func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
 
 func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int) ([]TrendingScore, error) {
 	rows, err := q.pool.Query(ctx,
-		`SELECT collection, window, score, views, bids, volume_wei::text
-		 FROM trending_scores WHERE window=$1
+		`SELECT collection, "window", score, views, bids, volume_wei::text
+		 FROM trending_scores WHERE "window"=$1
 		 ORDER BY score DESC LIMIT $2`, window, limit)
 	if err != nil {
 		return nil, err
@@ -691,6 +691,124 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	for rows.Next() {
 		var r SearchResult
 		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ── Atomic combined writes ────────────────────────────────────────────────
+
+// DeactivateAndSale atomically deactivates a listing and records the sale.
+// Replaces the non-transactional DeactivateListing + InsertSale pair in the indexer.
+func (q *Q) DeactivateAndSale(ctx context.Context,
+	collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash string,
+	blockNumber uint64, occurredAt time.Time,
+) error {
+	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2`,
+		collection, tokenID); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("deactivate: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO sales(collection,token_id,seller,buyer,price_wei,fee_wei,royalty_wei,tx_hash,block_number,occurred_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tx_hash) DO NOTHING`,
+		collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash, blockNumber, occurredAt); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("insert sale: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// InsertBidAndUpdateAuction atomically records a bid and updates the auction's highest bid.
+// Replaces the non-transactional InsertBid + UpdateAuctionBid pair in the indexer.
+func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {
+	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO bids(auction_id,bidder,amount_wei,tx_hash,placed_at)
+		 VALUES($1,$2,$3,$4,$5) ON CONFLICT(tx_hash) DO NOTHING`,
+		auctionID, bidder, amtWei, txHash, placedAt); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("insert bid: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE auctions SET highest_bid_wei=$1, highest_bidder=$2 WHERE auction_id=$3`,
+		amtWei, bidder, auctionID); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("update auction bid: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// ── Metrics ───────────────────────────────────────────────────────────────
+
+// MarketMetrics holds aggregate stats for the /api/v1/metrics endpoint.
+type MarketMetrics struct {
+	TotalActiveListings int64  `json:"totalActiveListings"`
+	TotalSales          int64  `json:"totalSales"`
+	GrossVolumeWei      string `json:"grossVolumeWei"`
+	TotalAuctions       int64  `json:"totalAuctions"`
+}
+
+func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
+	var m MarketMetrics
+	err := q.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*)          FROM listings WHERE active = true)::bigint,
+			(SELECT COUNT(*)          FROM sales)::bigint,
+			COALESCE((SELECT SUM(price_wei)::text FROM sales), '0'),
+			(SELECT COUNT(*)          FROM auctions)::bigint
+	`).Scan(&m.TotalActiveListings, &m.TotalSales, &m.GrossVolumeWei, &m.TotalAuctions)
+	return &m, err
+}
+
+// ActivityRow is a single entry in the marketplace activity feed.
+type ActivityRow struct {
+	Type       string    `json:"type"`
+	Collection string    `json:"collection"`
+	TokenID    string    `json:"tokenId"`
+	AmountWei  string    `json:"amountWei"`
+	Timestamp  time.Time `json:"timestamp"`
+	TxHash     string    `json:"txHash"`
+}
+
+// GetRecentTransactions returns the last `limit` marketplace events across all tables,
+// ordered newest first. Used by the /api/v1/activity endpoint.
+func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx, `
+		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
+			SELECT 'Listed'          AS type, collection, token_id, price_wei      AS amount_wei, listed_at    AS at, tx_hash   FROM listings
+			UNION ALL
+			SELECT 'Sold',                    collection, token_id, price_wei,                    occurred_at,        tx_hash   FROM sales
+			UNION ALL
+			SELECT 'AuctionCreated',          collection, token_id, reserve_price_wei,            starts_at,          create_tx FROM auctions
+			UNION ALL
+			SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
+			FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
+		) AS activity
+		ORDER BY at DESC
+		LIMIT $1
+	`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ActivityRow
+	for rows.Next() {
+		var r ActivityRow
+		if err := rows.Scan(&r.Type, &r.Collection, &r.TokenID, &r.AmountWei, &r.Timestamp, &r.TxHash); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

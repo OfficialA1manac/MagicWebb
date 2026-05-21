@@ -122,4 +122,24 @@ contract RoyaltyRegistryTest is Test {
         assertEq(r, address(0));
         assertEq(a, 0);
     }
+
+    // ── Fuzz tests ────────────────────────────────────────────────────────
+
+    function testFuzz_royaltyAmountNeverOverflows(uint256 price, uint16 bps) public {
+        price = bound(price, 0, type(uint256).max / 10_000);
+        bps   = uint16(bound(bps, 0, 2_500));
+
+        // No royalty set → zero
+        (address r0, uint256 a0) = reg.getRoyalty(coll, 1, price);
+        assertEq(r0, address(0));
+        assertEq(a0, 0);
+
+        if (bps == 0) return; // zero bps → amount always 0, skip set
+
+        reg.grantRole(reg.ROYALTY_SETTER_ROLE(), address(this));
+        reg.setCollectionRoyalty(coll, creator1, bps);
+
+        (, uint256 a1) = reg.getRoyalty(coll, 1, price);
+        assertEq(a1, price * bps / 10_000);
+    }
 }

@@ -1,7 +1,8 @@
 ﻿"use client";
-import {useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {parseEther, type Address, type Hex} from "viem";
 import {useReadContract, useAccount} from "wagmi";
+import {useQueryClient} from "@tanstack/react-query";
 import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {ERC721Abi} from "@/lib/abi";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
@@ -12,12 +13,13 @@ import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "./TxBanner";
 
 export function OwnerActions({
-  coll, tokenId, isListed, defaultTab = null
+  coll, tokenId, isListed, defaultTab = null, onListingChanged
 }: {
   coll: Address;
   tokenId: bigint;
   isListed: boolean;
   defaultTab?: "list" | "auction" | null;
+  onListingChanged?: () => void;
 }) {
   const {address} = useAccount();
   const [tab, setTab] = useState<"list" | "auction" | null>(defaultTab ?? null);
@@ -40,7 +42,7 @@ export function OwnerActions({
       </p>
       <div className="flex flex-wrap gap-2">
         {isListed ? (
-          <CancelBtn coll={coll} tokenId={tokenId} />
+          <CancelBtn coll={coll} tokenId={tokenId} onDone={onListingChanged} />
         ) : (
           <button
             className="px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 text-sm"
@@ -52,15 +54,24 @@ export function OwnerActions({
           onClick={() => setTab(tab === "auction" ? null : "auction")}
         >Auction</button>
       </div>
-      {tab === "list" && <ListForm coll={coll} tokenId={tokenId} approved={!!mpApproved} />}
+      {tab === "list" && <ListForm coll={coll} tokenId={tokenId} approved={!!mpApproved} onDone={onListingChanged} />}
       {tab === "auction" && <AuctionForm coll={coll} tokenId={tokenId} approved={!!ahApproved} />}
     </div>
   );
 }
 
-function CancelBtn({coll, tokenId}: {coll: Address; tokenId: bigint}) {
+function CancelBtn({coll, tokenId, onDone}: {coll: Address; tokenId: bigint; onDone?: () => void}) {
+  const qc = useQueryClient();
   const {cancel, isPending, error: writeError} = useCancelListing();
   const {hash, setHash, isConfirming, isConfirmed, txError} = useTx();
+
+  useEffect(() => {
+    if (isConfirmed) {
+      qc.invalidateQueries({queryKey: ["chain-listings"]});
+      onDone?.();
+    }
+  }, [isConfirmed, qc, onDone]);
+
   return (
     <div className="w-full space-y-2">
       <button
@@ -78,12 +89,14 @@ function CancelBtn({coll, tokenId}: {coll: Address; tokenId: bigint}) {
   );
 }
 
-function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; approved: boolean}) {
+function ListForm({coll, tokenId, approved, onDone}: {coll: Address; tokenId: bigint; approved: boolean; onDone?: () => void}) {
+  const qc = useQueryClient();
   const [price, setPrice] = useState("");
   const [days, setDays] = useState("7");
   const {approveAll, isPending: appPending, error: appErr} = useApproveNFT();
   const {list, isPending: listPending, error: listErr} = useList();
   const {hash, setHash, isConfirming, isConfirmed, txError} = useTx();
+  const isListingStep = useRef(false);
 
   const parsedPrice = (() => {
     try { return price ? parseEther(price) : null; } catch { return null; }
@@ -95,14 +108,23 @@ function ListForm({coll, tokenId, approved}: {coll: Address; tokenId: bigint; ap
   const priceValid = parsedPrice !== null && parsedPrice > 0n;
   const daysValid = parsedDays !== null;
 
+  useEffect(() => {
+    if (isConfirmed && isListingStep.current) {
+      qc.invalidateQueries({queryKey: ["chain-listings"]});
+      onDone?.();
+    }
+  }, [isConfirmed, qc, onDone]);
+
   const submit = async () => {
     try {
       if (!approved) {
+        isListingStep.current = false;
         const h = await approveAll(coll, ADDR.marketplace);
         setHash(h as Hex);
         return;
       }
       if (!priceValid || !daysValid) return;
+      isListingStep.current = true;
       const expiresAt = BigInt(Math.floor(Date.now() / 1000) + parsedDays! * 86400);
       const h = await list(coll, tokenId, parsedPrice!, expiresAt);
       setHash(h as Hex);

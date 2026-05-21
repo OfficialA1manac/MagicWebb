@@ -52,3 +52,4 @@ backend/api_server
 
 # Go dependencies (module cache lives in GOPATH)
 backend/vendor/
+.gstack/

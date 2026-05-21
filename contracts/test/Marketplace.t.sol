@@ -280,4 +280,69 @@ contract MarketplaceTest is Test {
     function invariant_marketplaceBalanceZero() public view {
         assertEq(address(mp).balance, 0);
     }
+
+    // ── Fuzz tests ────────────────────────────────────────────────────────
+
+    function testFuzz_feePlusRoyaltyNeverExceedsPrice(
+        uint128 price,
+        uint16  fBps,
+        uint16  rBps
+    ) public {
+        price = uint128(bound(price, 0.001 ether, 100 ether));
+        fBps  = uint16(bound(fBps,  0, 1_000));
+        rBps  = uint16(bound(rBps,  0, 2_500));
+
+        address royaltyRecv = address(0xF33D);
+        vm.deal(royaltyRecv, 0);
+
+        Marketplace   freshMp  = new Marketplace(creator, fBps, admin);
+        MockERC2981   royNft   = new MockERC2981(royaltyRecv, rBps);
+
+        address freshSeller = address(0xF001);
+        address freshBuyer  = address(0xF002);
+        vm.deal(freshBuyer, uint256(price));
+
+        vm.startPrank(freshSeller);
+        uint256 tid = royNft.mint(freshSeller);
+        royNft.setApprovalForAll(address(freshMp), true);
+        freshMp.list(address(royNft), tid, price, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
+
+        uint256 creatorBefore  = creator.balance;
+        uint256 sellerBefore   = freshSeller.balance;
+        uint256 royBefore      = royaltyRecv.balance;
+
+        vm.prank(freshBuyer);
+        freshMp.buy{value: uint256(price)}(address(royNft), tid);
+
+        uint256 fee    = creator.balance    - creatorBefore;
+        uint256 roy    = royaltyRecv.balance - royBefore;
+        uint256 payout = freshSeller.balance - sellerBefore;
+
+        assertLe(fee + roy, uint256(price));
+        assertEq(fee + roy + payout, uint256(price));
+    }
+
+    function test_relistAfterSale() public {
+        address buyer2 = address(0xDEAD2);
+        vm.deal(buyer2, 2 ether);
+
+        // First sale: seller → buyer
+        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        vm.prank(buyer);
+        mp.buy{value: 1 ether}(address(nft), id);
+        assertEq(nft.ownerOf(id), buyer);
+
+        // buyer re-lists the token
+        vm.startPrank(buyer);
+        nft.setApprovalForAll(address(mp), true);
+        mp.list(address(nft), id, 1.5 ether, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
+
+        // buyer2 buys from buyer
+        vm.prank(buyer2);
+        mp.buy{value: 1.5 ether}(address(nft), id);
+        assertEq(nft.ownerOf(id), buyer2);
+        assertGt(buyer.balance, 0);
+    }
 }

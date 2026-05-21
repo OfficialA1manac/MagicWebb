@@ -136,13 +136,13 @@ CREATE TABLE royalties (
 -- Materialized by the score worker (Zig hot-path) every minute.
 CREATE TABLE trending_scores (
     collection          CHAR(42)        NOT NULL REFERENCES collections(address),
-    window              TEXT            NOT NULL CHECK (window IN ('1h','24h','7d')),
+    "window"            TEXT            NOT NULL CHECK ("window" IN ('1h','24h','7d')),
     score               DOUBLE PRECISION NOT NULL DEFAULT 0,
     views               BIGINT          NOT NULL DEFAULT 0,
     bids                BIGINT          NOT NULL DEFAULT 0,
     volume_wei          NUMERIC(78,0)   NOT NULL DEFAULT 0,
     computed_at         TIMESTAMPTZ     NOT NULL DEFAULT now(),
-    PRIMARY KEY (collection, window)
+    PRIMARY KEY (collection, "window")
 );
 
 -- ── indexer_state ─────────────────────────────────────────────────────────
