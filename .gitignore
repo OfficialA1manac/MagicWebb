@@ -46,9 +46,9 @@ magicwebb_win.exe
 
 # Backend build artefacts
 backend/bin/
-backend/gen/
 backend/internal/hot/lib/
 backend/api_server
+backend/*.exe
 
 # Go dependencies (module cache lives in GOPATH)
 backend/vendor/

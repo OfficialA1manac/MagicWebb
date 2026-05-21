@@ -15,7 +15,9 @@ const walletConnectSrc = [
 
 const rpcUrl = process.env.NEXT_PUBLIC_RPC_URL ?? "";
 const explorerUrl = process.env.NEXT_PUBLIC_EXPLORER_URL ?? "";
-const chainConnectSrc = [rpcUrl, explorerUrl].filter(Boolean).join(" ");
+const apiUrl = process.env.NEXT_PUBLIC_API_URL ?? "";
+const apiWssUrl = apiUrl.replace(/^https/, "wss");
+const chainConnectSrc = [rpcUrl, explorerUrl, apiUrl, apiWssUrl].filter(Boolean).join(" ");
 
 const csp = [
   "default-src 'self'",

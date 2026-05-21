@@ -1,4 +1,4 @@
-// Package service implements the gRPC service handlers for WebbPlace.
+// Package service implements the gRPC service handlers for Magic Webb.
 package service
 
 import (

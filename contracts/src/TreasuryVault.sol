@@ -8,7 +8,7 @@ error ZeroAmount();
 error ZeroAddress();
 
 /// @title TreasuryVault
-/// @notice Pull-payment accumulator for WebbPlace platform fees.
+/// @notice Pull-payment accumulator for Magic Webb platform fees.
 /// @dev Receives ETH pushed by MarketplaceCore._splitAndPay; authorised withdrawers pull to any address.
 ///      Intentionally no automatic distribution — fees accumulate and the DAO/admin decides allocation.
 contract TreasuryVault is AccessControl {

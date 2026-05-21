@@ -9,7 +9,7 @@ error InvalidFeeBps();
 error ZeroAddress();
 
 /// @title RoyaltyRegistry
-/// @notice ERC-2981-compatible royalty registry for WebbPlace.
+/// @notice ERC-2981-compatible royalty registry for Magic Webb.
 /// @dev Two-tier lookup:
 ///   1. On-chain per-token override stored here (highest priority).
 ///   2. Per-collection default stored here.

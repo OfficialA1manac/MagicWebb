@@ -1,4 +1,4 @@
-// Package cache wraps go-redis with typed helpers for WebbPlace use-cases.
+// Package cache wraps go-redis with typed helpers for Magic Webb use-cases.
 package cache
 
 import (

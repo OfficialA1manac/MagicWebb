@@ -1,4 +1,4 @@
-# WebbPlace
+# Magic Webb
 
 Non-custodial NFT marketplace on Flare — buy, sell, bid, and make offers on ERC-721 tokens without giving up custody of your assets or your keys.
 
@@ -6,7 +6,7 @@ Non-custodial NFT marketplace on Flare — buy, sell, bid, and make offers on ER
 
 ## What It Is
 
-WebbPlace is a marketplace, not a creation platform. It lets anyone trade NFTs that already exist on the Flare network (or Coston2 testnet). The smart contracts are non-custodial: your NFT stays in your wallet until the moment a sale settles.
+Magic Webb is a marketplace, not a creation platform. It lets anyone trade NFTs that already exist on the Flare network (or Coston2 testnet). The smart contracts are non-custodial: your NFT stays in your wallet until the moment a sale settles.
 
 **What you can do:**
 - Browse listings and collections
@@ -91,8 +91,8 @@ All contracts are verified on [Coston2 Explorer](https://coston2-explorer.flare.
 The frontend reads directly from the chain and needs no running backend.
 
 ```bash
-git clone https://github.com/your-org/webbplace
-cd webbplace/frontend
+git clone https://github.com/your-org/magicwebb
+cd magicwebb/frontend
 cp .env.example .env.local
 # Fill in .env.local — chain vars and contract addresses are already populated for Coston2
 npm install
@@ -105,8 +105,8 @@ Open http://localhost:3000.
 
 ```bash
 # 1. Clone
-git clone https://github.com/your-org/webbplace
-cd webbplace
+git clone https://github.com/your-org/magicwebb
+cd magicwebb
 
 # 2. Backend env
 cp backend/.env.example backend/.env

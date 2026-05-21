@@ -66,7 +66,7 @@ type Config struct {
 	// Admin token for IndexerService.Reindex (leave empty to disable)
 	ServiceToken string
 
-	// FrontendURL is the allowed CORS origin (e.g. https://webbplace.xyz).
+	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
 }
 
