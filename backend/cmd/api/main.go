@@ -12,9 +12,12 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+	"github.com/gorilla/websocket"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
@@ -30,6 +33,8 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/service"
+	"github.com/OfficialA1manac/MagicWebb/backend/graph"
+	"github.com/OfficialA1manac/MagicWebb/backend/graph/generated"
 )
 
 func main() {
@@ -124,6 +129,23 @@ func main() {
 	apiRouter := apiPkg.NewRouter(q, rdb, &config.C)
 	mux.Handle("/api/", apiRouter)
 	mux.Handle("/events", apiRouter)
+
+	// GraphQL endpoint: HTTP POST for queries, WebSocket for subscriptions.
+	resolver := &graph.Resolver{Q: q, RDB: rdb}
+	gqlSrv := handler.New(generated.NewExecutableSchema(generated.Config{Resolvers: resolver}))
+	gqlSrv.AddTransport(transport.Websocket{
+		KeepAlivePingInterval: 10 * time.Second,
+		Upgrader: websocket.Upgrader{
+			CheckOrigin: func(r *http.Request) bool {
+				origin := r.Header.Get("Origin")
+				return origin == config.C.FrontendURL ||
+					strings.HasPrefix(origin, "http://localhost:") ||
+					strings.HasPrefix(origin, "http://127.0.0.1:")
+			},
+		},
+	})
+	gqlSrv.AddTransport(transport.POST{})
+	mux.Handle("/graphql", gqlSrv)
 
 	httpSrv := &http.Server{
 		Addr:         config.C.HTTPAddr,
