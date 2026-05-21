@@ -42,7 +42,7 @@ func DefaultWeights() ScoreWeights {
 	return ScoreWeights{Views: 0.3, Bids: 0.5, Volume: 0.2, DecayLambda: 0.05}
 }
 
-// DecodeLog matches topic0 against known WebbPlace selectors and decodes
+// DecodeLog matches topic0 against known Magic Webb selectors and decodes
 // the ABI-encoded data into a JSON map. Returns (eventType, jsonBytes, error).
 func DecodeLog(topic0 [32]byte, data []byte) (EventType, []byte, error) {
 	const outCap = 4096

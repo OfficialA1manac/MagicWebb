@@ -8,7 +8,7 @@ import {OfferBook}      from "../src/OfferBook.sol";
 import {RoyaltyRegistry} from "../src/RoyaltyRegistry.sol";
 import {TreasuryVault}  from "../src/TreasuryVault.sol";
 
-/// @notice Deploy all 5 WebbPlace contracts to Flare Coston2 (chain 114) or Flare mainnet (chain 14).
+/// @notice Deploy all 5 Magic Webb contracts to Flare Coston2 (chain 114) or Flare mainnet (chain 14).
 ///
 /// Required env vars:
 ///   PRIVATE_KEY   — deployer private key (never commit)
@@ -54,7 +54,7 @@ contract DeployCoston2 is Script {
         vm.stopBroadcast();
 
         // ── Print env block ───────────────────────────────────────────────
-        console2.log("# WebbPlace Coston2 deploy output");
+        console2.log("# Magic Webb Coston2 deploy output");
         console2.log("# --- paste into backend/.env ---");
         console2.log("CHAIN_ID=",            block.chainid);
         console2.log("MARKETPLACE_ADDR=",    address(marketplace));

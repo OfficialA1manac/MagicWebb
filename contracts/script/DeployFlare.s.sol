@@ -41,7 +41,7 @@ contract DeployFlare is Script {
 
         vm.stopBroadcast();
 
-        console2.log("# WebbPlace Flare mainnet deploy");
+        console2.log("# Magic Webb Flare mainnet deploy");
         console2.log("# --- paste into backend/.env ---");
         console2.log("CHAIN_ID=",            block.chainid);
         console2.log("MARKETPLACE_ADDR=",    address(marketplace));
