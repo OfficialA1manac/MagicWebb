@@ -59,6 +59,7 @@ abstract contract MarketplaceCore is ReentrancyGuard, Pausable, AccessControl, E
     function unpause() external onlyRole(PAUSER_ROLE) { _unpause(); }
 
     function setRoyaltyRegistry(address registry) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (registry == address(0)) revert ZeroAddress();
         emit RoyaltyRegistryUpdated(royaltyRegistry, registry);
         royaltyRegistry = registry;
     }
