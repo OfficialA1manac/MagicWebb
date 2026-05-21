@@ -9,8 +9,7 @@ export function useServerTime() {
       const {unix_ms} = await api.getServerTime();
       return {serverNow: Math.floor(unix_ms / 1000), fetchedAt: Date.now()};
     },
-    staleTime: 60_000,
-    refetchInterval: 60_000,
+    staleTime: Infinity,
   });
 
   // Interpolate server time using elapsed local clock ticks.

@@ -186,6 +186,50 @@ This builds and starts: `api` (port 8080/9090), `indexer`, `redis`, and `fronten
 
 ---
 
+## Running Locally (Devnet)
+
+```bash
+# 1. Start Postgres + Redis
+docker compose up -d db redis
+
+# 2. Start a local Anvil fork (chain ID 114 mimics Coston2)
+anvil --chain-id 114 --block-time 2
+
+# 3. Deploy contracts to local devnet
+cd contracts && forge script script/DeployCoston2.s.sol \
+  --rpc-url http://localhost:8545 --broadcast \
+  --private-key $PRIVATE_KEY
+
+# 4. Start backend (API + indexer)
+cd backend && go run ./cmd/api &
+cd backend && go run ./cmd/indexer &
+
+# 5. Start frontend
+cd frontend && npm run dev
+# → http://localhost:3000
+```
+
+## Running on Coston2 Testnet (Live Flare)
+
+```bash
+# 1. Deploy contracts
+cd contracts && forge script script/DeployCoston2.s.sol \
+  --rpc-url https://coston2-api.flare.network/ext/C/rpc \
+  --broadcast --verify \
+  --private-key $PRIVATE_KEY
+
+# 2. Copy deploy output addresses into backend/.env and frontend/.env.local
+
+# 3. Start backend pointing at live RPC
+FLARE_RPC=https://coston2-api.flare.network/ext/C/rpc \
+  go run ./cmd/api
+
+# 4. Start frontend
+cd frontend && npm run dev
+```
+
+---
+
 ## Switching to Flare Mainnet
 
 Only `frontend/.env.local` (and `backend/.env`) need to change. No code changes are required.

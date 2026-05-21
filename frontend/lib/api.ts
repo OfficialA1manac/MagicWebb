@@ -32,6 +32,19 @@ export interface OfferPayload {
   signature: string
 }
 
+export interface BackendOffer {
+  offer_id: string
+  bidder: string
+  collection: string
+  token_id: string       // empty = collection-wide
+  amount_wei: string
+  nonce: string
+  expires_at: string     // ISO 8601
+  signature: string
+  status: string
+  created_at: string     // ISO 8601
+}
+
 export const api = {
   getListings: (p?: { collection?: string; seller?: string; limit?: number }) => {
     const params = new URLSearchParams()
@@ -82,6 +95,12 @@ export const api = {
 
   postOffer: (offer: OfferPayload) =>
     apiFetch('/api/v1/offers', { method: 'POST', body: JSON.stringify(offer) }),
+
+  getMetrics: () =>
+    apiFetch('/api/v1/metrics'),
+
+  getActivity: (limit = 50) =>
+    apiFetch(`/api/v1/activity?limit=${limit}`),
 
   getIndexerStatus: () =>
     apiFetch('/api/v1/indexer/status'),

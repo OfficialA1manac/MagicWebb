@@ -4,19 +4,6 @@ import {useEffect, useMemo, useRef, useState} from "react";
 
 const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 
-/** Dedupe by connector id, prefer injected then WalletConnect for menu order. */
-function orderedConnectors<T extends {id: string; name: string}>(connectors: readonly T[]): T[] {
-  const byId = new Map<string, T>();
-  for (const c of connectors) {
-    if (!byId.has(c.id)) byId.set(c.id, c);
-  }
-  return Array.from(byId.values()).sort((a, b) => {
-    const rank = (x: T) => (x.id === "injected" ? 0 : x.id === "walletConnect" ? 1 : 2);
-    const d = rank(a) - rank(b);
-    return d !== 0 ? d : a.name.localeCompare(b.name);
-  });
-}
-
 export function ConnectButton() {
   const [mounted, setMounted] = useState(false);
   const [open, setOpen] = useState(false);
@@ -27,7 +14,14 @@ export function ConnectButton() {
   const {disconnect} = useDisconnect();
   const [pendingUid, setPendingUid] = useState<string | null>(null);
 
-  const choices = useMemo(() => orderedConnectors(connectors), [connectors]);
+  const choices = useMemo(() => {
+    const inj = connectors.find(c => c.type === "injected" || c.id === "injected");
+    const wc  = connectors.find(c => c.id === "walletConnect");
+    return [
+      inj ?? {id: "injected-missing", name: "Browser extension", type: "injected", uid: "inj-missing"},
+      wc  ?? {id: "walletConnect-missing", name: "WalletConnect (not configured)", type: "walletConnect", uid: "wc-missing"},
+    ] as typeof connectors[0][];
+  }, [connectors]);
 
   useEffect(() => {
     if (!open) return;
@@ -64,10 +58,15 @@ export function ConnectButton() {
   }
 
   const label = (c: (typeof choices)[0]) => {
+    if (c.id === "walletConnect-missing") return "WalletConnect (not configured)";
     if (c.id === "walletConnect") return "WalletConnect (QR)";
+    if (c.id === "injected-missing") return "Browser extension";
     if (c.type === "injected") return "Browser extension";
     return c.name;
   };
+
+  const isPlaceholder = (c: (typeof choices)[0]) =>
+    c.id === "injected-missing" || c.id === "walletConnect-missing";
 
   return (
     <div className="relative" ref={wrapRef}>
@@ -89,8 +88,9 @@ export function ConnectButton() {
                 type="button"
                 role="menuitem"
                 className="w-full px-4 py-2.5 text-left text-sm text-neutral-200 hover:bg-neutral-800 disabled:opacity-50"
-                disabled={!!pendingUid || isPending}
+                disabled={!!pendingUid || isPending || isPlaceholder(c)}
                 onClick={async () => {
+                  if (isPlaceholder(c)) return;
                   setPendingUid(c.uid);
                   try {
                     await connectAsync({connector: c});

@@ -1,4 +1,4 @@
-﻿"use client";
+"use client";
 import {useState} from "react";
 import {parseEther, formatEther, type Address, type Hex} from "viem";
 import {useAccount, useReadContract} from "wagmi";
@@ -9,7 +9,6 @@ import {useSignOffer} from "@/hooks/useSignOffer";
 import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "./TxBanner";
 import type {Offer} from "@/lib/eip712";
-import {appendSentOffer} from "@/lib/offerInbox";
 
 function randomUint64(): bigint {
   const buf = new Uint32Array(2);
@@ -24,8 +23,7 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
   const {deposit, isPending: depPending, error: depErr} = useDeposit();
   const {sign, isPending: sigPending, error: sigErr} = useSignOffer();
   const depositTx = useTx();
-  const [signature, setSignature] = useState<string>("");
-  const [copied, setCopied] = useState(false);
+  const [submitted, setSubmitted] = useState(false);
   const [err, setErr] = useState<string | null>(null);
 
   const {data: existingDeposit} = useReadContract({
@@ -63,24 +61,8 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
         expiresAt: BigInt(Math.floor(Date.now() / 1000) + parsedDays * 86400),
         nonce: randomUint64()
       };
-      const sig = await sign(offer);
-      setSignature(sig);
-      const payload = JSON.stringify({
-        offer: {
-          ...offer,
-          tokenId: offer.tokenId.toString(),
-          amount: offer.amount.toString(),
-          expiresAt: offer.expiresAt.toString(),
-          nonce: offer.nonce.toString()
-        },
-        sig
-      }, null, 2);
-      try {
-        await navigator.clipboard.writeText(payload);
-        setCopied(true);
-      } catch { /* clipboard not required */ }
-      appendSentOffer(payload);
-      window.dispatchEvent(new Event("magicwebb-offers-changed"));
+      await sign(offer);
+      setSubmitted(true);
     } catch (e) {
       if ((e as Error)?.message && !(e as Error).message.includes("User rejected")) {
         setErr((e as Error).message.split("\n")[0]);
@@ -130,21 +112,21 @@ export function OfferModal({coll, tokenId, onClose}: {coll: Address; tokenId: bi
           </div>
         )}
 
-        <button
-          type="button"
-          className="w-full px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
-          disabled={sigPending || !amountValid || !daysValid || (needsDeposit && !depositTx.isConfirmed)}
-          onClick={submitOffer}
-        >{sigPending ? "Sign in wallet…" : "Sign offer"}</button>
-        {sigErr && <div className="text-sm text-red-400">{sigErr.message.split("\n")[0]}</div>}
-        {err && <div className="text-sm text-red-400">{err}</div>}
-        {signature && (
-          <div className="text-xs text-emerald-400 break-all">
-            Offer signed{copied ? " and copied to clipboard" : ""}. Saved under{" "}
-            <a href="/offers" className="underline text-emerald-300">
-              Offers {"→"} Sent
-            </a>
-            ; share the JSON with the seller so they can import it under Offers {"→"} Received.
+        {!submitted ? (
+          <>
+            <button
+              type="button"
+              className="w-full px-3 py-2 rounded bg-emerald-600 hover:bg-emerald-500 disabled:opacity-50"
+              disabled={sigPending || !amountValid || !daysValid || (needsDeposit && !depositTx.isConfirmed)}
+              onClick={submitOffer}
+            >{sigPending ? "Sign in wallet…" : "Sign & submit offer"}</button>
+            {sigErr && <div className="text-sm text-red-400">{sigErr.message.split("\n")[0]}</div>}
+            {err && <div className="text-sm text-red-400">{err}</div>}
+          </>
+        ) : (
+          <div className="text-sm text-emerald-400">
+            Offer submitted. The seller can now see it under{" "}
+            <a href="/offers" className="underline text-emerald-300">Offers → Received</a>.
           </div>
         )}
       </div>
