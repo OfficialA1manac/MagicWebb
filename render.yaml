@@ -1,0 +1,110 @@
+services:
+  # ── API server (HTTP :8080 + gRPC :9090) ────────────────────────────────
+  - type: web
+    name: webbplace-api
+    env: docker
+    dockerfilePath: ./backend/Dockerfile.api
+    dockerContext: ./backend
+    plan: free
+    healthCheckPath: /healthz
+    envVars:
+      - key: POSTGRES_URL
+        sync: false          # set in Render dashboard
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: webbplace-redis
+          property: connectionString
+      - key: RPC_URL
+        value: https://coston2-api.flare.network/ext/C/rpc
+      - key: CHAIN_ID
+        value: "114"
+      - key: MARKETPLACE_ADDR
+        sync: false          # fill after Coston2 deploy
+      - key: AUCTION_ADDR
+        sync: false
+      - key: OFFERBOOK_ADDR
+        sync: false
+      - key: ROYALTY_ADDR
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
+      - key: FRONTEND_URL
+        sync: false          # your Vercel / frontend URL
+      - key: SERVICE_TOKEN
+        generateValue: true
+      - key: KEEPER_KEY
+        sync: false          # optional: auction auto-settlement key
+      - key: ENV
+        value: production
+      - key: INDEX_FROM_BLOCK
+        value: "0"
+      - key: GETLOGS_CHUNK
+        value: "30"
+      - key: GETLOGS_BLOCK_CAP
+        value: "0"
+
+  # ── Indexer (background worker, no public port) ──────────────────────────
+  - type: worker
+    name: webbplace-indexer
+    env: docker
+    dockerfilePath: ./backend/Dockerfile.indexer
+    dockerContext: ./backend
+    plan: free
+    envVars:
+      - key: POSTGRES_URL
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: POSTGRES_URL
+      - key: REDIS_URL
+        fromService:
+          type: redis
+          name: webbplace-redis
+          property: connectionString
+      - key: RPC_URL
+        value: https://coston2-api.flare.network/ext/C/rpc
+      - key: CHAIN_ID
+        value: "114"
+      - key: MARKETPLACE_ADDR
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: MARKETPLACE_ADDR
+      - key: AUCTION_ADDR
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: AUCTION_ADDR
+      - key: OFFERBOOK_ADDR
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: OFFERBOOK_ADDR
+      - key: ROYALTY_ADDR
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: ROYALTY_ADDR
+      - key: JWT_SECRET
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: JWT_SECRET
+      - key: SERVICE_TOKEN
+        fromService:
+          type: web
+          name: webbplace-api
+          envVarKey: SERVICE_TOKEN
+      - key: INDEX_FROM_BLOCK
+        value: "0"
+      - key: GETLOGS_CHUNK
+        value: "30"
+      - key: GETLOGS_BLOCK_CAP
+        value: "0"
+
+  # ── Redis (pub/sub + SIWE nonces) ────────────────────────────────────────
+  - type: redis
+    name: webbplace-redis
+    plan: free
+    maxmemoryPolicy: allkeys-lru
