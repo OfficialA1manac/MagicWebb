@@ -1,5 +1,5 @@
 "use client";
-import {useEffect, useState} from "react";
+import {useEffect, useRef, useState} from "react";
 import {parseEther, formatEther, type Address, type Hex} from "viem";
 import {useReadContract, useAccount} from "wagmi";
 import Link from "next/link";
@@ -13,7 +13,7 @@ import {useTokenImage} from "@/hooks/useTokenImage";
 import {TxBanner} from "./TxBanner";
 import type {ActiveListing} from "@/lib/marketIndex";
 
-function NftImage({src, id, alt}: {src?: string; id: bigint; alt: string}) {
+function NftImage({src, id, alt}: {src?: string | null; id: bigint; alt: string}) {
   const [err, setErr] = useState(false);
   if (src && !err) {
     return (
@@ -33,11 +33,12 @@ function NftImage({src, id, alt}: {src?: string; id: bigint; alt: string}) {
 }
 
 function ListForm({
-  coll, tokenId, onClose
+  coll, tokenId, onClose, onDone
 }: {
   coll: Address;
   tokenId: bigint;
   onClose: () => void;
+  onDone?: () => void;
 }) {
   const {address} = useAccount();
   const {approveAll, isPending: appPending} = useApproveNFT();
@@ -45,6 +46,7 @@ function ListForm({
   const {hash, setHash, isConfirming, isConfirmed, txError, reset} = useTx();
   const [price, setPrice] = useState("");
   const [days, setDays] = useState("7");
+  const isListingStep = useRef(false);
 
   const {data: isApproved, refetch: refetchApproval} = useReadContract({
     address: coll, abi: ERC721Abi, functionName: "isApprovedForAll",
@@ -53,8 +55,13 @@ function ListForm({
   });
 
   useEffect(() => {
-    if (isConfirmed && !isApproved) refetchApproval();
-  }, [isConfirmed, isApproved, refetchApproval]);
+    if (!isConfirmed) return;
+    if (!isApproved) {
+      refetchApproval();
+    } else if (isListingStep.current) {
+      onDone?.();
+    }
+  }, [isConfirmed, isApproved, refetchApproval, onDone]);
 
   const parsedPrice = (() => { try { return price ? parseEther(price) : null; } catch { return null; } })();
   const priceOk = parsedPrice !== null && parsedPrice > 0n;
@@ -64,11 +71,13 @@ function ListForm({
   const submit = async () => {
     try {
       if (!isApproved) {
+        isListingStep.current = false;
         const h = await approveAll(coll, ADDR.marketplace);
         setHash(h as Hex);
         return;
       }
       if (!priceOk || !daysOk) return;
+      isListingStep.current = true;
       const expiresAt = BigInt(Math.floor(Date.now() / 1000) + daysNum * 86400);
       const h = await list(coll, tokenId, parsedPrice!, expiresAt);
       setHash(h as Hex);
@@ -221,6 +230,7 @@ export function ProfileNftCard({
             coll={coll}
             tokenId={id}
             onClose={() => setListOpen(false)}
+            onDone={onActionDone}
           />
         )}
       </div>

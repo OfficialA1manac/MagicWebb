@@ -11,7 +11,7 @@ import {OwnerActions} from "@/components/OwnerActions";
 import {FavoriteToggle} from "@/components/FavoriteToggle";
 import {useTokenImage} from "@/hooks/useTokenImage";
 
-function TokenImage({src, id, name}: {src?: string; id: bigint; name?: string}) {
+function TokenImage({src, id, name}: {src?: string | null; id: bigint; name?: string}) {
   const [err, setErr] = useState(false);
   if (src && !err) {
     return (
@@ -105,7 +105,7 @@ export default function TokenPage() {
         )}
 
         {isOwner ? (
-          <OwnerActions coll={coll} tokenId={tokenId} isListed={isListed} />
+          <OwnerActions coll={coll} tokenId={tokenId} isListed={isListed} onListingChanged={() => void refetchListing()} />
         ) : (
           <button
             type="button"

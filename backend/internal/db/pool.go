@@ -3,15 +3,17 @@ package db
 
 import (
 	"context"
+	"database/sql"
 	"embed"
 	"fmt"
 	"net/url"
+	"strings"
 
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 	"github.com/rs/zerolog/log"
 
-	// goose postgres driver
+	// registers "pgx/v5" driver with database/sql
 	_ "github.com/jackc/pgx/v5/stdlib"
 )
 
@@ -29,6 +31,13 @@ func sanitizeDSN(dsn string) string {
 	q.Del("pool_mode")
 	u.RawQuery = q.Encode()
 	return u.String()
+}
+
+// migrationDSN prepares a DSN for goose migrations: strips pool_mode and
+// switches Supabase transaction pooler port 6543 → 5432 (session pooler)
+// so DDL statements in migrations are not rejected.
+func migrationDSN(dsn string) string {
+	return strings.ReplaceAll(sanitizeDSN(dsn), ":6543/", ":5432/")
 }
 
 // Connect opens a pgxpool with default settings and runs Goose migrations.
@@ -56,7 +65,7 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 func Migrate(dsn string) error {
 	goose.SetBaseFS(migrations)
 
-	db, err := goose.OpenDBWithDriver("pgx", sanitizeDSN(dsn))
+	db, err := sql.Open("pgx/v5", migrationDSN(dsn))
 	if err != nil {
 		return fmt.Errorf("db: open for migration: %w", err)
 	}

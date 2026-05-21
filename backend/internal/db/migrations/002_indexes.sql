@@ -31,7 +31,7 @@ CREATE INDEX idx_nft_tokens_owner      ON nft_tokens (owner);
 CREATE INDEX idx_nft_tokens_collection ON nft_tokens (collection);
 
 -- ── trending_scores ───────────────────────────────────────────────────────
-CREATE INDEX idx_trending_window_score ON trending_scores (window, score DESC);
+CREATE INDEX idx_trending_window_score ON trending_scores ("window", score DESC);
 
 -- +goose StatementEnd
 

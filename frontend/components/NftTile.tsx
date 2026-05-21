@@ -6,7 +6,7 @@ import {FavoriteToggle} from "./FavoriteToggle";
 import {useTokenImage} from "@/hooks/useTokenImage";
 import {CURRENCY_SYMBOL} from "@/lib/addresses";
 
-function NftImage({src, id, alt}: {src?: string; id: bigint; alt: string}) {
+function NftImage({src, id, alt}: {src?: string | null; id: bigint; alt: string}) {
   const [err, setErr] = useState(false);
   if (src && !err) {
     return (
