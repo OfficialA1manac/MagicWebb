@@ -108,3 +108,22 @@ func (c *Client) Publish(ctx context.Context, channel string, msg any) error {
 func (c *Client) Subscribe(ctx context.Context, channels ...string) *redis.PubSub {
 	return c.rdb.Subscribe(ctx, channels...)
 }
+
+// SubscribeMessages subscribes to one or more Redis channels and returns a
+// channel of raw JSON payload strings. The channel is closed when ctx is done.
+func (c *Client) SubscribeMessages(ctx context.Context, channels ...string) <-chan string {
+	out := make(chan string, 64)
+	sub := c.rdb.Subscribe(ctx, channels...)
+	go func() {
+		defer sub.Close()
+		defer close(out)
+		for msg := range sub.Channel() {
+			select {
+			case out <- msg.Payload:
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+	return out
+}

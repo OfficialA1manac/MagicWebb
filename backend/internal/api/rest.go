@@ -36,6 +36,10 @@ func NewRouter(q *db.Q, rdb *cache.Client, cfg *config.Config) http.Handler {
 	// search
 	mux.HandleFunc("GET /api/v1/search", handleSearch(q))
 
+	// metrics + activity
+	mux.HandleFunc("GET /api/v1/metrics", handleGetMarketMetrics(q))
+	mux.HandleFunc("GET /api/v1/activity", handleGetRecentActivity(q))
+
 	// indexer status
 	mux.HandleFunc("GET /api/v1/indexer/status", handleIndexerStatus(q))
 
