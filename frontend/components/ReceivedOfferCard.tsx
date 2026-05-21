@@ -1,6 +1,6 @@
-﻿"use client";
-import {useEffect, useState} from "react";
-import {formatEther, type Hex} from "viem";
+"use client";
+import {useState} from "react";
+import {formatEther, type Hex, type Address} from "viem";
 import {useAccount, useReadContract} from "wagmi";
 import {ADDR, CURRENCY_SYMBOL} from "@/lib/addresses";
 import {ERC721Abi, OfferBookAbi} from "@/lib/abi";
@@ -8,55 +8,54 @@ import {useAcceptOffer} from "@/hooks/useAcceptOffer";
 import {useApproveNFT} from "@/hooks/useApproveNFT";
 import {useTx} from "@/hooks/useTx";
 import {TxBanner} from "@/components/TxBanner";
-import type {ReceivedOfferEntry} from "@/lib/offerInbox";
-import {parseOfferPayload, removeReceivedOffer} from "@/lib/offerInbox";
+import type {BackendOffer} from "@/lib/api";
+import type {Offer} from "@/lib/eip712";
 
 export function ReceivedOfferCard({
-  entry,
+  offer: row,
   onChanged
 }: {
-  entry: ReceivedOfferEntry;
+  offer: BackendOffer;
   onChanged: () => void;
 }) {
   const {address} = useAccount();
-  const [parseErr, setParseErr] = useState<string | null>(null);
-  const parsed = (() => {
-    try { return parseOfferPayload(entry.raw); } catch { return null; }
+  const [err, setErr] = useState<string | null>(null);
+
+  const tokenIdActual: bigint = (() => {
+    try { return row.token_id ? BigInt(row.token_id) : 0n; } catch { return 0n; }
   })();
 
-  useEffect(() => {
-    setParseErr(parsed ? null : "Invalid JSON");
-  }, [parsed, entry.raw]);
-
-  let tokenIdActual: bigint;
-  try {
-    tokenIdActual = BigInt(entry.deliverTokenId);
-  } catch {
-    tokenIdActual = 0n;
-  }
+  const offer: Offer = {
+    bidder: row.bidder as Address,
+    collection: row.collection as Address,
+    tokenId: tokenIdActual,
+    amount: (() => { try { return BigInt(row.amount_wei); } catch { return 0n; } })(),
+    expiresAt: BigInt(Math.floor(new Date(row.expires_at).getTime() / 1000)),
+    nonce: (() => { try { return BigInt(row.nonce); } catch { return 0n; } })(),
+  };
+  const sig = row.signature as Hex;
 
   const {data: owner} = useReadContract({
-    address: parsed?.offer.collection,
+    address: offer.collection,
     abi: ERC721Abi,
     functionName: "ownerOf",
-    args: parsed ? [tokenIdActual] : undefined,
-    query: {enabled: !!parsed && tokenIdActual > 0n}
+    args: [tokenIdActual],
+    query: {enabled: tokenIdActual > 0n}
   });
 
   const {data: approved} = useReadContract({
-    address: parsed?.offer.collection,
+    address: offer.collection,
     abi: ERC721Abi,
     functionName: "isApprovedForAll",
-    args: address && parsed ? [address, ADDR.offer] : undefined,
-    query: {enabled: !!parsed && !!address}
+    args: address ? [address as Address, ADDR.offer] : undefined,
+    query: {enabled: !!address}
   });
 
   const {data: nonceUsed} = useReadContract({
     address: ADDR.offer,
     abi: OfferBookAbi,
     functionName: "usedNonce",
-    args: parsed ? [parsed.offer.bidder, parsed.offer.nonce] : undefined,
-    query: {enabled: !!parsed}
+    args: [offer.bidder, offer.nonce],
   });
 
   const {accept, isPending, error: acceptErr} = useAcceptOffer();
@@ -64,61 +63,35 @@ export function ReceivedOfferCard({
   const acceptTx = useTx();
   const approvalTx = useTx();
 
-  useEffect(() => {
-    if (acceptTx.isConfirmed) {
-      removeReceivedOffer(entry.id);
-      onChanged();
-      window.dispatchEvent(new Event("magicwebb-offers-changed"));
-    }
-  }, [acceptTx.isConfirmed, entry.id, onChanged]);
-
-  if (!parsed) {
-    return (
-      <div className="rounded-xl border border-red-900/40 bg-red-950/20 p-4 text-sm text-red-300">
-        {parseErr ?? "Invalid offer"}
-        <button
-          type="button"
-          className="mt-2 block text-xs underline"
-          onClick={() => { removeReceivedOffer(entry.id); onChanged(); }}
-        >
-          Remove
-        </button>
-      </div>
-    );
-  }
-
-  const {offer, sig} = parsed;
   const now = BigInt(Math.floor(Date.now() / 1000));
   const expired = now > offer.expiresAt;
-  const isOwner =
-    !!address && !!owner && typeof owner === "string" &&
-    address.toLowerCase() === owner.toLowerCase();
-  const wrongToken = offer.tokenId !== 0n && offer.tokenId !== tokenIdActual;
+  const isOwner = !!address && !!owner && typeof owner === "string" &&
+    address.toLowerCase() === (owner as string).toLowerCase();
   const invalidDeliver = tokenIdActual === 0n;
 
   return (
     <div className="rounded-xl border border-neutral-800 bg-neutral-900/40 p-4 text-sm space-y-3">
-      {invalidDeliver && (
-        <p className="text-xs text-red-400">Invalid stored token ID. Remove and re-import with a valid ID.</p>
-      )}
       <div className="font-mono text-xs text-neutral-500 break-all">{offer.collection}</div>
-      <div className="text-lg font-semibold text-emerald-400">{formatEther(offer.amount)} {CURRENCY_SYMBOL}</div>
+      <div className="text-lg font-semibold text-emerald-400">
+        {formatEther(offer.amount)} {CURRENCY_SYMBOL}
+      </div>
       <div className="text-xs text-neutral-400">
         Bidder <span className="break-all font-mono text-neutral-300">{offer.bidder}</span>
       </div>
       <div className="text-xs text-neutral-500">
-        Deliver token #{tokenIdActual.toString()}
-        {offer.tokenId === 0n && <span className="text-amber-400"> (collection-wide offer)</span>}
+        Token #{tokenIdActual.toString()}
+        {row.token_id === "" && <span className="text-amber-400"> (collection-wide)</span>}
       </div>
       <div className="text-xs text-neutral-500">
-        Expires {new Date(Number(offer.expiresAt) * 1000).toLocaleString()}
+        Expires {new Date(row.expires_at).toLocaleString()}
       </div>
+      <div className="text-xs text-neutral-500 capitalize">{row.status}</div>
 
-      {wrongToken && <p className="text-xs text-red-400">Stored token ID does not match this offer.</p>}
+      {invalidDeliver && <p className="text-xs text-red-400">Collection-wide offer — token ID required to accept.</p>}
       {expired && <p className="text-xs text-amber-400">Offer expiry has passed.</p>}
       {nonceUsed && <p className="text-xs text-amber-400">This nonce was already used or cancelled.</p>}
-      {!address && <p className="text-xs text-yellow-600">Connect the seller wallet to accept.</p>}
-      {address && !isOwner && !wrongToken && !invalidDeliver && (
+      {!address && <p className="text-xs text-yellow-600">Connect seller wallet to accept.</p>}
+      {address && !isOwner && !invalidDeliver && (
         <p className="text-xs text-red-400">Connected wallet is not the owner of token #{tokenIdActual.toString()}.</p>
       )}
 
@@ -126,12 +99,12 @@ export function ReceivedOfferCard({
         <button
           type="button"
           className="rounded-lg border border-neutral-600 px-3 py-1.5 text-xs hover:border-rose-500/50"
-          onClick={() => { removeReceivedOffer(entry.id); onChanged(); window.dispatchEvent(new Event("magicwebb-offers-changed")); }}
+          onClick={onChanged}
         >
           Dismiss
         </button>
 
-        {isOwner && !wrongToken && !expired && !nonceUsed && !invalidDeliver && (
+        {isOwner && !expired && !nonceUsed && !invalidDeliver && (
           <>
             {!approved ? (
               <button
@@ -156,6 +129,7 @@ export function ReceivedOfferCard({
                   try {
                     const h = await accept(offer, sig, tokenIdActual);
                     acceptTx.setHash(h as Hex);
+                    onChanged();
                   } catch { /* wagmi handles display */ }
                 }}
               >
@@ -166,20 +140,9 @@ export function ReceivedOfferCard({
         )}
       </div>
 
-      <TxBanner
-        hash={approvalTx.hash}
-        isConfirming={approvalTx.isConfirming}
-        isConfirmed={approvalTx.isConfirmed}
-        error={appErr ?? approvalTx.txError}
-        label="Approval"
-      />
-      <TxBanner
-        hash={acceptTx.hash}
-        isConfirming={acceptTx.isConfirming}
-        isConfirmed={acceptTx.isConfirmed}
-        error={acceptErr ?? acceptTx.txError}
-        label="Accept"
-      />
+      {err && <div className="mt-2 text-xs text-red-400">{err}</div>}
+      <TxBanner hash={approvalTx.hash} isConfirming={approvalTx.isConfirming} isConfirmed={approvalTx.isConfirmed} error={appErr ?? approvalTx.txError} label="Approval" />
+      <TxBanner hash={acceptTx.hash} isConfirming={acceptTx.isConfirming} isConfirmed={acceptTx.isConfirmed} error={acceptErr ?? acceptTx.txError} label="Accept" />
     </div>
   );
 }
