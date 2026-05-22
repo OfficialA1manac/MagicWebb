@@ -65,13 +65,11 @@ The frontend can also read directly from the chain via RPC for latency-sensitive
 
 | Contract | Address |
 |----------|---------|
-| Marketplace | `0x767F7fF7c66673488a30053C025C153E13b6BfAa` |
-| AuctionHouse | `0x6016688AfFAF5427E1f8100160A6378Da2B1476a` |
-| OfferBook | `0x0C7112Ec22262d1E423132e35bC87E33abF64a22` |
-| RoyaltyRegistry | deployed on Coston2 |
-| TreasuryVault | deployed on Coston2 |
+| Marketplace | [`0x767F7fF7c66673488a30053C025C153E13b6BfAa`](https://coston2-explorer.flare.network/address/0x767F7fF7c66673488a30053C025C153E13b6BfAa) |
+| AuctionHouse | [`0x6016688AfFAF5427E1f8100160A6378Da2B1476a`](https://coston2-explorer.flare.network/address/0x6016688AfFAF5427E1f8100160A6378Da2B1476a) |
+| OfferBook | [`0x0C7112Ec22262d1E423132e35bC87E33abF64a22`](https://coston2-explorer.flare.network/address/0x0C7112Ec22262d1E423132e35bC87E33abF64a22) |
 
-All contracts are verified on [Coston2 Explorer](https://coston2-explorer.flare.network).
+All contracts verified on [Coston2 Explorer](https://coston2-explorer.flare.network).
 
 ---
 
@@ -91,7 +89,7 @@ All contracts are verified on [Coston2 Explorer](https://coston2-explorer.flare.
 The frontend reads directly from the chain and needs no running backend.
 
 ```bash
-git clone https://github.com/your-org/magicwebb
+git clone https://github.com/OfficialA1manac/MagicWebb
 cd magicwebb/frontend
 cp .env.example .env.local
 # Fill in .env.local — chain vars and contract addresses are already populated for Coston2
@@ -105,7 +103,7 @@ Open http://localhost:3000.
 
 ```bash
 # 1. Clone
-git clone https://github.com/your-org/magicwebb
+git clone https://github.com/OfficialA1manac/MagicWebb
 cd magicwebb
 
 # 2. Backend env
