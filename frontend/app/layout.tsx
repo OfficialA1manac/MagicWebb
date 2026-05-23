@@ -5,9 +5,35 @@ import {NetworkGuard} from "@/components/NetworkGuard";
 import {ConnectButton} from "@/components/ConnectButton";
 import Link from "next/link";
 
+const APP_URL = process.env.NEXT_PUBLIC_APP_URL ?? "https://magicwebb-web.onrender.com";
+const DESCRIPTION = "Non-custodial NFT marketplace on Flare — fixed price, auctions, and EIP-712 signed offers.";
+
 export const metadata: Metadata = {
-  title: "MagicWebb",
-  description: "Non-custodial NFT marketplace on Flare — fixed price, auctions, and EIP-712 offers"
+  metadataBase: new URL(APP_URL),
+  title: {
+    default: "MagicWebb",
+    template: "%s | MagicWebb",
+  },
+  description: DESCRIPTION,
+  openGraph: {
+    type: "website",
+    siteName: "MagicWebb",
+    title: "MagicWebb — NFT Marketplace on Flare",
+    description: DESCRIPTION,
+    url: APP_URL,
+    images: [{ url: "/opengraph-image", width: 1200, height: 630, alt: "MagicWebb" }],
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "MagicWebb — NFT Marketplace on Flare",
+    description: DESCRIPTION,
+    images: ["/opengraph-image"],
+  },
+  icons: {
+    icon: "/favicon.svg",
+    shortcut: "/favicon.svg",
+  },
+  robots: { index: true, follow: true },
 };
 
 export default function RootLayout({children}: {children: React.ReactNode}) {

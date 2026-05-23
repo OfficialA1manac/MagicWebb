@@ -5,6 +5,7 @@ services:
     env: docker
     dockerfilePath: ./backend/Dockerfile.api
     dockerContext: ./backend
+    port: 8080
     plan: free
     healthCheckPath: /healthz
     envVars:
