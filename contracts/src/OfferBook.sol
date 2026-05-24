@@ -66,11 +66,11 @@ contract OfferBook is MarketplaceCore, EIP712 {
     event Withdrawn(address indexed bidder, uint256 amount, uint256 newBalance);
     event OfferAccepted(
         address indexed coll, uint256 indexed tokenId, address indexed seller,
-        address bidder, uint128 amount, uint256 fee, uint256 royalty, uint64 nonce
+        address bidder, uint128 amount, uint256 fee, uint64 nonce
     );
     event Offer1155Accepted(
         address indexed coll, uint256 indexed tokenId, address indexed seller,
-        address bidder, uint128 units, uint128 amount, uint256 fee, uint256 royalty, uint64 nonce
+        address bidder, uint128 units, uint128 amount, uint256 fee, uint64 nonce
     );
     event OfferCancelled(address indexed bidder, uint64 indexed nonce);
 
@@ -143,9 +143,9 @@ contract OfferBook is MarketplaceCore, EIP712 {
         unchecked { deposits[o.bidder] -= o.amount; }
 
         _transferToken(TokenStandard.ERC721, o.collection, msg.sender, o.bidder, tokenIdActual, 1);
-        (uint256 fee, uint256 royalty,) = _splitAndPay(msg.sender, o.amount, o.collection, tokenIdActual);
+        uint256 fee = _splitAndPay(msg.sender, o.amount);
 
-        emit OfferAccepted(o.collection, tokenIdActual, msg.sender, o.bidder, o.amount, fee, royalty, o.nonce);
+        emit OfferAccepted(o.collection, tokenIdActual, msg.sender, o.bidder, o.amount, fee, o.nonce);
     }
 
     /// @notice Seller accepts a signed ERC-1155 offer. FINAL on success.
@@ -168,8 +168,8 @@ contract OfferBook is MarketplaceCore, EIP712 {
         unchecked { deposits[o.bidder] -= o.amount; }
 
         _transferToken(TokenStandard.ERC1155, o.collection, msg.sender, o.bidder, o.tokenId, o.units);
-        (uint256 fee, uint256 royalty,) = _splitAndPay(msg.sender, o.amount, o.collection, o.tokenId);
+        uint256 fee = _splitAndPay(msg.sender, o.amount);
 
-        emit Offer1155Accepted(o.collection, o.tokenId, msg.sender, o.bidder, o.units, o.amount, fee, royalty, o.nonce);
+        emit Offer1155Accepted(o.collection, o.tokenId, msg.sender, o.bidder, o.units, o.amount, fee, o.nonce);
     }
 }
