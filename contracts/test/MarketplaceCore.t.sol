@@ -95,15 +95,4 @@ contract MarketplaceCoreTest is Test {
     }
 
     // ── Royalty registry ──────────────────────────────────────────────────
-
-    function test_adminCanSetRoyaltyRegistry() public {
-        mp.setRoyaltyRegistry(address(0x1234));
-        assertEq(mp.royaltyRegistry(), address(0x1234));
-    }
-
-    function test_nonAdminCannotSetRoyaltyRegistry() public {
-        vm.prank(address(0xBAD));
-        vm.expectRevert();
-        mp.setRoyaltyRegistry(address(0x1234));
-    }
 }

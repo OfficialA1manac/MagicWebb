@@ -104,7 +104,7 @@ contract AuctionHouse is MarketplaceCore {
     );
     event BidCommitted(uint256 indexed id, address indexed bidder, bytes32 commitment);
     event BidPlaced(uint256 indexed id, address indexed bidder, uint128 amount);
-    event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 amount, uint256 fee, uint256 royalty);
+    event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 amount, uint256 fee);
     event AuctionCancelled(uint256 indexed id);
     event RefundWithdrawn(address indexed bidder, uint256 amount);
     event AuctionExtended(uint256 indexed id, uint64 newEndsAt);
@@ -293,9 +293,9 @@ contract AuctionHouse is MarketplaceCore {
         uint128       hieBid = a.highestBid;
 
         _transferToken(std, coll, sel, highBidder, tid, amt);
-        (uint256 fee, uint256 royalty,) = _splitAndPay(sel, hieBid, coll, tid);
+        uint256 fee = _splitAndPay(sel, hieBid);
 
-        emit AuctionSettled(id, highBidder, sel, hieBid, fee, royalty);
+        emit AuctionSettled(id, highBidder, sel, hieBid, fee);
     }
 
     // ── Cancel ────────────────────────────────────────────────────────────

@@ -55,8 +55,7 @@ contract Marketplace is MarketplaceCore {
         TokenStandard standard,
         uint128 amount,
         uint128 price,
-        uint256 fee,
-        uint256 royalty
+        uint256 fee
     );
 
     constructor(address vault, uint16 fee, address admin)
@@ -136,8 +135,8 @@ contract Marketplace is MarketplaceCore {
         delete listings[coll][id];
 
         _transferToken(l.standard, coll, l.seller, msg.sender, id, l.amount);
-        (uint256 fee, uint256 royalty,) = _splitAndPay(l.seller, msg.value, coll, id);
+        uint256 fee = _splitAndPay(l.seller, msg.value);
 
-        emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee, royalty);
+        emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee);
     }
 }
