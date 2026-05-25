@@ -45,10 +45,12 @@ make status  # process/port/chain status
 All services have `restart: always` — they restart automatically on crash or Docker daemon restart. `make up` once = runs forever.
 
 ## Auction keeper bot
-Enabled by setting `KEEPER_KEY` in `.env`. The keeper:
-1. Polls `GetExpiredActiveAuctions()` every 30 seconds
-2. Calls `settle(auctionId)` on each expired unsettled auction
-3. Contract transfers NFT to winner and pays seller
+Enabled by setting `KEEPER_KEY` in `.env`. The keeper runs two sweeps every 30 seconds:
+
+**Auto-settle:** Calls `settle(auctionId)` on expired auctions that have at least one bid.
+- Contract: NFT → winner, fee (upfront from bidder) → feeRecipient, full bid → seller.
+
+**Auto-cancel:** Calls `cancelIfInactive(auctionId)` on auctions with zero bids past the 30-minute window.
 
 Fund the keeper wallet with small amounts of FLR for gas.
 
@@ -72,7 +74,7 @@ make regen-abi         # writes frontend/lib/abi/*.ts from compiled JSON
 | `OFFERBOOK_ADDR` | yes | Deployed OfferBook address |
 | `JWT_SECRET` | yes | 32+ byte hex for SIWE JWT signing |
 | `FRONTEND_URL` | yes | CORS origin |
-| `KEEPER_KEY` | opt | Keeper wallet private key |
+| `KEEPER_KEY` | yes | Keeper wallet private key (auto-settles/cancels auctions) |
 | `INDEX_FROM_BLOCK` | opt | Start block (auto-set by `make deploy`) |
 
 ### `frontend/.env.local`
@@ -86,4 +88,6 @@ make regen-abi         # writes frontend/lib/abi/*.ts from compiled JSON
 | `NEXT_PUBLIC_OFFER_ADDR` | OfferBook address |
 
 ## Contract addresses are permanent
-Once deployed, contract addresses and `feeRecipient` cannot change. The 1.5% platform fee is hardcoded in the contracts as `PLATFORM_FEE_BPS = 150` — it cannot be overridden by any env var or admin key. To change the fee recipient or fee rate: deploy new contracts and run `make fresh-deploy`.
+Once deployed, contract addresses and `feeRecipient` cannot change. The 1.5% platform fee is hardcoded as `PLATFORM_FEE_BPS = 150` — not overridable by any env var or admin key. Contracts have no pause function and no admin role — they run forever. To change the fee recipient or fee rate: deploy new contracts and run `make fresh-deploy`.
+
+No royalties are supported or enforced by any contract.

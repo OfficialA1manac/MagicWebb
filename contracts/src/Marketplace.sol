@@ -21,9 +21,10 @@ uint64 constant MAX_LISTING_DURATION = 365 days;
 
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
-/// @dev Non-custodial: tokens stay with seller until a buyer settles. Approval required.
+/// @dev Non-custodial: tokens stay with seller until buyer settles. Approval required.
 ///      Once `buy` settles the trade is FINAL — no reverse, refund, or admin override.
 ///      Funds flow atomically: 1.5% platform fee → feeRecipient wallet, remainder → seller.
+///      Unstoppable: no pause, no admin. Runs forever.
 contract Marketplace is MarketplaceCore {
     /// @notice Listing record. Two storage slots:
     ///   slot 0: seller(20) + expiresAt(8) + standard(1) [3 bytes padding]
@@ -60,14 +61,14 @@ contract Marketplace is MarketplaceCore {
         uint256 fee
     );
 
-    constructor(address recipient, address admin)
-        MarketplaceCore(recipient, admin)
+    constructor(address recipient)
+        MarketplaceCore(recipient)
     {}
 
     // ── List ──────────────────────────────────────────────────────────────
 
     function list(address coll, uint256 id, uint128 price, uint64 expiresAt)
-        external payable whenNotPaused
+        external payable
     {
         uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
         if (msg.value != fee) revert WrongPrice();
@@ -79,7 +80,7 @@ contract Marketplace is MarketplaceCore {
     }
 
     function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt)
-        external payable whenNotPaused
+        external payable
     {
         if (amount == 0) revert InvalidAmount();
         uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
@@ -103,7 +104,7 @@ contract Marketplace is MarketplaceCore {
     /// @notice List up to 50 ERC-721 tokens in one transaction.
     ///         Caller must have approved this contract on each collection.
     ///         msg.value must equal sum of 1.5% listing fees across all items.
-    function batchList(BatchItem[] calldata items) external payable whenNotPaused {
+    function batchList(BatchItem[] calldata items) external payable {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         uint256 totalFee;
         for (uint256 i; i < items.length; ++i) {
@@ -155,7 +156,7 @@ contract Marketplace is MarketplaceCore {
 
     // ── Cancel ────────────────────────────────────────────────────────────
 
-    /// @notice Cancel an unsold listing. Seller only. Works even while paused so sellers can unwind.
+    /// @notice Cancel an unsold listing. Seller only.
     function cancel(address coll, uint256 id) external {
         Listing memory l = listings[coll][id];
         if (l.seller != msg.sender) revert NotOwner();
@@ -168,7 +169,7 @@ contract Marketplace is MarketplaceCore {
     /// @notice Buy a listed token at exactly the listing price.
     /// @dev FINAL on success. NFT → buyer, then 1.5% fee → feeRecipient wallet, remainder → seller.
     ///      Entire tx reverts if NFT transfer fails — no fee is taken, listing remains valid.
-    function buy(address coll, uint256 id) external payable nonReentrant whenNotPaused {
+    function buy(address coll, uint256 id) external payable nonReentrant {
         Listing memory l = listings[coll][id];
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp > l.expiresAt) revert Expired();

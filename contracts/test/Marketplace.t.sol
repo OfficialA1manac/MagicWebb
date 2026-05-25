@@ -5,20 +5,18 @@ import {Test}         from "forge-std/Test.sol";
 import {Marketplace, BatchTooLarge}  from "../src/Marketplace.sol";
 import {MockERC721}   from "./MockERC721.sol";
 import {MockERC1155}  from "./MockERC1155.sol";
-import {MockERC2981}  from "./MockERC2981.sol";
 
 contract MarketplaceTest is Test {
     Marketplace  mp;
     MockERC721   nft;
     MockERC1155  multi;
-    address admin   = address(this);
     address creator = address(0xC0DE);
     address seller  = address(0xBEEF);
     address buyer   = address(0xCAFE);
     address other   = address(0xDEAD);
 
     function setUp() public {
-        mp    = new Marketplace(creator, admin);
+        mp    = new Marketplace(creator);
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(buyer, 10 ether);
@@ -219,42 +217,6 @@ contract MarketplaceTest is Test {
         assertEq(s, seller);
     }
 
-    // ── Pause ─────────────────────────────────────────────────────────────
-
-    function test_pauseBlocksBuy() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
-        mp.pause();
-        vm.prank(buyer);
-        vm.expectRevert();
-        mp.buy{value: 1 ether}(address(nft), id);
-    }
-
-    function test_pauseBlocksList() public {
-        mp.pause();
-        vm.startPrank(seller);
-        uint256 id = nft.mint(seller);
-        nft.setApprovalForAll(address(mp), true);
-        vm.expectRevert();
-        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
-        vm.stopPrank();
-    }
-
-    function test_cancelWorksWhilePaused() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
-        mp.pause();
-        vm.prank(seller); // seller can still cancel when paused
-        mp.cancel(address(nft), id);
-    }
-
-    function test_unpauseRestoresBuy() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
-        mp.pause();
-        mp.unpause();
-        vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
-        assertEq(nft.ownerOf(id), buyer);
-    }
-
     // ── Invariant ─────────────────────────────────────────────────────────
 
     function invariant_marketplaceBalanceZero() public view {
@@ -266,7 +228,7 @@ contract MarketplaceTest is Test {
     function testFuzz_feesPlusPayoutEqPrice(uint128 price) public {
         price = uint128(bound(price, 0.001 ether, 100 ether));
 
-        Marketplace freshMp = new Marketplace(creator, admin);
+        Marketplace freshMp = new Marketplace(creator);
 
         address freshSeller = address(0xF001);
         address freshBuyer  = address(0xF002);

@@ -5,31 +5,25 @@ import {Test}        from "forge-std/Test.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MockERC721}  from "./MockERC721.sol";
 
-/// @dev Tests that exercise MarketplaceCore behaviour (fees, immutability, access control).
+/// @dev Tests for MarketplaceCore behaviour: fees, immutability, no-admin, no-pause.
 contract MarketplaceCoreTest is Test {
     Marketplace mp;
     MockERC721  nft;
-    address admin   = address(this);
     address creator = address(0xC0DE);
     address seller  = address(0xBEEF);
     address buyer   = address(0xCAFE);
 
     function setUp() public {
-        mp  = new Marketplace(creator, admin);
+        mp  = new Marketplace(creator);
         nft = new MockERC721();
         vm.deal(buyer, 10 ether);
     }
 
-    // ── Constructor guards ────────────────────────────────────────────────
+    // ── Constructor guard ─────────────────────────────────────────────────
 
     function test_constructorZeroRecipientReverts() public {
         vm.expectRevert();
-        new Marketplace(address(0), admin);
-    }
-
-    function test_constructorZeroAdminReverts() public {
-        vm.expectRevert();
-        new Marketplace(creator, address(0));
+        new Marketplace(address(0));
     }
 
     // ── Immutability ──────────────────────────────────────────────────────
@@ -60,30 +54,20 @@ contract MarketplaceCoreTest is Test {
         assertEq(creator.balance - before_, 0.03 ether);
     }
 
-    // ── Access control ────────────────────────────────────────────────────
+    // ── No pause / no admin ───────────────────────────────────────────────
 
-    function test_nonAdminCannotPause() public {
-        vm.prank(address(0xBAD));
-        vm.expectRevert();
-        mp.pause();
-    }
+    function test_noPauseFunctionExists() public {
+        // Marketplace no longer has pause/unpause — just verify basic buy works normally
+        uint256 listingFee = (1 ether * 150) / 10_000;
+        vm.deal(seller, listingFee);
+        vm.startPrank(seller);
+        uint256 id = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
+        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
 
-    function test_adminCanGrantPauserRole() public {
-        bytes32 pauserRole = mp.PAUSER_ROLE();
-        mp.grantRole(pauserRole, seller);
-
-        vm.prank(seller);
-        mp.pause();
-        assertTrue(mp.paused());
-    }
-
-    function test_pauserCannotGrantRoles() public {
-        bytes32 pauserRole = mp.PAUSER_ROLE();
-        mp.grantRole(pauserRole, seller);
-
-        // A pauser cannot grant the pauser role to someone else
-        vm.prank(seller);
-        vm.expectRevert();
-        mp.grantRole(pauserRole, buyer);
+        vm.prank(buyer);
+        mp.buy{value: 1 ether}(address(nft), id);
+        assertEq(nft.ownerOf(id), buyer);
     }
 }

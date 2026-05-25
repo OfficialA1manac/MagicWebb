@@ -8,10 +8,11 @@ import {OfferBook}    from "../src/OfferBook.sol";
 
 /// @notice Deploy Magic Webb to Flare mainnet (chain 14).
 ///         Single hardcoded 1.5% platform fee — sent directly to CREATOR_ADDR wallet.
+///         Contracts are unstoppable: no pause, no admin. CREATOR_ADDR is fee recipient only.
 ///
 /// Required env vars:
 ///   PRIVATE_KEY   -- deployer private key (never commit)
-///   CREATOR_ADDR  -- fee recipient and admin (Safe multi-sig recommended on mainnet)
+///   CREATOR_ADDR  -- fee recipient wallet address (Safe multi-sig recommended on mainnet)
 contract DeployFlare is Script {
     function run() external {
         require(block.chainid == 14, "WRONG_CHAIN: use DeployCoston2.s.sol for testnet");
@@ -22,9 +23,9 @@ contract DeployFlare is Script {
 
         vm.startBroadcast(pk);
 
-        Marketplace  marketplace = new Marketplace (creator, creator);
-        AuctionHouse auction     = new AuctionHouse(creator, creator);
-        OfferBook    offerBook   = new OfferBook   (creator, creator);
+        Marketplace  marketplace = new Marketplace (creator);
+        AuctionHouse auction     = new AuctionHouse(creator);
+        OfferBook    offerBook   = new OfferBook   (creator);
 
         vm.stopBroadcast();
 
