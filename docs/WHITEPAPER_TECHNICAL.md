@@ -34,19 +34,25 @@ Wallet <-> Frontend (Next.js + wagmi/viem) <-> Flare RPC <-> Contracts
 | `OfferBook` | **All** offer lifecycle: bidder **deposits**, EIP-712 **signed** offers off-chain, **acceptance** or **cancellation** on-chain. Nonces, deposits, and events give a clear **open vs. closed** picture; the contract is the source of truth for what can still execute. |
 | `MarketplaceCore` | Shared **immutable** fee routing, `_splitAndPay`, standard-aware NFT transfer helpers, and `ReentrancyGuard`. No admin roles, no fee mutability, no pause switch—so listings, auctions, and offers **cannot** silently change fee economics or clash on shared settlement primitives. |
 
-### 3.2 Platform fee (immutable per deployment)
+### 3.2 Platform fee (single, unified, immutable)
 
-On each child contract (`Marketplace`, `AuctionHouse`, `OfferBook`), the platform fee settings are constructor arguments only—there is no setter, upgrade path, or owner key that can change them after deploy.
+MagicWebb charges a single **1.5% platform fee** (`PLATFORM_FEE_BPS = 150`) applied to **all operations**: listing, buying, auction settlement, and offer acceptance. There is no separate listing fee vs. trade fee — one constant governs everything.
 
-**Canonical production parameters (documented target):**
+The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or mutable storage variable. It cannot be changed by any admin key, environment variable, or upgrade path. Changing it requires deploying new contracts.
 
-- **Platform fee amount:** `150` bps (1.5% of the trade `msg.value` / accepted bid / offer amount).
+**Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-Deploy scripts read `CREATOR_ADDR` and `FEE_BPS`; operators must set these to the intended immutable values **before** broadcasting, because they cannot be corrected post-deploy without new contracts.
+Deploy scripts require only `CREATOR_ADDR` (the fee recipient + admin wallet). No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
-**Where the immutable bps is applied.** The platform fee **applies** (is **charged from trade proceeds**) on every **successful, final settlement** that moves an NFT and pays the seller: `Marketplace.buy`, `AuctionHouse.settle` (winning bid only), and `OfferBook.acceptOffer` / `acceptOffer1155`. There is **no** separate listing fee, auction-creation fee, or offer-signature fee—**listing, relisting, cancelling an unsold listing, cancelling a zero-bid auction, and offer cancellation (nonce burn) do not call `_splitAndPay`**, so the platform fee is **not applied** on those actions.
+**Where the 1.5% fee applies.** The platform fee is charged on:
+- **Listing:** 1.5% of listing price, paid upfront by the seller when calling `list`, `list1155`, or `batchList`. Sent directly to `feeRecipient` immediately.
+- **Buy:** 1.5% of sale price, deducted from seller proceeds via `_splitAndPay` in the same atomic transaction as the NFT transfer.
+- **Auction settlement:** 1.5% of the winning bid, deducted from seller proceeds when `settle()` is called.
+- **Offer acceptance:** 1.5% of the offer amount, deducted from seller proceeds when `acceptOffer()` / `acceptOffer1155()` is called.
+
+**What is NOT charged:** Auction-creation, bid placement, outbid refunds, offer signing, listing cancellation, zero-bid auction cancellation — none of these trigger `_splitAndPay` or any fee deduction.
 
 **Auction bids (no fee applied on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
 
@@ -94,7 +100,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 | Reentrancy on payable flows | `ReentrancyGuard` + checks-effects-interactions |
 | Auction griefing via refund callback | Pull-pattern refunds (`withdrawRefund`) |
 | Signature replay | EIP-712 domain includes `chainId` and `verifyingContract`; nonce burn map |
-| Fee abuse | `MAX_FEE_BPS` (10%) enforced at **constructor**; platform fee settings are **immutable** (no admin fee changes) |
+| Fee abuse | `PLATFORM_FEE_BPS` is a hardcoded `constant` (1.5%); no admin key, env var, or upgrade path can change it |
 | Listing overwrite by third party | Seller collision checks (`AlreadyListed`) |
 
 Residual accepted risks:

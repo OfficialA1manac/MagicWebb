@@ -1,6 +1,6 @@
 # MagicWebb Smart Contracts
 
-All contracts inherit `MarketplaceCore` which provides: `feeVault` (immutable), `feeBps` (immutable 150 = 1.5%), `pause`/`unpause`, `AccessControl`, `ReentrancyGuard`.
+All contracts inherit `MarketplaceCore` which provides: `feeRecipient` (immutable wallet address), `PLATFORM_FEE_BPS` (constant 150 = 1.5%), `pause`/`unpause`, `AccessControl`, `ReentrancyGuard`.
 
 ---
 
@@ -12,11 +12,11 @@ Fixed-price ERC-721 and ERC-1155 listings.
 
 | Function | Who | Description |
 |----------|-----|-------------|
-| `list(coll, id, price, expiresAt)` | seller | List one ERC-721. Requires ownership + approval. |
-| `list1155(coll, id, amount, price, expiresAt)` | seller | List ERC-1155 tokens. |
-| `batchList(items[])` | seller | List up to 50 ERC-721 tokens in one tx. Each item: `{coll, id, price, expiresAt}`. Reverts if `items.length == 0 || items.length > 50` (`BatchTooLarge`). |
+| `list(coll, id, price, expiresAt)` | seller | List one ERC-721. Requires ownership + approval. 1.5% listing fee paid upfront. |
+| `list1155(coll, id, amount, price, expiresAt)` | seller | List ERC-1155 tokens. 1.5% listing fee paid upfront. |
+| `batchList(items[])` | seller | List up to 50 ERC-721 tokens in one tx. Each item: `{coll, id, price, expiresAt}`. Reverts if `items.length == 0 || items.length > 50` (`BatchTooLarge`). 1.5% listing fee on each item, summed. |
 | `cancel(coll, id)` | seller | Remove listing. Works while paused. |
-| `buy(coll, id)` | buyer | Buy at exact listing price. NFT → buyer, fee → feeVault, remainder → seller. Atomic — entire tx reverts if NFT transfer fails. |
+| `buy(coll, id)` | buyer | Buy at exact listing price. NFT → buyer, 1.5% fee → feeRecipient wallet, remainder → seller. Atomic — entire tx reverts if NFT transfer fails. |
 
 ### Listing struct (2 storage slots)
 ```
@@ -67,7 +67,7 @@ slot 5: amount(16)
 | `create1155(...)` | seller | Create ERC-1155 auction. |
 | `commitBid(id, commitment)` | bidder | Phase 1: store bid commitment. |
 | `bid(id, fullAmount, salt)` | bidder | Phase 2: reveal and apply bid. |
-| `settle(id)` | anyone | After `endsAt`: transfers NFT to winner, pays seller. Called automatically by keeper bot. |
+| `settle(id)` | anyone | After `endsAt`: transfers NFT to winner, 1.5% fee → feeRecipient wallet, remainder → seller. Called automatically by keeper bot. |
 | `cancel(id)` | seller | Cancel if no bids exist. |
 | `withdrawRefund()` | outbid bidder | Claim accumulated refunds from pendingReturns. |
 | `reclaimBid(id)` | winner | If `settle` not called within 7 days of `endsAt`, winner reclaims ETH. |
@@ -83,7 +83,7 @@ Off-chain EIP-712 signed offers with on-chain ETH escrow.
 |----------|-----|-------------|
 | `deposit()` | offeror | Deposit ETH to use across all offers. |
 | `withdraw(amount)` | offeror | Withdraw deposited ETH. |
-| `acceptOffer(offer, sig)` | token owner | Accept a signed offer: verifies EIP-712 sig, transfers NFT, pays offeror's deposited ETH. |
+| `acceptOffer(offer, sig)` | token owner | Accept a signed offer: verifies EIP-712 sig, transfers NFT, 1.5% fee → feeRecipient wallet, remainder → seller. |
 | `cancelOffer(offer)` | offeror | Invalidate an offer. |
 
 ---
@@ -92,9 +92,9 @@ Off-chain EIP-712 signed offers with on-chain ETH escrow.
 
 | Item | Value |
 |------|-------|
-| `feeVault` | Immutable. Set at deploy. Receives all platform fees. |
-| `feeBps` | Immutable. Set at deploy (150 = 1.5%). |
-| `_splitAndPay(seller, amount)` | Deducts `feeBps/10000 * amount` → feeVault, remainder → seller. |
+| `feeRecipient` | Immutable wallet address. Set at deploy. Receives all platform fees directly. |
+| `PLATFORM_FEE_BPS` | Constant `150` (1.5%). Hardcoded — cannot be changed by any admin or env var. |
+| `_splitAndPay(seller, amount)` | Deducts `PLATFORM_FEE_BPS/10000 * amount` → feeRecipient, remainder → seller. |
 | `_transferToken(std, coll, from, to, id, amt)` | Handles ERC-721 and ERC-1155 transfers. |
 
-Fee formula: `fee = amount * feeBps / 10_000`. Seller receives `amount - fee`.
+Fee formula: `fee = amount * 150 / 10_000`. Seller receives `amount - fee`. Fee is sent via `.call{value: fee}("")` directly to the `feeRecipient` wallet.
