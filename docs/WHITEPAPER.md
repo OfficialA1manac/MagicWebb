@@ -7,7 +7,7 @@
 
 ## Executive summary
 
-MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and signed off-chain offers. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a hard-capped 2.5% platform fee, and the underlying contracts cannot raise that fee above 10% under any circumstance, no matter who controls the admin key.
+MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and signed off-chain offers. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 1.5% platform fee across all operations (listing, buying, auctions, offers). The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
 
 This document explains what MagicWebb is, who it serves, why it exists, and where it is going. A separate **technical whitepaper** (`WHITEPAPER_TECHNICAL.md`) covers the smart-contract design and threat model in depth; a **line-by-line annotation** (`CONTRACTS_ANNOTATED.md`) walks every line of every Solidity file.
 
@@ -24,7 +24,7 @@ NFT marketplaces today suffer from three structural failures:
 MagicWebb addresses all three:
 
 - **No custody.** Sellers retain the NFT in their wallet until the moment a buyer settles. The contract holds zero NFT inventory at rest.
-- **Hard-capped fee.** The on-chain `MAX_FEE_BPS` constant is 1,000 basis points (10%). The fee admin can lower the fee but cannot raise it above this cap. Default ships at 2.5%.
+- **Fixed fee.** The on-chain `PLATFORM_FEE_BPS` constant is 150 basis points (1.5%). It is a `constant` — not a variable, not a mutable slot. No admin can change it post-deploy.
 - **One product, two standards.** A single contract surface handles both ERC-721 and ERC-1155 via a one-byte discriminator. Frontends treat them uniformly.
 
 ---
@@ -72,9 +72,11 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 ## 4. What makes MagicWebb different
 
-### 4.1 Hard-capped fee
+### 4.1 Single hardcoded fee
 
-The `MAX_FEE_BPS` constant in `MarketplaceCore.sol` is 1,000 (10%). It is a `constant` — not a `variable`, not a `mutable storage slot`. Changing it requires deploying a new contract; the new contract would have a different address, so users can verify the cap themselves.
+The `PLATFORM_FEE_BPS` constant in `MarketplaceCore.sol` is 150 (1.5%). It is a `constant` — not a variable, not a mutable storage slot. It applies uniformly to listing, buying, auction settlement, and offer acceptance. Changing it requires deploying a new contract with a different address, so users can verify the rate themselves.
+
+Fees are sent directly to the `feeRecipient` wallet via `.call{value: fee}("")` — no intermediary contract, no vault, no accumulator step.
 
 This is a structural commitment, not a marketing line.
 
@@ -138,7 +140,7 @@ This is a deliberate choice:
 
 - A token would create an alignment between the platform and short-term price action that we do not want. We are building infrastructure, not a meme.
 - The Flare Network already has FLR; introducing a second token to a niche venue would fragment liquidity.
-- All decisions that *could* be governed (fee changes, pauser, vault address) are visible on-chain via the AccessControl events.
+- All decisions that *could* be governed (pauser changes, fee recipient address) are visible on-chain via the AccessControl events. The fee rate itself cannot be governed — it is a compile-time constant.
 
 If user feedback ever justifies governance, it will be added via a separate mechanism — not retroactively jammed in by minting a token.
 
@@ -160,7 +162,7 @@ If user feedback ever justifies governance, it will be added via a separate mech
 | Risk | What happens | What we do |
 |---|---|---|
 | Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty, no upgradeability that could change behavior post-deploy |
-| Operator key compromised | Fee router changes | Cap at 10% means worst case is a 4× fee jump (2.5%→10%), still bounded; no fund-drain path; pre-mainnet handover to multisig |
+| Operator key compromised | Admin role changes | Fee rate is a hardcoded constant — no admin can change it; worst case is pausing the contracts; pre-mainnet handover to multisig |
 | Frontend disappears | Inconvenient | Contracts remain callable via Flarescan or any wallet's "contract interaction" panel |
 | Indexer lags | Stale UI | Frontend shows "syncing" badge; on-chain trades still settle in real time |
 | Approval phishing | Drained NFTs | Per-collection approvals; user education in app; we never request blanket setApprovalForAll for unknown contracts |

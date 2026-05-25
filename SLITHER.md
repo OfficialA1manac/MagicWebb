@@ -1,10 +1,10 @@
 # Slither Security Report
 
-**Date:** 2026-05-20  
+**Date:** 2026-05-25 (updated — TreasuryVault removed, unified 1.5% fee)  
 **Tool:** Slither (crytic)  
 **Config:** `contracts/slither.config.json` (lib/ filtered, all severities shown)  
-**Contracts analyzed:** 30 (6 src + mocks + OZ)  
-**Results:** 23 findings — 0 HIGH, 0 MEDIUM (post-fix), resolved below
+**Contracts analyzed:** 5 src (MarketplaceCore, Marketplace, AuctionHouse, OfferBook, RoyaltyRegistry)  
+**Results:** All HIGH and MEDIUM: 0 (no findings)
 
 ---
 
@@ -20,36 +20,29 @@
 
 ### arbitrary-send-eth (MEDIUM — accepted)
 
-**`MarketplaceCore._splitAndPay`:** ETH sent to `royaltyReceiver`, `feeVault`, `seller`.  
-Accepted: all three destinations are validated — `feeVault` is immutable; `seller` is the authenticated NFT owner; `royaltyReceiver` comes from ERC-2981 or the access-controlled RoyaltyRegistry. Not arbitrary.
+**`MarketplaceCore._splitAndPay`:** ETH sent to `feeRecipient` and `seller`.  
+Accepted: both destinations are validated — `feeRecipient` is immutable (set at deploy, never changeable); `seller` is the authenticated NFT owner at settlement time. Not arbitrary.
 
-**`TreasuryVault.withdraw/withdrawAll`:** ETH sent to `to` parameter.  
-Accepted: function gated to `WITHDRAWER_ROLE`. Caller is trusted admin, not user-controlled.
+**Note:** `TreasuryVault` has been removed. All fees are sent directly to the immutable `feeRecipient` wallet — no vault contract, no accumulator.
 
 ### reentrancy-events (LOW — accepted)
 
-**`TreasuryVault.withdraw/withdrawAll`:** Event emitted after `.call`.  
-Accepted: state (`balance`) updated before the call (CEI followed). Event emission after a reentrant call would simply emit a duplicate log — no state is corrupted, no funds at risk. `nonReentrant` added for defense-in-depth on the external call path.
-
-### incorrect-equality (LOW — accepted)
-
-**`TreasuryVault.withdrawAll`:** `bal == 0` strict equality.  
-Accepted: intentional — reverts if vault is empty. No external input can force `bal` to a non-zero value that equals zero.
+**`AuctionHouse.withdrawRefund` / `reclaimBid`:** State updated before `.call`. CEI followed. `nonReentrant` provides defense-in-depth.
 
 ### timestamp (LOW — accepted)
 
-All auction/listing timestamp comparisons are intentional. Flare block time is ~1.8 s; miner timestamp manipulation is bounded to ±15 s. Anti-snipe window is 5 minutes — well above manipulation range.
+All auction/listing timestamp comparisons are intentional. Flare block time is ~1.8 s; miner timestamp manipulation is bounded to ±15 s.
 
 ### cyclomatic-complexity (INFO — accepted)
 
-**`AuctionHouse.bid`:** Complexity 20. Justified by the commit-reveal + compound-bid + anti-snipe + increment logic in a single function. Splitting would increase gas via extra SLOADs.
+**`AuctionHouse.bid`:** Complexity justified by commit-reveal + compound-bid + increment logic. Splitting would increase gas via extra SLOADs.
 
 ### low-level-calls (INFO — accepted)
 
-All `.call{value:}` usages check the return bool and revert on failure. This is the recommended pattern for ETH transfers (avoids 2300 gas limit of `.transfer()`).
+All `.call{value:}` usages check the return bool and revert on failure. Recommended pattern for ETH transfers.
 
 ---
 
 ## Summary
 
-**No HIGH or MEDIUM vulnerabilities remain.** All findings are either fixed, accepted false-positives, or intentional design patterns with documented rationale.
+**No HIGH or MEDIUM vulnerabilities.** All findings are accepted false-positives or intentional design patterns with documented rationale. The removal of `TreasuryVault` eliminated the `WITHDRAWER_ROLE`-gated send findings.

@@ -86,4 +86,4 @@ make regen-abi         # writes frontend/lib/abi/*.ts from compiled JSON
 | `NEXT_PUBLIC_OFFER_ADDR` | OfferBook address |
 
 ## Contract addresses are permanent
-Once deployed, contract addresses and `feeVault` cannot change. To change fee/admin: deploy new contracts and run `make fresh-deploy`.
+Once deployed, contract addresses and `feeRecipient` cannot change. The 1.5% platform fee is hardcoded in the contracts as `PLATFORM_FEE_BPS = 150` — it cannot be overridden by any env var or admin key. To change the fee recipient or fee rate: deploy new contracts and run `make fresh-deploy`.

@@ -38,7 +38,7 @@ NFTs stay in the seller's wallet until a transaction settles on-chain. No deposi
 | `AuctionHouse` | English auctions. Fixed end time (never extended). Commit-reveal MEV protection. Auto-settled by keeper. |
 | `OfferBook` | EIP-712 signed offers. Deposited ETH held until accepted or expired. |
 
-Platform fee: **1.5%** (`FEE_BPS=150`). No royalties. Fee goes to immutable `feeVault` set at deploy time.
+Platform fee: **1.5%** (`PLATFORM_FEE_BPS = 150`, hardcoded constant). Applied to **all operations** — listing, buying, auction settlement, and offer acceptance. Fee is sent directly and immediately to the immutable `feeRecipient` wallet set at deploy time. No vault, no intermediary.
 
 ## Key design decisions
 
