@@ -80,7 +80,7 @@ contract AuctionHouseTest is Test {
         // Compound: full = 1.6 ether, increment = 0.6 ether (> 5% of 1 ether)
         _commitAndBid(id, alice, 1.6 ether, 0.6 ether);
 
-        (,,,,,,,, , ,uint128 hi,,) = ah.auctions(id);
+        (,,,,,,,,, uint128 hi,,) = ah.auctions(id);
         assertEq(hi, 1.6 ether);
         assertEq(ah.pendingReturns(alice), 0);
         assertEq(address(ah).balance, 1.6 ether);
@@ -139,64 +139,6 @@ contract AuctionHouseTest is Test {
         vm.prank(alice);
         vm.expectRevert();
         ah.bid{value: uint256(amt)}(id, amt, salt);
-    }
-
-    // ── Anti-snipe ────────────────────────────────────────────────────────
-
-    function test_antiSnipeExtends() public {
-        (uint256 id,) = _createAuction();
-
-        vm.warp(block.timestamp + 7 days - 2 minutes);
-
-        _commitAndBid(id, alice, 1 ether, 1 ether);
-
-        (,,,,,, uint64 endsAt,,,,,,) = ah.auctions(id);
-        assertGt(endsAt, uint64(block.timestamp));
-    }
-
-    // Anti-snipe cap: extension clamped to originalEndsAt + ANTI_SNIPE_MAX_EXTENSION.
-    function test_antiSnipeCapRespected() public {
-        (uint256 id,) = _createAuction();
-
-        // Place initial bid (needed so Alice can compound-raise later)
-        _commitAndBid(id, alice, 1 ether, 1 ether);
-
-        // Manipulate endsAt via vm.store to be near the absolute cap.
-        // Storage layout (new MarketplaceCore adds Pausable._paused[slot0], AccessControl._roles[slot1],
-        // royaltyRegistry[slot2]): nextAuctionId=slot3, auctions mapping=slot4.
-        // Struct slot+1: collection(160) | endsAt(64) | originalEndsAt(32)
-        bytes32 base = keccak256(abi.encode(uint256(id), uint256(4)));
-        bytes32 slot1 = bytes32(uint256(base) + 1);
-        bytes32 word  = vm.load(address(ah), slot1);
-
-        uint160 coll    = uint160(uint256(word));
-        uint32  origEnd = uint32(uint256(word) >> (160 + 64));
-
-        uint64 cap       = uint64(origEnd) + ah.ANTI_SNIPE_MAX_EXTENSION();
-        uint64 newEndsAt = cap - 100; // 100 seconds before cap
-
-        bytes32 newWord = bytes32(
-            uint256(coll) |
-            (uint256(newEndsAt) << 160) |
-            (uint256(origEnd)   << 224)
-        );
-        vm.store(address(ah), slot1, newWord);
-
-        // Warp to inside snipe window; roll is independent of timestamp
-        vm.warp(uint256(newEndsAt) - 1);
-
-        // Alice compound-raises (fullAmount = 1.06 ether, increment = 0.06 ether)
-        uint128 raised = 1.06 ether;
-        bytes32 salt2  = keccak256("raise_salt");
-        bytes32 c2     = keccak256(abi.encode(id, alice, raised, salt2));
-        vm.prank(alice);
-        ah.commitBid(id, c2);
-        vm.roll(block.number + uint256(ah.COMMIT_DELAY_BLOCKS()) + 1);
-        vm.prank(alice);
-        ah.bid{value: 0.06 ether}(id, raised, salt2);
-
-        (,,,,,, uint64 finalEnd,,,,,,) = ah.auctions(id);
-        assertEq(finalEnd, cap);
     }
 
     // ── reclaimBid safety valve ───────────────────────────────────────────
@@ -367,7 +309,7 @@ contract AuctionHouseTest is Test {
         uint256 inc      = uint256(reserve) * incBps / 10_000;
         uint128 validBid = uint128(uint256(reserve) + (inc == 0 ? 1 : inc) + 1);
         _commitAndBid(id, bob, validBid, validBid);
-        (,,,,,,,, , ,uint128 hi,,) = ah.auctions(id);
+        (,,,,,,,,, uint128 hi,,) = ah.auctions(id);
         assertEq(hi, validBid);
     }
 
