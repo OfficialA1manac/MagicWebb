@@ -137,6 +137,9 @@ export function ProfileNftCard({
   hidden,
   onToggleHide,
   onActionDone,
+  batchMode = false,
+  selected = false,
+  onToggleSelect,
 }: {
   coll: Address;
   id: bigint;
@@ -145,6 +148,9 @@ export function ProfileNftCard({
   hidden: boolean;
   onToggleHide: () => void;
   onActionDone?: () => void;
+  batchMode?: boolean;
+  selected?: boolean;
+  onToggleSelect?: (coll: Address, id: bigint) => void;
 }) {
   const [listOpen, setListOpen] = useState(false);
   const {cancel, isPending: cancelPending} = useCancelListing();
@@ -166,10 +172,21 @@ export function ProfileNftCard({
   }, [cancelTx.isConfirmed, onActionDone]);
 
   return (
-    <div className={`flex flex-col rounded-xl border border-neutral-800 bg-neutral-900/40 overflow-hidden transition hover:border-neutral-600 ${hidden ? "opacity-40 grayscale" : ""}`}>
-      <Link href={`/token/${coll}/${id.toString()}`} className="block shrink-0">
-        <NftImage src={imageUrl} id={id} alt={`${title} #${id}`} />
-      </Link>
+    <div
+      className={`flex flex-col rounded-xl border overflow-hidden transition bg-neutral-900/40 ${selected ? "border-emerald-500 ring-1 ring-emerald-500/40" : "border-neutral-800 hover:border-neutral-600"} ${hidden ? "opacity-40 grayscale" : ""}`}
+      onClick={batchMode && !listing ? () => onToggleSelect?.(coll, id) : undefined}
+      style={batchMode && !listing ? {cursor: "pointer"} : undefined}
+    >
+      <div className="relative block shrink-0">
+        {batchMode && !listing && (
+          <div className="absolute top-2 left-2 z-10 pointer-events-none">
+            <input type="checkbox" checked={selected} readOnly className="w-4 h-4 accent-emerald-500" />
+          </div>
+        )}
+        <Link href={`/token/${coll}/${id.toString()}`} className="block" onClick={batchMode && !listing ? e => e.preventDefault() : undefined}>
+          <NftImage src={imageUrl} id={id} alt={`${title} #${id}`} />
+        </Link>
+      </div>
 
       <div className="flex flex-col flex-1 p-3 gap-2">
         <div>
@@ -185,7 +202,7 @@ export function ProfileNftCard({
           )}
         </div>
 
-        {!listOpen && (
+        {!listOpen && !batchMode && (
           <div className="flex gap-1.5 mt-auto">
             <button
               type="button"
@@ -212,6 +229,14 @@ export function ProfileNftCard({
                 List
               </button>
             )}
+          </div>
+        )}
+
+        {batchMode && !listing && (
+          <div className="mt-auto">
+            <div className={`text-xs text-center py-1 rounded ${selected ? "text-emerald-400" : "text-neutral-600"}`}>
+              {selected ? "Selected" : "Tap to select"}
+            </div>
           </div>
         )}
 

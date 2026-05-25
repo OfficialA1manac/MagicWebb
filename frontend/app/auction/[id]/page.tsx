@@ -43,7 +43,7 @@ export default function AuctionPage() {
 
   const derived = useMemo(() => {
     if (!data) return null;
-    const a = data as Auction;
+    const a = data as unknown as Auction;
     const [seller, , minIncBps, settled, , collection, endsAt, tokenId, reserve, highestBid, highestBidder] = a;
     const live = !settled && BigInt(Math.floor(Date.now() / 1000)) < endsAt;
     const hasBid = highestBidder !== "0x0000000000000000000000000000000000000000";
@@ -110,7 +110,14 @@ export default function AuctionPage() {
         </div>
       </div>
 
-      {live && <BidForm id={aid} minNext={minNext} />}
+      {live && (
+        <BidForm
+          id={aid}
+          minNext={minNext}
+          highestBid={highestBid}
+          highestBidder={highestBidder as Address}
+        />
+      )}
 
       {needsSettle && !isConnected && (
         <p className="text-sm text-amber-400/90">
