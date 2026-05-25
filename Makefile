@@ -16,7 +16,7 @@ LOG_FILE := frontend/.next/web.log
 export
 
 .PHONY: help install build start stop restart status health \
-        contracts-build contracts-test deploy load-addrs clean
+        contracts-build contracts-test deploy load-addrs clean \n        up down logs regen-abi fresh-deploy
 
 help: ## show targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-18s %s\n", $$1, $$2}'
@@ -140,6 +140,8 @@ load-addrs: ## sync deployed addresses from broadcast → $(ENV_FILE)
 	    else printf '%s=%s\n' "$$k" "$$v" >> $(ENV_FILE); fi; \
 	    echo "  $$k=$$v"; \
 	  done
+t  echo "==> Updating .env (backend)"; \n	  for kv in MARKETPLACE_ADDR=$$m AUCTION_ADDR=$$a OFFERBOOK_ADDR=$$o; do \n	    k=$${kv%%=*}; v=$${kv#*=}; \n	    if grep -qE "^$$k=" .env 2>/dev/null; then sed -i "s|^$$k=.*|$$k=$$v|" .env; \n	    else printf '%s=%s
+' "$$k" "$$v" >> .env; fi; \n	    echo "  $$k=$$v"; \n	  done; \n	  echo "==> Updating render.yaml"; \n	  sed -i "s|value: \"0x[0-9a-fA-F]*\"  # MARKETPLACE|value: \"$$m\"  # MARKETPLACE|g" render.yaml 2>/dev/null || true; \n	  sed -i "s|value: \"0x[0-9a-fA-F]*\"  # AUCTION|value: \"$$a\"  # AUCTION|g" render.yaml 2>/dev/null || true; \n	  sed -i "s|value: \"0x[0-9a-fA-F]*\"  # OFFERBOOK|value: \"$$o\"  # OFFERBOOK|g" render.yaml 2>/dev/null || true; \n	  echo "  render.yaml updated"
 
 # --- Housekeeping -------------------------------------------------------------
 
@@ -153,3 +155,44 @@ build: ## production build of the Next.js app
 clean: ## remove all build artifacts
 	rm -rf contracts/out contracts/cache contracts/broadcast
 	rm -rf frontend/.next frontend/dist
+
+# --- Docker (immutable continuous operation) ---------------------------------
+
+up: ## start all services with docker-compose (restart:always — never stops)
+	@test -f .env || { echo "FATAL: .env missing — cp backend/.env.example .env and fill in values"; exit 1; }
+	docker-compose up -d --build
+	@echo ""
+	@echo "  All services starting. Run 'make logs' to monitor."
+	@echo "  Services restart automatically on crash or reboot."
+	@echo ""
+
+down: ## stop all docker services
+	docker-compose down
+
+logs: ## tail all service logs (Ctrl-C to stop)
+	docker-compose logs -f
+
+# --- ABI regeneration --------------------------------------------------------
+
+regen-abi: ## regenerate TypeScript ABI files from forge build output
+	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
+	@echo "==> Regenerating TypeScript ABI files"
+	@for contract in AuctionHouse Marketplace OfferBook; do \
+	  f=contracts/out/$$contract.sol/$$contract.json; \
+	  test -f "$$f" || { echo "FATAL: $$f not found"; exit 1; }; \
+	  abi=$$(jq -c '.abi' "$$f"); \
+	  printf 'export const %sAbi = %s as const;\n' "$$contract" "$$abi" \
+	    > "frontend/lib/abi/$$contract.ts"; \
+	  echo "  updated frontend/lib/abi/$$contract.ts"; \
+	done
+
+# --- One-command full redeploy -----------------------------------------------
+
+fresh-deploy: ## full cycle: build → test → deploy → regen-abi → up
+	@$(MAKE) contracts-build
+	@$(MAKE) contracts-test
+	@$(MAKE) deploy
+	@$(MAKE) regen-abi
+	@$(MAKE) up
+	@echo ""
+	@echo "  Full redeploy complete. Run 'make logs' to monitor."
