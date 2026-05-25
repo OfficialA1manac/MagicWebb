@@ -13,6 +13,7 @@ error NotApproved();
 error InvalidExpiry();
 error InvalidAmount();
 error AlreadyListed();
+error BatchTooLarge();
 
 /// @dev Max listing duration. Prevents listings expiring decades in the future.
 uint64 constant MAX_LISTING_DURATION = 365 days;
@@ -75,6 +76,24 @@ contract Marketplace is MarketplaceCore {
     {
         if (amount == 0) revert InvalidAmount();
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
+    }
+
+    // ── Batch List ────────────────────────────────────────────────────────
+
+    struct BatchItem {
+        address coll;
+        uint256 id;
+        uint128 price;
+        uint64  expiresAt;
+    }
+
+    /// @notice List up to 50 ERC-721 tokens in one transaction.
+    ///         Caller must have approved this contract on each collection.
+    function batchList(BatchItem[] calldata items) external whenNotPaused {
+        if (items.length == 0 || items.length > 50) revert BatchTooLarge();
+        for (uint256 i; i < items.length; ++i) {
+            _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);
+        }
     }
 
     function _list(

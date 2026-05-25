@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test}         from "forge-std/Test.sol";
-import {Marketplace}  from "../src/Marketplace.sol";
+import {Marketplace, BatchTooLarge}  from "../src/Marketplace.sol";
 import {MockERC721}   from "./MockERC721.sol";
 import {MockERC1155}  from "./MockERC1155.sol";
 import {MockERC2981}  from "./MockERC2981.sol";
@@ -312,5 +312,51 @@ contract MarketplaceTest is Test {
         mp.buy{value: 1.5 ether}(address(nft), id);
         assertEq(nft.ownerOf(id), buyer2);
         assertGt(buyer.balance, 0);
+    }
+}
+
+contract BatchListTest is MarketplaceTest {
+    function test_batchList_listsAllTokens() public {
+        vm.startPrank(seller);
+        nft.setApprovalForAll(address(mp), true);
+        uint256 t1 = nft.mint(seller);
+        uint256 t2 = nft.mint(seller);
+        uint256 t3 = nft.mint(seller);
+        uint64 exp = uint64(block.timestamp + 7 days);
+
+        Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](3);
+        items[0] = Marketplace.BatchItem({coll: address(nft), id: t1, price: 1 ether, expiresAt: exp});
+        items[1] = Marketplace.BatchItem({coll: address(nft), id: t2, price: 2 ether, expiresAt: exp});
+        items[2] = Marketplace.BatchItem({coll: address(nft), id: t3, price: 3 ether, expiresAt: exp});
+
+        mp.batchList(items);
+        vm.stopPrank();
+
+        (address s1,,,uint128 p1,) = mp.listings(address(nft), t1);
+        (address s2,,,uint128 p2,) = mp.listings(address(nft), t2);
+        (address s3,,,uint128 p3,) = mp.listings(address(nft), t3);
+        assertEq(s1, seller); assertEq(p1, 1 ether);
+        assertEq(s2, seller); assertEq(p2, 2 ether);
+        assertEq(s3, seller); assertEq(p3, 3 ether);
+    }
+
+    function test_batchList_revertsOnEmpty() public {
+        vm.prank(seller);
+        Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](0);
+        vm.expectRevert(BatchTooLarge.selector);
+        mp.batchList(items);
+    }
+
+    function test_batchList_revertsOver50() public {
+        vm.startPrank(seller);
+        nft.setApprovalForAll(address(mp), true);
+        Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](51);
+        for (uint256 i; i < 51; i++) {
+            uint256 tid = nft.mint(seller);
+            items[i] = Marketplace.BatchItem({coll: address(nft), id: tid, price: 1 ether, expiresAt: uint64(block.timestamp + 7 days)});
+        }
+        vm.expectRevert(BatchTooLarge.selector);
+        mp.batchList(items);
+        vm.stopPrank();
     }
 }
