@@ -55,16 +55,19 @@ contract MarketplaceCoreTest is Test {
     // ── Fee routing ───────────────────────────────────────────────────────
 
     function test_feePushedToFeeVault() public {
+        uint256 listingFee = (1 ether * 150) / 10_000;
+        vm.deal(seller, listingFee);
+        uint256 before_ = creator.balance;
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
         vm.stopPrank();
 
-        uint256 before_ = creator.balance;
         vm.prank(buyer);
         mp.buy{value: 1 ether}(address(nft), id);
-        assertEq(creator.balance - before_, 0.025 ether);
+        // listing fee (150 bps) + sale fee (250 bps) of 1 ether
+        assertEq(creator.balance - before_, 0.04 ether);
     }
 
     // ── Access control ────────────────────────────────────────────────────

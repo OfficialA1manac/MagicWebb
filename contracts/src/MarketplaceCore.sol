@@ -25,6 +25,9 @@ abstract contract MarketplaceCore is ReentrancyGuard, Pausable, AccessControl, E
     /// @notice Hard cap on platform fee: 10%.
     uint16 public constant MAX_FEE_BPS = 1_000;
 
+    /// @notice Listing fee: 1.5% of listing price, collected upfront on every list call.
+    uint16 public constant LISTING_FEE_BPS = 150;
+
     /// @notice Platform fee in basis points. Immutable post-deploy.
     uint16  public immutable feeBps;
     /// @notice Recipient of the platform fee on every trade. Immutable post-deploy.
