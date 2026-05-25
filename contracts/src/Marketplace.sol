@@ -14,6 +14,7 @@ error InvalidExpiry();
 error InvalidAmount();
 error AlreadyListed();
 error BatchTooLarge();
+error TransferFailed();
 
 /// @dev Max listing duration. Prevents listings expiring decades in the future.
 uint64 constant MAX_LISTING_DURATION = 365 days;
@@ -66,15 +67,27 @@ contract Marketplace is MarketplaceCore {
     // ── List ──────────────────────────────────────────────────────────────
 
     function list(address coll, uint256 id, uint128 price, uint64 expiresAt)
-        external whenNotPaused
+        external payable whenNotPaused
     {
+        uint256 fee = (uint256(price) * LISTING_FEE_BPS) / 10_000;
+        if (msg.value != fee) revert WrongPrice();
+        if (fee > 0) {
+            (bool ok,) = feeVault.call{value: fee}("");
+            if (!ok) revert TransferFailed();
+        }
         _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
     }
 
     function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt)
-        external whenNotPaused
+        external payable whenNotPaused
     {
         if (amount == 0) revert InvalidAmount();
+        uint256 fee = (uint256(price) * LISTING_FEE_BPS) / 10_000;
+        if (msg.value != fee) revert WrongPrice();
+        if (fee > 0) {
+            (bool ok,) = feeVault.call{value: fee}("");
+            if (!ok) revert TransferFailed();
+        }
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
     }
 
@@ -89,8 +102,18 @@ contract Marketplace is MarketplaceCore {
 
     /// @notice List up to 50 ERC-721 tokens in one transaction.
     ///         Caller must have approved this contract on each collection.
-    function batchList(BatchItem[] calldata items) external whenNotPaused {
+    ///         msg.value must equal sum of 1.5% listing fees across all items.
+    function batchList(BatchItem[] calldata items) external payable whenNotPaused {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
+        uint256 totalFee;
+        for (uint256 i; i < items.length; ++i) {
+            totalFee += (uint256(items[i].price) * LISTING_FEE_BPS) / 10_000;
+        }
+        if (msg.value != totalFee) revert WrongPrice();
+        if (totalFee > 0) {
+            (bool ok,) = feeVault.call{value: totalFee}("");
+            if (!ok) revert TransferFailed();
+        }
         for (uint256 i; i < items.length; ++i) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);
         }
