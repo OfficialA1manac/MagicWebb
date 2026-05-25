@@ -11,10 +11,9 @@ contract OfferBookTest is Test {
     MockERC721  nft;
     MockERC1155 multi;
 
-    address admin    = address(this);
-    address feeVault = address(0x1111000000000000000000000000000000111100);
-    uint16  feeBps   = 250;
-    address seller   = address(0xBEEF);
+    address admin        = address(this);
+    address feeRecipient = address(0x1111000000000000000000000000000000111100);
+    address seller       = address(0xBEEF);
 
     uint256 bidderKey;
     address bidder;
@@ -24,7 +23,7 @@ contract OfferBookTest is Test {
         bidderKey = 0xA11CEBEEF;
         bidder    = vm.addr(bidderKey);
 
-        ob    = new OfferBook(feeVault, feeBps, admin);
+        ob    = new OfferBook(feeRecipient, admin);
         nft   = new MockERC721();
         multi = new MockERC1155();
 
@@ -266,7 +265,7 @@ contract OfferBookTest is Test {
         assertEq(ob.deposits(bidder), 0);
     }
 
-    /// @dev Fee paid on any accepted offer must never exceed feeBps% of sale price.
+    /// @dev Fee paid on any accepted offer must equal 1.5% (PLATFORM_FEE_BPS) of offer amount.
     function testFuzz_feeNeverExceedsCap(uint128 amount) public {
         amount = uint128(bound(amount, 0.001 ether, 100 ether));
 
@@ -279,14 +278,14 @@ contract OfferBookTest is Test {
         OfferBook.Offer memory o = _makeOffer(tid, amount, uint64(block.timestamp + 1 days), 8);
         bytes memory sig = _sign(o);
 
-        uint256 sellerBefore  = seller.balance;
-        uint256 vaultBefore   = feeVault.balance;
+        uint256 sellerBefore = seller.balance;
+        uint256 vaultBefore  = feeRecipient.balance;
 
         vm.prank(seller);
         ob.acceptOffer(o, sig, tid);
 
-        uint256 feeActual = feeVault.balance - vaultBefore;
-        uint256 feeCap    = (uint256(amount) * feeBps) / 10_000;
+        uint256 feeActual = feeRecipient.balance - vaultBefore;
+        uint256 feeCap    = (uint256(amount) * 150) / 10_000;
         assertLe(feeActual, feeCap);
 
         // Seller + vault received at most `amount` total (no value creation)

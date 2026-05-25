@@ -23,7 +23,7 @@ uint64 constant MAX_LISTING_DURATION = 365 days;
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
 /// @dev Non-custodial: tokens stay with seller until a buyer settles. Approval required.
 ///      Once `buy` settles the trade is FINAL — no reverse, refund, or admin override.
-///      Funds flow atomically: platform fee → immutable `feeVault`, royalty → creator, remainder → seller.
+///      Funds flow atomically: 1.5% platform fee → feeRecipient wallet, remainder → seller.
 contract Marketplace is MarketplaceCore {
     /// @notice Listing record. Two storage slots:
     ///   slot 0: seller(20) + expiresAt(8) + standard(1) [3 bytes padding]
@@ -60,8 +60,8 @@ contract Marketplace is MarketplaceCore {
         uint256 fee
     );
 
-    constructor(address vault, uint16 fee, address admin)
-        MarketplaceCore(vault, fee, admin)
+    constructor(address recipient, address admin)
+        MarketplaceCore(recipient, admin)
     {}
 
     // ── List ──────────────────────────────────────────────────────────────
@@ -69,10 +69,10 @@ contract Marketplace is MarketplaceCore {
     function list(address coll, uint256 id, uint128 price, uint64 expiresAt)
         external payable whenNotPaused
     {
-        uint256 fee = (uint256(price) * LISTING_FEE_BPS) / 10_000;
+        uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
         if (msg.value != fee) revert WrongPrice();
         if (fee > 0) {
-            (bool ok,) = feeVault.call{value: fee}("");
+            (bool ok,) = feeRecipient.call{value: fee}("");
             if (!ok) revert TransferFailed();
         }
         _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
@@ -82,10 +82,10 @@ contract Marketplace is MarketplaceCore {
         external payable whenNotPaused
     {
         if (amount == 0) revert InvalidAmount();
-        uint256 fee = (uint256(price) * LISTING_FEE_BPS) / 10_000;
+        uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
         if (msg.value != fee) revert WrongPrice();
         if (fee > 0) {
-            (bool ok,) = feeVault.call{value: fee}("");
+            (bool ok,) = feeRecipient.call{value: fee}("");
             if (!ok) revert TransferFailed();
         }
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
@@ -107,11 +107,11 @@ contract Marketplace is MarketplaceCore {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         uint256 totalFee;
         for (uint256 i; i < items.length; ++i) {
-            totalFee += (uint256(items[i].price) * LISTING_FEE_BPS) / 10_000;
+            totalFee += (uint256(items[i].price) * PLATFORM_FEE_BPS) / 10_000;
         }
         if (msg.value != totalFee) revert WrongPrice();
         if (totalFee > 0) {
-            (bool ok,) = feeVault.call{value: totalFee}("");
+            (bool ok,) = feeRecipient.call{value: totalFee}("");
             if (!ok) revert TransferFailed();
         }
         for (uint256 i; i < items.length; ++i) {
@@ -166,7 +166,7 @@ contract Marketplace is MarketplaceCore {
     // ── Buy ───────────────────────────────────────────────────────────────
 
     /// @notice Buy a listed token at exactly the listing price.
-    /// @dev FINAL on success. NFT → buyer, then fee → feeVault, royalty → creator, remainder → seller.
+    /// @dev FINAL on success. NFT → buyer, then 1.5% fee → feeRecipient wallet, remainder → seller.
     ///      Entire tx reverts if NFT transfer fails — no fee is taken, listing remains valid.
     function buy(address coll, uint256 id) external payable nonReentrant whenNotPaused {
         Listing memory l = listings[coll][id];

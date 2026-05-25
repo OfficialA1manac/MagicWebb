@@ -10,15 +10,14 @@ contract AuctionHouseTest is Test {
     AuctionHouse ah;
     MockERC721   nft;
     MockERC1155  multi;
-    address admin    = address(this);
-    address feeVault = address(0x1111000000000000000000000000000000111100);
-    uint16  feeBps   = 250;
-    address seller   = address(0xBEEF);
-    address alice    = address(0xA11CE);
-    address bob      = address(0xB0B);
+    address admin        = address(this);
+    address feeRecipient = address(0x1111000000000000000000000000000000111100);
+    address seller       = address(0xBEEF);
+    address alice        = address(0xA11CE);
+    address bob          = address(0xB0B);
 
     function setUp() public {
-        ah    = new AuctionHouse(feeVault, feeBps, admin);
+        ah    = new AuctionHouse(feeRecipient, admin);
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);
@@ -93,17 +92,17 @@ contract AuctionHouseTest is Test {
 
         vm.warp(block.timestamp + 8 days);
 
-        uint256 vaultBefore  = feeVault.balance;
+        uint256 vaultBefore  = feeRecipient.balance;
         uint256 sellerBefore = seller.balance;
 
-        uint256 fee          = (2 ether * uint256(feeBps)) / 10_000;
-        uint256 sellerPayout = 2 ether - fee; // no royalty on MockERC721
+        uint256 fee          = (2 ether * 150) / 10_000;
+        uint256 sellerPayout = 2 ether - fee;
 
         ah.settle(id);
 
         assertEq(nft.ownerOf(tid), bob);
-        assertEq(feeVault.balance,  vaultBefore  + fee);
-        assertEq(seller.balance,    sellerBefore + sellerPayout);
+        assertEq(feeRecipient.balance, vaultBefore  + fee);
+        assertEq(seller.balance,       sellerBefore + sellerPayout);
     }
 
     // ── Commit-reveal MEV protection ──────────────────────────────────────
@@ -251,12 +250,12 @@ contract AuctionHouseTest is Test {
         _commitAndBid(id, alice, 1 ether, 1 ether);
         vm.warp(block.timestamp + 8 days);
 
-        uint256 vaultBefore = feeVault.balance;
+        uint256 vaultBefore = feeRecipient.balance;
         ah.settle(id);
 
         assertEq(multi.balanceOf(alice,  99), 5);
         assertEq(multi.balanceOf(seller, 99), 0);
-        assertGt(feeVault.balance, vaultBefore);
+        assertGt(feeRecipient.balance, vaultBefore);
     }
 
     function test_settleFailsIfApprovalRevoked() public {
