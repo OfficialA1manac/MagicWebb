@@ -79,6 +79,14 @@ export const api = {
   getAuction: (id: string | bigint) =>
     apiFetch(`/api/v1/auctions/${id}`),
 
+  getAuctionBids: (id: string | bigint): Promise<Array<{
+    bidder: string;
+    amount_wei: string;
+    tx_hash: string;
+    placed_at: string;
+  }>> =>
+    apiFetch(`/api/v1/auctions/${id}/bids`),
+
   getServerTime: (): Promise<{ unix_ms: number }> =>
     apiFetch('/api/v1/server-time'),
 
