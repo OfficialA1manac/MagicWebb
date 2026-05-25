@@ -54,8 +54,7 @@ export default function Home() {
           </li>
           <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
             <div className="mb-1 font-semibold text-emerald-400/90">Auction</div>
-            Reserve, duration, min bid step. Outbids accrue as withdrawable balance; anti-snipe extends the clock in the
-            final minutes.
+            Reserve price, fixed duration, min bid step. Commit-reveal bids prevent front-running. Outbids return automatically to losers.
           </li>
           <li className="rounded-xl border border-neutral-800 bg-neutral-900/30 p-4">
             <div className="mb-1 font-semibold text-emerald-400/90">Offer</div>
