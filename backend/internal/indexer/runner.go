@@ -244,7 +244,7 @@ func (r *Runner) runOfferExpirySweeper(ctx context.Context) {
 
 // ── Auction Keeper (on-chain settlement) ──────────────────────────────────
 
-var settleSelector = crypto.Keccak256([]byte("settleAuction(uint256)"))[:4]
+var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
 
 func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)

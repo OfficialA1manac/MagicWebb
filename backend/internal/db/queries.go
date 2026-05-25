@@ -374,6 +374,38 @@ func (q *Q) InsertBid(ctx context.Context, auctionID int64, bidder, amtWei, txHa
 	return err
 }
 
+// BidRow is one row from the bids table.
+type BidRow struct {
+	Bidder    string    `json:"bidder"`
+	AmountWei string    `json:"amount_wei"`
+	TxHash    string    `json:"tx_hash"`
+	PlacedAt  time.Time `json:"placed_at"`
+}
+
+// GetBidsForAuction returns all bids for an auction ordered newest-first.
+func (q *Q) GetBidsForAuction(ctx context.Context, auctionID int64) ([]BidRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT bidder, amount_wei::text, tx_hash, placed_at
+		   FROM bids
+		  WHERE auction_id = $1
+		  ORDER BY placed_at DESC
+		  LIMIT 200`,
+		auctionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []BidRow
+	for rows.Next() {
+		var r BidRow
+		if err := rows.Scan(&r.Bidder, &r.AmountWei, &r.TxHash, &r.PlacedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ── Sales ─────────────────────────────────────────────────────────────────
 
 func (q *Q) InsertSale(ctx context.Context,
