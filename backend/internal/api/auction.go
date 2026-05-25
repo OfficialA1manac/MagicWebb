@@ -57,3 +57,23 @@ func handleServerTime() http.HandlerFunc {
 		writeJSON(w, http.StatusOK, map[string]int64{"unix_ms": time.Now().UnixMilli()})
 	}
 }
+
+func handleGetAuctionBids(q *db.Q) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		idStr := r.PathValue("id")
+		id, err := strconv.ParseInt(idStr, 10, 64)
+		if err != nil {
+			writeErr(w, http.StatusBadRequest, "invalid auction id")
+			return
+		}
+		rows, err := q.GetBidsForAuction(r.Context(), id)
+		if err != nil {
+			writeErr(w, http.StatusInternalServerError, "internal error")
+			return
+		}
+		if rows == nil {
+			rows = []db.BidRow{}
+		}
+		writeJSON(w, http.StatusOK, rows)
+	}
+}

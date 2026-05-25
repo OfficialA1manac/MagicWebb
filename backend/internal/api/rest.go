@@ -27,6 +27,7 @@ func NewRouter(q *db.Q, rdb *cache.Client, cfg *config.Config) http.Handler {
 	// auctions
 	mux.HandleFunc("GET /api/v1/auctions", handleListAuctions(q))
 	mux.HandleFunc("GET /api/v1/auctions/{id}", handleGetAuction(q))
+	mux.HandleFunc("GET /api/v1/auctions/{id}/bids", handleGetAuctionBids(q))
 	mux.HandleFunc("GET /api/v1/server-time", handleServerTime())
 
 	// offers
