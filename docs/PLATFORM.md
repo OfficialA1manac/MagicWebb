@@ -1,78 +1,89 @@
-# MagicWebb — platform guide
+# MagicWebb Platform Guide
 
-This document is for **developers**, **collectors**, **collection creators / sellers**, and the **broader community**. It explains what MagicWebb is, what you can do, and how the pieces fit together.
+## Prerequisites
+| Tool | Purpose |
+|------|---------|
+| Docker + Docker Compose 24+ | Run all services |
+| Foundry (`forge`, `cast`) | Contract build/deploy |
+| Node.js 20+ | Frontend build |
+| `jq` | ABI regen + address sync |
+| Go 1.22+ | Backend build (optional — Docker handles it) |
 
----
+## First-time setup
+```bash
+git clone https://github.com/OfficialA1manac/MagicWebb && cd MagicWebb
+make install
+cp backend/.env.example .env          # backend/indexer env
+cp frontend/.env.example frontend/.env.local  # frontend env
+# Fill in: POSTGRES_URL, PRIVATE_KEY, CREATOR_ADDR, KEEPER_KEY, JWT_SECRET
+```
 
-## 1. One product, two layers (no separate “backend”)
+## Full deploy (one command)
+```bash
+make fresh-deploy
+# builds contracts → tests → deploys to Coston2 → regenerates ABIs
+# → updates .env + frontend/.env.local + render.yaml → starts Docker
+```
 
-MagicWebb is intentionally small: **a web app plus smart contracts**. There is **no** standalone API server, database, or indexer required for trading to work.
+## Daily operations
+```bash
+make up      # start all services (restart:always — survives reboots + crashes)
+make down    # stop all services
+make logs    # tail all logs (Ctrl-C to stop)
+make health  # HTTP health check
+make status  # process/port/chain status
+```
 
-| Layer | Role |
-| --- | --- |
-| **Frontend** (`frontend/`) | Next.js UI, wagmi/viem, wallet connection. Reads chain state and submits transactions. |
-| **Contracts** (`contracts/src/`) | Source of truth: listings, auctions, offers, fees, pausing. |
+## Services
+| Service | Port | Description |
+|---------|------|-------------|
+| `api` | 8080 | REST API + SSE events |
+| `indexer` | — | Chain watcher + keeper bot + sweepers |
+| `redis` | 6379 | Event pub/sub + rate limiting |
+| `frontend` | 3000 | Next.js SSR app |
 
-Anything that looks like a “backend” in other marketplaces (order books, relayers, custody) is either **on-chain** here or **off-chain but non-custodial** (e.g. passing a signed offer JSON between people).
+All services have `restart: always` — they restart automatically on crash or Docker daemon restart. `make up` once = runs forever.
 
-**How they work as one system**
+## Auction keeper bot
+Enabled by setting `KEEPER_KEY` in `.env`. The keeper:
+1. Polls `GetExpiredActiveAuctions()` every 30 seconds
+2. Calls `settle(auctionId)` on each expired unsettled auction
+3. Contract transfers NFT to winner and pays seller
 
-1. You connect a wallet (browser extension or WalletConnect).
-2. The app configures RPC + contract addresses from env (`frontend/.env.local`).
-3. Every buy, list, bid, settle, deposit, or accept runs as **your** transaction to the Flare RPC — the UI is only a signer and a reader.
-4. If the website went offline, **your assets and listings still exist on-chain**; anyone could build another UI or use a block explorer with the same ABIs.
+Fund the keeper wallet with small amounts of FLR for gas.
 
----
+## ABI regeneration
+After redeploying contracts, regenerate TypeScript ABIs:
+```bash
+make contracts-build   # compile
+make regen-abi         # writes frontend/lib/abi/*.ts from compiled JSON
+```
 
-## 2. For collectors (buyers & bidders)
+## Environment variables
+### Root `.env` (backend + indexer)
+| Key | Required | Description |
+|-----|----------|-------------|
+| `POSTGRES_URL` | yes | Supabase connection string |
+| `REDIS_URL` | yes | Redis (default: `redis://redis:6379` in Docker) |
+| `RPC_URL` | yes | Flare/Coston2 JSON-RPC |
+| `CHAIN_ID` | yes | `114` (Coston2) or `14` (mainnet) |
+| `MARKETPLACE_ADDR` | yes | Deployed Marketplace address |
+| `AUCTION_ADDR` | yes | Deployed AuctionHouse address |
+| `OFFERBOOK_ADDR` | yes | Deployed OfferBook address |
+| `JWT_SECRET` | yes | 32+ byte hex for SIWE JWT signing |
+| `FRONTEND_URL` | yes | CORS origin |
+| `KEEPER_KEY` | opt | Keeper wallet private key |
+| `INDEX_FROM_BLOCK` | opt | Start block (auto-set by `make deploy`) |
 
-- **Buy a listed NFT** — Search → collection → token. If listed and not expired, **Buy now** sends `msg.value` equal to the list price. The marketplace transfers the NFT and splits the fee.
-- **Bid in an auction** — Auctions page or token flow. Each bid must beat the previous by the minimum increment. If you are outbid, your funds move to **pending returns**; withdraw them from **Profile**.
-- **Make a signed offer** — On a token page (even if not listed), connect, optionally **deposit** into OfferBook, then **Make offer**. You sign EIP-712 data; copy the JSON and send it to the owner off-chain. They import it under **Offers → Received** and accept on-chain when they agree.
+### `frontend/.env.local`
+| Key | Description |
+|-----|-------------|
+| `NEXT_PUBLIC_API_URL` | Backend URL |
+| `NEXT_PUBLIC_CHAIN_ID` | `114` / `14` |
+| `NEXT_PUBLIC_RPC_URL` | Chain RPC for wagmi |
+| `NEXT_PUBLIC_MARKETPLACE_ADDR` | Marketplace address |
+| `NEXT_PUBLIC_AUCTION_ADDR` | AuctionHouse address |
+| `NEXT_PUBLIC_OFFER_ADDR` | OfferBook address |
 
-**Networks** — Default deployment targets **Flare Coston2** (chain id 114). Use a Coston2–funded wallet and the in-app network switcher when prompted.
-
----
-
-## 3. For creators & sellers (projects and individuals)
-
-- **List a fixed price** — **List NFT** in the nav (or `/list`): enter ERC-721 contract + token id, connect as owner, approve **Marketplace**, set price and expiry, list.
-- **Run an auction** — Same flow; approve **AuctionHouse**, set reserve, duration, and min increment (bps). Public settlement after `endsAt`.
-- **Offers** — You do not “list” an offer on-chain. Bidders sign; you **accept** when you like the price. Keep your OfferBook approval in mind when you are ready to accept.
-
-**Fees** — A platform fee is enforced in the contracts (default 2.5%, hard-capped at 10%). The fee is applied on each settled trade.
-
-**ERC-1155** — Contracts support 1155; the `/list` wizard currently focuses on **ERC-721** first. Advanced flows can use the same ABIs with amount parameters from the contracts.
-
----
-
-## 4. For developers
-
-- **Repo layout** — `frontend/` (Next 15), `contracts/` (Foundry), `docs/` (this file + whitepapers + annotated Solidity), root `Makefile` (bash) for deploy/lifecycle, root `package.json` to run the app from **repo root**.
-- **Env** — Single file for the app: `frontend/.env.local` (copy from `frontend/.env.example`). `NEXT_PUBLIC_*` keys are inlined at build time; **never** commit real private keys.
-- **WalletConnect / Reown** — Set `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` and `NEXT_PUBLIC_APP_URL` for QR and metadata.
-- **Local dev from root** — `npm start` or `npm run dev` at the repository root runs `next dev` inside `frontend/`.
-- **Contracts** — `cd contracts && forge test && forge build`. Deploy script: `DeployCoston2.s.sol` (see `Makefile` `deploy` target when using bash + Foundry).
-
-**EIP-712 domain** — The on-chain `OfferBook` domain name is **`MagicWebbOfferBook`** (version `1`). The frontend `lib/eip712.ts` **must** match the deployed contract or signatures will not verify.
-
----
-
-## 5. For the community & operators
-
-- **Open source** — MIT. Issues and PRs welcome on [GitHub](https://github.com/OfficialA1manac/MagicWebb).
-- **Security** — Non-custodial design reduces platform risk but not smart-contract risk. Treat testnet as experimental; mainnet requires your own audit and key custody plan.
-- **Transparency** — Contract addresses for Coston2 are shown on the home page and in `README.md`; verify bytecode on a Flare explorer before large flows. Operational fixes (chunks, chain 114, approvals, refunds) live in [`TROUBLESHOOTING.md`](TROUBLESHOOTING.md).
-
----
-
-## 6. Glossary
-
-| Term | Meaning |
-| --- | --- |
-| **Coston2** | Flare testnet (chain id 114). |
-| **Pull refund** | Outbid auction funds are credited to you; you call `withdrawRefund` instead of receiving ETH inside the bid tx. |
-| **EIP-712** | Typed structured data signing; wallets show readable offer fields before you sign. |
-| **OfferBook deposit** | Shared escrow balance used when your accepted offers consume your committed amount. |
-
-For contract-level detail, read `WHITEPAPER_TECHNICAL.md` and `CONTRACTS_ANNOTATED.md`.
+## Contract addresses are permanent
+Once deployed, contract addresses and `feeVault` cannot change. To change fee/admin: deploy new contracts and run `make fresh-deploy`.
