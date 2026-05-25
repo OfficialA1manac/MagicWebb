@@ -74,8 +74,8 @@ contract OfferBook is MarketplaceCore, EIP712 {
     );
     event OfferCancelled(address indexed bidder, uint64 indexed nonce);
 
-    constructor(address vault, uint16 fee, address admin)
-        MarketplaceCore(vault, fee, admin)
+    constructor(address recipient, address admin)
+        MarketplaceCore(recipient, admin)
         EIP712("MagicWebbOfferBook", "1")
     {}
 

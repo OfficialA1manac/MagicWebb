@@ -15,46 +15,36 @@ contract MarketplaceCoreTest is Test {
     address buyer   = address(0xCAFE);
 
     function setUp() public {
-        mp  = new Marketplace(creator, 250, admin);
+        mp  = new Marketplace(creator, admin);
         nft = new MockERC721();
         vm.deal(buyer, 10 ether);
     }
 
     // ── Constructor guards ────────────────────────────────────────────────
 
-    function test_constructorFeeAboveCapReverts() public {
+    function test_constructorZeroRecipientReverts() public {
         vm.expectRevert();
-        new Marketplace(creator, 1_001, admin);
-    }
-
-    function test_constructorFeeAtCapOk() public {
-        Marketplace mp2 = new Marketplace(creator, 1_000, admin);
-        assertEq(mp2.feeBps(), 1_000);
-    }
-
-    function test_constructorZeroVaultReverts() public {
-        vm.expectRevert();
-        new Marketplace(address(0), 250, admin);
+        new Marketplace(address(0), admin);
     }
 
     function test_constructorZeroAdminReverts() public {
         vm.expectRevert();
-        new Marketplace(creator, 250, address(0));
+        new Marketplace(creator, address(0));
     }
 
     // ── Immutability ──────────────────────────────────────────────────────
 
-    function test_feeVaultImmutable() public view {
-        assertEq(mp.feeVault(), creator);
+    function test_feeRecipientImmutable() public view {
+        assertEq(mp.feeRecipient(), creator);
     }
 
-    function test_feeBpsImmutable() public view {
-        assertEq(mp.feeBps(), 250);
+    function test_platformFeeConstant() public view {
+        assertEq(mp.PLATFORM_FEE_BPS(), 150);
     }
 
     // ── Fee routing ───────────────────────────────────────────────────────
 
-    function test_feePushedToFeeVault() public {
+    function test_feePushedToFeeRecipient() public {
         uint256 listingFee = (1 ether * 150) / 10_000;
         vm.deal(seller, listingFee);
         uint256 before_ = creator.balance;
@@ -66,8 +56,8 @@ contract MarketplaceCoreTest is Test {
 
         vm.prank(buyer);
         mp.buy{value: 1 ether}(address(nft), id);
-        // listing fee (150 bps) + sale fee (250 bps) of 1 ether
-        assertEq(creator.balance - before_, 0.04 ether);
+        // listing fee (150 bps) + sale fee (150 bps) of 1 ether = 300 bps = 0.03 ether
+        assertEq(creator.balance - before_, 0.03 ether);
     }
 
     // ── Access control ────────────────────────────────────────────────────
@@ -96,6 +86,4 @@ contract MarketplaceCoreTest is Test {
         vm.expectRevert();
         mp.grantRole(pauserRole, buyer);
     }
-
-    // ── Royalty registry ──────────────────────────────────────────────────
 }

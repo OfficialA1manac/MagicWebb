@@ -10,34 +10,26 @@ import {ERC1155Holder}   from "@openzeppelin/contracts/token/ERC1155/utils/ERC11
 
 error TransferFailed();
 error WithdrawFailed();
-error InvalidFee();
 error ZeroAddress();
 
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @title MarketplaceCore
 /// @notice Shared base: immutable fee config, NFT dispatch, access control, pausability.
-/// @dev Single platform fee only — no royalties.
-///      feeVault and feeBps are both immutable post-deploy (protects traders from rug/fee changes).
+/// @dev Single 1.5% platform fee applied to all operations (listing, buy, auction, offer).
+///      feeRecipient is immutable post-deploy — protects traders from fee/recipient changes.
 abstract contract MarketplaceCore is ReentrancyGuard, Pausable, AccessControl, ERC1155Holder {
     bytes32 public constant PAUSER_ROLE = keccak256("PAUSER_ROLE");
 
-    /// @notice Hard cap on platform fee: 10%.
-    uint16 public constant MAX_FEE_BPS = 1_000;
+    /// @notice Platform fee: 1.5% on all operations. Hardcoded — cannot be changed post-deploy.
+    uint16 public constant PLATFORM_FEE_BPS = 150;
 
-    /// @notice Listing fee: 1.5% of listing price, collected upfront on every list call.
-    uint16 public constant LISTING_FEE_BPS = 150;
+    /// @notice Wallet address that receives the platform fee on every operation. Immutable post-deploy.
+    address public immutable feeRecipient;
 
-    /// @notice Platform fee in basis points. Immutable post-deploy.
-    uint16  public immutable feeBps;
-    /// @notice Recipient of the platform fee on every trade. Immutable post-deploy.
-    address public immutable feeVault;
-
-    constructor(address vault, uint16 fee, address admin) {
-        if (vault == address(0) || admin == address(0)) revert ZeroAddress();
-        if (fee > MAX_FEE_BPS) revert InvalidFee();
-        feeVault = vault;
-        feeBps   = fee;
+    constructor(address recipient, address admin) {
+        if (recipient == address(0) || admin == address(0)) revert ZeroAddress();
+        feeRecipient = recipient;
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(PAUSER_ROLE, admin);
     }
@@ -49,15 +41,15 @@ abstract contract MarketplaceCore is ReentrancyGuard, Pausable, AccessControl, E
 
     // ── Fee split ──────────────────────────────────────────────────────────────
 
-    /// @dev Takes platform fee from salePrice, sends fee to feeVault, remainder to seller.
+    /// @dev Deducts 1.5% fee from salePrice, sends fee directly to feeRecipient, remainder to seller.
     ///      Returns the fee amount taken.
     function _splitAndPay(address seller, uint256 salePrice) internal returns (uint256 fee) {
-        fee = (salePrice * feeBps) / 10_000;
+        fee = (salePrice * PLATFORM_FEE_BPS) / 10_000;
         uint256 sellerAmt;
         unchecked { sellerAmt = salePrice - fee; }
 
         if (fee > 0) {
-            (bool ok,) = feeVault.call{value: fee}("");
+            (bool ok,) = feeRecipient.call{value: fee}("");
             if (!ok) revert TransferFailed();
         }
         (bool ok2,) = seller.call{value: sellerAmt}("");

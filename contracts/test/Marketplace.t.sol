@@ -18,7 +18,7 @@ contract MarketplaceTest is Test {
     address other   = address(0xDEAD);
 
     function setUp() public {
-        mp    = new Marketplace(creator, 250, admin);
+        mp    = new Marketplace(creator, admin);
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(buyer, 10 ether);
@@ -55,8 +55,10 @@ contract MarketplaceTest is Test {
         mp.buy{value: 1 ether}(address(nft), id);
 
         assertEq(nft.ownerOf(id), buyer);
-        assertEq(creator.balance, 0.04 ether); // 150 bps listing fee + 250 bps sale fee of 1 ether
-        assertEq(seller.balance,  0.975 ether);
+        // 150 bps listing fee + 150 bps sale fee of 1 ether = 0.03 ether total to creator
+        assertEq(creator.balance, 0.03 ether);
+        // seller receives 1 ether minus 150 bps = 0.985 ether
+        assertEq(seller.balance,  0.985 ether);
     }
 
     function test_cancel() public {
@@ -125,8 +127,10 @@ contract MarketplaceTest is Test {
 
         assertEq(multi.balanceOf(buyer,  1), 5);
         assertEq(multi.balanceOf(seller, 1), 0);
-        assertEq(creator.balance, 0.08 ether); // 150 bps listing fee + 250 bps sale fee of 2 ether
-        assertEq(seller.balance,  1.95 ether);
+        // 150 bps listing fee + 150 bps sale fee of 2 ether = 0.06 ether total to creator
+        assertEq(creator.balance, 0.06 ether);
+        // seller receives 2 ether minus 150 bps = 1.97 ether
+        assertEq(seller.balance,  1.97 ether);
     }
 
     function test_list1155ZeroAmountReverts() public {
@@ -259,11 +263,10 @@ contract MarketplaceTest is Test {
 
     // ── Fuzz tests ────────────────────────────────────────────────────────
 
-    function testFuzz_feesPlusPayoutEqPrice(uint128 price, uint16 fBps) public {
+    function testFuzz_feesPlusPayoutEqPrice(uint128 price) public {
         price = uint128(bound(price, 0.001 ether, 100 ether));
-        fBps  = uint16(bound(fBps,  0, 1_000));
 
-        Marketplace freshMp = new Marketplace(creator, fBps, admin);
+        Marketplace freshMp = new Marketplace(creator, admin);
 
         address freshSeller = address(0xF001);
         address freshBuyer  = address(0xF002);

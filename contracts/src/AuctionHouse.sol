@@ -98,8 +98,8 @@ contract AuctionHouse is MarketplaceCore {
     event RefundWithdrawn(address indexed bidder, uint256 amount);
     event BidReclaimed(uint256 indexed id, address indexed winner, uint256 amount);
 
-    constructor(address vault, uint16 fee, address admin)
-        MarketplaceCore(vault, fee, admin)
+    constructor(address recipient, address admin)
+        MarketplaceCore(recipient, admin)
     {}
 
     // ── Create ────────────────────────────────────────────────────────────
@@ -250,7 +250,7 @@ contract AuctionHouse is MarketplaceCore {
     // ── Settle ────────────────────────────────────────────────────────────
 
     /// @notice Settle a finished auction. Anyone can call after `endsAt`. FINAL.
-    ///         NFT → winner, fee → feeVault, royalty → creator, remainder → seller.
+    ///         NFT → winner, 1.5% fee → feeRecipient wallet, remainder → seller.
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
