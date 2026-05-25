@@ -24,16 +24,10 @@ error CommitTooFresh();
 error NoCommit();
 
 /// @title AuctionHouse
-/// @notice English auctions with reserve, bid increment, anti-snipe, commit-reveal MEV protection,
-///         and pull-refund pattern.
+/// @notice English auctions with fixed end time, reserve price, min bid increment,
+///         commit-reveal MEV protection, and pull-refund pattern.
 ///
-/// MEV protection rationale — commit-reveal chosen over batched settlement:
-///   Batched settlement adds per-bid block-window latency, ruining the live auction feel.
-///   Commit-reveal has 2-tx UX cost but keeps continuous bidding. On Flare (~1.8s blocks),
-///   commit+reveal completes in ≈4 s. Front-runners can't act on a revealed bid amount until
-///   it's already in the same block, eliminating profitable sandwich attacks on bid transactions.
-///
-/// Commit-reveal flow:
+/// Commit-reveal flow (MEV protection):
 ///   1. Bidder calls `commitBid(id, keccak256(abi.encode(id, bidder, fullBidAmount, salt)))`.
 ///   2. After COMMIT_DELAY_BLOCKS, bidder calls `bid(id, fullBidAmount, salt)` with
 ///      msg.value = increment (fullBidAmount - existingBid, or fullBidAmount for first bid).
@@ -44,10 +38,6 @@ error NoCommit();
 contract AuctionHouse is MarketplaceCore {
     /// @notice Cap on `minIncrementBps` (50%). Prevents seller griefing via absurd increments.
     uint16  public constant MAX_MIN_INCREMENT_BPS  = 5_000;
-    /// @notice Anti-snipe: bids within this window extend the auction.
-    uint64  public constant ANTI_SNIPE_WINDOW      = 5 minutes;
-    /// @notice Maximum total anti-snipe extension past `originalEndsAt`.
-    uint64  public constant ANTI_SNIPE_MAX_EXTENSION = 2 days;
     /// @notice After `endsAt + SETTLE_DEADLINE` with no settlement the winner may reclaim.
     uint64  public constant SETTLE_DEADLINE        = 7 days;
     /// @notice Minimum blocks between commit and reveal. Prevents same-block front-running.
@@ -70,7 +60,6 @@ contract AuctionHouse is MarketplaceCore {
         TokenStandard standard;
         address       collection;
         uint64        endsAt;
-        uint32        originalEndsAt;
         uint256       tokenId;
         uint128       reserve;
         uint128       highestBid;
@@ -107,7 +96,6 @@ contract AuctionHouse is MarketplaceCore {
     event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 amount, uint256 fee);
     event AuctionCancelled(uint256 indexed id);
     event RefundWithdrawn(address indexed bidder, uint256 amount);
-    event AuctionExtended(uint256 indexed id, uint64 newEndsAt);
     event BidReclaimed(uint256 indexed id, address indexed winner, uint256 amount);
 
     constructor(address vault, uint16 fee, address admin)
@@ -171,7 +159,6 @@ contract AuctionHouse is MarketplaceCore {
             standard:        standard,
             collection:      coll,
             endsAt:          endsAt,
-            originalEndsAt:  uint32(endsAt),
             tokenId:         tokenId,
             reserve:         reserve,
             highestBid:      0,
@@ -241,18 +228,6 @@ contract AuctionHouse is MarketplaceCore {
 
         a.highestBid    = fullBidAmount;
         a.highestBidder = msg.sender;
-
-        // Anti-snipe extension
-        uint64 endsAt = a.endsAt;
-        if (endsAt - block.timestamp < ANTI_SNIPE_WINDOW) {
-            uint64 absoluteCap = uint64(a.originalEndsAt) + ANTI_SNIPE_MAX_EXTENSION;
-            uint64 newEnd = uint64(block.timestamp) + ANTI_SNIPE_WINDOW;
-            if (newEnd > absoluteCap) newEnd = absoluteCap;
-            if (newEnd > endsAt) {
-                a.endsAt = newEnd;
-                emit AuctionExtended(id, newEnd);
-            }
-        }
 
         if (prevBidder != address(0) && prevBidder != msg.sender) {
             pendingReturns[prevBidder] += prevHigh;

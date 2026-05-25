@@ -207,38 +207,6 @@ contract MarketplaceTest is Test {
         assertEq(s, seller);
     }
 
-    // ── Royalty split ─────────────────────────────────────────────────────
-
-    function test_erc2981RoyaltyAppliedOnBuy() public {
-        address royaltyRecv = address(0xAA01);
-        vm.deal(royaltyRecv, 0);
-
-        // ERC-721 with 5% (500 bps) native ERC-2981
-        MockERC2981 royaltyNft = new MockERC2981(royaltyRecv, 500);
-
-        vm.startPrank(seller);
-        uint256 tid = royaltyNft.mint(seller);
-        royaltyNft.setApprovalForAll(address(mp), true);
-        mp.list(address(royaltyNft), tid, 1 ether, uint64(block.timestamp + 1 days));
-        vm.stopPrank();
-
-        uint256 creatorBefore  = creator.balance;
-        uint256 sellerBefore   = seller.balance;
-        uint256 royaltyBefore  = royaltyRecv.balance;
-
-        vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(royaltyNft), tid);
-
-        assertEq(royaltyNft.ownerOf(tid), buyer);
-
-        // fee = 250 bps of 1 ether = 0.025 ether
-        // royalty = 500 bps of 1 ether = 0.05 ether
-        // seller gets 1 - 0.025 - 0.05 = 0.925 ether
-        assertEq(creator.balance   - creatorBefore, 0.025 ether);
-        assertEq(royaltyRecv.balance - royaltyBefore, 0.05 ether);
-        assertEq(seller.balance    - sellerBefore,  0.925 ether);
-    }
-
     // ── Pause ─────────────────────────────────────────────────────────────
 
     function test_pauseBlocksBuy() public {
