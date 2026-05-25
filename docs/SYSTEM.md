@@ -1,6 +1,6 @@
 # MagicWebb — Complete System Reference
 
-**Version:** 1.0 — 2026-05-25  
+**Version:** 2.0 — 2026-05-25  
 **Network:** Flare Coston2 (testnet) / Flare mainnet  
 **License:** MIT
 
@@ -37,7 +37,7 @@
 │  Go Indexer (background worker)                              │
 │  • Chain watcher (polls every 2 s)                          │
 │  • Auction keeper (polls every 30 s — auto-settles)         │
-│  • Offer expiry sweeper (every 5 min)                       │
+│  • Auction inactivity sweeper (auto-cancels within 30 min)  │
 │  • Trending score worker (every 60 s)                       │
 └──────────────────────┬──────────────────────────────────────┘
                        │ eth_getLogs / eth_sendRawTransaction
@@ -70,18 +70,17 @@
 Shared base inherited by all three marketplace contracts. Provides:
 
 - `PLATFORM_FEE_BPS = 150` — the single hardcoded 1.5% fee constant
-- `feeRecipient` — immutable wallet address that receives all fees
+- `feeRecipient` — immutable wallet address that receives all platform fees
 - `_splitAndPay(seller, salePrice)` — fee calculation and payment dispatch
 - `_transferToken(standard, coll, from, to, id, amount)` — ERC-721/1155 dispatch
-- `PAUSER_ROLE` — pause/unpause via AccessControl
-- `ReentrancyGuard`, `Pausable`, `ERC1155Holder`
+- `ReentrancyGuard`, `ERC1155Holder`
 
-Constructor: `constructor(address recipient, address admin)`
+Constructor: `constructor(address recipient)`
 
 **Key invariants:**
 - `feeRecipient` cannot be changed post-deploy
 - `PLATFORM_FEE_BPS` is a Solidity `constant` — not a variable, not changeable by anyone
-- `_splitAndPay` always sends to `feeRecipient` first, then to seller — atomically in one function
+- No pause function. No admin role. Contracts are unstoppable once deployed.
 
 ### 2.2 Marketplace
 
@@ -94,12 +93,6 @@ Fixed-price listings for ERC-721 and ERC-1155 tokens.
 mapping(address => mapping(uint256 => Listing)) public listings;
 ```
 
-**Listing struct (2 storage slots):**
-```
-slot 0: seller(20) + expiresAt(8) + standard(1) + [3 bytes padding]
-slot 1: price(16)  + amount(16)
-```
-
 **Functions:**
 
 | Function | Caller | Fee | Description |
@@ -107,8 +100,8 @@ slot 1: price(16)  + amount(16)
 | `list(coll, id, price, expiresAt)` | seller | 1.5% of price upfront | List ERC-721. Approval required. |
 | `list1155(coll, id, amount, price, expiresAt)` | seller | 1.5% of price upfront | List ERC-1155. Approval required. |
 | `batchList(items[])` | seller | 1.5% of each price, summed | List up to 50 ERC-721 tokens in one tx. |
-| `cancel(coll, id)` | seller only | none | Remove listing. Works while paused. |
-| `buy(coll, id)` | buyer | 1.5% of price deducted from seller | Buy at exact listing price. Atomic. |
+| `cancel(coll, id)` | seller only | none | Remove listing. |
+| `buy(coll, id)` | buyer | 1.5% of price deducted from seller proceeds | Buy at exact listing price. Atomic. |
 
 **Events:** `Listed`, `Cancelled`, `Bought`
 
@@ -116,67 +109,73 @@ slot 1: price(16)  + amount(16)
 
 `contracts/src/AuctionHouse.sol`
 
-English auctions with fixed end time, commit-reveal MEV protection, and pull-pattern refunds.
+English auctions with auto-settlement, instant push-refunds for outbid bidders, and no manual work required from participants.
 
 **State:**
 ```solidity
 mapping(uint256 => Auction) public auctions;
-mapping(address => uint256) public pendingReturns;
-mapping(uint256 => mapping(address => bytes32)) public commitments;
-mapping(uint256 => mapping(address => uint256)) public commitBlock;
+mapping(address => uint256) public pendingReturns; // emergency fallback only
 ```
 
 **Constants:**
 - `MAX_MIN_INCREMENT_BPS = 5000` (50% max bid increment cap)
-- `SETTLE_DEADLINE = 7 days` (after `endsAt`, winner may reclaim if unsettled)
-- `COMMIT_DELAY_BLOCKS = 2` (MEV protection: 2-block minimum between commit and reveal)
+- `NO_BID_CANCEL_WINDOW = 30 minutes` (auto-cancel deadline for zero-bid auctions)
+
+**Auction flow:**
+1. Seller calls `create` → `AuctionCreated` event. Auction starts immediately.
+2. Bidder calls `bid(id, bidAmount)` with `msg.value = bidAmount + 1.5% fee`. Previous highest bidder is refunded their full payment automatically. `BidPlaced` event.
+3. At expiry, keeper bot (or anyone) calls `settle(id)` → NFT → winner, fee → feeRecipient, full bid → seller. `AuctionSettled` event.
+
+**Fee semantics for auctions:**
+- Bidder pays 1.5% on top of their bid at bid time.
+- If they win: the 1.5% goes to the platform.
+- If they lose (outbid): full payment (bid + fee) is pushed back immediately — no fee taken.
+- The seller always receives 100% of the winning bid amount.
 
 **Functions:**
 
 | Function | Caller | Fee | Description |
 |----------|--------|-----|-------------|
-| `create(coll, id, reserve, startsAt, endsAt, minIncBps)` | seller | none | Create ERC-721 auction. |
+| `create(coll, id, reserve, endsAt, minIncBps)` | seller | none | Create ERC-721 auction. Starts immediately. |
 | `create1155(...)` | seller | none | Create ERC-1155 auction. |
-| `commitBid(id, commitment)` | bidder | none | Phase 1: store bid hash. |
-| `bid(id, fullAmount, salt)` | bidder | none | Phase 2: reveal bid, send ETH. |
-| `settle(id)` | anyone | 1.5% of winning bid from seller proceeds | Finalize auction. NFT → winner, fee → feeRecipient, remainder → seller. |
-| `cancel(id)` | seller | none | Cancel zero-bid auction. |
-| `withdrawRefund()` | outbid bidder | none | Claim `pendingReturns` balance. |
-| `reclaimBid(id)` | winner | none | Reclaim ETH if unsettled after 7 days. |
+| `bid(id, bidAmount)` | bidder | 1.5% of bidAmount paid upfront | Single-step bid. msg.value = bidAmount + fee. Outbid refund pushed automatically. |
+| `settle(id)` | anyone | fee retained from winner's upfront payment | Auto-settle. Called by keeper bot after expiry. |
+| `cancelIfInactive(id)` | anyone | none | Cancel zero-bid auction after 30-minute window. Keeper calls this. |
+| `cancelEarly(id)` | seller only | none | Seller cancels early (manual approval). Refunds highest bidder if any. |
+| `withdrawRefund()` | bidder | none | Emergency: reclaim ETH if automatic push failed. |
 
-**Events:** `AuctionCreated`, `BidCommitted`, `BidPlaced`, `AuctionSettled`, `AuctionCancelled`, `RefundWithdrawn`, `BidReclaimed`
+**Events:** `AuctionCreated`, `BidPlaced`, `AuctionSettled`, `AuctionCancelled`, `RefundPushed`
 
 ### 2.4 OfferBook
 
 `contracts/src/OfferBook.sol`
 
-EIP-712 signed off-chain offers with on-chain ETH escrow.
+On-chain NFT offer system. Owners explicitly mark tokens as eligible to receive offers.
 
 **State:**
 ```solidity
-mapping(address => mapping(uint64 => bool)) public usedNonce;
-mapping(address => uint256) public deposits;
+mapping(address => mapping(uint256 => address)) public eligible;      // ERC-721 eligibility
+mapping(address => mapping(uint256 => address)) public eligible1155;  // ERC-1155 eligibility
+mapping(address => mapping(uint256 => mapping(address => uint256))) public offers;       // ERC-721 offers
+mapping(address => mapping(uint256 => mapping(address => Offer1155))) public offers1155; // ERC-1155 offers
 ```
-
-**EIP-712 domain:** `"MagicWebbOfferBook"`, version `"1"`
 
 **Functions:**
 
 | Function | Caller | Fee | Description |
 |----------|--------|-----|-------------|
-| `deposit()` | offeror | none | Add ETH to bidder escrow balance. |
-| `withdraw(amount)` | offeror | none | Remove ETH from escrow. Works while paused. |
-| `cancelOffer(nonce)` | offeror | none | Burn nonce pre-emptively. Works while paused. |
-| `acceptOffer(offer, sig, tokenIdActual)` | token owner | 1.5% of offer amount from seller proceeds | Accept ERC-721 offer. Verifies sig, transfers NFT, pays. |
-| `acceptOffer1155(offer, sig)` | token owner | 1.5% of offer amount from seller proceeds | Accept ERC-1155 offer. |
+| `markEligible(coll, tokenId)` | token owner | none | Mark ERC-721 as eligible to receive offers. |
+| `removeEligible(coll, tokenId)` | owner who marked | none | Stop accepting new offers. Existing offers persist. |
+| `makeOffer(coll, tokenId)` | anyone | none | Deposit ETH offer for an eligible ERC-721. Accumulates on repeat calls. |
+| `withdrawOffer(coll, tokenId)` | offeror | none | Reclaim full ETH — no fee on unaccepted offers. |
+| `acceptOffer(coll, tokenId, bidder)` | token owner | 1.5% of offer amount from seller proceeds | Accept offer. NFT → bidder. Eligibility auto-cleared. |
+| `markEligible1155(coll, tokenId)` | holder | none | Mark ERC-1155 as eligible. |
+| `removeEligible1155(coll, tokenId)` | owner who marked | none | Stop accepting ERC-1155 offers. |
+| `makeOffer1155(coll, tokenId, units)` | anyone | none | One offer per bidder per token. Withdraw to update. |
+| `withdrawOffer1155(coll, tokenId)` | offeror | none | Reclaim full ETH. |
+| `acceptOffer1155(coll, tokenId, bidder)` | holder | 1.5% of offer amount from seller proceeds | Accept ERC-1155 offer. |
 
-**Events:** `Deposited`, `Withdrawn`, `OfferAccepted`, `Offer1155Accepted`, `OfferCancelled`
-
-### 2.5 RoyaltyRegistry
-
-`contracts/src/RoyaltyRegistry.sol`
-
-Registry for ERC-2981 royalty info. Currently informational only — royalties are NOT deducted from settlement proceeds in the current version. Reserved for Phase 2.
+**Events:** `EligibilityMarked`, `EligibilityRemoved`, `Eligibility1155Marked`, `Eligibility1155Removed`, `OfferMade`, `OfferWithdrawn`, `OfferAccepted`, `Offer1155Made`, `Offer1155Withdrawn`, `Offer1155Accepted`
 
 ---
 
@@ -190,7 +189,7 @@ Registry for ERC-2981 royalty info. Currently informational only — royalties a
 uint16 public constant PLATFORM_FEE_BPS = 150;
 ```
 
-This is a Solidity `constant` — compiled into the bytecode. No admin key, environment variable, multisig vote, or upgrade can change it. To change the fee rate, new contracts must be deployed (new addresses = verifiable by users).
+This is a Solidity `constant` — compiled into the bytecode. No admin key, environment variable, multisig vote, or upgrade can change it.
 
 ### 3.2 Fee recipient
 
@@ -198,7 +197,7 @@ This is a Solidity `constant` — compiled into the bytecode. No admin key, envi
 address public immutable feeRecipient;
 ```
 
-Set once at deployment via `CREATOR_ADDR` env var. ETH is transferred directly to this address via `.call{value: fee}("")`. No vault contract, no accumulator, no intermediary. Fee lands in the wallet immediately on each transaction.
+Set once at deployment via `CREATOR_ADDR` env var. ETH is transferred directly to this address via `.call{value: fee}("")`. No vault contract, no accumulator, no intermediary.
 
 ### 3.3 Fee application by operation
 
@@ -207,25 +206,18 @@ Set once at deployment via `CREATOR_ADDR` env var. ETH is transferred directly t
 | `list` / `list1155` | At listing time (upfront) | Seller | 1.5% of listing price |
 | `batchList` | At listing time (upfront, summed) | Seller | 1.5% × each item's price |
 | `buy` | At buy time | Deducted from seller proceeds | 1.5% of sale price |
-| `settle` (auction) | At settlement | Deducted from seller proceeds | 1.5% of winning bid |
+| `bid` (auction) | At bid time (upfront, on top of bid) | Bidder | 1.5% of bid amount |
+| `settle` (auction) | At settlement | Retained from winner's upfront payment | 1.5% of winning bid |
 | `acceptOffer` / `acceptOffer1155` | At acceptance | Deducted from seller proceeds | 1.5% of offer amount |
 
-**Operations with NO fee:** create auction, commit/reveal bid, outbid refund withdrawal, offer deposit/withdrawal, offer cancellation, listing cancellation, zero-bid auction cancellation.
+**Operations with NO fee:** create auction, outbid refund (pushed automatically), unaccepted offer withdrawal, listing cancellation, zero-bid auction cancellation, marking/removing offer eligibility.
 
-### 3.4 Fee calculation
+### 3.4 Auction fee detail
 
-```
-fee = (amount * 150) / 10_000
-sellerReceives = amount - fee
-```
+Bidder bids 1 ETH: sends `1.015 ETH` (1 ETH bid + 0.015 ETH fee).
 
-For a 1 ETH sale:
-- Fee: `1e18 * 150 / 10000 = 0.015 ETH` → feeRecipient
-- Seller receives: `1e18 - 0.015e18 = 0.985 ETH`
-
-For a 1 ETH listing:
-- Upfront listing fee: `1e18 * 150 / 10000 = 0.015 ETH` → feeRecipient (paid at list time)
-- At buy: additional 1.5% of 1 ETH = 0.015 ETH → feeRecipient; seller gets 0.985 ETH
+- If they win: platform gets 0.015 ETH, seller gets 1 ETH.
+- If outbid: they receive 1.015 ETH back in full — no fee kept.
 
 ### 3.5 Fee flow diagram
 
@@ -233,25 +225,27 @@ For a 1 ETH listing:
 LISTING:
   Seller calls list(price=1 ETH)
   Seller sends msg.value = 0.015 ETH (1.5% of price)
-  Contract: feeRecipient.call{value: 0.015 ETH}("")  ← immediate direct transfer
+  Contract: feeRecipient.call{value: 0.015 ETH}("")  ← immediate
 
 BUY:
-  Buyer calls buy() with msg.value = 1 ETH (listing price)
+  Buyer calls buy() with msg.value = 1 ETH
   Contract: NFT transferred seller → buyer
   Contract: _splitAndPay(seller, 1 ETH)
-    └── feeRecipient.call{value: 0.015 ETH}("")  ← fee direct to wallet
-    └── seller.call{value: 0.985 ETH}("")        ← remainder to seller
+    └── feeRecipient.call{value: 0.015 ETH}("")
+    └── seller.call{value: 0.985 ETH}("")
+
+AUCTION BID:
+  Bidder calls bid(id, 1 ETH) with msg.value = 1.015 ETH
+  If outbid later: previous bidder receives 1.015 ETH automatically
 
 AUCTION SETTLE:
   Anyone calls settle(id)
-  Contract: NFT transferred seller → winner
-  Contract: _splitAndPay(seller, winningBid)
-    └── feeRecipient.call{value: fee}("")
-    └── seller.call{value: winningBid - fee}("")
+  Contract: NFT → winner
+  Contract: feeRecipient.call{value: 0.015 ETH}("")  ← exact premium paid by winner
+  Contract: seller.call{value: 1 ETH}("")             ← full bid amount
 
 OFFER ACCEPT:
-  Owner calls acceptOffer(offer, sig, tokenId)
-  Contract: debits bidder's deposit
+  Owner calls acceptOffer(coll, tokenId, bidder)
   Contract: NFT transferred owner → bidder
   Contract: _splitAndPay(owner, offer.amount)
     └── feeRecipient.call{value: fee}("")
@@ -264,81 +258,71 @@ OFFER ACCEPT:
 
 ### 4.1 Buy a listed token
 
-1. User opens listing page → sees price, expiry, seller
-2. User clicks **Buy** → frontend calls `buy(coll, id)` with `msg.value = listingPrice`
-3. Wallet popup: user confirms exact price
-4. On-chain (atomic): listing validated → NFT transferred → 1.5% fee to feeRecipient → remainder to seller → `Bought` event emitted
-5. Frontend detects `Bought` event (SSE or tx receipt) → UI updates: NFT shows in buyer's profile
-
-**Revert conditions:** price wrong, listing expired, listing doesn't exist, NFT transfer fails
+1. User opens listing page → sees price, expiry, seller.
+2. User clicks **Buy** → frontend calls `buy(coll, id)` with `msg.value = listingPrice`.
+3. Wallet popup: confirm exact price.
+4. On-chain (atomic): listing validated → NFT transferred → 1.5% fee to feeRecipient → remainder to seller → `Bought` event.
+5. Frontend detects event → UI updates.
 
 ### 4.2 List a single token (fixed price)
 
-1. User goes to **List an NFT** → selects token → enters price and duration
-2. Frontend checks approval: if not approved, sends `setApprovalForAll(marketplace, true)` first (wallet confirm)
-3. Frontend calculates listing fee: `price * 150 / 10000`
-4. User clicks **List** → frontend calls `list(coll, id, price, expiresAt)` with `msg.value = listingFee`
-5. Wallet popup: user confirms listing fee amount
-6. On-chain: fee sent to feeRecipient → listing stored → `Listed` event emitted
-7. Frontend shows listing live
-
-**Revert conditions:** msg.value ≠ fee (WrongPrice), price = 0, expiry invalid, not owner, not approved, already listed by different seller
+1. User selects token → enters price and duration.
+2. Frontend checks approval; if missing, sends `setApprovalForAll(marketplace, true)` first.
+3. Frontend calculates listing fee: `price * 150 / 10000`.
+4. User calls `list(coll, id, price, expiresAt)` with `msg.value = listingFee`.
+5. On-chain: fee → feeRecipient → listing stored → `Listed` event.
 
 ### 4.3 Batch list (up to 50 tokens)
 
-1. User goes to **Batch list** → selects up to 50 tokens → sets shared price and duration
-2. Frontend calculates total fee: `sum(price_i * 150 / 10000)` for all selected
-3. User clicks **List N tokens** → one `batchList(items[])` call with `msg.value = totalFee`
-4. Wallet popup: single confirm for all tokens
-5. On-chain: total fee → feeRecipient → each item listed → `Listed` events emitted
+1. User selects up to 50 tokens → sets price and duration per token.
+2. Frontend calculates total fee: `sum(price_i * 150 / 10000)`.
+3. One `batchList(items[])` call with `msg.value = totalFee`.
+4. On-chain: total fee → feeRecipient → each item listed.
 
 ### 4.4 Create an auction
 
-1. User opens token → clicks **Auction** → sets reserve, start/end times, min increment (bps)
-2. Frontend checks approval for AuctionHouse → sends `setApprovalForAll` if needed
-3. User clicks **Create auction** → `create(coll, id, reserve, startsAt, endsAt, minIncBps)` called
-4. No fee at creation. `AuctionCreated` event emitted.
-5. Auction is live when `block.timestamp >= startsAt`
+1. User opens token → clicks **Auction** → sets reserve, end time, min increment (bps).
+2. Frontend checks approval for AuctionHouse → sends `setApprovalForAll` if needed.
+3. User calls `create(coll, id, reserve, endsAt, minIncBps)` — no fee at creation.
+4. `AuctionCreated` event emitted. Auction starts immediately and accepts bids.
 
-### 4.5 Bid on an auction (2-step commit-reveal)
+### 4.5 Bid on an auction
 
-**Step 1 — Commit (no ETH required):**
-1. User enters bid amount → frontend computes commitment hash:
-   `keccak256(abi.encode(id, bidder, fullBidAmount, salt))`
-2. User clicks **Commit bid** → `commitBid(id, commitment)` — no msg.value
-3. Commitment saved to browser storage + on-chain
+1. User enters bid amount → frontend computes required `msg.value = bidAmount + floor(bidAmount * 150 / 10000)`.
+2. User clicks **Bid** → `bid(id, bidAmount)` called with exact msg.value.
+3. On-chain: bid recorded; if previous bidder exists, their full payment is pushed back to them immediately. `BidPlaced` event.
+4. If outbid later: full payment (bid + fee) is automatically pushed back — no action needed.
 
-**Step 2 — Reveal (after 2+ blocks, ~4 seconds):**
-4. After 2 blocks, **Reveal bid** button becomes active
-5. User clicks **Reveal bid** → `bid(id, fullBidAmount, salt)` with `msg.value = fullBidAmount` (or increment if re-bidding)
-6. On-chain: commitment verified, delay enforced, bid recorded, previous high bidder credited in `pendingReturns`
+### 4.6 Auction settlement (automatic)
 
-**If outbid:** ETH sits in `pendingReturns[bidder]` — claim via **Profile → Refunds → Withdraw**
+- **Automatic (normal path):** Keeper bot polls every 30 s, calls `settle(id)` on expired auctions with bids.
+- **Manual fallback:** Anyone may call `settle(id)` after `endsAt`.
+- On-chain: NFT → winner. Fee (premium paid by winner) → feeRecipient. Full bid amount → seller. `AuctionSettled` emitted.
 
-### 4.6 Settle an auction
+### 4.7 Auction inactivity cancel (automatic)
 
-- **Automatic:** Keeper bot polls every 30s, calls `settle(id)` on expired auctions with bids
-- **Manual:** Anyone can call `settle(id)` after `endsAt` — permissionless
-- On-chain: NFT → winner, 1.5% of bid → feeRecipient, remainder → seller, `AuctionSettled` emitted
+- Keeper bot also sweeps for auctions with zero bids past the 30-minute window.
+- Calls `cancelIfInactive(id)` — permissionless, anyone can trigger.
 
-### 4.7 Make an offer
+### 4.8 Auction early cancel (seller)
 
-1. User opens token → clicks **Make offer**
-2. If first offer: deposit ETH into OfferBook → `deposit()` with `msg.value` (reusable for all future offers)
-3. User sets amount and expiry → frontend constructs EIP-712 `Offer` struct → requests wallet signature (no transaction, no gas)
-4. Signed offer stored off-chain (backend) — visible to NFT owner
+1. Seller clicks **Cancel Auction** on their active auction.
+2. Wallet prompt requires manual approval (the user must sign the transaction).
+3. `cancelEarly(id)` called — if a highest bidder exists, their full ETH is pushed back immediately.
 
-### 4.8 Accept an offer
+### 4.9 Make an offer on an NFT
 
-1. Owner sees offer in **Profile → Offers → Received**
-2. Owner clicks **Accept** → frontend calls `acceptOffer(offer, sig, tokenIdActual)`
-3. On-chain: sig verified, nonce burned, NFT transferred, 1.5% fee → feeRecipient, remainder → owner, `OfferAccepted` emitted
+1. Owner marks token eligible: `markEligible(coll, tokenId)`.
+2. Bidder navigates to token → clicks **Make Offer** → enters offer amount.
+3. `makeOffer(coll, tokenId)` called with `msg.value = offerAmount`. ETH held on-chain.
+4. Owner sees offer in their dashboard.
+5. Owner accepts: `acceptOffer(coll, tokenId, bidder)` → NFT → bidder, 1.5% fee → feeRecipient, remainder → owner. Eligibility auto-cleared.
+6. Bidder may `withdrawOffer(coll, tokenId)` at any time to get full ETH back — no fee taken.
 
-### 4.9 Withdraw refund / deposit
+### 4.10 Remove offer eligibility
 
-- **Outbid refund:** Profile → Refunds → Withdraw → `withdrawRefund()` sends `pendingReturns[user]` to wallet
-- **OfferBook deposit:** Profile → Deposit → Withdraw → `withdraw(amount)` returns deposited ETH
-- Both work while contracts are paused
+Owner calls `removeEligible(coll, tokenId)` — stops new offers from being made.
+Existing offers persist; bidders call `withdrawOffer` to reclaim their ETH.
 
 ---
 
@@ -359,7 +343,7 @@ cp frontend/.env.example frontend/.env.local
 
 ```bash
 # Testnet (Coston2, chain 114):
-cd frontend && forge script script/DeployCoston2.s.sol \
+cd contracts && forge script script/DeployCoston2.s.sol \
   --rpc-url $RPC_URL --broadcast
 
 # Mainnet (Flare, chain 14):
@@ -368,7 +352,7 @@ forge script script/DeployFlare.s.sol \
 ```
 
 Required env vars: `PRIVATE_KEY`, `CREATOR_ADDR`
-- `CREATOR_ADDR` becomes both `feeRecipient` and the initial `DEFAULT_ADMIN_ROLE`
+- `CREATOR_ADDR` becomes the `feeRecipient` for all contracts (immutable post-deploy)
 - Fee rate is `PLATFORM_FEE_BPS = 150` — hardcoded, not configurable
 
 After deploy, copy output addresses into `backend/.env` and `frontend/.env.local`.
@@ -403,7 +387,7 @@ make status   # process/port/chain status
 ```bash
 cd contracts && forge test          # all tests
 forge test -vvv                     # verbose output
-forge test --match-test test_listAndBuy  # single test
+forge test --match-test test_settleAfterExpiry  # single test
 ```
 
 ---
@@ -413,40 +397,46 @@ forge test --match-test test_listAndBuy  # single test
 ### 6.1 Event emission → indexer → database → API → frontend
 
 ```
-1. User submits tx (e.g. buy)
-2. Contract emits event (e.g. Bought)
+1. User submits tx (e.g. bid)
+2. Contract emits event (e.g. BidPlaced)
 3. Indexer polls eth_getLogs every 2s, detects event
-4. Handler: onBought() → inserts row into sales table (price, fee, seller, buyer, tx_hash)
-5. Indexer publishes to Redis pub/sub channel (e.g. "marketplace:events")
-6. API SSE handler reads Redis → pushes event to connected browser clients
-7. Frontend receives SSE event → invalidates React Query cache → UI updates
+4. Handler: onBidPlaced() → inserts row into bids table
+5. Indexer publishes to Redis pub/sub
+6. API SSE handler reads Redis → pushes event to connected browsers
+7. Frontend receives SSE → invalidates React Query cache → UI updates
 ```
 
 ### 6.2 Database schema (key tables)
 
 ```sql
 listings      -- active fixed-price listings
-sales         -- completed trades (price_wei, fee_wei, royalty_wei, tx_hash)
+sales         -- completed trades (price_wei, fee_wei, tx_hash)
 auctions      -- auction records (reserve, highest_bid, settled)
 bids          -- bid history per auction
-offers        -- signed off-chain offers (pending/accepted/cancelled)
+offers        -- on-chain ETH offers per (collection, tokenId, bidder)
+eligibility   -- tokens marked as eligible for offers
 collections   -- NFT collection metadata
 tokens        -- per-token metadata cache
 ```
 
-The `fee_wei` column in `sales` records the exact 1.5% fee taken on every settled trade, available for analytics and metrics.
+### 6.3 Keeper bot (auction auto-settlement and auto-cancel)
 
-### 6.3 Keeper bot (auction auto-settlement)
-
+**Auto-settle goroutine (every 30 s):**
 ```
-Keeper goroutine wakes every 30 seconds:
-  1. Queries DB: SELECT auctions WHERE endsAt < now AND settled = false AND highest_bid > 0
-  2. For each: calls settle(auctionId) via KEEPER_KEY wallet
-  3. Contract: NFT → winner, fee → feeRecipient, remainder → seller
-  4. Indexer detects AuctionSettled event → updates DB
+1. Queries DB: SELECT auctions WHERE endsAt < now AND settled = false AND highest_bid > 0
+2. For each: calls settle(auctionId) via KEEPER_KEY wallet
+3. On-chain: NFT → winner, fee → feeRecipient, full bid → seller
+4. Indexer detects AuctionSettled → updates DB
 ```
 
-Keeper wallet needs small FLR balance for gas. Fund it separately from `CREATOR_ADDR`.
+**Inactivity cancel goroutine (every 30 s):**
+```
+1. Queries DB: SELECT auctions WHERE created_at + 30min < now AND highest_bidder IS NULL AND settled = false
+2. For each: calls cancelIfInactive(auctionId)
+3. Indexer detects AuctionCancelled → updates DB
+```
+
+Keeper wallet needs a small FLR balance for gas. Fund it separately from `CREATOR_ADDR`.
 
 ---
 
@@ -456,25 +446,27 @@ Keeper wallet needs small FLR balance for gas. Fund it separately from `CREATOR_
 
 | Vector | Mitigation |
 |--------|-----------|
-| Reentrancy | `nonReentrant` on all payable settlement functions (`buy`, `bid`, `settle`, `acceptOffer`, `withdrawRefund`) |
+| Reentrancy | `nonReentrant` on all payable settlement functions (`buy`, `bid`, `settle`, `cancelEarly`, `acceptOffer`, `withdrawOffer`, `withdrawRefund`) |
 | Fee rate manipulation | `PLATFORM_FEE_BPS` is a compile-time `constant` — zero admin surface |
 | Fee recipient change | `feeRecipient` is `immutable` — set once at deploy, frozen forever |
-| Signature replay (offers) | EIP-712 domain includes `chainId` + `verifyingContract`; nonce burn map |
 | Listing overwrite | `AlreadyListed` check prevents third-party overwrites |
-| NFT transfer failure | Fee sent AFTER NFT transfer for `buy`/`settle`/`accept`; if transfer reverts, whole tx reverts, no fee taken |
-| Pull-payment DOS | Outbid refunds use pull pattern (`pendingReturns`) — no push that can be griefed |
-| Bid front-running (MEV) | 2-block commit-reveal delay on all auction bids |
-| Stuck auction (no settle) | `reclaimBid` allows winner to reclaim ETH after `SETTLE_DEADLINE = 7 days` |
-| Admin key compromise | Admin can only: pause contracts, grant/revoke roles — cannot change fee, recipient, or drain funds |
+| NFT transfer failure | NFT transferred before payment in `buy`/`settle`/`acceptOffer`; if transfer reverts, whole tx reverts, no payment taken |
+| Push refund griefing | Outbid refund push uses silent fallback: if push fails, stores in `pendingReturns` without blocking the incoming bid |
+| Bid DOS via non-receiving contract | 2300 gas limit on push + fallback to `pendingReturns` |
+| No pause attack surface | Contracts have no pause, no admin — cannot be frozen by any key compromise |
+| Auction fee double-charge | Fee taken from bidder upfront; losing bidders get full refund including fee — never double-charged |
 
 ### 7.2 Immutability guarantees
 
 These values are set once at deploy and can never be changed without deploying new contracts at new addresses:
 - `feeRecipient` — who receives fees
 - `PLATFORM_FEE_BPS` — how much the fee is (a constant, not even stored as state)
-- EIP-712 domain (OfferBook) — signature domain binding
 
-Users can verify these by reading the deployed bytecode.
+Users can verify these by reading the deployed bytecode/state.
+
+### 7.3 No royalties
+
+The platform does not conduct, route, or enforce royalties of any kind. No royalty registry, no ERC-2981 lookups, no royalty splits in any settlement function.
 
 ---
 
@@ -493,7 +485,7 @@ Users can verify these by reading the deployed bytecode.
 | `OFFERBOOK_ADDR` | yes | Deployed OfferBook contract address |
 | `JWT_SECRET` | yes | 32+ byte hex for SIWE JWT signing |
 | `FRONTEND_URL` | yes | CORS origin (e.g. `http://localhost:3000`) |
-| `KEEPER_KEY` | optional | Keeper wallet private key (auto-settles auctions) |
+| `KEEPER_KEY` | yes | Keeper wallet private key (auto-settles/cancels auctions) |
 | `INDEX_FROM_BLOCK` | optional | Start block for log scanning (auto-set by `make deploy`) |
 
 ### `frontend/.env.local`
@@ -509,7 +501,7 @@ Users can verify these by reading the deployed bytecode.
 | `NEXT_PUBLIC_EXPLORER_URL` | yes | Chain explorer URL |
 | `NEXT_PUBLIC_CURRENCY_SYMBOL` | yes | `C2FLR` or `FLR` |
 | `PRIVATE_KEY` | deploy only | Deployer private key (never commit) |
-| `CREATOR_ADDR` | deploy only | Fee recipient + admin wallet address |
+| `CREATOR_ADDR` | deploy only | Fee recipient wallet address |
 
 **Note:** `FEE_BPS` is not an env var. The 1.5% fee is hardcoded as `PLATFORM_FEE_BPS = 150` in the contracts.
 
@@ -518,6 +510,7 @@ Users can verify these by reading the deployed bytecode.
 ## 9. Operations Reference
 
 ### Service ports
+
 | Service | Port | Notes |
 |---------|------|-------|
 | Frontend | 3000 | Next.js SSR |
@@ -526,6 +519,7 @@ Users can verify these by reading the deployed bytecode.
 | PostgreSQL | 5432 | Supabase-hosted (not local) |
 
 ### Make targets
+
 ```bash
 make up           # start all Docker services
 make down         # stop all services
@@ -538,6 +532,7 @@ make contracts-build  # forge build
 ```
 
 ### Contract interaction via CLI (no frontend)
+
 ```bash
 # Read a listing
 cast call $MARKETPLACE_ADDR "listings(address,uint256)" $COLL_ADDR $TOKEN_ID
@@ -549,13 +544,16 @@ cast call $MARKETPLACE_ADDR "feeRecipient()"
 cast call $MARKETPLACE_ADDR "PLATFORM_FEE_BPS()"
 # Returns: 0x0000...0096 (= 150 decimal)
 
-# Settle an auction directly
-cast send $AUCTION_ADDR "settle(uint256)" $AUCTION_ID --private-key $PRIVATE_KEY
+# Settle an auction (keeper does this automatically)
+cast send $AUCTION_ADDR "settle(uint256)" $AUCTION_ID --private-key $KEEPER_KEY
+
+# Cancel inactive auction (keeper does this automatically)
+cast send $AUCTION_ADDR "cancelIfInactive(uint256)" $AUCTION_ID --private-key $KEEPER_KEY
 ```
 
 ### Verifying fee rate on deployed contract
-Because `PLATFORM_FEE_BPS` is a public constant, it is readable via any ABI-compatible call:
+
 ```bash
 cast call $MARKETPLACE_ADDR "PLATFORM_FEE_BPS()" --rpc-url $RPC_URL
-# Must return 150 (0x96) — if it returns anything else, you are talking to a different contract
+# Must return 150 (0x96)
 ```

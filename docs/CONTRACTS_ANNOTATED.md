@@ -1,6 +1,8 @@
 # MagicWebb Smart Contracts
 
-All contracts inherit `MarketplaceCore` which provides: `feeRecipient` (immutable wallet address), `PLATFORM_FEE_BPS` (constant 150 = 1.5%), `pause`/`unpause`, `AccessControl`, `ReentrancyGuard`.
+All contracts inherit `MarketplaceCore` which provides: `feeRecipient` (immutable wallet address), `PLATFORM_FEE_BPS` (constant 150 = 1.5%), `ReentrancyGuard`. No pause, no admin role — contracts run forever once deployed.
+
+No royalties are supported or enforced by any contract.
 
 ---
 
@@ -15,7 +17,7 @@ Fixed-price ERC-721 and ERC-1155 listings.
 | `list(coll, id, price, expiresAt)` | seller | List one ERC-721. Requires ownership + approval. 1.5% listing fee paid upfront. |
 | `list1155(coll, id, amount, price, expiresAt)` | seller | List ERC-1155 tokens. 1.5% listing fee paid upfront. |
 | `batchList(items[])` | seller | List up to 50 ERC-721 tokens in one tx. Each item: `{coll, id, price, expiresAt}`. Reverts if `items.length == 0 || items.length > 50` (`BatchTooLarge`). 1.5% listing fee on each item, summed. |
-| `cancel(coll, id)` | seller | Remove listing. Works while paused. |
+| `cancel(coll, id)` | seller | Remove listing. |
 | `buy(coll, id)` | buyer | Buy at exact listing price. NFT → buyer, 1.5% fee → feeRecipient wallet, remainder → seller. Atomic — entire tx reverts if NFT transfer fails. |
 
 ### Listing struct (2 storage slots)
@@ -28,73 +30,94 @@ slot 1: price(16) + amount(16)
 
 ## AuctionHouse
 
-English auctions with fixed end time, reserve price, min bid increment, and commit-reveal MEV protection.
+English auctions with auto-settlement, single-step bidding, and automatic push-refunds for outbid bidders.
 
 ### Constants
 | Constant | Value | Purpose |
 |----------|-------|---------|
 | `MAX_MIN_INCREMENT_BPS` | 5000 (50%) | Prevents absurd min increment griefing |
-| `SETTLE_DEADLINE` | 7 days | After this past `endsAt`, winner may reclaim bid |
-| `COMMIT_DELAY_BLOCKS` | 2 | Min blocks between commit and reveal |
+| `NO_BID_CANCEL_WINDOW` | 30 minutes | Auction auto-cancels if no bid within this window |
 
-**No anti-snipe.** `endsAt` is immutable after creation. Bids in the final seconds do not extend the clock.
+**No anti-snipe.** `endsAt` is immutable after creation.
 
-### Auction struct (6 storage slots, 12 fields)
+### Auction struct (6 storage slots, 13 fields)
 ```
 slot 0: seller(20) + startsAt(8) + minIncrementBps(2) + settled(1) + standard(1)
 slot 1: collection(20) + endsAt(8)
 slot 2: tokenId(32)
 slot 3: reserve(16) + highestBid(16)
 slot 4: highestBidder(20)
-slot 5: amount(16)
+slot 5: amount(16) + highestTotal(16)
 ```
 
-### Bid flow (commit-reveal)
+`highestBid` = the bid amount proper (used for reserve/increment checks).
+`highestTotal` = exact ETH held for highest bidder (bid + 1.5% fee). Used for push-refunds and settlement.
+
+### Bid flow (single-step)
 ```
-1. commitBid(id, keccak256(abi.encode(id, bidder, fullAmount, salt)))
-   — stores hash on-chain, emits BidCommitted
-2. Wait COMMIT_DELAY_BLOCKS (2 blocks ≈ 3.6 s on Flare)
-3. bid(id, fullAmount, salt) with msg.value = fullAmount (new bidder)
-                                            or fullAmount - prevHighBid (rebidder)
-   — verifies hash, enforces delay, updates highestBid/Bidder
-   — previous high bidder's ETH queued in pendingReturns
+1. bid(id, bidAmount) with msg.value = bidAmount + floor(bidAmount * 150 / 10000)
+   — validates bid meets reserve/increment
+   — records new highestBid + highestTotal
+   — previous high bidder's ETH (highestTotal) is pushed back immediately
+   — BidPlaced event emitted
+```
+
+### Settlement
+At or after `endsAt`, anyone calls `settle(id)` (keeper bot does this automatically):
+```
+- NFT transferred: seller → winner
+- Fee = highestTotal - highestBid  (exact premium paid by winner)
+- feeRecipient receives: fee
+- seller receives: highestBid (full bid amount)
 ```
 
 ### Key functions
 | Function | Who | Description |
 |----------|-----|-------------|
-| `create(coll, id, reserve, startsAt, endsAt, minIncBps)` | seller | Create ERC-721 auction. |
+| `create(coll, id, reserve, endsAt, minIncBps)` | seller | Create ERC-721 auction. Starts immediately. |
 | `create1155(...)` | seller | Create ERC-1155 auction. |
-| `commitBid(id, commitment)` | bidder | Phase 1: store bid commitment. |
-| `bid(id, fullAmount, salt)` | bidder | Phase 2: reveal and apply bid. |
-| `settle(id)` | anyone | After `endsAt`: transfers NFT to winner, 1.5% fee → feeRecipient wallet, remainder → seller. Called automatically by keeper bot. |
-| `cancel(id)` | seller | Cancel if no bids exist. |
-| `withdrawRefund()` | outbid bidder | Claim accumulated refunds from pendingReturns. |
-| `reclaimBid(id)` | winner | If `settle` not called within 7 days of `endsAt`, winner reclaims ETH. |
+| `bid(id, bidAmount)` | bidder | Single-step bid. msg.value = bidAmount + 1.5% fee. Outbid refund pushed automatically. |
+| `settle(id)` | anyone | After `endsAt`: NFT → winner, fee → feeRecipient, bid → seller. Keeper calls automatically. |
+| `cancelIfInactive(id)` | anyone | Cancel zero-bid auction after 30-minute window. Keeper calls automatically. |
+| `cancelEarly(id)` | seller only | Seller cancels before `endsAt`. Refunds highest bidder if any. Requires manual tx approval. |
+| `withdrawRefund()` | bidder | Emergency: reclaim ETH if automatic push-refund failed (edge case). |
 
 ---
 
 ## OfferBook
 
-Off-chain EIP-712 signed offers with on-chain ETH escrow.
+On-chain NFT offer system. Owners opt tokens in to receive offers.
+
+### State
+```solidity
+mapping(address => mapping(uint256 => address)) public eligible;       // ERC-721 eligibility
+mapping(address => mapping(uint256 => address)) public eligible1155;   // ERC-1155 eligibility
+mapping(address => mapping(uint256 => mapping(address => uint256))) public offers;        // ERC-721 offers (ETH)
+mapping(address => mapping(uint256 => mapping(address => Offer1155))) public offers1155;  // ERC-1155 offers
+```
+
+### Offer flow
+```
+1. Owner: markEligible(coll, tokenId)        — signals willingness to receive offers
+2. Bidder: makeOffer(coll, tokenId)          — deposits ETH offer on-chain
+3. Owner: acceptOffer(coll, tokenId, bidder) — NFT → bidder, fee → feeRecipient, remainder → owner
+   OR
+   Bidder: withdrawOffer(coll, tokenId)      — reclaims full ETH, no fee taken
+```
+
+### Fee on offers
+Fee is 1.5% of offer amount, deducted from seller proceeds at acceptance. Bidder gets full ETH back if offer not accepted — no fee.
 
 ### Key functions
 | Function | Who | Description |
 |----------|-----|-------------|
-| `deposit()` | offeror | Deposit ETH to use across all offers. |
-| `withdraw(amount)` | offeror | Withdraw deposited ETH. |
-| `acceptOffer(offer, sig)` | token owner | Accept a signed offer: verifies EIP-712 sig, transfers NFT, 1.5% fee → feeRecipient wallet, remainder → seller. |
-| `cancelOffer(offer)` | offeror | Invalidate an offer. |
-
----
-
-## MarketplaceCore (base)
-
-| Item | Value |
-|------|-------|
-| `feeRecipient` | Immutable wallet address. Set at deploy. Receives all platform fees directly. |
-| `PLATFORM_FEE_BPS` | Constant `150` (1.5%). Hardcoded — cannot be changed by any admin or env var. |
-| `_splitAndPay(seller, amount)` | Deducts `PLATFORM_FEE_BPS/10000 * amount` → feeRecipient, remainder → seller. |
-| `_transferToken(std, coll, from, to, id, amt)` | Handles ERC-721 and ERC-1155 transfers. |
-
-Fee formula: `fee = amount * 150 / 10_000`. Seller receives `amount - fee`. Fee is sent via `.call{value: fee}("")` directly to the `feeRecipient` wallet.
+| `markEligible(coll, tokenId)` | token owner | Mark ERC-721 as eligible for offers. |
+| `removeEligible(coll, tokenId)` | owner who marked | Stop receiving new offers. Existing offers persist. |
+| `makeOffer(coll, tokenId)` | anyone | ETH offer for eligible ERC-721. Accumulates on repeat calls. |
+| `withdrawOffer(coll, tokenId)` | offeror | Full ETH refund — no fee. |
+| `acceptOffer(coll, tokenId, bidder)` | token owner | Accept offer. NFT → bidder. Eligibility auto-cleared. |
+| `markEligible1155(coll, tokenId)` | holder | Mark ERC-1155 as eligible. |
+| `removeEligible1155(coll, tokenId)` | owner who marked | Stop receiving ERC-1155 offers. |
+| `makeOffer1155(coll, tokenId, units)` | anyone | One offer per bidder. Withdraw to update. |
+| `withdrawOffer1155(coll, tokenId)` | offeror | Full ETH refund. |
+| `acceptOffer1155(coll, tokenId, bidder)` | holder | Accept ERC-1155 offer. |

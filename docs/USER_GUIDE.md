@@ -15,43 +15,48 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 
 ## Batch list (up to 50 tokens at once)
 1. Go to **List an NFT** → click **Batch list**
-2. Tap tokens to select (up to 50, any collections, green ring = selected)
-3. Set a shared price and duration
+2. Tap tokens to select (up to 50, any collections)
+3. Set price and duration per token
 4. Click **List N tokens** — one wallet confirmation
 
 ## Create an auction
 1. Open any token you own → click **Auction**
-2. Set reserve price (0 = accept any bid), duration, min increment (bps, e.g. 500 = 5%)
+2. Set reserve price (0 = accept any bid), end time, min increment (bps, e.g. 500 = 5%)
 3. Click **Create auction** — approve AuctionHouse if prompted
-4. End time is fixed. It will never be extended.
-5. No bids → click **Cancel**. With bids → keeper bot auto-settles after end time.
+4. Auction starts immediately. End time is fixed and never extended.
+5. If nobody bids within 30 minutes, the auction is cancelled automatically.
+6. To cancel early: click **Cancel Auction** → approve the wallet transaction manually.
 
-## Bid on an auction (2-step commit-reveal)
-Bidding uses two steps to prevent front-running:
+## Bid on an auction
+1. Open an active auction → enter bid amount
+2. Click **Bid** → confirm wallet — your bid + 1.5% fee is sent in one transaction
+3. If someone outbids you, your full payment (bid + fee) is returned to your wallet automatically — no action needed
+4. At auction end, the keeper bot settles automatically: NFT goes to winner, seller receives the full bid amount
 
-**Step 1 — Commit**
-- Enter bid amount → click **Commit bid** → confirm wallet
-- Your bid is hidden on-chain
+## Auction fees for bidders
+- You pay: `bid + 1.5% of bid` upfront
+- If you win: the 1.5% goes to the platform, seller gets the full bid
+- If you lose: you get back the full amount you paid (bid + fee) — no fee kept
 
-**Step 2 — Reveal** (after ~2 blocks, ~4 seconds on Flare)
-- Return to the auction page — **Reveal bid** button turns green when ready
-- Click **Reveal bid** → confirm wallet — bid applied
+## Offer on an NFT
+Offers work on tokens the owner has marked as eligible:
 
-> Your pending commit is saved in browser storage. Close the tab and return — it reappears.
+1. Browse token → if owner enabled offers, click **Make Offer**
+2. Enter offer amount → click **Submit Offer** → confirm wallet (ETH deposited on-chain)
+3. Owner reviews and may accept or ignore
+4. If accepted: NFT transfers to you automatically
+5. To cancel: click **Withdraw Offer** → confirm wallet → full ETH returned, no fee
 
-If outbid: your ETH accumulates in your refund balance. Go to **My Profile → Refunds → Withdraw** to claim it.
+## Enable offers on your NFT (owner)
+1. Open any token you own → click **Accept Offers**
+2. Confirm wallet — token is now marked eligible
+3. Bidders can make on-chain ETH offers
+4. Review offers in **My Offers → Received** → click **Accept** on your preferred offer
+5. To stop receiving offers: click **Remove Eligibility** → confirm wallet
 
-## Make an offer
-1. Open any token → click **Make offer**
-2. Deposit ETH into OfferBook (one-time, reusable for all offers)
-3. Set amount and expiry → sign EIP-712 message (no transaction)
-4. Owner accepts on-chain → your ETH pays automatically
+## Accept an offer (owner)
+Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.
+NFT goes to bidder, you receive ETH minus 1.5% platform fee.
 
-## Accept an offer
-Go to **Offers → Received** → click **Accept** → confirm wallet. NFT goes to bidder, you receive ETH minus 1.5% fee.
-
-## Withdraw refund / deposit
-- Outbid refund: **My Profile → Refunds → Withdraw**
-- OfferBook deposit: **My Profile → Deposit → Withdraw**
-
-Both are pull-pattern: you initiate, contract sends ETH to you.
+## No royalties
+MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 100% of the sale price minus the 1.5% platform fee.
