@@ -1,36 +1,35 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
-func handleGetMarketMetrics(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		m, err := q.GetMarketMetrics(r.Context())
+func marketMetrics(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		m, err := q.GetMarketMetrics(c.Context())
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		writeJSON(w, http.StatusOK, m)
+		return c.JSON(m)
 	}
 }
 
-func handleGetRecentActivity(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func recentActivity(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		limit := 50
-		if s := r.URL.Query().Get("limit"); s != "" {
+		if s := c.Query("limit"); s != "" {
 			if n, err := strconv.Atoi(s); err == nil && n > 0 {
 				limit = n
 			}
 		}
-		rows, err := q.GetRecentTransactions(r.Context(), limit)
+		rows, err := q.GetRecentTransactions(c.Context(), limit)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }

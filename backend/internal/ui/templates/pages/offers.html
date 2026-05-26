@@ -1,0 +1,61 @@
+{{template "layout.html" .}}
+{{define "content"}}
+<h1 class="text-2xl font-bold text-neutral-200 mb-6">Offers</h1>
+
+<div x-data="{tab: 'received'}">
+  <div class="flex gap-2 mb-6">
+    <button @click="tab='received'"
+            :class="tab==='received' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+            class="px-4 py-2 rounded-lg text-sm font-semibold transition">
+      Received ({{len .Received}})
+    </button>
+    <button @click="tab='sent'"
+            :class="tab==='sent' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+            class="px-4 py-2 rounded-lg text-sm font-semibold transition">
+      Sent ({{len .Sent}})
+    </button>
+  </div>
+
+  <div x-show="tab==='received'">
+    {{if .Received}}
+    <div class="space-y-3">
+      {{range .Received}}
+      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-white font-mono">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</p>
+          <p class="text-xs text-neutral-500 mt-1">From {{shortAddr .Bidder}} · Expires {{.ExpiresAt.Format "Jan 2 15:04"}}</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+          <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="text-neutral-600 text-center py-16">No offers received yet.</p>
+    {{end}}
+  </div>
+
+  <div x-show="tab==='sent'">
+    {{if .Sent}}
+    <div class="space-y-3">
+      {{range .Sent}}
+      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between">
+        <div>
+          <p class="text-sm font-medium text-white font-mono">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</p>
+          <p class="text-xs text-neutral-500 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}}</p>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+          <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="text-neutral-600 text-center py-16">No offers sent yet.</p>
+    {{end}}
+  </div>
+</div>
+{{end}}

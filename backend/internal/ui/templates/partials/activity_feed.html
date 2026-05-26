@@ -1,0 +1,14 @@
+{{define "partials/activity_feed.html"}}
+<div class="flex gap-3 overflow-x-auto pb-2 text-xs text-neutral-500">
+  {{range .Activity}}
+  <div class="flex-shrink-0 bg-neutral-900 rounded-lg px-3 py-2 border border-neutral-800">
+    <span class="text-emerald-400 font-medium">{{.Type}}</span>
+    <span class="ml-2 font-mono">{{shortAddr .Collection}}</span>
+    <span class="ml-2 text-neutral-400">{{wei2eth .AmountWei}} FLR</span>
+  </div>
+  {{end}}
+  {{if not .Activity}}
+  <span class="text-neutral-700">No recent activity</span>
+  {{end}}
+</div>
+{{end}}

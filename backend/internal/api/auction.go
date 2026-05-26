@@ -1,79 +1,72 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
 	"time"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
-func handleListAuctions(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func listAuctions(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		f := db.AuctionsFilter{
-			Collection: r.URL.Query().Get("collection"),
-			Status:     r.URL.Query().Get("status"),
+			Collection: c.Query("collection"),
+			Status:     c.Query("status"),
 		}
-		if lim := r.URL.Query().Get("limit"); lim != "" {
+		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
 				f.Limit = n
 			}
 		}
-		rows, err := q.ListAuctions(r.Context(), f)
+		rows, err := q.ListAuctions(c.Context(), f)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if rows == nil {
 			rows = []db.AuctionRow{}
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }
 
-func handleGetAuction(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.PathValue("id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
+func getAuction(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id, err := strconv.ParseInt(c.Params("id"), 10, 64)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid auction id")
-			return
+			return writeErr(c, fiber.StatusBadRequest, "invalid auction id")
 		}
-		row, err := q.GetAuction(r.Context(), id)
+		row, err := q.GetAuction(c.Context(), id)
 		if err != nil {
 			if isNotFound(err) {
-				writeErr(w, http.StatusNotFound, "auction not found")
-				return
+				return writeErr(c, fiber.StatusNotFound, "auction not found")
 			}
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		writeJSON(w, http.StatusOK, row)
+		return c.JSON(row)
 	}
 }
 
-func handleServerTime() http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		writeJSON(w, http.StatusOK, map[string]int64{"unix_ms": time.Now().UnixMilli()})
+func serverTime() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"unix_ms": time.Now().UnixMilli()})
 	}
 }
 
-func handleGetAuctionBids(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.PathValue("id")
-		id, err := strconv.ParseInt(idStr, 10, 64)
+func getAuctionBids(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id, err := strconv.ParseInt(c.Params("id"), 10, 64)
 		if err != nil {
-			writeErr(w, http.StatusBadRequest, "invalid auction id")
-			return
+			return writeErr(c, fiber.StatusBadRequest, "invalid auction id")
 		}
-		rows, err := q.GetBidsForAuction(r.Context(), id)
+		rows, err := q.GetBidsForAuction(c.Context(), id)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if rows == nil {
 			rows = []db.BidRow{}
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }

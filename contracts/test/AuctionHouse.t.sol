@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test}         from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, WrongBidValue, NoBids, AuctionLive, AuctionEnded, NotSeller} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, WrongBidValue, AuctionLive, AuctionEnded, NotSeller} from "../src/AuctionHouse.sol";
 import {MockERC721}   from "./MockERC721.sol";
 import {MockERC1155}  from "./MockERC1155.sol";
 
@@ -127,11 +127,12 @@ contract AuctionHouseTest is Test {
         ah.settle(id);
     }
 
-    function test_settleNoBidsReverts() public {
+    function test_settleNoBidsCancelsInactive() public {
         (uint256 id,) = _createAuction();
         vm.warp(block.timestamp + 8 days);
-        vm.expectRevert(NoBids.selector);
-        ah.settle(id);
+        ah.settle(id); // auto-cancels internally via _cancelIfInactive
+        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
+        assertTrue(settled);
     }
 
     function test_settleAlreadySettledReverts() public {
@@ -143,12 +144,12 @@ contract AuctionHouseTest is Test {
         ah.settle(id);
     }
 
-    // ── cancelIfInactive ──────────────────────────────────────────────────
+    // ── cancelIfInactive (triggered via settle) ───────────────────────────
 
     function test_cancelIfInactiveAfterWindow() public {
         (uint256 id,) = _createAuction();
         vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() + 1);
-        ah.cancelIfInactive(id); // anyone can call
+        ah.settle(id); // keeper calls settle(); contract cancels internally
         (,,,bool settled,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
@@ -157,15 +158,15 @@ contract AuctionHouseTest is Test {
         (uint256 id,) = _createAuction();
         vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() - 1);
         vm.expectRevert(AuctionLive.selector);
-        ah.cancelIfInactive(id);
+        ah.settle(id);
     }
 
     function test_cancelIfInactiveWithBidsReverts() public {
         (uint256 id,) = _createAuction();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() + 1);
-        vm.expectRevert(AuctionLive.selector);
-        ah.cancelIfInactive(id);
+        vm.expectRevert(AuctionLive.selector); // has winner, endsAt not reached
+        ah.settle(id);
     }
 
     // ── cancelEarly ───────────────────────────────────────────────────────

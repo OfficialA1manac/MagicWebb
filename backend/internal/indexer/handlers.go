@@ -2,22 +2,20 @@ package indexer
 
 import (
 	"context"
-	"encoding/json"
 	"fmt"
 	"math/big"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
-	"github.com/rs/zerolog/log"
 
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
 type handlers struct {
-	q   *db.Q
-	rdb *cache.Client
+	q    *db.Q
+	bcast *sse.Broadcaster
 }
 
 // chunk returns the i-th 32-byte ABI word from event data.
@@ -28,16 +26,13 @@ func chunk(data []byte, i int) []byte {
 	return data[i*32 : (i+1)*32]
 }
 
-func addrStr(b []byte) string       { return common.BytesToAddress(b).Hex() }
-func bigInt(b []byte) *big.Int      { return new(big.Int).SetBytes(b) }
-func bigStr(b []byte) string        { return bigInt(b).String() }
-func tsUnix(b []byte) time.Time     { return time.Unix(bigInt(b).Int64(), 0) }
+func addrStr(b []byte) string   { return common.BytesToAddress(b).Hex() }
+func bigInt(b []byte) *big.Int  { return new(big.Int).SetBytes(b) }
+func bigStr(b []byte) string    { return bigInt(b).String() }
+func tsUnix(b []byte) time.Time { return time.Unix(bigInt(b).Int64(), 0) }
 
-func (h *handlers) pub(ctx context.Context, ch string, payload any) {
-	b, _ := json.Marshal(payload)
-	if err := h.rdb.Publish(ctx, ch, string(b)); err != nil {
-		log.Warn().Err(err).Str("ch", ch).Msg("redis publish failed")
-	}
+func (h *handlers) pub(evType string, payload any) {
+	h.bcast.Publish(sse.Event{Type: evType, Data: payload})
 }
 
 // dispatch routes a log to the correct handler.
@@ -108,7 +103,7 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 	if err := h.q.UpsertListing(ctx, r); err != nil {
 		return fmt.Errorf("onListed upsert: %w", err)
 	}
-	h.pub(ctx, "mktplace:events", map[string]any{"event": "Listed", "data": r})
+	h.pub("listing-updated", map[string]any{"event": "Listed", "data": r})
 	return nil
 }
 
@@ -122,7 +117,7 @@ func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 	if err := h.q.DeactivateListing(ctx, collection, tokenID); err != nil {
 		return fmt.Errorf("onCancelled: %w", err)
 	}
-	h.pub(ctx, "mktplace:events", map[string]any{
+	h.pub("listing-updated", map[string]any{
 		"event": "Cancelled", "collection": collection, "tokenId": tokenID,
 	})
 	return nil
@@ -150,7 +145,7 @@ func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) 
 		priceWei, feeWei, royaltyWei, l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
 		return fmt.Errorf("onBought sale: %w", err)
 	}
-	h.pub(ctx, "mktplace:events", map[string]any{
+	h.pub("listing-updated", map[string]any{
 		"event": "Bought", "collection": collection, "tokenId": tokenID,
 		"buyer": buyer, "seller": seller, "priceWei": priceWei,
 	})
@@ -195,7 +190,7 @@ func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 	if err := h.q.UpsertAuction(ctx, r); err != nil {
 		return fmt.Errorf("onAuctionCreated: %w", err)
 	}
-	h.pub(ctx, "auction:events", map[string]any{"event": "AuctionCreated", "data": r})
+	h.pub("auction-updated", map[string]any{"event": "AuctionCreated", "data": r})
 	return nil
 }
 
@@ -217,7 +212,7 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 	if err := h.q.UpdateAuctionBid(ctx, row); err != nil {
 		return fmt.Errorf("onBidPlaced updateBid: %w", err)
 	}
-	h.pub(ctx, "auction:events", map[string]any{
+	h.pub("auction-updated", map[string]any{
 		"event": "BidPlaced", "auctionId": auctionID, "bidder": bidder, "amtWei": amtWei,
 	})
 	return nil
@@ -233,7 +228,7 @@ func (h *handlers) onAuctionSettled(ctx context.Context, l types.Log) error {
 	if err := h.q.SetAuctionStatus(ctx, auctionID, "settled"); err != nil {
 		return fmt.Errorf("onAuctionSettled: %w", err)
 	}
-	h.pub(ctx, "auction:events", map[string]any{
+	h.pub("auction-updated", map[string]any{
 		"event": "AuctionSettled", "auctionId": auctionID,
 		"winner": addrStr(l.Topics[2].Bytes()), "seller": addrStr(l.Topics[3].Bytes()),
 		"amtWei": bigStr(chunk(l.Data, 0)),
@@ -250,7 +245,7 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 	if err := h.q.SetAuctionStatus(ctx, auctionID, "cancelled"); err != nil {
 		return fmt.Errorf("onAuctionCancelled: %w", err)
 	}
-	h.pub(ctx, "auction:events", map[string]any{"event": "AuctionCancelled", "auctionId": auctionID})
+	h.pub("auction-updated", map[string]any{"event": "AuctionCancelled", "auctionId": auctionID})
 	return nil
 }
 
@@ -275,7 +270,7 @@ func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime u
 		amtWei, feeWei, royaltyWei, l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
 		return fmt.Errorf("onOfferAccepted: %w", err)
 	}
-	h.pub(ctx, "mktplace:events", map[string]any{
+	h.pub("offer-updated", map[string]any{
 		"event": "OfferAccepted", "collection": collection, "tokenId": tokenID,
 		"seller": seller, "bidder": bidder, "amtWei": amtWei,
 	})
@@ -301,7 +296,7 @@ func (h *handlers) onOffer1155Accepted(ctx context.Context, l types.Log, blockTi
 		amtWei, feeWei, royaltyWei, l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
 		return fmt.Errorf("onOffer1155Accepted: %w", err)
 	}
-	h.pub(ctx, "mktplace:events", map[string]any{
+	h.pub("offer-updated", map[string]any{
 		"event": "Offer1155Accepted", "collection": collection, "tokenId": tokenID,
 		"seller": seller, "bidder": bidder, "amtWei": amtWei,
 	})

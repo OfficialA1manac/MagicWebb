@@ -1,0 +1,34 @@
+{{template "layout.html" .}}
+{{define "content"}}
+<div class="mb-8">
+  <form action="/search" method="get">
+    <div class="flex gap-3">
+      <input name="q" value="{{.Query}}" type="text" placeholder="Search NFTs and collections…"
+             class="flex-1 bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">Search</button>
+    </div>
+  </form>
+</div>
+
+{{if .Query}}
+<p class="text-sm text-neutral-500 mb-4">{{len .Results}} results for "{{.Query}}"</p>
+{{if .Results}}
+<div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+  {{range .Results}}
+  <a href="{{if eq .Kind "nft"}}/token/{{.Collection}}/{{.TokenID}}{{else}}/collection/{{.Collection}}{{end}}"
+     class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block">
+    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-4xl">
+      {{if eq .Kind "nft"}}🖼{{else}}🗂{{end}}
+    </div>
+    <div class="p-3">
+      <p class="text-xs text-neutral-500">{{.Kind}}</p>
+      <p class="text-sm font-medium text-white truncate mt-0.5">{{if .Name}}{{.Name}}{{else}}{{shortAddr .Collection}}{{end}}</p>
+    </div>
+  </a>
+  {{end}}
+</div>
+{{else}}
+<p class="text-neutral-600 text-center py-16">No results found.</p>
+{{end}}
+{{end}}
+{{end}}

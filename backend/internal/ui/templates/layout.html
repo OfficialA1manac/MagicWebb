@@ -1,0 +1,56 @@
+<!DOCTYPE html>
+<html lang="en" class="bg-neutral-950 text-white antialiased">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>{{.Title}} — MagicWebb</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script>
+    tailwind.config = { theme: { extend: { colors: { neutral: { 950: '#0a0a0a' } } } } }
+  </script>
+  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
+  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
+  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" defer></script>
+  <script src="/static/wallet.js" defer></script>
+</head>
+<body hx-ext="sse" sse-connect="/events" x-data>
+
+<!-- Nav -->
+<nav class="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur border-b border-neutral-800">
+  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
+    <a href="/" class="text-xl font-bold tracking-tight text-white">Magic<span class="text-emerald-400">Webb</span></a>
+    <div class="hidden md:flex items-center gap-6 text-sm text-neutral-400">
+      <a href="/listings" class="hover:text-white transition">Listings</a>
+      <a href="/auctions" class="hover:text-white transition">Auctions</a>
+      <a href="/offers" class="hover:text-white transition">Offers</a>
+      <a href="/metrics" class="hover:text-white transition">Metrics</a>
+    </div>
+    <div x-data="walletStore" class="flex items-center gap-3">
+      <template x-if="!address">
+        <button @click="connect()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition">Connect</button>
+      </template>
+      <template x-if="address">
+        <div class="flex items-center gap-2">
+          <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
+          <a :href="'/profile/' + address" class="text-sm text-neutral-300 hover:text-white font-mono" x-text="shortAddr"></a>
+        </div>
+      </template>
+    </div>
+  </div>
+</nav>
+
+<!-- Toast container -->
+<div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
+
+<!-- Page content -->
+<main class="max-w-7xl mx-auto px-4 py-8">
+  {{block "content" .}}{{end}}
+</main>
+
+<footer class="border-t border-neutral-800 mt-16 py-8 text-center text-neutral-600 text-sm">
+  MagicWebb · Non-custodial NFT marketplace on Flare Network · <a href="https://github.com/OfficialA1manac/MagicWebb" class="hover:text-neutral-400">GitHub</a>
+</footer>
+
+</body>
+</html>

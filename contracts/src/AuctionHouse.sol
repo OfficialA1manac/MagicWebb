@@ -11,7 +11,6 @@ error NotActive();
 error AuctionEnded();
 error AuctionLive();
 error BidTooLow();
-error NoBids();
 error InvalidWindow();
 error NotApproved();
 error BidOverflow();
@@ -26,9 +25,10 @@ error NothingToWithdraw();
 ///   1. Seller calls `create` → AuctionCreated event. Auction starts immediately.
 ///   2. Bidder calls `bid(id, bidAmount)` with msg.value = bidAmount + 1.5% platform fee.
 ///      Outbid bidder is refunded immediately (full bid + fee). BidPlaced event.
-///   3. After `endsAt`, keeper bot (or anyone) calls `settle(id)` → NFT → winner,
+///   3. After `endsAt`, keeper bot calls `settle(id)` → NFT → winner,
 ///      fee → feeRecipient, full bid → seller. AuctionSettled event.
-///   4. Auto-cancel: if no bid within first 30 minutes, anyone calls `cancelIfInactive`.
+///   4. Auto-cancel: if no bid within first 30 minutes, keeper calls `settle(id)` which
+///      triggers `_cancelIfInactive` internally. Not directly callable externally.
 ///   5. Owner early cancel: seller calls `cancelEarly` any time before expiry (manual approval).
 ///      Highest bidder (if any) refunded in full automatically.
 ///
@@ -223,16 +223,23 @@ contract AuctionHouse is MarketplaceCore {
 
     // ── Settle ────────────────────────────────────────────────────────────
 
-    /// @notice Settle a finished auction. Callable by anyone after endsAt (keeper bot calls this).
+    /// @notice Settle a finished auction. Keeper bot calls this after endsAt.
     ///         NFT → winner. Fee (exact amount paid by bidder on top of bid) → feeRecipient.
     ///         Full bid amount → seller.
+    ///         If no bids and the 30-minute inactivity window has elapsed, cancels internally.
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
-        if (block.timestamp < a.endsAt) revert AuctionLive();
 
         address winner = a.highestBidder;
-        if (winner == address(0)) revert NoBids();
+
+        if (winner == address(0)) {
+            if (block.timestamp <= a.startsAt + NO_BID_CANCEL_WINDOW) revert AuctionLive();
+            _cancelIfInactive(a, id);
+            return;
+        }
+
+        if (block.timestamp < a.endsAt) revert AuctionLive();
 
         a.settled = true;
 
@@ -258,16 +265,11 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
 
-    // ── Cancel: inactive ──────────────────────────────────────────────────
+    // ── Cancel: inactive (internal) ───────────────────────────────────────
 
-    /// @notice Cancel an auction with zero bids if the first-bid window has elapsed.
-    ///         Anyone may call this — the keeper bot uses it for cleanup.
-    function cancelIfInactive(uint256 id) external {
-        Auction storage a = auctions[id];
-        if (a.seller == address(0) || a.settled) revert NotActive();
-        if (a.highestBidder != address(0)) revert AuctionLive();
-        if (block.timestamp <= a.startsAt + NO_BID_CANCEL_WINDOW) revert AuctionLive();
-
+    /// @dev Called by settle() when a zero-bid auction has passed NO_BID_CANCEL_WINDOW.
+    ///      Not externally callable.
+    function _cancelIfInactive(Auction storage a, uint256 id) private {
         a.settled = true;
         emit AuctionCancelled(id);
     }

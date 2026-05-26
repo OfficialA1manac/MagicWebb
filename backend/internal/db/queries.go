@@ -15,6 +15,9 @@ type Q struct{ pool *pgxpool.Pool }
 
 func New(pool *pgxpool.Pool) *Q { return &Q{pool} }
 
+// Ping verifies the DB connection is alive.
+func (q *Q) Ping(ctx context.Context) error { return q.pool.Ping(ctx) }
+
 // ── Indexer state ─────────────────────────────────────────────────────────
 
 func (q *Q) GetIndexedBlock(ctx context.Context, chainID int) (uint64, error) {
@@ -346,6 +349,33 @@ func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) 
 		        min_increment_bps, starts_at, ends_at, status::text, create_tx
 		 FROM auctions WHERE status='active' AND ends_at < now()
 		 ORDER BY ends_at ASC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuctionRow
+	for rows.Next() {
+		var r AuctionRow
+		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
+			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
+			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT auction_id, collection, token_id::text, seller, standard::text,
+		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
+		        min_increment_bps, starts_at, ends_at, status::text, create_tx
+		 FROM auctions
+		 WHERE status='active'
+		   AND highest_bidder IS NULL
+		   AND starts_at + interval '30 minutes' < now()
+		 ORDER BY starts_at ASC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}

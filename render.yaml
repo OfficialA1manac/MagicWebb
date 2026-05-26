@@ -1,21 +1,18 @@
 services:
-  # ── API server (HTTP :8080 + gRPC :9090) ────────────────────────────────
   - type: web
-    name: magicwebb-api
-    env: docker
-    dockerfilePath: ./backend/Dockerfile.api
-    dockerContext: ./backend
+    name: magicwebb
+    runtime: go
+    rootDir: backend
+    buildCommand: go build -o ../bin/magicwebb ./cmd/server
+    startCommand: ../bin/magicwebb
     port: 8080
     plan: free
     healthCheckPath: /healthz
     envVars:
       - key: POSTGRES_URL
-        sync: false          # set in Render dashboard — contains password
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: magicwebb-redis
-          property: connectionString
+        sync: false
+      - key: JWT_SECRET
+        generateValue: true
       - key: RPC_URL
         value: https://coston2-api.flare.network/ext/C/rpc
       - key: CHAIN_ID
@@ -26,16 +23,12 @@ services:
         value: "0xf62e931D807f87eBd90Cc3254b0a34a76c326331"  # AUCTION
       - key: OFFERBOOK_ADDR
         value: "0x7e88e86F61E6AD80abD828B6bCEDAA86311736f0"  # OFFERBOOK
-      - key: ROYALTY_ADDR
-        value: ""
-      - key: JWT_SECRET
-        generateValue: true
+      - key: HTTP_ADDR
+        value: ":8080"
       - key: FRONTEND_URL
-        value: https://magicwebb-web.onrender.com
-      - key: SERVICE_TOKEN
-        generateValue: true
-      - key: KEEPER_KEY
-        sync: false          # optional: auction auto-settlement key
+        value: https://magicwebb.onrender.com
+      - key: SIWE_DOMAIN
+        value: magicwebb.onrender.com
       - key: ENV
         value: production
       - key: INDEX_FROM_BLOCK
@@ -44,115 +37,5 @@ services:
         value: "30"
       - key: GETLOGS_BLOCK_CAP
         value: "30"
-      - key: SIWE_DOMAIN
-        value: magicwebb-api.onrender.com
-
-  # ── Indexer (background worker, no public port) ──────────────────────────
-  - type: worker
-    name: magicwebb-indexer
-    env: docker
-    dockerfilePath: ./backend/Dockerfile.indexer
-    dockerContext: ./backend
-    plan: free
-    envVars:
-      - key: POSTGRES_URL
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: POSTGRES_URL
-      - key: REDIS_URL
-        fromService:
-          type: redis
-          name: magicwebb-redis
-          property: connectionString
-      - key: RPC_URL
-        value: https://coston2-api.flare.network/ext/C/rpc
-      - key: CHAIN_ID
-        value: "114"
-      - key: MARKETPLACE_ADDR
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: MARKETPLACE_ADDR
-      - key: AUCTION_ADDR
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: AUCTION_ADDR
-      - key: OFFERBOOK_ADDR
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: OFFERBOOK_ADDR
-      - key: ROYALTY_ADDR
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: ROYALTY_ADDR
-      - key: JWT_SECRET
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: JWT_SECRET
-      - key: SERVICE_TOKEN
-        fromService:
-          type: web
-          name: magicwebb-api
-          envVarKey: SERVICE_TOKEN
-      - key: INDEX_FROM_BLOCK
-        value: "30437062"
-      - key: GETLOGS_CHUNK
-        value: "30"
-      - key: GETLOGS_BLOCK_CAP
-        value: "30"
-
-  # ── Frontend (Next.js standalone) ────────────────────────────────────────
-  - type: web
-    name: magicwebb-web
-    env: node
-    rootDir: frontend
-    nodeVersion: "22"
-    buildCommand: >-
-      npm ci && npm run build &&
-      cp -r .next/static .next/standalone/.next/static
-    startCommand: node .next/standalone/server.js
-    plan: free
-    envVars:
-      - key: NODE_ENV
-        value: production
-      - key: NEXT_PUBLIC_CHAIN_ID
-        value: "114"
-      - key: NEXT_PUBLIC_RPC_URL
-        value: https://coston2-api.flare.network/ext/C/rpc
-      - key: NEXT_PUBLIC_EXPLORER_URL
-        value: https://coston2-explorer.flare.network
-      - key: NEXT_PUBLIC_CURRENCY_SYMBOL
-        value: C2FLR
-      - key: NEXT_PUBLIC_CHAIN_NAME
-        value: Flare Coston2
-      - key: NEXT_PUBLIC_MARKETPLACE_ADDR
-        value: "0xEC47a481513DA81FF59A6c4002A98803039994E5"  # MARKETPLACE
-      - key: NEXT_PUBLIC_AUCTION_ADDR
-        value: "0xf62e931D807f87eBd90Cc3254b0a34a76c326331"  # AUCTION
-      - key: NEXT_PUBLIC_OFFER_ADDR
-        value: "0x7e88e86F61E6AD80abD828B6bCEDAA86311736f0"  # OFFERBOOK
-      - key: NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID
-        value: "2e5f8e7db6f7a239e347c49b96cdf658"
-      - key: NEXT_PUBLIC_APP_URL
-        value: https://magicwebb-web.onrender.com
-      - key: NEXT_PUBLIC_API_URL
-        value: https://magicwebb-api.onrender.com
-      - key: NEXT_PUBLIC_INDEX_FROM_BLOCK
-        value: "30437062"
-      - key: NEXT_PUBLIC_INDEX_CHUNK_BLOCKS
-        value: "30"
-      - key: NEXT_PUBLIC_INDEX_GETLOGS_BLOCK_CAP
-        value: "30"
-      - key: NEXT_PUBLIC_TRACKED_COLLECTIONS
-        value: "0x9a6aC1e5CBeF7d477fC1B99f5c7f20999370184B"
-
-  # ── Redis (pub/sub + SIWE nonces) ────────────────────────────────────────
-  - type: redis
-    name: magicwebb-redis
-    plan: free
-    maxmemoryPolicy: allkeys-lru
+      - key: KEEPER_KEY
+        sync: false
