@@ -1,0 +1,51 @@
+{{template "layout.html" .}}
+{{define "content"}}
+<!-- Hero -->
+<section class="text-center py-20">
+  <h1 class="text-5xl font-bold mb-4">Trade NFTs on <span class="text-emerald-400">Flare</span></h1>
+  <p class="text-neutral-400 text-lg mb-8 max-w-xl mx-auto">Non-custodial marketplace. Fixed-price listings, English auctions, and signed offers. Your keys, your NFTs.</p>
+  <div class="flex gap-4 justify-center">
+    <a href="/listings" class="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">Browse Listings</a>
+    <a href="/auctions" class="px-6 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold transition">Live Auctions</a>
+  </div>
+</section>
+
+<!-- Live activity ticker (SSE-driven) -->
+<div id="activity-ticker" class="mb-10"
+     hx-get="/partials/activity"
+     hx-trigger="load, sse:listing-updated, sse:auction-updated"
+     hx-swap="innerHTML">
+  <div class="text-neutral-600 text-sm text-center">Loading activity...</div>
+</div>
+
+<!-- Trending -->
+{{if .Trending}}
+<section class="mb-12">
+  <h2 class="text-xl font-bold mb-4 text-neutral-200">Trending Collections</h2>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    {{range .Trending}}
+    <a href="/collection/{{.Collection}}" class="bg-neutral-900 rounded-xl p-4 hover:bg-neutral-800 transition group">
+      <div class="w-full aspect-square rounded-lg bg-neutral-800 mb-3 group-hover:scale-105 transition"></div>
+      <p class="text-sm font-medium truncate text-neutral-200">{{shortAddr .Collection}}</p>
+      <p class="text-xs text-neutral-500 mt-1">Score {{printf "%.1f" .Score}}</p>
+    </a>
+    {{end}}
+  </div>
+</section>
+{{end}}
+
+<!-- Recent Listings -->
+<section>
+  <div class="flex items-center justify-between mb-4">
+    <h2 class="text-xl font-bold text-neutral-200">Recent Listings</h2>
+    <a href="/listings" class="text-sm text-emerald-400 hover:text-emerald-300">View all →</a>
+  </div>
+  <div id="listings-grid"
+       class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+       hx-get="/partials/listings"
+       hx-trigger="sse:listing-updated"
+       hx-swap="innerHTML">
+    {{template "partials/listing_cards.html" .}}
+  </div>
+</section>
+{{end}}

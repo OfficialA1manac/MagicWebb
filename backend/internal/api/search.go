@@ -1,34 +1,32 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
-// handleSearch serves GET /api/v1/search?q=<query>&limit=<n>
-func handleSearch(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		query := r.URL.Query().Get("q")
+func search(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		query := c.Query("q")
 		if len(query) < 2 {
-			writeErr(w, http.StatusBadRequest, "q must be at least 2 characters")
-			return
+			return writeErr(c, fiber.StatusBadRequest, "q must be at least 2 characters")
 		}
 		limit := 20
-		if lim := r.URL.Query().Get("limit"); lim != "" {
+		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
 				limit = n
 			}
 		}
-		results, err := q.Search(r.Context(), query, limit)
+		results, err := q.Search(c.Context(), query, limit)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if results == nil {
 			results = []db.SearchResult{}
 		}
-		writeJSON(w, http.StatusOK, results)
+		return c.JSON(results)
 	}
 }

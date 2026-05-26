@@ -50,6 +50,11 @@ backend/bin/
 backend/internal/hot/lib/
 backend/api_server
 backend/*.exe
+backend/server
+backend/server.exe
+
+# Single binary output
+bin/
 
 # Go dependencies (module cache lives in GOPATH)
 backend/vendor/

@@ -30,11 +30,7 @@ type Config struct {
 	// Database
 	PostgresURL string
 
-	// Redis
-	RedisURL string
-
 	// Servers
-	GRPCAddr string
 	HTTPAddr string
 
 	// Auth
@@ -53,10 +49,6 @@ type Config struct {
 	ScoreWVolume float64
 	ScoreDecay   float64
 
-	// Observability
-	SentryDSN        string
-	OtelEndpoint     string
-
 	// Pinata (IPFS uploads)
 	PinataJWT string
 
@@ -68,6 +60,10 @@ type Config struct {
 
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
+
+	// ServerTimeMs is set by the indexer on each new block (used by /api/v1/server-time).
+	// Accessed atomically via sync/atomic in the indexer runner.
+	ServerTimeMs int64
 }
 
 // Load reads environment variables and panics on missing required values.
@@ -83,9 +79,7 @@ func Load() {
 		RoyaltyAddr:     envOrDefault("ROYALTY_ADDR", ""),
 
 		PostgresURL: required("POSTGRES_URL"),
-		RedisURL:    required("REDIS_URL"),
 
-		GRPCAddr: envOrDefault("GRPC_ADDR", ":9090"),
 		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
 
 		SIWEDomain: envOrDefault("SIWE_DOMAIN", "localhost"),
@@ -100,9 +94,6 @@ func Load() {
 		ScoreWBids:   optFloat64("SCORE_W_BIDS", 0.5),
 		ScoreWVolume: optFloat64("SCORE_W_VOLUME", 0.2),
 		ScoreDecay:   optFloat64("SCORE_DECAY", 0.05),
-
-		SentryDSN:    envOrDefault("SENTRY_DSN", ""),
-		OtelEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 
 		PinataJWT: envOrDefault("PINATA_JWT", ""),
 

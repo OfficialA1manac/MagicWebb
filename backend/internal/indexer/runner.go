@@ -7,6 +7,7 @@ import (
 	"math"
 	"math/big"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
@@ -16,23 +17,32 @@ import (
 	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
 
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
 // Runner orchestrates all indexer workers.
 type Runner struct {
-	cfg *config.Config
-	q   *db.Q
-	rdb *cache.Client
-	eth *ethclient.Client
-	h   *handlers
+	cfg   *config.Config
+	q     *db.Q
+	bcast *sse.Broadcaster
+	eth   *ethclient.Client
+	h     *handlers
+	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
+	serverTimeMs *int64
 }
 
 // New creates a Runner with all dependencies injected.
-func New(cfg *config.Config, q *db.Q, rdb *cache.Client, eth *ethclient.Client) *Runner {
-	return &Runner{cfg: cfg, q: q, rdb: rdb, eth: eth, h: &handlers{q: q, rdb: rdb}}
+func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth *ethclient.Client, serverTimeMs *int64) *Runner {
+	return &Runner{
+		cfg:          cfg,
+		q:            q,
+		bcast:        bcast,
+		eth:          eth,
+		h:            &handlers{q: q, bcast: bcast},
+		serverTimeMs: serverTimeMs,
+	}
 }
 
 // Run starts all workers and blocks until ctx is cancelled.
@@ -103,7 +113,7 @@ func (r *Runner) runWatcher(ctx context.Context) {
 			r.processRange(ctx, lastBlock+1, newHead, contracts, topics, chainID)
 			lastBlock = newHead
 			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(newHead))); err == nil {
-				_ = r.rdb.SetServerTime(ctx, int64(header.Time*1000))
+				atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
 			}
 		}
 	}
@@ -275,6 +285,19 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: settle tx failed")
 				} else {
 					log.Info().Int64("auctionId", a.AuctionID).Msg("keeper: settle tx sent")
+				}
+			}
+
+			inactive, err := r.q.GetInactiveAuctions(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("keeper: get inactive auctions")
+				continue
+			}
+			for _, a := range inactive {
+				if err := r.sendSettle(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID)); err != nil {
+					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: cancel-inactive tx failed")
+				} else {
+					log.Info().Int64("auctionId", a.AuctionID).Msg("keeper: cancel-inactive tx sent")
 				}
 			}
 		}

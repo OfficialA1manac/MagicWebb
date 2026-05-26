@@ -1,0 +1,44 @@
+{{template "layout.html" .}}
+{{define "content"}}
+<div class="grid md:grid-cols-2 gap-8">
+  <div class="bg-neutral-900 rounded-2xl overflow-hidden">
+    {{with .Listing}}
+    {{if .ImageURI}}
+    <img src="{{.ImageURI}}" alt="NFT" class="w-full aspect-square object-cover">
+    {{else}}
+    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-6xl">🖼</div>
+    {{end}}
+    <div class="p-4">
+      <p class="text-sm font-semibold text-white">{{if .Name}}{{.Name}}{{else}}Token #{{$.TokenID}}{{end}}</p>
+      <p class="text-xs text-neutral-500 font-mono mt-1">{{$.Contract}}</p>
+    </div>
+    {{else}}
+    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-6xl">🖼</div>
+    <div class="p-4">
+      <p class="text-xs text-neutral-500 font-mono">{{.Contract}} #{{.TokenID}}</p>
+    </div>
+    {{end}}
+  </div>
+
+  <div>
+    <h1 class="text-2xl font-bold text-white mb-1">Token #{{.TokenID}}</h1>
+    <p class="text-sm text-neutral-500 font-mono mb-6">{{.Contract}}</p>
+
+    {{with .Listing}}
+    <div class="bg-neutral-900 rounded-xl p-4 mb-4">
+      <p class="text-sm text-neutral-500">Listed price</p>
+      <p class="text-2xl font-bold text-emerald-400 mt-1">{{wei2eth .PriceWei}} FLR</p>
+      <p class="text-xs text-neutral-600 mt-1">Seller: {{shortAddr .Seller}}</p>
+    </div>
+    <button class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition"
+            @click="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', price: '{{.PriceWei}}'})">
+      Buy Now
+    </button>
+    {{else}}
+    <div class="bg-neutral-900 rounded-xl p-4">
+      <p class="text-neutral-500">Not currently listed</p>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}

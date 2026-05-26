@@ -1,69 +1,66 @@
 package api
 
 import (
-	"net/http"
 	"strconv"
+
+	"github.com/gofiber/fiber/v2"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
-func handleListListings(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func listListings(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		f := db.ListingsFilter{
-			Collection: r.URL.Query().Get("collection"),
-			Seller:     r.URL.Query().Get("seller"),
+			Collection: c.Query("collection"),
+			Seller:     c.Query("seller"),
 		}
-		if lim := r.URL.Query().Get("limit"); lim != "" {
+		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
 				f.Limit = n
 			}
 		}
-		rows, err := q.ListActiveListings(r.Context(), f)
+		rows, err := q.ListActiveListings(c.Context(), f)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if rows == nil {
 			rows = []db.ListingRow{}
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }
 
-func handleGetListing(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		collection := r.PathValue("collection")
-		id := r.PathValue("id")
-		row, err := q.GetListing(r.Context(), collection, id)
+func getListing(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		collection := c.Params("collection")
+		id := c.Params("id")
+		row, err := q.GetListing(c.Context(), collection, id)
 		if err != nil {
 			if isNotFound(err) {
-				writeErr(w, http.StatusNotFound, "listing not found")
-				return
+				return writeErr(c, fiber.StatusNotFound, "listing not found")
 			}
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		writeJSON(w, http.StatusOK, row)
+		return c.JSON(row)
 	}
 }
 
-func handleListCollections(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
+func listCollections(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
 		limit := 50
-		if lim := r.URL.Query().Get("limit"); lim != "" {
+		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
 				limit = n
 			}
 		}
-		rows, err := q.ListCollections(r.Context(), limit)
+		rows, err := q.ListCollections(c.Context(), limit)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if rows == nil {
 			rows = []db.CollectionRow{}
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }
 
@@ -74,56 +71,50 @@ type collectionDetail struct {
 	ListedCount   int    `json:"listed_count"`
 }
 
-func handleGetCollection(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		address := r.PathValue("address")
-		col, err := q.GetCollection(r.Context(), address)
+func getCollection(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		address := c.Params("address")
+		col, err := q.GetCollection(c.Context(), address)
 		if err != nil {
 			if isNotFound(err) {
-				writeErr(w, http.StatusNotFound, "collection not found")
-				return
+				return writeErr(c, fiber.StatusNotFound, "collection not found")
 			}
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		floor, _ := q.GetFloorPrice(r.Context(), address)
-		vol, _ := q.Get24hVolume(r.Context(), address)
-		listed, _ := q.GetListedCount(r.Context(), address)
+		floor, _ := q.GetFloorPrice(c.Context(), address)
+		vol, _ := q.Get24hVolume(c.Context(), address)
+		listed, _ := q.GetListedCount(c.Context(), address)
 
-		detail := collectionDetail{
-			CollectionRow: *col,
-			ListedCount:   listed,
-		}
+		detail := collectionDetail{CollectionRow: *col, ListedCount: listed}
 		if floor != nil {
 			detail.FloorPriceWei = floor.String()
 		}
 		if vol != nil {
 			detail.Volume24hWei = vol.String()
 		}
-		writeJSON(w, http.StatusOK, detail)
+		return c.JSON(detail)
 	}
 }
 
-func handleGetTrending(q *db.Q) http.HandlerFunc {
-	return func(w http.ResponseWriter, r *http.Request) {
-		window := r.URL.Query().Get("window")
+func getTrending(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		window := c.Query("window")
 		if window == "" {
 			window = "24h"
 		}
 		limit := 20
-		if lim := r.URL.Query().Get("limit"); lim != "" {
+		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
 				limit = n
 			}
 		}
-		rows, err := q.GetTrendingCollections(r.Context(), window, limit)
+		rows, err := q.GetTrendingCollections(c.Context(), window, limit)
 		if err != nil {
-			writeErr(w, http.StatusInternalServerError, "internal error")
-			return
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
 		if rows == nil {
 			rows = []db.TrendingScore{}
 		}
-		writeJSON(w, http.StatusOK, rows)
+		return c.JSON(rows)
 	}
 }

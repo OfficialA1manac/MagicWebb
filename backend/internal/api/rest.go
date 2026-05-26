@@ -1,118 +1,98 @@
-// Package api wires all REST handlers, CORS, rate-limiting and SSE.
+// Package api wires all REST handlers and SSE using Go Fiber.
 package api
 
 import (
+	"bufio"
 	"encoding/json"
-	"net/http"
 	"strings"
 	"time"
 
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
+	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/cors"
+	flog "github.com/gofiber/fiber/v2/middleware/logger"
+
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
-// NewRouter returns an http.Handler mounting all REST + SSE routes.
-// Excludes /healthz, /readyz, /auth/* — those stay in main.go.
-func NewRouter(q *db.Q, rdb *cache.Client, cfg *config.Config) http.Handler {
-	mux := http.NewServeMux()
+// Mount registers all REST + SSE routes on the Fiber app.
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config) {
+	app.Use(cors.New(cors.Config{
+		AllowOrigins:     buildOrigins(cfg.FrontendURL),
+		AllowMethods:     "GET,POST,OPTIONS",
+		AllowHeaders:     "Content-Type,Authorization",
+		AllowCredentials: true,
+	}))
 
-	// marketplace
-	mux.HandleFunc("GET /api/v1/listings", handleListListings(q))
-	mux.HandleFunc("GET /api/v1/listings/{collection}/{id}", handleGetListing(q))
-	mux.HandleFunc("GET /api/v1/collections", handleListCollections(q))
-	mux.HandleFunc("GET /api/v1/collections/{address}", handleGetCollection(q))
-	mux.HandleFunc("GET /api/v1/trending", handleGetTrending(q))
+	app.Use(flog.New(flog.Config{
+		Format: "${time} ${method} ${path} ${status} ${latency}\n",
+	}))
 
-	// auctions
-	mux.HandleFunc("GET /api/v1/auctions", handleListAuctions(q))
-	mux.HandleFunc("GET /api/v1/auctions/{id}", handleGetAuction(q))
-	mux.HandleFunc("GET /api/v1/auctions/{id}/bids", handleGetAuctionBids(q))
-	mux.HandleFunc("GET /api/v1/server-time", handleServerTime())
-
-	// offers
-	mux.HandleFunc("GET /api/v1/offers", handleListOffers(q))
-	mux.HandleFunc("POST /api/v1/offers", handleNotifyOffer(q))
-
-	// search
-	mux.HandleFunc("GET /api/v1/search", handleSearch(q))
-
-	// metrics + activity
-	mux.HandleFunc("GET /api/v1/metrics", handleGetMarketMetrics(q))
-	mux.HandleFunc("GET /api/v1/activity", handleGetRecentActivity(q))
-
-	// indexer status
-	mux.HandleFunc("GET /api/v1/indexer/status", handleIndexerStatus(q))
-
-	// SSE
-	mux.HandleFunc("GET /events", handleEvents(rdb))
-
-	return corsMiddleware(cfg.FrontendURL, rateLimitMiddleware(rdb, mux))
-}
-
-// ── CORS ──────────────────────────────────────────────────────────────────────
-
-func corsMiddleware(frontendURL string, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		origin := r.Header.Get("Origin")
-		if origin == frontendURL ||
-			strings.HasPrefix(origin, "http://localhost:") ||
-			strings.HasPrefix(origin, "http://127.0.0.1:") {
-			w.Header().Set("Access-Control-Allow-Origin", origin)
-			w.Header().Set("Access-Control-Allow-Credentials", "true")
-			w.Header().Set("Access-Control-Allow-Methods", "GET, POST, OPTIONS")
-			w.Header().Set("Access-Control-Allow-Headers", "Content-Type, Authorization")
+	app.Get("/healthz", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	app.Get("/readyz", func(c *fiber.Ctx) error {
+		if err := q.Ping(c.Context()); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")
 		}
-		if r.Method == http.MethodOptions {
-			w.WriteHeader(http.StatusNoContent)
-			return
-		}
-		next.ServeHTTP(w, r)
+		return c.SendStatus(fiber.StatusOK)
 	})
+
+	app.Get("/events", sseHandler(bcast))
+
+	api := app.Group("/api/v1", rateLimitMiddleware(rl))
+
+	api.Get("/listings", listListings(q))
+	api.Get("/listings/:collection/:id", getListing(q))
+	api.Get("/collections", listCollections(q))
+	api.Get("/collections/:address", getCollection(q))
+	api.Get("/trending", getTrending(q))
+
+	api.Get("/auctions", listAuctions(q))
+	api.Get("/auctions/:id", getAuction(q))
+	api.Get("/auctions/:id/bids", getAuctionBids(q))
+	api.Get("/server-time", serverTime())
+
+	api.Get("/offers", listOffers(q))
+	api.Post("/offers", notifyOffer(q))
+
+	api.Get("/search", search(q))
+	api.Get("/metrics", marketMetrics(q))
+	api.Get("/activity", recentActivity(q))
+	api.Get("/indexer/status", indexerStatus(q))
 }
 
-// ── Rate limiter (Redis-backed sliding window) ────────────────────────────────
+// ── Middleware ────────────────────────────────────────────────────────────────
 
-const (
-	rateLimitRequests = 60
-	rateLimitWindow   = time.Minute
-)
-
-func rateLimitMiddleware(rdb *cache.Client, next http.Handler) http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		ip := clientIP(r)
-		ok, _ := rdb.Allow(r.Context(), "api:"+ip, rateLimitRequests, rateLimitWindow)
-		if !ok {
-			http.Error(w, "rate limit exceeded", http.StatusTooManyRequests)
-			return
+func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if !rl.Allow(clientIP(c), 60, time.Minute) {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
-		next.ServeHTTP(w, r)
-	})
+		return c.Next()
+	}
 }
 
-func clientIP(r *http.Request) string {
-	if xff := r.Header.Get("X-Forwarded-For"); xff != "" {
+func clientIP(c *fiber.Ctx) string {
+	if xff := c.Get("X-Forwarded-For"); xff != "" {
 		parts := strings.SplitN(xff, ",", 2)
 		return strings.TrimSpace(parts[0])
 	}
-	// strip port
-	addr := r.RemoteAddr
-	if i := strings.LastIndex(addr, ":"); i != -1 {
-		return addr[:i]
+	return c.IP()
+}
+
+func buildOrigins(frontendURL string) string {
+	origins := frontendURL
+	if !strings.Contains(origins, "localhost") {
+		origins += ",http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
 	}
-	return addr
+	return origins
 }
 
 // ── JSON helpers ──────────────────────────────────────────────────────────────
 
-func writeJSON(w http.ResponseWriter, status int, v any) {
-	w.Header().Set("Content-Type", "application/json")
-	w.WriteHeader(status)
-	_ = json.NewEncoder(w).Encode(v)
-}
-
-func writeErr(w http.ResponseWriter, status int, msg string) {
-	writeJSON(w, status, map[string]string{"error": msg})
+func writeErr(c *fiber.Ctx, status int, msg string) error {
+	return c.Status(status).JSON(fiber.Map{"error": msg})
 }
 
 func isNotFound(err error) bool {
@@ -120,5 +100,42 @@ func isNotFound(err error) bool {
 		return false
 	}
 	s := err.Error()
-	return strings.Contains(s, "not found")
+	return strings.Contains(s, "not found") || strings.Contains(s, "no rows")
+}
+
+func bodyDecode(c *fiber.Ctx, v any) error {
+	return json.Unmarshal(c.Body(), v)
+}
+
+// ── SSE handler ───────────────────────────────────────────────────────────────
+
+func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "text/event-stream")
+		c.Set("Cache-Control", "no-cache")
+		c.Set("Connection", "keep-alive")
+		c.Set("X-Accel-Buffering", "no")
+
+		ch, cancel := bcast.Subscribe()
+		defer cancel()
+
+		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+			ticker := time.NewTicker(15 * time.Second)
+			defer ticker.Stop()
+			for {
+				select {
+				case msg, ok := <-ch:
+					if !ok {
+						return
+					}
+					_, _ = w.WriteString(msg)
+					_ = w.Flush()
+				case <-ticker.C:
+					_, _ = w.WriteString(": keepalive\n\n")
+					_ = w.Flush()
+				}
+			}
+		})
+		return nil
+	}
 }
