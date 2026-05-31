@@ -19,6 +19,10 @@ contract MarketplaceCoreTest is Test {
         vm.deal(buyer, 10 ether);
     }
 
+    function _buyTotal(uint128 price) internal pure returns (uint256) {
+        return uint256(price) + (uint256(price) * 150) / 10_000;
+    }
+
     // ── Constructor guard ─────────────────────────────────────────────────
 
     function test_constructorZeroRecipientReverts() public {
@@ -36,38 +40,37 @@ contract MarketplaceCoreTest is Test {
         assertEq(mp.PLATFORM_FEE_BPS(), 150);
     }
 
+    function test_minPriceConstant() public view {
+        assertEq(mp.MIN_PRICE(), 0.01 ether);
+    }
+
     // ── Fee routing ───────────────────────────────────────────────────────
 
     function test_feePushedToFeeRecipient() public {
-        uint256 listingFee = (1 ether * 150) / 10_000;
-        vm.deal(seller, listingFee);
-        uint256 before_ = creator.balance;
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
         vm.stopPrank();
 
+        uint256 before_ = creator.balance;
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
-        // listing fee (150 bps) + sale fee (150 bps) of 1 ether = 300 bps = 0.03 ether
-        assertEq(creator.balance - before_, 0.03 ether);
+        mp.buy{value: _buyTotal(1 ether)}(address(nft), id, seller);
+        // Only the taker fee (1.5%) is collected — sellers pay nothing.
+        assertEq(creator.balance - before_, 0.015 ether);
     }
 
-    // ── No pause / no admin ───────────────────────────────────────────────
+    // ── No admin / no pause / no upgrade ──────────────────────────────────
 
-    function test_noPauseFunctionExists() public {
-        // Marketplace no longer has pause/unpause — just verify basic buy works normally
-        uint256 listingFee = (1 ether * 150) / 10_000;
-        vm.deal(seller, listingFee);
+    function test_basicBuyWorks() public {
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
         vm.stopPrank();
 
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _buyTotal(1 ether)}(address(nft), id, seller);
         assertEq(nft.ownerOf(id), buyer);
     }
 }

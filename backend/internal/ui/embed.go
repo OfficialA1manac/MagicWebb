@@ -5,18 +5,23 @@ import (
 	"embed"
 	"html/template"
 	"io/fs"
+	"strings"
+	"time"
 )
 
 //go:embed all:templates all:static
 var FS embed.FS
 
 var funcMap = template.FuncMap{
+	// wei2eth converts a wei string to a 4-decimal ETH string.
+	// Handles leading zeros correctly for sub-1-ether values.
 	"wei2eth": func(wei string) string {
-		if len(wei) == 0 {
-			return "0"
+		if wei == "" || wei == "0" {
+			return "0.0000"
 		}
-		if len(wei) <= 18 {
-			return "0." + wei
+		// Pad to at least 19 chars (18 decimals + 1 integer digit minimum)
+		for len(wei) <= 18 {
+			wei = "0" + wei
 		}
 		whole := wei[:len(wei)-18]
 		frac := wei[len(wei)-18 : len(wei)-14]
@@ -27,6 +32,12 @@ var funcMap = template.FuncMap{
 			return addr
 		}
 		return addr[:6] + "…" + addr[len(addr)-4:]
+	},
+	"lower": func(s string) string {
+		return strings.ToLower(s)
+	},
+	"unix": func(t time.Time) int64 {
+		return t.Unix()
 	},
 }
 
@@ -49,8 +60,7 @@ var pagePaths = []string{
 	"pages/metrics.html",
 }
 
-// Templates maps "pages/home.html" and "partials/listing_cards.html" etc.
-// to parsed template sets. Each page gets its own set to avoid "content" conflicts.
+// Templates maps page/partial keys to parsed template sets.
 var Templates map[string]*template.Template
 
 func init() {
