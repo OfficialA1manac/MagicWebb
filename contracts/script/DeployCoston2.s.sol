@@ -7,8 +7,9 @@ import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook}    from "../src/OfferBook.sol";
 
 /// @notice Deploy Magic Webb to Flare Coston2 (chain 114).
-///         Single hardcoded 1.5% platform fee — sent directly to CREATOR_ADDR wallet.
-///         Contracts are unstoppable: no pause, no admin. CREATOR_ADDR is fee recipient only.
+///         Unified 1.5% taker fee — sellers pay nothing, buyers/bidders pay
+///         price + 1.5% on top. feeRecipient is immutable and hardcoded at deploy.
+///         No admin, no pause, no upgrade.
 ///
 /// Required env vars:
 ///   PRIVATE_KEY   -- deployer private key (never commit)
@@ -34,12 +35,13 @@ contract DeployCoston2 is Script {
         console2.log("MARKETPLACE_ADDR=", address(marketplace));
         console2.log("AUCTION_ADDR=",     address(auction));
         console2.log("OFFERBOOK_ADDR=",   address(offerBook));
-        console2.log("# paste into frontend/.env.local");
+        console2.log("# paste into wallet.js + frontend env");
         console2.log("NEXT_PUBLIC_CHAIN_ID=",         block.chainid);
         console2.log("NEXT_PUBLIC_MARKETPLACE_ADDR=", address(marketplace));
         console2.log("NEXT_PUBLIC_AUCTION_ADDR=",     address(auction));
         console2.log("NEXT_PUBLIC_OFFER_ADDR=",       address(offerBook));
         console2.log("CREATOR_ADDR=",  creator);
-        console2.log("FEE=",           "1.5% (150 bps, hardcoded)");
+        console2.log("FEE_MODEL=",     "taker pays 1.5%, sellers pay 0");
+        console2.log("NOTE: no admin / no pause / no upgrade. Contracts are unstoppable.");
     }
 }

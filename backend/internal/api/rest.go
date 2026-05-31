@@ -7,10 +7,12 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -18,7 +20,7 @@ import (
 )
 
 // Mount registers all REST + SSE routes on the Fiber app.
-func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config) {
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth *ethclient.Client) {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL),
 		AllowMethods:     "GET,POST,OPTIONS",
@@ -44,6 +46,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	api.Get("/listings", listListings(q))
 	api.Get("/listings/:collection/:id", getListing(q))
+	api.Get("/listings/:coll/:id/preflight", preflight(q, eth, cfg.MarketplaceAddr))
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address", getCollection(q))
 	api.Get("/trending", getTrending(q))
@@ -53,8 +56,32 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/auctions/:id/bids", getAuctionBids(q))
 	api.Get("/server-time", serverTime())
 
+	// Legacy off-chain offers (kept for back-compat — new code uses offer_positions)
 	api.Get("/offers", listOffers(q))
 	api.Post("/offers", notifyOffer(q))
+	api.Delete("/offers/:id", jwtMiddleware(cfg), cancelOffer(q))
+
+	// Stacked offer positions (new model)
+	api.Get("/tokens/:coll/:id/offers", tokenOfferPositions(q))
+	api.Get("/users/:addr/offers", userOfferPositions(q))
+
+	// Wallet NFT holdings
+	api.Get("/wallet/:addr/nfts", walletNFTs(q))
+
+	// Notifications (auth required)
+	api.Get("/notifications",        jwtMiddleware(cfg), listNotifications(q))
+	api.Post("/notifications/read",  jwtMiddleware(cfg), markRead(q))
+
+	// Profiles
+	api.Get("/profiles/:addr",       getProfile(q))
+	api.Put("/profiles/:addr",       jwtMiddleware(cfg), upsertProfile(q))
+
+	// Reports
+	api.Post("/reports",             jwtMiddleware(cfg), createReport(q))
+
+	// Admin (SIWE JWT + allowlist)
+	api.Post("/admin/collections/:addr/verify", adminMiddleware(cfg), verifyCollection(q))
+	api.Get("/admin/reports",                   adminMiddleware(cfg), listReports(q))
 
 	api.Get("/search", search(q))
 	api.Get("/metrics", marketMetrics(q))
@@ -63,6 +90,21 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
+
+func jwtMiddleware(cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		hdr := c.Get("Authorization")
+		if !strings.HasPrefix(hdr, "Bearer ") {
+			return writeErr(c, fiber.StatusUnauthorized, "missing token")
+		}
+		addr, err := auth.Verify(strings.TrimPrefix(hdr, "Bearer "), cfg.JWTSecret)
+		if err != nil {
+			return writeErr(c, fiber.StatusUnauthorized, "invalid token")
+		}
+		c.Locals(string(auth.CallerKey), addr)
+		return c.Next()
+	}
+}
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {

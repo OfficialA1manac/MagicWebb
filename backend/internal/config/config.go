@@ -53,10 +53,18 @@ type Config struct {
 	PinataJWT string
 
 	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
-	KeeperKey string
+	KeeperKey         string
+	KeeperPollSeconds int
 
 	// Admin token for IndexerService.Reindex (leave empty to disable)
 	ServiceToken string
+
+	// AdminAddrs is the comma-separated allowlist of EOAs allowed to call
+	// /api/v1/admin/* endpoints (after SIWE JWT verification).
+	AdminAddrs []string
+
+	// WalletConnect project id surfaced to the frontend.
+	WCProjectID string
 
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
@@ -97,8 +105,12 @@ func Load() {
 
 		PinataJWT: envOrDefault("PINATA_JWT", ""),
 
-		KeeperKey:    envOrDefault("KEEPER_KEY", ""),
-		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
+		KeeperKey:         envOrDefault("KEEPER_KEY", ""),
+		KeeperPollSeconds: int(optUint64("KEEPER_POLL_SECONDS", 30)),
+		ServiceToken:      envOrDefault("SERVICE_TOKEN", ""),
+
+		AdminAddrs:  parseAddrList(envOrDefault("ADMIN_ADDRS", "")),
+		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 	}
@@ -162,4 +174,33 @@ func optFloat64(key string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+// IsAdmin reports whether the address is in the admin allowlist (case-insensitive).
+func (c *Config) IsAdmin(addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	if addr == "" {
+		return false
+	}
+	for _, a := range c.AdminAddrs {
+		if a == addr {
+			return true
+		}
+	}
+	return false
+}
+
+func parseAddrList(s string) []string {
+	if s == "" {
+		return nil
+	}
+	parts := strings.Split(s, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		p = strings.ToLower(strings.TrimSpace(p))
+		if p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }

@@ -9,16 +9,21 @@ import {ERC1155Holder}   from "@openzeppelin/contracts/token/ERC1155/utils/ERC11
 error TransferFailed();
 error WithdrawFailed();
 error ZeroAddress();
+error BelowMinPrice();
 
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @title MarketplaceCore
-/// @notice Shared base: immutable fee config, NFT dispatch.
-/// @dev Single 1.5% platform fee on all operations. feeRecipient immutable post-deploy.
-///      No pause, no admin — contracts are unstoppable once deployed.
+/// @notice Shared base: immutable fee config, NFT dispatch, taker-fee helpers.
+/// @dev Unified 1.5% taker fee. Sellers never pay. Buyers/bidders pay price + 1.5% on top.
+///      feeRecipient immutable post-deploy. No pause, no admin, no upgrade.
+///      MIN_PRICE = 0.01 FLR floor on all priced inputs.
 abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
-    /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
+    /// @notice Platform fee in basis points: 150 = 1.5%.
     uint16 public constant PLATFORM_FEE_BPS = 150;
+
+    /// @notice Minimum value for list price, auction reserve, or offer amount.
+    uint128 public constant MIN_PRICE = 0.01 ether;
 
     /// @notice Wallet that receives all platform fees. Immutable post-deploy.
     address public immutable feeRecipient;
@@ -28,20 +33,30 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         feeRecipient = recipient;
     }
 
-    // ── Fee split ──────────────────────────────────────────────────────────────
+    // ── Fee helpers ────────────────────────────────────────────────────────────
 
-    /// @dev Sends fee to feeRecipient and remainder to seller. Returns fee taken.
-    function _splitAndPay(address seller, uint256 salePrice) internal returns (uint256 fee) {
-        fee = (salePrice * PLATFORM_FEE_BPS) / 10_000;
-        uint256 sellerAmt;
-        unchecked { sellerAmt = salePrice - fee; }
+    /// @dev 1.5% surcharge on a commitment value (price / bid / offer).
+    function _feeOnTop(uint256 commit) internal pure returns (uint256) {
+        return (commit * PLATFORM_FEE_BPS) / 10_000;
+    }
 
+    /// @dev Reverts if `v` is below the global floor.
+    function _checkMin(uint128 v) internal pure {
+        if (v < MIN_PRICE) revert BelowMinPrice();
+    }
+
+    /// @dev Forwards `fee` to feeRecipient and `bid` to seller. Used when caller
+    ///      already separated commitment and surcharge (auction settle, offer accept,
+    ///      taker-pay buy).
+    function _payOut(address seller, uint256 bid, uint256 fee) internal {
         if (fee > 0) {
             (bool ok,) = feeRecipient.call{value: fee}("");
             if (!ok) revert TransferFailed();
         }
-        (bool ok2,) = seller.call{value: sellerAmt}("");
-        if (!ok2) revert TransferFailed();
+        if (bid > 0) {
+            (bool ok2,) = seller.call{value: bid}("");
+            if (!ok2) revert TransferFailed();
+        }
     }
 
     // ── Token dispatch ─────────────────────────────────────────────────────────
