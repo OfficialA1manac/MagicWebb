@@ -49,6 +49,7 @@ type CollectionRow struct {
 	Symbol      string
 	Standard    string // "erc721" | "erc1155"
 	DeployBlock uint64
+	Verified    bool
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
@@ -64,9 +65,12 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
 	err := q.pool.QueryRow(ctx,
-		`SELECT address, name, symbol, standard::text, deploy_block
-		 FROM collections WHERE address=$1`, address).
-		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock)
+		`SELECT c.address, c.name, c.symbol, c.standard::text, c.deploy_block,
+		        COALESCE(t.verified, false)
+		 FROM collections c
+		 LEFT JOIN tracked_collections t ON t.address=c.address
+		 WHERE c.address=$1`, address).
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("collection not found: %s", address)
 	}
@@ -78,8 +82,11 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 		limit = 50
 	}
 	rows, err := q.pool.Query(ctx,
-		`SELECT address, name, symbol, standard::text, deploy_block
-		 FROM collections WHERE tracked=true ORDER BY created_at DESC LIMIT $1`, limit)
+		`SELECT c.address, c.name, c.symbol, c.standard::text, c.deploy_block,
+		        COALESCE(t.verified, false)
+		 FROM collections c
+		 LEFT JOIN tracked_collections t ON t.address=c.address
+		 WHERE c.tracked=true ORDER BY c.created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -87,7 +94,7 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 	var out []CollectionRow
 	for rows.Next() {
 		var c CollectionRow
-		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock); err != nil {
+		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified); err != nil {
 			return nil, err
 		}
 		out = append(out, c)
@@ -146,6 +153,7 @@ type ListingRow struct {
 	// Denormalised from nft_tokens (may be empty)
 	Name     string
 	ImageURI string
+	Verified bool
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -186,15 +194,17 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 	err := q.pool.QueryRow(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		        COALESCE(t.name,''), COALESCE(t.image_uri,''),
+		        COALESCE(tc.verified, false)
 		 FROM listings l
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN tracked_collections tc ON tc.address=l.collection
 		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true AND l.orphaned=false
 		   AND l.expires_at > now()
 		 ORDER BY CAST(l.price_wei AS numeric) ASC LIMIT 1`,
 		collection, tokenID).
 		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI)
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI, &r.Verified)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("listing not found")
 	}
@@ -207,9 +217,11 @@ func (q *Q) GetListingsForToken(ctx context.Context, collection, tokenID string)
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		        COALESCE(t.name,''), COALESCE(t.image_uri,''),
+		        COALESCE(tc.verified, false)
 		 FROM listings l
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN tracked_collections tc ON tc.address=l.collection
 		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true AND l.orphaned=false
 		   AND l.expires_at > now()
 		 ORDER BY CAST(l.price_wei AS numeric) ASC`,
@@ -222,7 +234,7 @@ func (q *Q) GetListingsForToken(ctx context.Context, collection, tokenID string)
 	for rows.Next() {
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI); err != nil {
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI, &r.Verified); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -263,9 +275,11 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		        COALESCE(t.name,''), COALESCE(t.image_uri,''),
+		        COALESCE(tc.verified, false)
 		 FROM listings l
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN tracked_collections tc ON tc.address=l.collection
 		 `+where+`
 		 ORDER BY `+orderBy+` LIMIT $1`, args...)
 	if err != nil {
@@ -277,7 +291,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	for rows.Next() {
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI); err != nil {
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI, &r.Verified); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

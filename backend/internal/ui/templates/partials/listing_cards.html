@@ -13,7 +13,10 @@
     {{end}}
   </div>
   <div class="p-3">
-    <p class="text-xs text-neutral-500 truncate font-mono">{{shortAddr .Collection}}</p>
+    <p class="text-xs text-neutral-500 truncate font-mono flex items-center gap-1">
+      <span class="truncate">{{shortAddr .Collection}}</span>
+      {{if .Verified}}<span class="text-emerald-400" title="Verified collection">✓</span>{{end}}
+    </p>
     <p class="text-sm font-medium text-white mt-0.5 flex items-center gap-1">
       <span class="truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</span>
     </p>
