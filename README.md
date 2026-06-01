@@ -1,26 +1,44 @@
 # Magic Webb
 
-Non-custodial NFT marketplace on Flare — buy, sell, bid, and make offers on ERC-721 tokens without giving up custody of your assets or your keys.
+Non-custodial NFT marketplace on Flare Coston2 — buy, sell, bid, and make offers on ERC-721 / ERC-1155 tokens without giving up custody of your assets or your keys.
 
 ---
 
 ## What It Is
 
-Magic Webb is a marketplace, not a creation platform. It lets anyone trade NFTs that already exist on the Flare network (or Coston2 testnet). The smart contracts are non-custodial: your NFT stays in your wallet until the moment a sale settles.
+Magic Webb is a marketplace, not a creation platform. It lets anyone trade NFTs that already exist on Coston2. The smart contracts are non-custodial: your NFT stays in your wallet until the moment a sale settles.
 
 **What you can do:**
 - Browse listings and collections
-- Buy NFTs at a fixed price
-- List your own NFTs for sale
-- Create and bid in timed auctions
-- Make off-chain EIP-712 signed offers (no gas until acceptance)
-- Accept incoming offers on NFTs you own
+- Buy NFTs at a fixed price (buyer pays the 1.5% taker fee on top)
+- List your NFTs for sale (free — no listing fee)
+- Create timed English auctions with anti-snipe extension
+- Make stacked, time-locked offers (Option-4 positions)
+- Accept incoming offers on NFTs you own (no fee — fees were collected up-front)
 
 **What this platform does not do:**
-- Mint new NFTs
-- Create or deploy collections
+- Mint new NFTs or deploy collections
 - Bridge assets cross-chain
 - Accept fiat payment
+- Pay royalties (royalty registry was dropped in the rework)
+- Run on Flare mainnet (Coston2 testnet only for now)
+
+---
+
+## Fee Model (unified 1.5% taker)
+
+| Action | Who pays | What they pay |
+|--------|----------|---------------|
+| List / batch-list / create auction / mark-offer-eligible | seller | nothing |
+| Buy | buyer | `price + 1.5%` (seller receives `price` in full) |
+| Auction bid | bidder | `bid + 1.5%` (1.5% is non-refundable — outbid refunds bid only) |
+| Auction winning settle | winner already paid | seller receives the full bid, no extra fee |
+| Auction reserve-unmet / seller cancel | leading bidder | refunded `bid` only; fee retained |
+| Offer (stacked deposit) | bidder | `offer + 1.5%` (fee forwarded immediately, non-refundable) |
+| Offer expiry refund | platform | bidder receives total principal back; fee retained |
+| Accept offer | seller | nothing (receives full position principal) |
+
+Floor: every priced input (`list`, `reserve`, `offer`) must be ≥ `MIN_PRICE = 0.01 FLR`.
 
 ---
 
@@ -28,214 +46,97 @@ Magic Webb is a marketplace, not a creation platform. It lets anyone trade NFTs 
 
 | Layer | Technology |
 |-------|-----------|
-| Frontend | Next.js 15, React 19, wagmi v2, Tailwind CSS |
-| Backend | Go 1.23, Fiber, gRPC (port 9090), REST + SSE (port 8080) |
-| Smart Contracts | Solidity 0.8.26, Forge test suite |
-| Database | Supabase Postgres (pgx + sqlc), Goose migrations |
-| Cache / Pub-Sub | Redis 7 |
-| Blockchain | Flare Network / Coston2 testnet (chain ID 114) |
+| Frontend | HTMX + Alpine.js + ethers v6, embedded in Go templates |
+| Backend | Go 1.23, Fiber, pgx (Postgres), Server-Sent Events |
+| Smart Contracts | Solidity 0.8.26, Foundry test suite |
+| Database | Postgres + Goose migrations |
+| Wallets | MetaMask + WalletConnect v2 |
+| Blockchain | Flare Coston2 testnet (chain ID 114) |
 
 ---
 
 ## Architecture
 
 ```
-Browser (Next.js)
+Browser (HTMX + Alpine + ethers v6)
      |
   REST API + SSE (/api/v1/*, /events)
      |
-Go Backend (port 8080 HTTP | 9090 gRPC)
-  ├── MarketplaceService
-  ├── AuctionService
-  ├── OffersService
-  └── IndexerService
-       |
-  Blockchain Indexer ──── Flare RPC
-       |
- Supabase Postgres ← Goose Migrations
-       |
-     Redis (pub/sub + SIWE nonces)
+Go server (single binary, port 8080)
+  ├── REST handlers (listings, auctions, offers, wallet, profile, notifications, reports, admin)
+  ├── HTMX page handlers + embedded templates
+  ├── Indexer goroutines
+  │     ├── Market event watcher (Marketplace + AuctionHouse + OfferBook)
+  │     ├── Transfer watcher (ERC-721/1155 ownership tracking + orphan flagging)
+  │     ├── Metadata worker (tokenURI / uri fetch + attribute parse)
+  │     └── Keeper (settle expired auctions + refundExpired offer positions)
+  └── SSE broadcaster
+         |
+   Postgres ← Goose migrations (incl. 006_rework.sql)
+         |
+   Coston2 RPC
 ```
 
-The frontend can also read directly from the chain via RPC for latency-sensitive operations (wallet holdings, live auction state). The Go backend provides indexed history, search, trending scores, and offer aggregation.
+---
+
+## Smart Contracts
+
+Deploy fresh to Coston2 with `forge script script/DeployCoston2.s.sol`. The deploy script prints the three addresses; paste them into `.env`.
+
+| Contract | Notes |
+|----------|-------|
+| Marketplace | Free `list / list1155 / batchList`. `buy(coll, id, seller)` payable: msg.value = price + 1.5%. |
+| AuctionHouse | English with anti-snipe (3-min extension), default 3d / max 7d, min-increment max(5%, sellerFlatMinFLR). Outbid refunds bid only. |
+| OfferBook | Stacked positions per (NFT, bidder). 1.5% fee forwarded on every deposit, non-refundable. `acceptOffer` is free. |
+
+All three contracts are unstoppable: `feeRecipient` is immutable; there is no pause, no admin, no upgrade path.
 
 ---
 
-## Smart Contracts (Coston2 Testnet)
-
-| Contract | Address |
-|----------|---------|
-| Marketplace | [`0x767F7fF7c66673488a30053C025C153E13b6BfAa`](https://coston2-explorer.flare.network/address/0x767F7fF7c66673488a30053C025C153E13b6BfAa) |
-| AuctionHouse | [`0x6016688AfFAF5427E1f8100160A6378Da2B1476a`](https://coston2-explorer.flare.network/address/0x6016688AfFAF5427E1f8100160A6378Da2B1476a) |
-| OfferBook | [`0x0C7112Ec22262d1E423132e35bC87E33abF64a22`](https://coston2-explorer.flare.network/address/0x0C7112Ec22262d1E423132e35bC87E33abF64a22) |
-
-All contracts verified on [Coston2 Explorer](https://coston2-explorer.flare.network).
-
----
-
-## Prerequisites
-
-- A wallet: MetaMask, or any WalletConnect-compatible wallet
-- Coston2 FLR for gas — get free testnet tokens at the [Flare Faucet](https://faucet.flare.network)
-- **Frontend only:** Node 22+
-- **Backend (optional):** Go 1.23+, Redis, Supabase project
-
----
-
-## Quick Start (Local Dev)
-
-### Frontend only (no backend required)
-
-The frontend reads directly from the chain and needs no running backend.
+## Quick Start
 
 ```bash
 git clone https://github.com/OfficialA1manac/MagicWebb
-cd magicwebb/frontend
-cp .env.example .env.local
-# Fill in .env.local — chain vars and contract addresses are already populated for Coston2
-npm install
-npm run dev
-```
-
-Open http://localhost:3000.
-
-### Full stack
-
-```bash
-# 1. Clone
-git clone https://github.com/OfficialA1manac/MagicWebb
-cd magicwebb
-
-# 2. Backend env
+cd MagicWebb
 cp backend/.env.example backend/.env
-# Edit backend/.env — set POSTGRES_URL, REDIS_URL, JWT_SECRET, contract addresses
-
-# 3. Frontend env
-cp frontend/.env.example frontend/.env.local
-# Edit frontend/.env.local — set contract addresses and WalletConnect project ID
-
-# 4. Start Redis (and optionally Postgres via Docker)
-docker compose up redis -d
-
-# 5. Run the API server
-cd backend && go run ./cmd/api
-
-# 6. Run the indexer (separate terminal)
-cd backend && go run ./cmd/indexer
-
-# 7. Start the frontend
-cd frontend && npm install && npm run dev
+# Edit backend/.env — set POSTGRES_URL, RPC_URL, JWT_SECRET, contract addresses, ADMIN_ADDRS
+cd backend && go run ./cmd/server
+# → http://localhost:8080
 ```
 
----
-
-## Production Deploy
+For contract development:
 
 ```bash
-docker compose up --build
+cd contracts
+forge build
+forge test -vvv
+forge script script/DeployCoston2.s.sol \
+  --rpc-url https://coston2-api.flare.network/ext/C/rpc \
+  --broadcast --private-key $PRIVATE_KEY
 ```
-
-This builds and starts: `api` (port 8080/9090), `indexer`, `redis`, and `frontend` (port 3000). The `api` and `indexer` services read from the root `.env` file. The `frontend` service reads from `frontend/.env.local`.
 
 ---
 
 ## Environment Variables
 
-### Backend (`.env` or `backend/.env`)
+Backend (`backend/.env`):
 
 | Variable | Required | Description |
 |----------|----------|-------------|
-| `POSTGRES_URL` | Yes | Supabase pooler DSN — port 6543, `pool_mode=transaction` |
-| `REDIS_URL` | Yes | Redis connection URL |
-| `RPC_URL` | Yes | Flare/Coston2 JSON-RPC endpoint |
-| `CHAIN_ID` | Yes | `114` for Coston2, `14` for Flare mainnet |
-| `MARKETPLACE_ADDR` | Yes | Deployed Marketplace contract address |
-| `AUCTION_ADDR` | Yes | Deployed AuctionHouse contract address |
-| `OFFERBOOK_ADDR` | Yes | Deployed OfferBook contract address |
-| `JWT_SECRET` | Yes | 32+ hex bytes — generate with `openssl rand -hex 32` |
-| `FRONTEND_URL` | Yes | Allowed CORS origin (e.g. `http://localhost:3000`) |
-| `ROYALTY_ADDR` | No | RoyaltyRegistry contract address |
-| `KEEPER_KEY` | No | Hex-encoded private key for auction auto-settlement bot |
-| `SERVICE_TOKEN` | No | Admin token for `IndexerService.Reindex` endpoint |
-| `SENTRY_DSN` | No | Sentry error tracking DSN |
-| `INDEX_FROM_BLOCK` | No | Starting block for indexer (default `0`) |
-| `GETLOGS_CHUNK` | No | Blocks per `eth_getLogs` request (default `30`) |
-| `GETLOGS_BLOCK_CAP` | No | Hard cap per range; `0` = unlimited (default `0`) |
-
-### Frontend (`frontend/.env.local`)
-
-| Variable | Required | Description |
-|----------|----------|-------------|
-| `NEXT_PUBLIC_CHAIN_ID` | Yes | `114` for Coston2 |
-| `NEXT_PUBLIC_RPC_URL` | Yes | Flare/Coston2 JSON-RPC endpoint |
-| `NEXT_PUBLIC_MARKETPLACE_ADDR` | Yes | Marketplace contract address |
-| `NEXT_PUBLIC_AUCTION_ADDR` | Yes | AuctionHouse contract address |
-| `NEXT_PUBLIC_OFFER_ADDR` | Yes | OfferBook contract address |
-| `NEXT_PUBLIC_EXPLORER_URL` | Yes | Block explorer base URL |
-| `NEXT_PUBLIC_CURRENCY_SYMBOL` | Yes | Native currency symbol (`FLR` or `C2FLR`) |
-| `NEXT_PUBLIC_CHAIN_NAME` | Yes | Human-readable chain name |
-| `NEXT_PUBLIC_WALLETCONNECT_PROJECT_ID` | No | Reown/WalletConnect project ID (enables mobile wallets) |
-| `NEXT_PUBLIC_APP_URL` | No | App origin shown in WalletConnect modal |
-| `NEXT_PUBLIC_API_URL` | No | Backend API base URL (enables indexed data) |
-| `NEXT_PUBLIC_INDEX_FROM_BLOCK` | No | First block to scan for listings |
-| `NEXT_PUBLIC_INDEX_CHUNK_BLOCKS` | No | Block range per `eth_getLogs` chunk (default `30`) |
-
-> The frontend throws `"Refusing to launch"` at startup if any of the six required `NEXT_PUBLIC_*` vars are missing or empty. This is intentional — a misconfigured build is caught immediately.
-
----
-
-## Running Locally (Devnet)
-
-```bash
-# 1. Start Postgres + Redis
-docker compose up -d db redis
-
-# 2. Start a local Anvil fork (chain ID 114 mimics Coston2)
-anvil --chain-id 114 --block-time 2
-
-# 3. Deploy contracts to local devnet
-cd contracts && forge script script/DeployCoston2.s.sol \
-  --rpc-url http://localhost:8545 --broadcast \
-  --private-key $PRIVATE_KEY
-
-# 4. Start backend (API + indexer)
-cd backend && go run ./cmd/api &
-cd backend && go run ./cmd/indexer &
-
-# 5. Start frontend
-cd frontend && npm run dev
-# → http://localhost:3000
-```
-
-## Running on Coston2 Testnet (Live Flare)
-
-```bash
-# 1. Deploy contracts
-cd contracts && forge script script/DeployCoston2.s.sol \
-  --rpc-url https://coston2-api.flare.network/ext/C/rpc \
-  --broadcast --verify \
-  --private-key $PRIVATE_KEY
-
-# 2. Copy deploy output addresses into backend/.env and frontend/.env.local
-
-# 3. Start backend pointing at live RPC
-FLARE_RPC=https://coston2-api.flare.network/ext/C/rpc \
-  go run ./cmd/api
-
-# 4. Start frontend
-cd frontend && npm run dev
-```
-
----
-
-## Switching to Flare Mainnet
-
-Only `frontend/.env.local` (and `backend/.env`) need to change. No code changes are required.
-
-1. Deploy contracts to Flare mainnet.
-2. Update `NEXT_PUBLIC_CHAIN_ID=14`, RPC URL, explorer URL, currency symbol, chain name, and all three contract addresses in `frontend/.env.local`.
-3. Update backend `.env` with mainnet RPC, chain ID, and contract addresses.
-4. Rebuild and redeploy.
+| `POSTGRES_URL` | Yes | Postgres connection URL |
+| `RPC_URL` | Yes | Coston2 JSON-RPC endpoint |
+| `CHAIN_ID` | Yes | `114` for Coston2 |
+| `MARKETPLACE_ADDR` | Yes | Deployed Marketplace address |
+| `AUCTION_ADDR` | Yes | Deployed AuctionHouse address |
+| `OFFERBOOK_ADDR` | Yes | Deployed OfferBook address |
+| `JWT_SECRET` | Yes | 32+ hex bytes — `openssl rand -hex 32` |
+| `FRONTEND_URL` | Yes | Allowed CORS origin |
+| `ADMIN_ADDRS` | No | Comma list of EOAs allowed to call `/api/v1/admin/*` (SIWE JWT also required) |
+| `WC_PROJECT_ID` | No | WalletConnect projectId surfaced to the browser |
+| `KEEPER_KEY` | No | Hex private key for the auction-settlement + offer-refund keeper |
+| `KEEPER_POLL_SECONDS` | No | Keeper poll interval, default 30 |
+| `INDEX_FROM_BLOCK` | No | Indexer start block (set to deploy block on rework) |
+| `GETLOGS_CHUNK` | No | Blocks per `eth_getLogs` request, default 30 |
 
 ---
 

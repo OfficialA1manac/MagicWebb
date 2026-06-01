@@ -1,11 +1,31 @@
 {{define "partials/auction_cards.html"}}
+{{$now := .Now}}
 {{range .Auctions}}
-<a href="/auction/{{.AuctionID}}" class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block">
-  <div class="aspect-square bg-neutral-800 flex items-center justify-center text-neutral-600 text-xs">NFT</div>
+<a href="/auction/{{.AuctionID}}"
+   x-data="{
+     endsAt: {{.EndsAt.Unix}},
+     now: {{$now}},
+     get remaining() {
+       const diff = this.endsAt - this.now;
+       if (diff <= 0) return 'Ended';
+       const h = Math.floor(diff/3600);
+       const m = Math.floor((diff%3600)/60);
+       const s = diff%60;
+       return h > 0 ? h+'h '+m+'m '+s+'s' : m+'m '+s+'s';
+     },
+     init() { setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000); }
+   }"
+   class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block group">
+  <div class="aspect-square bg-neutral-800 flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
+    NFT
+  </div>
   <div class="p-3">
     <p class="text-xs text-neutral-500 truncate font-mono">{{shortAddr .Collection}} #{{.TokenID}}</p>
     <p class="text-emerald-400 font-bold text-sm mt-1">{{wei2eth .HighestBidWei}} FLR</p>
-    <p class="text-xs text-neutral-500 mt-0.5">Reserve: {{wei2eth .ReservePriceWei}} FLR</p>
+    <p class="text-xs text-neutral-500 mt-0.5">Reserve: {{wei2eth .ReservePriceWei}} FLR · +1.5% fee per bid</p>
+    <p class="text-xs font-semibold mt-1"
+       :class="remaining === 'Ended' ? 'text-red-400' : 'text-yellow-400'"
+       x-text="remaining"></p>
   </div>
 </a>
 {{end}}

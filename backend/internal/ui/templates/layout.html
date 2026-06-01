@@ -3,53 +3,153 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} — MagicWebb</title>
+  <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
-    tailwind.config = { theme: { extend: { colors: { neutral: { 950: '#0a0a0a' } } } } }
+    tailwind.config = { theme: { extend: { colors: { neutral: { 950: '#0a0a0a' } } } } };
+    window.MW_ADDRS = {
+      MARKETPLACE: "{{.MarketplaceAddr}}",
+      AUCTION:     "{{.AuctionAddr}}",
+      OFFERBOOK:   "{{.OfferBookAddr}}",
+    };
+    window.WC_PROJECT_ID = "{{.WCProjectID}}";
   </script>
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" defer></script>
+  <script src="https://unpkg.com/@walletconnect/ethereum-provider@2.21.4/dist/index.umd.js" defer></script>
   <script src="/static/wallet.js" defer></script>
+  <style>[x-cloak]{display:none}</style>
 </head>
 <body hx-ext="sse" sse-connect="/events" x-data>
 
 <!-- Nav -->
-<nav class="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur border-b border-neutral-800">
-  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-    <a href="/" class="text-xl font-bold tracking-tight text-white">Magic<span class="text-emerald-400">Webb</span></a>
+<nav x-data="{ open: false }" class="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur border-b border-neutral-800">
+  <div class="max-w-7xl mx-auto px-3 sm:px-4 flex items-center justify-between h-14 sm:h-16 gap-2">
+
+    <a href="/" class="text-lg sm:text-xl font-bold tracking-tight text-white flex-shrink-0">Magic<span class="text-emerald-400">Webb</span></a>
+
+    <!-- Desktop links -->
     <div class="hidden md:flex items-center gap-6 text-sm text-neutral-400">
       <a href="/listings" class="hover:text-white transition">Listings</a>
       <a href="/auctions" class="hover:text-white transition">Auctions</a>
-      <a href="/offers" class="hover:text-white transition">Offers</a>
+      <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="hover:text-white transition">Offers</a>
+      <a href="/search" class="hover:text-white transition">Search</a>
       <a href="/metrics" class="hover:text-white transition">Metrics</a>
     </div>
-    <div x-data="walletStore" class="flex items-center gap-3">
-      <template x-if="!address">
-        <button @click="connect()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition">Connect</button>
+
+    <!-- Right: bell + wallet + hamburger -->
+    <div class="flex items-center gap-2 sm:gap-3">
+
+      <!-- Notification bell -->
+      <template x-if="$store.wallet.address">
+        <button @click="$store.notifs.toggle()" class="relative p-2 rounded-lg text-neutral-300 hover:text-white hover:bg-neutral-800 transition" aria-label="Notifications">
+          <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2a2 2 0 01-.6 1.4L4 17h5m6 0a3 3 0 11-6 0"/>
+          </svg>
+          <span x-show="$store.notifs.unread > 0"
+                class="absolute -top-0.5 -right-0.5 bg-red-500 text-white text-[10px] rounded-full px-1.5 leading-4 min-w-[18px] text-center"
+                x-text="$store.notifs.unread"></span>
+        </button>
       </template>
-      <template x-if="address">
+
+      <template x-if="!$store.wallet.address">
+        <button @click="$store.wallet.connect()" class="px-3 sm:px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs sm:text-sm transition">Connect</button>
+      </template>
+      <template x-if="$store.wallet.address">
         <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
-          <a :href="'/profile/' + address" class="text-sm text-neutral-300 hover:text-white font-mono" x-text="shortAddr"></a>
+          <div class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></div>
+          <a :href="'/profile/' + $store.wallet.address" class="text-xs sm:text-sm text-neutral-300 hover:text-white font-mono" x-text="$store.wallet.shortAddr"></a>
         </div>
       </template>
+
+      <!-- Hamburger (mobile) -->
+      <button @click="open = !open" class="md:hidden p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" aria-label="Menu">
+        <svg x-show="!open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <svg x-show="open" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
   </div>
+
+  <!-- Mobile menu -->
+  <div x-show="open" x-cloak class="md:hidden border-t border-neutral-800 px-4 py-3 space-y-1 text-sm">
+    <a href="/listings"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Listings</a>
+    <a href="/auctions"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Auctions</a>
+    <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Offers</a>
+    <a href="/search"    class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Search</a>
+    <a href="/metrics"   class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Metrics</a>
+  </div>
 </nav>
+
+<!-- Notification drawer -->
+<div x-show="$store.notifs.open" x-cloak
+     @click.away="$store.notifs.open = false"
+     class="fixed top-14 sm:top-16 right-2 sm:right-4 z-40 w-80 max-w-[calc(100vw-1rem)] bg-neutral-900 border border-neutral-800 rounded-xl shadow-2xl">
+  <div class="px-4 py-3 border-b border-neutral-800 flex items-center justify-between">
+    <h3 class="text-sm font-semibold text-white">Notifications</h3>
+    <button @click="$store.notifs.open = false" class="text-neutral-500 hover:text-white text-xs">Close</button>
+  </div>
+  <div class="max-h-96 overflow-y-auto">
+    <template x-for="n in $store.notifs.items" :key="n.id">
+      <div class="px-4 py-3 border-b border-neutral-800/50 text-xs">
+        <p class="text-neutral-300 font-medium" x-text="n.kind"></p>
+        <p class="text-neutral-500 mt-1 font-mono break-all" x-text="n.payload"></p>
+      </div>
+    </template>
+    <template x-if="$store.notifs.items.length === 0">
+      <p class="text-neutral-600 text-xs text-center py-8">No notifications.</p>
+    </template>
+  </div>
+</div>
+
+<!-- NFT picker modal (driven by $store.picker) -->
+<div x-show="$store.picker.open" x-cloak
+     class="fixed inset-0 z-40 flex items-center justify-center bg-black/70 p-3 sm:p-6">
+  <div @click.away="$store.picker.close()" class="bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-3xl max-h-[85vh] overflow-hidden flex flex-col">
+    <div class="px-4 sm:px-6 py-3 sm:py-4 border-b border-neutral-800 flex items-center justify-between">
+      <h2 class="text-sm sm:text-base font-bold text-white" x-text="`Pick an NFT to ${$store.picker.mode}`"></h2>
+      <button @click="$store.picker.close()" class="text-neutral-500 hover:text-white">✕</button>
+    </div>
+    <div class="p-3 sm:p-4 overflow-y-auto flex-1">
+      <template x-if="$store.picker.loading"><p class="text-neutral-500 text-sm text-center py-8">Loading your NFTs…</p></template>
+      <template x-if="!$store.picker.loading && $store.picker.nfts.length === 0">
+        <p class="text-neutral-500 text-sm text-center py-8">No NFTs found in your wallet on Coston2.</p>
+      </template>
+      <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 gap-3">
+        <template x-for="n in $store.picker.nfts" :key="n.collection + '-' + n.token_id">
+          <a :href="`/token/${n.collection}/${n.token_id}`"
+             class="bg-neutral-800 hover:bg-neutral-700 rounded-xl overflow-hidden transition group">
+            <div class="aspect-square bg-neutral-700 flex items-center justify-center text-3xl overflow-hidden">
+              <template x-if="n.image_uri"><img :src="n.image_uri" :alt="n.name" class="w-full h-full object-cover"/></template>
+              <template x-if="!n.image_uri"><span>🖼</span></template>
+            </div>
+            <div class="p-2 sm:p-3">
+              <p class="text-xs font-semibold text-white truncate" x-text="n.name || ('#' + n.token_id)"></p>
+              <p class="text-[10px] text-neutral-500 font-mono truncate" x-text="n.collection.slice(0,6) + '…' + n.collection.slice(-4)"></p>
+              <div class="flex gap-1 mt-1 text-[9px]">
+                <span x-show="n.is_listed" class="text-emerald-400">Listed</span>
+                <span x-show="n.has_auction" class="text-amber-400">Auction</span>
+                <span x-show="n.has_offer" class="text-blue-400">Offers</span>
+              </div>
+            </div>
+          </a>
+        </template>
+      </div>
+    </div>
+  </div>
+</div>
 
 <!-- Toast container -->
 <div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
 
 <!-- Page content -->
-<main class="max-w-7xl mx-auto px-4 py-8">
+<main class="max-w-7xl mx-auto px-3 sm:px-4 py-6 sm:py-8">
   {{block "content" .}}{{end}}
 </main>
 
 <footer class="border-t border-neutral-800 mt-16 py-8 text-center text-neutral-600 text-sm">
-  MagicWebb · Non-custodial NFT marketplace on Flare Network · <a href="https://github.com/OfficialA1manac/MagicWebb" class="hover:text-neutral-400">GitHub</a>
+  MagicWebb · Non-custodial NFT marketplace on Flare Coston2 · Sellers pay no fees. Buyers pay 1.5% taker fee.
 </footer>
 
 </body>

@@ -1,19 +1,33 @@
 {{define "partials/listing_cards.html"}}
 {{range .Listings}}
-<div class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition group" x-data>
-  <div class="aspect-square bg-neutral-800 flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
-    NFT
+<a href="/token/{{.Collection}}/{{.TokenID}}"
+   class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition group block" x-data>
+  <div class="aspect-square overflow-hidden bg-neutral-800">
+    {{if .ImageURI}}
+    <img src="{{.ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
+         class="w-full h-full object-cover group-hover:scale-105 transition duration-300">
+    {{else}}
+    <div class="w-full h-full flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
+      NFT
+    </div>
+    {{end}}
   </div>
   <div class="p-3">
-    <p class="text-xs text-neutral-500 truncate font-mono">{{shortAddr .Collection}}</p>
-    <p class="text-sm font-medium text-white mt-0.5">#{{.TokenID}}</p>
+    <p class="text-xs text-neutral-500 truncate font-mono flex items-center gap-1">
+      <span class="truncate">{{shortAddr .Collection}}</span>
+      {{if .Verified}}<span class="text-emerald-400" title="Verified collection">✓</span>{{end}}
+    </p>
+    <p class="text-sm font-medium text-white mt-0.5 flex items-center gap-1">
+      <span class="truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</span>
+    </p>
     <p class="text-emerald-400 font-bold text-sm mt-1">{{wei2eth .PriceWei}} FLR</p>
+    <p class="text-[10px] text-neutral-600">+1.5% taker fee</p>
     <button
       class="mt-2 w-full py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition"
-      @click="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', price: '{{.PriceWei}}'})">
+      @click.prevent="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{lower .Seller}}', price: '{{.PriceWei}}'})">
       Buy Now
     </button>
   </div>
-</div>
+</a>
 {{end}}
 {{end}}

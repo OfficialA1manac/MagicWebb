@@ -5,7 +5,10 @@
   <div class="flex items-center gap-4 mb-2">
     <div class="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-2xl">🗂</div>
     <div>
-      <h1 class="text-2xl font-bold text-white">{{if .Name}}{{.Name}}{{else}}{{shortAddr .Address}}{{end}}</h1>
+      <h1 class="text-2xl font-bold text-white flex items-center gap-2">
+        <span>{{if .Name}}{{.Name}}{{else}}{{shortAddr .Address}}{{end}}</span>
+        {{if .Verified}}<span class="text-emerald-400 text-xl" title="Verified collection">✓</span>{{end}}
+      </h1>
       <p class="text-sm text-neutral-500 font-mono">{{.Address}} · {{.Standard}}</p>
     </div>
   </div>

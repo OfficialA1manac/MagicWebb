@@ -1,12 +1,18 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div class="mb-6 flex items-center justify-between">
-  <h1 class="text-2xl font-bold text-neutral-200">Live Auctions</h1>
-  <span class="text-sm text-neutral-500">{{len .Auctions}} active</span>
+<div class="mb-6 flex flex-wrap items-center justify-between gap-3">
+  <h1 class="text-xl sm:text-2xl font-bold text-neutral-200">Live Auctions</h1>
+  <div class="flex items-center gap-2 sm:gap-3">
+    <span class="text-xs sm:text-sm text-neutral-500">{{len .Auctions}} active</span>
+    <button @click="$store.picker.show('auction')"
+            class="px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs sm:text-sm font-bold transition">
+      + Start an Auction
+    </button>
+  </div>
 </div>
 
 <div id="auctions-grid"
-     class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
+     class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-3 sm:gap-4"
      hx-get="/partials/auctions"
      hx-trigger="sse:auction-updated"
      hx-swap="innerHTML">
