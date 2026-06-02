@@ -1,44 +1,195 @@
 {{template "layout.html" .}}
 {{define "content"}}
 <div class="grid md:grid-cols-2 gap-8">
+
+  <!-- Left: NFT image -->
   <div class="bg-neutral-900 rounded-2xl overflow-hidden">
     {{with .Listing}}
-    {{if .ImageURI}}
-    <img src="{{.ImageURI}}" alt="NFT" class="w-full aspect-square object-cover">
+      {{if .ImageURI}}
+      <img src="{{.ImageURI}}" alt="Token #{{$.TokenID}}" class="w-full aspect-square object-cover">
+      {{else}}
+      <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl">🖼</div>
+      {{end}}
+      <div class="p-4">
+        <p class="text-sm font-semibold text-white">{{if .Name}}{{.Name}}{{else}}Token #{{$.TokenID}}{{end}}</p>
+        <p class="text-xs text-neutral-500 font-mono mt-1 truncate">{{$.Contract}}</p>
+      </div>
     {{else}}
-    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-6xl">🖼</div>
-    {{end}}
-    <div class="p-4">
-      <p class="text-sm font-semibold text-white">{{if .Name}}{{.Name}}{{else}}Token #{{$.TokenID}}{{end}}</p>
-      <p class="text-xs text-neutral-500 font-mono mt-1">{{$.Contract}}</p>
-    </div>
-    {{else}}
-    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-6xl">🖼</div>
-    <div class="p-4">
-      <p class="text-xs text-neutral-500 font-mono">{{.Contract}} #{{.TokenID}}</p>
-    </div>
+      <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl">🖼</div>
+      <div class="p-4">
+        <p class="text-xs text-neutral-500 font-mono truncate">{{.Contract}} #{{.TokenID}}</p>
+      </div>
     {{end}}
   </div>
 
-  <div>
-    <h1 class="text-2xl font-bold text-white mb-1">Token #{{.TokenID}}</h1>
-    <p class="text-sm text-neutral-500 font-mono mb-6">{{.Contract}}</p>
+  <!-- Right: actions -->
+  <div x-data="{
+    sellerAddr: '{{with .Listing}}{{lower .Seller}}{{end}}',
+    tab: 'buy',
+    listPrice: '',
+    listDays: '30',
+    auctionReserve: '',
+    auctionDays: '3',
+    offerAmt: '',
+    acceptBidder: '',
+    get listFeeDisplay() {
+      const p = parseFloat(this.listPrice);
+      if (isNaN(p) || p <= 0) return '0.0000';
+      return (p * 0.015).toFixed(4);
+    },
+    get listTotalDisplay() {
+      const p = parseFloat(this.listPrice);
+      if (isNaN(p) || p <= 0) return '0.0000';
+      return (p * 1.015).toFixed(4);
+    },
+  }">
 
+    <h1 class="text-2xl font-bold text-white mb-1">Token #{{.TokenID}}</h1>
+    <p class="text-sm text-neutral-500 font-mono mb-4 truncate">{{.Contract}}</p>
+
+    <!-- Current listing price -->
     {{with .Listing}}
     <div class="bg-neutral-900 rounded-xl p-4 mb-4">
-      <p class="text-sm text-neutral-500">Listed price</p>
+      <p class="text-xs text-neutral-500">Listed price</p>
       <p class="text-2xl font-bold text-emerald-400 mt-1">{{wei2eth .PriceWei}} FLR</p>
-      <p class="text-xs text-neutral-600 mt-1">Seller: {{shortAddr .Seller}}</p>
+      <p class="text-xs text-neutral-600 mt-1">Seller: {{shortAddr .Seller}} · Expires {{.ExpiresAt.Format "Jan 2 2006"}}</p>
     </div>
-    <button class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition"
-            @click="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', price: '{{.PriceWei}}'})">
-      Buy Now
-    </button>
-    {{else}}
-    <div class="bg-neutral-900 rounded-xl p-4">
-      <p class="text-neutral-500">Not currently listed</p>
+    {{end}}
+
+    <!-- Action tabs -->
+    <div class="flex flex-wrap gap-2 mb-4 text-xs font-semibold">
+      {{with .Listing}}
+      <button @click="tab='buy'"
+        :class="tab==='buy' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+        class="px-3 py-1.5 rounded-lg transition">Buy</button>
+      {{end}}
+      <button @click="tab='offer'"
+        :class="tab==='offer' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+        class="px-3 py-1.5 rounded-lg transition">Make Offer</button>
+      <button @click="tab='list'"
+        :class="tab==='list' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+        class="px-3 py-1.5 rounded-lg transition">List for Sale</button>
+      <button @click="tab='auction'"
+        :class="tab==='auction' ? 'bg-emerald-500 text-black' : 'bg-neutral-800 text-neutral-400'"
+        class="px-3 py-1.5 rounded-lg transition">Create Auction</button>
+    </div>
+
+    <!-- Buy tab -->
+    {{with .Listing}}
+    <div x-show="tab==='buy'" class="space-y-2">
+      <button class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition"
+              @click="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', price: '{{.PriceWei}}'})">
+        Buy Now — {{wei2eth .PriceWei}} FLR
+      </button>
+      <!-- Cancel listing — shown only to seller -->
+      <template x-if="sellerAddr && $store.wallet.address === sellerAddr">
+        <button class="w-full py-2 rounded-xl bg-red-900/40 hover:bg-red-900/60 text-red-400 text-sm font-semibold transition"
+                @click="$dispatch('cancel-listing', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}'})">
+          Cancel Listing
+        </button>
+      </template>
+    </div>
+    {{end}}
+
+    <!-- Make Offer tab (on-chain ETH deposit via OfferBook) -->
+    <div x-show="tab==='offer'" class="space-y-3">
+      <p class="text-xs text-neutral-500">Deposits ETH on-chain. Owner must have enabled offers first.</p>
+      <input x-model="offerAmt" type="number" step="0.001" min="0" placeholder="Offer amount (FLR)"
+             class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <button class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition"
+              @click="$store.wallet.makeOffer('{{.Contract}}', '{{.TokenID}}', (parseFloat(offerAmt)*1e18).toString())">
+        Submit Offer
+      </button>
+      <button class="w-full py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-xs font-semibold transition"
+              @click="$store.wallet.withdrawOffer('{{.Contract}}', '{{.TokenID}}')">
+        Withdraw My Offer
+      </button>
+
+      <!-- Accept offer (owner only) -->
+      <div class="border-t border-neutral-800 pt-3 mt-2">
+        <p class="text-xs text-neutral-500 mb-2">Accept an offer (owners only)</p>
+        <div class="flex gap-2">
+          <button class="w-full py-2 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-semibold transition"
+                  @click="$store.wallet.markEligible('{{.Contract}}', '{{.TokenID}}')">
+            Enable Offers
+          </button>
+        </div>
+        <div class="flex gap-2 mt-2">
+          <input x-model="acceptBidder" type="text" placeholder="Bidder address (0x…)"
+                 class="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-xs text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+          <button class="px-3 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition"
+                  @click="$store.wallet.acceptOffer('{{.Contract}}', '{{.TokenID}}', acceptBidder)">
+            Accept
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- List for Sale tab -->
+    <div x-show="tab==='list'" class="space-y-3">
+      <p class="text-xs text-neutral-500">Requires NFT approval. 1.5% listing fee charged upfront.</p>
+      <input x-model="listPrice" type="number" step="0.001" min="0" placeholder="Price (FLR)"
+             class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <select x-model="listDays" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
+        <option value="7">7 days</option>
+        <option value="30" selected>30 days</option>
+        <option value="90">90 days</option>
+        <option value="180">180 days</option>
+      </select>
+      <div class="text-xs text-neutral-500 space-y-0.5">
+        <p>Listing fee (1.5%): <span class="text-neutral-300" x-text="listFeeDisplay"></span> FLR</p>
+        <p>Total cost: <span class="text-neutral-300" x-text="listTotalDisplay"></span> FLR</p>
+      </div>
+      <button class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition"
+              @click="$store.wallet.list(
+                '{{.Contract}}', '{{.TokenID}}',
+                (parseFloat(listPrice)*1e18).toString(),
+                Date.now()/1000 + parseInt(listDays)*86400
+              )">
+        List for Sale
+      </button>
+    </div>
+
+    <!-- Create Auction tab -->
+    <div x-show="tab==='auction'" class="space-y-3">
+      <p class="text-xs text-neutral-500">Requires NFT approval. Reserve price is the minimum first bid.</p>
+      <input x-model="auctionReserve" type="number" step="0.001" min="0" placeholder="Reserve price in FLR (0 = any bid)"
+             class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <select x-model="auctionDays" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
+        <option value="1">1 day</option>
+        <option value="3" selected>3 days</option>
+        <option value="7">7 days</option>
+        <option value="14">14 days</option>
+      </select>
+      <button class="w-full py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition"
+              @click="$store.wallet.createAuction(
+                '{{.Contract}}', '{{.TokenID}}',
+                auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0',
+                Date.now()/1000 + parseInt(auctionDays)*86400,
+                500
+              )">
+        Create Auction
+      </button>
+    </div>
+
+  </div>
+</div>
+
+<!-- DB Offer notifications -->
+{{if .Offers}}
+<div class="mt-10">
+  <h2 class="text-lg font-semibold text-neutral-300 mb-4">Pending Offer Notifications</h2>
+  <div class="space-y-2">
+    {{range .Offers}}
+    <div class="bg-neutral-900 rounded-xl px-4 py-3 flex items-center justify-between text-sm">
+      <div>
+        <p class="font-mono text-neutral-300 text-xs">{{shortAddr .Bidder}}</p>
+        <p class="text-xs text-neutral-600 mt-0.5">Expires {{.ExpiresAt.Format "Jan 2 15:04"}}</p>
+      </div>
+      <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
     </div>
     {{end}}
   </div>
 </div>
+{{end}}
 {{end}}

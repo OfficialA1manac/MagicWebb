@@ -1,0 +1,25 @@
+root = "."
+tmp_dir = "tmp"
+
+[build]
+  bin        = "./tmp/server.exe"
+  cmd        = "go build -o ./tmp/server.exe ./cmd/server"
+  delay      = 800
+  include_ext = ["go", "html", "js", "css", "toml"]
+  exclude_dir = ["tmp", "vendor", "testdata"]
+  exclude_regex = ["_test\\.go$"]
+  stop_on_error = true
+  kill_delay = "500ms"
+  log = "tmp/build-errors.log"
+
+[color]
+  build   = "yellow"
+  runner  = "green"
+  watcher = "cyan"
+  app     = ""
+
+[log]
+  time = true
+
+[misc]
+  clean_on_exit = true

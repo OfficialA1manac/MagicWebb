@@ -1,9 +1,37 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
   <h1 class="text-2xl font-bold text-neutral-200">Active Listings</h1>
   <span class="text-sm text-neutral-500">{{len .Listings}} items</span>
 </div>
+
+<!-- Filter + sort controls -->
+<form class="mb-6 flex flex-wrap gap-3 items-end"
+      hx-get="/partials/listings"
+      hx-target="#listings-grid"
+      hx-swap="innerHTML"
+      hx-trigger="change, submit"
+      hx-push-url="false">
+  <div class="flex-1 min-w-48">
+    <label class="block text-xs text-neutral-500 mb-1">Collection</label>
+    <input type="text" name="collection" value="{{.Collection}}"
+           placeholder="0x… or name"
+           class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+  </div>
+  <div>
+    <label class="block text-xs text-neutral-500 mb-1">Sort</label>
+    <select name="sort"
+            class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
+      <option value="recent" {{if eq .Sort "recent"}}selected{{end}}>Newest first</option>
+      <option value="price_asc" {{if eq .Sort "price_asc"}}selected{{end}}>Price: Low to High</option>
+      <option value="price_desc" {{if eq .Sort "price_desc"}}selected{{end}}>Price: High to Low</option>
+    </select>
+  </div>
+  <button type="submit"
+          class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
+    Filter
+  </button>
+</form>
 
 <div id="listings-grid"
      class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"

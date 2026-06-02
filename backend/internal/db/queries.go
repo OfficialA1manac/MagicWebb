@@ -188,6 +188,7 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 type ListingsFilter struct {
 	Collection string
 	Seller     string
+	Sort       string // "recent" | "price_asc" | "price_desc"
 	Limit      int
 	Cursor     string
 }
@@ -206,6 +207,13 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		args = append(args, f.Seller)
 		where += fmt.Sprintf(" AND l.seller=$%d", len(args))
 	}
+	orderBy := "l.listed_at DESC"
+	switch f.Sort {
+	case "price_asc":
+		orderBy = "CAST(l.price_wei AS numeric) ASC"
+	case "price_desc":
+		orderBy = "CAST(l.price_wei AS numeric) DESC"
+	}
 
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
@@ -214,7 +222,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		 FROM listings l
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
 		 `+where+`
-		 ORDER BY l.listed_at DESC LIMIT $1`, args...)
+		 ORDER BY `+orderBy+` LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
 	}

@@ -2,6 +2,16 @@
 {{define "content"}}
 <h1 class="text-2xl font-bold text-neutral-200 mb-6">Offers</h1>
 
+{{if not .Addr}}
+<div class="bg-neutral-900 rounded-xl p-8 mb-6 text-center">
+  <p class="text-neutral-400 mb-4">Connect your wallet to view your offers</p>
+  <button @click="$store.wallet.connect()"
+          class="px-6 py-2.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">
+    Connect Wallet
+  </button>
+</div>
+{{end}}
+
 <div x-data="{tab: 'received'}">
   <div class="flex gap-2 mb-6">
     <button @click="tab='received'"
@@ -16,18 +26,31 @@
     </button>
   </div>
 
+  <!-- Received offers -->
   <div x-show="tab==='received'">
     {{if .Received}}
     <div class="space-y-3">
       {{range .Received}}
-      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between">
-        <div>
-          <p class="text-sm font-medium text-white font-mono">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</p>
-          <p class="text-xs text-neutral-500 mt-1">From {{shortAddr .Bidder}} · Expires {{.ExpiresAt.Format "Jan 2 15:04"}}</p>
+      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <a href="/token/{{.Collection}}/{{.TokenID}}"
+             class="text-sm font-medium text-white font-mono hover:text-emerald-400 transition truncate block">
+            {{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}
+          </a>
+          <p class="text-xs text-neutral-500 mt-1">
+            From <span class="font-mono">{{shortAddr .Bidder}}</span> · Expires {{.ExpiresAt.Format "Jan 2 15:04"}}
+          </p>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-3 flex-shrink-0">
           <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+          {{if eq .Status "pending"}}
+          <button class="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition"
+                  @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{.Bidder}}')">
+            Accept
+          </button>
+          {{else}}
           <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
+          {{end}}
         </div>
       </div>
       {{end}}
@@ -37,18 +60,41 @@
     {{end}}
   </div>
 
+  <!-- Sent offers -->
   <div x-show="tab==='sent'">
     {{if .Sent}}
     <div class="space-y-3">
       {{range .Sent}}
-      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between">
-        <div>
-          <p class="text-sm font-medium text-white font-mono">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</p>
+      <div class="bg-neutral-900 rounded-xl p-4 flex items-center justify-between gap-4">
+        <div class="min-w-0 flex-1">
+          <a href="/token/{{.Collection}}/{{.TokenID}}"
+             class="text-sm font-medium text-white font-mono hover:text-emerald-400 transition truncate block">
+            {{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}
+          </a>
           <p class="text-xs text-neutral-500 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}}</p>
         </div>
-        <div class="flex items-center gap-4">
+        <div class="flex items-center gap-2 flex-shrink-0">
           <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+          {{if eq .Status "pending"}}
+          <button class="px-3 py-1.5 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-neutral-300 text-xs font-semibold transition"
+                  @click="$store.wallet.withdrawOffer('{{.Collection}}', '{{.TokenID}}')">
+            Withdraw
+          </button>
+          <button class="px-3 py-1.5 rounded-lg bg-red-900/40 hover:bg-red-900/60 text-red-400 text-xs font-semibold transition"
+                  @click="
+                    const tok = localStorage.getItem('mw_jwt');
+                    if (!tok) { alert('Sign in first'); return; }
+                    if (!confirm('Remove this offer notification?')) return;
+                    fetch('/api/v1/offers/{{.OfferID}}', {
+                      method: 'DELETE',
+                      headers: {'Authorization': 'Bearer ' + tok}
+                    }).then(r => { if (r.ok) $el.closest('.bg-neutral-900').remove(); });
+                  ">
+            Cancel
+          </button>
+          {{else}}
           <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
+          {{end}}
         </div>
       </div>
       {{end}}

@@ -2,10 +2,12 @@ package api
 
 import (
 	"strconv"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
@@ -42,6 +44,23 @@ type offerRequest struct {
 	Nonce      string `json:"nonce"`
 	ExpiresAt  int64  `json:"expires_at"`
 	Signature  string `json:"signature"`
+}
+
+func cancelOffer(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		offerID := strings.TrimSpace(c.Params("id"))
+		if offerID == "" {
+			return writeErr(c, fiber.StatusBadRequest, "offer id required")
+		}
+		caller, ok := c.Locals(string(auth.CallerKey)).(string)
+		if !ok || caller == "" {
+			return writeErr(c, fiber.StatusUnauthorized, "unauthorized")
+		}
+		if err := q.CancelOffer(c.Context(), offerID, caller); err != nil {
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		return c.SendStatus(fiber.StatusNoContent)
+	}
 }
 
 func notifyOffer(q *db.Q) fiber.Handler {

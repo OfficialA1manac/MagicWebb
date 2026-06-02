@@ -3,7 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>{{.Title}} — MagicWebb</title>
+  <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
   <script src="https://cdn.tailwindcss.com"></script>
   <script>
     tailwind.config = { theme: { extend: { colors: { neutral: { 950: '#0a0a0a' } } } } }
@@ -13,30 +13,52 @@
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" defer></script>
   <script src="/static/wallet.js" defer></script>
+  <style>[x-cloak]{display:none}</style>
 </head>
 <body hx-ext="sse" sse-connect="/events" x-data>
 
 <!-- Nav -->
-<nav class="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur border-b border-neutral-800">
+<nav x-data="{ open: false }" class="sticky top-0 z-50 bg-neutral-900/80 backdrop-blur border-b border-neutral-800">
   <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-    <a href="/" class="text-xl font-bold tracking-tight text-white">Magic<span class="text-emerald-400">Webb</span></a>
+
+    <a href="/" class="text-xl font-bold tracking-tight text-white flex-shrink-0">Magic<span class="text-emerald-400">Webb</span></a>
+
+    <!-- Desktop links -->
     <div class="hidden md:flex items-center gap-6 text-sm text-neutral-400">
       <a href="/listings" class="hover:text-white transition">Listings</a>
       <a href="/auctions" class="hover:text-white transition">Auctions</a>
-      <a href="/offers" class="hover:text-white transition">Offers</a>
+      <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="hover:text-white transition">Offers</a>
+      <a href="/search" class="hover:text-white transition">Search</a>
       <a href="/metrics" class="hover:text-white transition">Metrics</a>
     </div>
-    <div x-data="walletStore" class="flex items-center gap-3">
-      <template x-if="!address">
-        <button @click="connect()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition">Connect</button>
+
+    <!-- Right: wallet + hamburger -->
+    <div class="flex items-center gap-3">
+      <template x-if="!$store.wallet.address">
+        <button @click="$store.wallet.connect()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-sm transition">Connect</button>
       </template>
-      <template x-if="address">
+      <template x-if="$store.wallet.address">
         <div class="flex items-center gap-2">
-          <div class="w-2 h-2 rounded-full bg-emerald-400"></div>
-          <a :href="'/profile/' + address" class="text-sm text-neutral-300 hover:text-white font-mono" x-text="shortAddr"></a>
+          <div class="w-2 h-2 rounded-full bg-emerald-400 flex-shrink-0"></div>
+          <a :href="'/profile/' + $store.wallet.address" class="text-sm text-neutral-300 hover:text-white font-mono" x-text="$store.wallet.shortAddr"></a>
         </div>
       </template>
+
+      <!-- Hamburger (mobile) -->
+      <button @click="open = !open" class="md:hidden p-2 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition" aria-label="Menu">
+        <svg x-show="!open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
+        <svg x-show="open" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
+      </button>
     </div>
+  </div>
+
+  <!-- Mobile menu -->
+  <div x-show="open" x-cloak class="md:hidden border-t border-neutral-800 px-4 py-3 space-y-1 text-sm">
+    <a href="/listings"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Listings</a>
+    <a href="/auctions"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Auctions</a>
+    <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Offers</a>
+    <a href="/search"    class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Search</a>
+    <a href="/metrics"   class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Metrics</a>
   </div>
 </nav>
 

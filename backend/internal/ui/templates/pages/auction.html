@@ -2,17 +2,46 @@
 {{define "content"}}
 {{with .Auction}}
 <div class="grid md:grid-cols-2 gap-8">
+
+  <!-- Left: NFT placeholder -->
   <div class="bg-neutral-900 rounded-2xl overflow-hidden">
-    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-neutral-600 text-6xl">🖼</div>
+    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl">🖼</div>
     <div class="p-4">
       <p class="text-xs text-neutral-500 font-mono truncate">{{shortAddr .Collection}} #{{.TokenID}}</p>
     </div>
   </div>
 
-  <div x-data="{bidAmt: ''}">
-    <h1 class="text-2xl font-bold text-white mb-1">Auction #{{.AuctionID}}</h1>
-    <p class="text-neutral-500 text-sm mb-6 font-mono">{{.Collection}}</p>
+  <!-- Right: bid + info -->
+  <div x-data="{
+    bidAmt: '',
+    endsAt: {{$.EndsAtUnix}},
+    now: Math.floor(Date.now()/1000),
+    get remaining() {
+      const diff = this.endsAt - this.now;
+      if (diff <= 0) return 'Ended';
+      const h = Math.floor(diff/3600);
+      const m = Math.floor((diff%3600)/60);
+      const s = diff%60;
+      return h > 0 ? h+'h '+m+'m '+s+'s' : m+'m '+s+'s';
+    },
+    get feeDisplay() {
+      const b = parseFloat(this.bidAmt);
+      if (isNaN(b) || b <= 0) return '0.0000';
+      return (b * 0.015).toFixed(4);
+    },
+    get totalDisplay() {
+      const b = parseFloat(this.bidAmt);
+      if (isNaN(b) || b <= 0) return '0.0000';
+      return (b * 1.015).toFixed(4);
+    },
+    sellerAddr: '{{lower .Seller}}',
+    init() { setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000); }
+  }">
 
+    <h1 class="text-2xl font-bold text-white mb-1">Auction #{{.AuctionID}}</h1>
+    <p class="text-sm text-neutral-500 font-mono mb-4 truncate">{{.Collection}}</p>
+
+    <!-- Stats -->
     <div class="bg-neutral-900 rounded-xl p-4 mb-4 space-y-2">
       <div class="flex justify-between text-sm">
         <span class="text-neutral-500">Current bid</span>
@@ -22,19 +51,59 @@
         <span class="text-neutral-500">Reserve</span>
         <span class="text-neutral-300">{{wei2eth .ReservePriceWei}} FLR</span>
       </div>
+      {{if .HighestBidder}}
+      <div class="flex justify-between text-sm">
+        <span class="text-neutral-500">Leading bidder</span>
+        <span class="text-neutral-300 font-mono">{{shortAddr .HighestBidder}}</span>
+      </div>
+      {{end}}
+      <div class="flex justify-between text-sm border-t border-neutral-800 pt-2 mt-2">
+        <span class="text-neutral-500">Time remaining</span>
+        <span class="font-bold text-white" x-text="remaining"></span>
+      </div>
     </div>
 
-    <div class="flex gap-2 mb-4">
-      <input x-model="bidAmt" type="number" step="0.01" min="0" placeholder="Bid amount (FLR)"
-             class="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
-      <button @click="$store.wallet.bid('{{.AuctionID}}', (parseFloat(bidAmt) * 1e18).toString())"
-              class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition">
-        Place Bid
+    <!-- Bid form (only when auction is active) -->
+    {{if not $.Ended}}
+    <div class="space-y-2 mb-4">
+      <div class="flex gap-2">
+        <input x-model="bidAmt" type="number" step="0.01" min="0" placeholder="Bid amount (FLR)"
+               class="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+        <button @click="$store.wallet.bid({{.AuctionID}}, (parseFloat(bidAmt)*1e18).toString())"
+                class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition">
+          Bid
+        </button>
+      </div>
+      <p class="text-xs text-neutral-600">
+        1.5% fee: <span class="text-neutral-400" x-text="feeDisplay"></span> FLR ·
+        Total: <span class="text-neutral-400" x-text="totalDisplay"></span> FLR
+      </p>
+    </div>
+    {{end}}
+
+    <!-- Settle button (after auction ends) -->
+    {{if $.Ended}}
+    <div class="space-y-2">
+      <button @click="$dispatch('settle-auction', {auctionId: {{.AuctionID}}})"
+              class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">
+        Settle Auction
       </button>
     </div>
+    {{end}}
 
+    <!-- Cancel early (seller only, before end) -->
+    {{if not $.Ended}}
+    <template x-if="sellerAddr && $store.wallet.address === sellerAddr">
+      <button @click="$store.wallet.cancelEarly({{.AuctionID}})"
+              class="w-full mt-2 py-2 rounded-xl bg-red-900/40 hover:bg-red-900/60 text-red-400 text-sm font-semibold transition">
+        Cancel Auction Early
+      </button>
+    </template>
+    {{end}}
+
+    <!-- Bid history -->
     {{if $.Bids}}
-    <div class="bg-neutral-900 rounded-xl p-4">
+    <div class="bg-neutral-900 rounded-xl p-4 mt-4">
       <h2 class="text-sm font-semibold text-neutral-400 mb-3">Bid History</h2>
       <div class="space-y-2 max-h-48 overflow-y-auto">
         {{range $.Bids}}
@@ -46,6 +115,7 @@
       </div>
     </div>
     {{end}}
+
   </div>
 </div>
 {{else}}

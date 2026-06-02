@@ -11,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -55,6 +56,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	api.Get("/offers", listOffers(q))
 	api.Post("/offers", notifyOffer(q))
+	api.Delete("/offers/:id", jwtMiddleware(cfg), cancelOffer(q))
 
 	api.Get("/search", search(q))
 	api.Get("/metrics", marketMetrics(q))
@@ -63,6 +65,21 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 }
 
 // ── Middleware ────────────────────────────────────────────────────────────────
+
+func jwtMiddleware(cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		hdr := c.Get("Authorization")
+		if !strings.HasPrefix(hdr, "Bearer ") {
+			return writeErr(c, fiber.StatusUnauthorized, "missing token")
+		}
+		addr, err := auth.Verify(strings.TrimPrefix(hdr, "Bearer "), cfg.JWTSecret)
+		if err != nil {
+			return writeErr(c, fiber.StatusUnauthorized, "invalid token")
+		}
+		c.Locals(string(auth.CallerKey), addr)
+		return c.Next()
+	}
+}
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
