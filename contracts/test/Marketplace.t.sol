@@ -22,41 +22,54 @@ contract MarketplaceTest is Test {
         vm.deal(buyer, 10 ether);
     }
 
-    // ── Helpers ───────────────────────────────────────────────────────────
+    // ── Helpers ───────────────────────────────────────────────────────────────
+
+    /// @dev 1.5% fee the buyer pays ON TOP of `price`.
+    function _fee(uint256 price) internal pure returns (uint256) {
+        return (price * 150) / 10_000;
+    }
+
+    /// @dev Total msg.value a buyer sends: price + 1.5%.
+    function _total(uint256 price) internal pure returns (uint256) {
+        return price + _fee(price);
+    }
 
     function _list(uint256 price, uint64 exp) internal returns (uint256 id) {
-        uint256 fee = (price * 150) / 10_000;
-        vm.deal(seller, seller.balance + fee);
         vm.startPrank(seller);
         id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: fee}(address(nft), id, uint128(price), exp);
+        mp.list(address(nft), id, uint128(price), exp);
         vm.stopPrank();
     }
 
     function _list1155(uint256 tokenId, uint128 units, uint128 price, uint64 exp) internal {
-        uint256 fee = (uint256(price) * 150) / 10_000;
-        vm.deal(seller, seller.balance + fee);
         vm.startPrank(seller);
         multi.mint(seller, tokenId, units);
         multi.setApprovalForAll(address(mp), true);
-        mp.list1155{value: fee}(address(multi), tokenId, units, price, exp);
+        mp.list1155(address(multi), tokenId, units, price, exp);
         vm.stopPrank();
     }
 
-    // ── ERC-721 basic flow ────────────────────────────────────────────────
+    // ── ERC-721 basic flow ──────────────────────────────────────────────────────
 
     function test_listAndBuy() public {
         uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
 
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
         assertEq(nft.ownerOf(id), buyer);
-        // 150 bps listing fee + 150 bps sale fee of 1 ether = 0.03 ether total to creator
-        assertEq(creator.balance, 0.03 ether);
-        // seller receives 1 ether minus 150 bps = 0.985 ether
-        assertEq(seller.balance,  0.985 ether);
+        // Taker pays 1.5% on top; only the sale fee reaches creator.
+        assertEq(creator.balance, 0.015 ether);
+        // Seller receives 100% of the asking price.
+        assertEq(seller.balance,  1 ether);
+    }
+
+    function test_buyWrongSellerReverts() public {
+        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        vm.prank(buyer);
+        vm.expectRevert(); // no listing under `other`
+        mp.buy{value: _total(1 ether)}(address(nft), id, other);
     }
 
     function test_cancel() public {
@@ -65,7 +78,7 @@ contract MarketplaceTest is Test {
         mp.cancel(address(nft), id);
         vm.prank(buyer);
         vm.expectRevert();
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
     }
 
     function test_cancelByNonSellerReverts() public {
@@ -78,8 +91,17 @@ contract MarketplaceTest is Test {
     function test_wrongPriceReverts() public {
         uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
         vm.prank(buyer);
+        vm.expectRevert(); // bare price, missing the fee
+        mp.buy{value: 1 ether}(address(nft), id, seller);
+    }
+
+    function test_belowMinPriceReverts() public {
+        vm.startPrank(seller);
+        uint256 id = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.buy{value: 0.5 ether}(address(nft), id);
+        mp.list(address(nft), id, 0.009 ether, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
     }
 
     function test_expiredReverts() public {
@@ -87,7 +109,7 @@ contract MarketplaceTest is Test {
         vm.warp(block.timestamp + 2 days);
         vm.prank(buyer);
         vm.expectRevert();
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
     }
 
     function test_listExpiryInPastReverts() public {
@@ -102,7 +124,7 @@ contract MarketplaceTest is Test {
     function test_completedSaleIsFinal() public {
         uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
         vm.prank(seller);
         vm.expectRevert();
@@ -110,25 +132,23 @@ contract MarketplaceTest is Test {
 
         vm.prank(buyer);
         vm.expectRevert();
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
         assertEq(nft.ownerOf(id), buyer);
     }
 
-    // ── ERC-1155 ──────────────────────────────────────────────────────────
+    // ── ERC-1155 ────────────────────────────────────────────────────────────────
 
     function test_list1155AndBuy() public {
         _list1155(1, 5, 2 ether, uint64(block.timestamp + 1 days));
 
         vm.prank(buyer);
-        mp.buy{value: 2 ether}(address(multi), 1);
+        mp.buy{value: _total(2 ether)}(address(multi), 1, seller);
 
         assertEq(multi.balanceOf(buyer,  1), 5);
         assertEq(multi.balanceOf(seller, 1), 0);
-        // 150 bps listing fee + 150 bps sale fee of 2 ether = 0.06 ether total to creator
-        assertEq(creator.balance, 0.06 ether);
-        // seller receives 2 ether minus 150 bps = 1.97 ether
-        assertEq(seller.balance,  1.97 ether);
+        assertEq(creator.balance, 0.03 ether); // 1.5% of 2 ether
+        assertEq(seller.balance,  2 ether);    // seller keeps 100%
     }
 
     function test_list1155ZeroAmountReverts() public {
@@ -162,27 +182,32 @@ contract MarketplaceTest is Test {
         vm.warp(block.timestamp + 2 hours);
         vm.prank(buyer);
         vm.expectRevert();
-        mp.buy{value: 1 ether}(address(multi), 5);
+        mp.buy{value: _total(1 ether)}(address(multi), 5, seller);
     }
 
-    function test_overwriteBySecondSellerReverts() public {
+    /// @dev Per-holder stacked ERC-1155 listings: a second holder lists the SAME id
+    ///      under their own key. Both listings coexist (no exclusivity).
+    function test_secondHolderListsSeparately() public {
         _list1155(20, 5, 1 ether, uint64(block.timestamp + 1 days));
         vm.startPrank(other);
         multi.mint(other, 20, 10);
         multi.setApprovalForAll(address(mp), true);
-        vm.expectRevert();
         mp.list1155(address(multi), 20, 10, 2 ether, uint64(block.timestamp + 1 days));
         vm.stopPrank();
+
+        (address s1,,,uint128 p1,) = mp.listings(address(multi), 20, seller);
+        (address s2,,,uint128 p2,) = mp.listings(address(multi), 20, other);
+        assertEq(s1, seller); assertEq(p1, 1 ether);
+        assertEq(s2, other);  assertEq(p2, 2 ether);
     }
 
     function test_originalSellerCanRelist() public {
         _list1155(21, 5, 1 ether, uint64(block.timestamp + 1 days));
-        uint256 fee = (2 ether * 150) / 10_000;
-        vm.deal(seller, seller.balance + fee);
         vm.prank(seller);
-        mp.list1155{value: fee}(address(multi), 21, 5, 2 ether, uint64(block.timestamp + 1 days));
-        (address s,,,,) = mp.listings(address(multi), 21);
+        mp.list1155(address(multi), 21, 5, 2 ether, uint64(block.timestamp + 1 days));
+        (address s,,,uint128 p,) = mp.listings(address(multi), 21, seller);
         assertEq(s, seller);
+        assertEq(p, 2 ether);
     }
 
     function test_cancel1155() public {
@@ -191,68 +216,66 @@ contract MarketplaceTest is Test {
         mp.cancel(address(multi), 6);
         vm.prank(buyer);
         vm.expectRevert();
-        mp.buy{value: 1 ether}(address(multi), 6);
+        mp.buy{value: _total(1 ether)}(address(multi), 6, seller);
     }
 
-    // ── Expiry boundary ───────────────────────────────────────────────────
+    // ── Expiry boundary (max 90 days) ───────────────────────────────────────────
 
     function test_listExpiryBeyondMaxReverts() public {
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 366 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 91 days));
         vm.stopPrank();
     }
 
     function test_listExpiryAtMaxOk() public {
-        uint256 fee = (1 ether * 150) / 10_000;
-        vm.deal(seller, fee);
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: fee}(address(nft), id, 1 ether, uint64(block.timestamp + 365 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 90 days));
         vm.stopPrank();
-        (address s,,,,) = mp.listings(address(nft), id);
+        (address s,,,,) = mp.listings(address(nft), id, seller);
         assertEq(s, seller);
     }
 
-    // ── Invariant ─────────────────────────────────────────────────────────
+    // ── Invariant ─────────────────────────────────────────────────────────────
 
     function invariant_marketplaceBalanceZero() public view {
         assertEq(address(mp).balance, 0);
     }
 
-    // ── Fuzz tests ────────────────────────────────────────────────────────
+    // ── Fuzz ────────────────────────────────────────────────────────────────────
 
-    function testFuzz_feesPlusPayoutEqPrice(uint128 price) public {
-        price = uint128(bound(price, 0.001 ether, 100 ether));
+    function testFuzz_buyerPaysPricePlusFee(uint128 price) public {
+        price = uint128(bound(price, 0.01 ether, 100 ether));
 
         Marketplace freshMp = new Marketplace(creator);
 
         address freshSeller = address(0xF001);
         address freshBuyer  = address(0xF002);
-        uint256 listingFee  = (uint256(price) * 150) / 10_000;
-        vm.deal(freshSeller, listingFee);
-        vm.deal(freshBuyer, uint256(price));
+        vm.deal(freshBuyer, _total(uint256(price)));
 
         vm.startPrank(freshSeller);
         uint256 tid = nft.mint(freshSeller);
         nft.setApprovalForAll(address(freshMp), true);
-        freshMp.list{value: listingFee}(address(nft), tid, price, uint64(block.timestamp + 1 days));
+        freshMp.list(address(nft), tid, price, uint64(block.timestamp + 1 days));
         vm.stopPrank();
 
         uint256 creatorBefore = creator.balance;
         uint256 sellerBefore  = freshSeller.balance;
 
         vm.prank(freshBuyer);
-        freshMp.buy{value: uint256(price)}(address(nft), tid);
+        freshMp.buy{value: _total(uint256(price))}(address(nft), tid, freshSeller);
 
-        uint256 fees   = creator.balance    - creatorBefore;
+        uint256 fees   = creator.balance     - creatorBefore;
         uint256 payout = freshSeller.balance - sellerBefore;
 
-        assertLe(fees, uint256(price));
-        assertEq(fees + payout, uint256(price));
+        // Seller gets 100% of price; platform gets exactly the 1.5% premium.
+        assertEq(payout, uint256(price));
+        assertEq(fees,   _fee(uint256(price)));
+        assertEq(address(freshMp).balance, 0);
     }
 
     function test_relistAfterSale() public {
@@ -262,20 +285,18 @@ contract MarketplaceTest is Test {
         // First sale: seller → buyer
         uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
         assertEq(nft.ownerOf(id), buyer);
 
-        // buyer re-lists the token
-        uint256 relistFee = (1.5 ether * 150) / 10_000;
-        vm.deal(buyer, buyer.balance + relistFee);
+        // buyer re-lists the token (free)
         vm.startPrank(buyer);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: relistFee}(address(nft), id, 1.5 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 1.5 ether, uint64(block.timestamp + 1 days));
         vm.stopPrank();
 
         // buyer2 buys from buyer
         vm.prank(buyer2);
-        mp.buy{value: 1.5 ether}(address(nft), id);
+        mp.buy{value: _total(1.5 ether)}(address(nft), id, buyer);
         assertEq(nft.ownerOf(id), buyer2);
         assertGt(buyer.balance, 0);
     }
@@ -295,14 +316,12 @@ contract BatchListTest is MarketplaceTest {
         items[1] = Marketplace.BatchItem({coll: address(nft), id: t2, price: 2 ether, expiresAt: exp});
         items[2] = Marketplace.BatchItem({coll: address(nft), id: t3, price: 3 ether, expiresAt: exp});
 
-        uint256 totalFee = ((1 ether + 2 ether + 3 ether) * 150) / 10_000;
-        vm.deal(seller, seller.balance + totalFee);
-        mp.batchList{value: totalFee}(items);
+        mp.batchList(items); // free — no value
         vm.stopPrank();
 
-        (address s1,,,uint128 p1,) = mp.listings(address(nft), t1);
-        (address s2,,,uint128 p2,) = mp.listings(address(nft), t2);
-        (address s3,,,uint128 p3,) = mp.listings(address(nft), t3);
+        (address s1,,,uint128 p1,) = mp.listings(address(nft), t1, seller);
+        (address s2,,,uint128 p2,) = mp.listings(address(nft), t2, seller);
+        (address s3,,,uint128 p3,) = mp.listings(address(nft), t3, seller);
         assertEq(s1, seller); assertEq(p1, 1 ether);
         assertEq(s2, seller); assertEq(p2, 2 ether);
         assertEq(s3, seller); assertEq(p3, 3 ether);

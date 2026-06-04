@@ -9,16 +9,20 @@ import {ERC1155Holder}   from "@openzeppelin/contracts/token/ERC1155/utils/ERC11
 error TransferFailed();
 error WithdrawFailed();
 error ZeroAddress();
+error BelowMinPrice();
 
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @title MarketplaceCore
-/// @notice Shared base: immutable fee config, NFT dispatch.
-/// @dev Single 1.5% platform fee on all operations. feeRecipient immutable post-deploy.
-///      No pause, no admin — contracts are unstoppable once deployed.
+/// @notice Shared base: immutable fee config, price floor, taker-pays fee math, NFT dispatch.
+/// @dev Single 1.5% platform fee, paid ON TOP by the taker (buyer/bidder/offerer) — sellers never pay.
+///      feeRecipient immutable post-deploy. No pause, no admin — contracts are unstoppable once deployed.
 abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
     uint16 public constant PLATFORM_FEE_BPS = 150;
+
+    /// @notice Minimum accepted commitment everywhere (list price, auction reserve, offer amount).
+    uint256 public constant MIN_PRICE = 0.01 ether;
 
     /// @notice Wallet that receives all platform fees. Immutable post-deploy.
     address public immutable feeRecipient;
@@ -28,20 +32,25 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         feeRecipient = recipient;
     }
 
-    // ── Fee split ──────────────────────────────────────────────────────────────
+    // ── Taker-pays fee math ──────────────────────────────────────────────────
 
-    /// @dev Sends fee to feeRecipient and remainder to seller. Returns fee taken.
-    function _splitAndPay(address seller, uint256 salePrice) internal returns (uint256 fee) {
-        fee = (salePrice * PLATFORM_FEE_BPS) / 10_000;
-        uint256 sellerAmt;
-        unchecked { sellerAmt = salePrice - fee; }
+    /// @dev 1.5% fee for a given commitment. The taker always pays this ON TOP — sellers keep 100%.
+    function _feeOf(uint256 commitment) internal pure returns (uint256) {
+        return (commitment * PLATFORM_FEE_BPS) / 10_000;
+    }
 
-        if (fee > 0) {
-            (bool ok,) = feeRecipient.call{value: fee}("");
-            if (!ok) revert TransferFailed();
-        }
-        (bool ok2,) = seller.call{value: sellerAmt}("");
-        if (!ok2) revert TransferFailed();
+    /// @dev Forward the platform fee to the immutable feeRecipient. Reverts on failure.
+    function _payFee(uint256 fee) internal {
+        if (fee == 0) return;
+        (bool ok,) = feeRecipient.call{value: fee}("");
+        if (!ok) revert TransferFailed();
+    }
+
+    /// @dev Pay `amount` to `to`. Reverts on failure.
+    function _pay(address to, uint256 amount) internal {
+        if (amount == 0) return;
+        (bool ok,) = to.call{value: amount}("");
+        if (!ok) revert TransferFailed();
     }
 
     // ── Token dispatch ─────────────────────────────────────────────────────────

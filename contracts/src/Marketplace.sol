@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, BelowMinPrice} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -12,18 +12,22 @@ error Expired();
 error NotApproved();
 error InvalidExpiry();
 error InvalidAmount();
-error AlreadyListed();
 error BatchTooLarge();
-error TransferFailed();
 
 /// @dev Max listing duration. Prevents listings expiring decades in the future.
-uint64 constant MAX_LISTING_DURATION = 365 days;
+uint64 constant MAX_LISTING_DURATION = 90 days;
 
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
 /// @dev Non-custodial: tokens stay with seller until buyer settles. Approval required.
+///      Listing is FREE. The buyer pays a 1.5% platform fee ON TOP of the price —
+///      the seller receives 100% of their asking price.
+///      Listings are keyed by (collection, tokenId, seller): ERC-1155 holders each keep
+///      their own stacked listing; for ERC-721 only the true owner's listing is
+///      settle-able (a stale listing from a prior owner simply reverts on `buy`).
+///      No exclusivity: the same NFT may also sit in the AuctionHouse / OfferBook —
+///      first settle wins, the rest revert when the token has moved.
 ///      Once `buy` settles the trade is FINAL — no reverse, refund, or admin override.
-///      Funds flow atomically: 1.5% platform fee → feeRecipient wallet, remainder → seller.
 ///      Unstoppable: no pause, no admin. Runs forever.
 contract Marketplace is MarketplaceCore {
     /// @notice Listing record. Two storage slots:
@@ -37,8 +41,8 @@ contract Marketplace is MarketplaceCore {
         uint128       amount;    // slot 1 (always 1 for ERC-721)
     }
 
-    /// @notice listings[collection][tokenId] → Listing.
-    mapping(address => mapping(uint256 => Listing)) public listings;
+    /// @notice listings[collection][tokenId][seller] → Listing.
+    mapping(address => mapping(uint256 => mapping(address => Listing))) public listings;
 
     event Listed(
         address indexed coll,
@@ -65,34 +69,20 @@ contract Marketplace is MarketplaceCore {
         MarketplaceCore(recipient)
     {}
 
-    // ── List ──────────────────────────────────────────────────────────────
+    // ── List (free) ───────────────────────────────────────────────────────────
 
-    function list(address coll, uint256 id, uint128 price, uint64 expiresAt)
-        external payable
-    {
-        uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
-        if (msg.value != fee) revert WrongPrice();
-        if (fee > 0) {
-            (bool ok,) = feeRecipient.call{value: fee}("");
-            if (!ok) revert TransferFailed();
-        }
+    /// @notice List an ERC-721 token at a fixed price. FREE — no listing fee.
+    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external {
         _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
     }
 
-    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt)
-        external payable
-    {
+    /// @notice List ERC-1155 units at a fixed price. FREE — no listing fee.
+    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external {
         if (amount == 0) revert InvalidAmount();
-        uint256 fee = (uint256(price) * PLATFORM_FEE_BPS) / 10_000;
-        if (msg.value != fee) revert WrongPrice();
-        if (fee > 0) {
-            (bool ok,) = feeRecipient.call{value: fee}("");
-            if (!ok) revert TransferFailed();
-        }
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
     }
 
-    // ── Batch List ────────────────────────────────────────────────────────
+    // ── Batch List ────────────────────────────────────────────────────────────
 
     struct BatchItem {
         address coll;
@@ -101,20 +91,10 @@ contract Marketplace is MarketplaceCore {
         uint64  expiresAt;
     }
 
-    /// @notice List up to 50 ERC-721 tokens in one transaction.
+    /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
     ///         Caller must have approved this contract on each collection.
-    ///         msg.value must equal sum of 1.5% listing fees across all items.
-    function batchList(BatchItem[] calldata items) external payable {
+    function batchList(BatchItem[] calldata items) external {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
-        uint256 totalFee;
-        for (uint256 i; i < items.length; ++i) {
-            totalFee += (uint256(items[i].price) * PLATFORM_FEE_BPS) / 10_000;
-        }
-        if (msg.value != totalFee) revert WrongPrice();
-        if (totalFee > 0) {
-            (bool ok,) = feeRecipient.call{value: totalFee}("");
-            if (!ok) revert TransferFailed();
-        }
         for (uint256 i; i < items.length; ++i) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);
         }
@@ -128,12 +108,9 @@ contract Marketplace is MarketplaceCore {
         uint128 price,
         uint64  expiresAt
     ) internal {
-        if (price == 0) revert WrongPrice();
+        if (price < MIN_PRICE) revert BelowMinPrice();
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
         if (expiresAt > block.timestamp + MAX_LISTING_DURATION) revert InvalidExpiry();
-
-        address curSeller = listings[coll][id].seller;
-        if (curSeller != address(0) && curSeller != msg.sender) revert AlreadyListed();
 
         if (standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(id) != msg.sender) revert NotOwner();
@@ -144,7 +121,7 @@ contract Marketplace is MarketplaceCore {
             if (!IERC1155(coll).isApprovedForAll(msg.sender, address(this))) revert NotApproved();
         }
 
-        listings[coll][id] = Listing({
+        listings[coll][id][msg.sender] = Listing({
             seller:    msg.sender,
             expiresAt: expiresAt,
             standard:  standard,
@@ -154,31 +131,36 @@ contract Marketplace is MarketplaceCore {
         emit Listed(coll, id, msg.sender, standard, amount, price, expiresAt);
     }
 
-    // ── Cancel ────────────────────────────────────────────────────────────
+    // ── Cancel ────────────────────────────────────────────────────────────────
 
     /// @notice Cancel an unsold listing. Seller only.
     function cancel(address coll, uint256 id) external {
-        Listing memory l = listings[coll][id];
-        if (l.seller != msg.sender) revert NotOwner();
-        delete listings[coll][id];
+        Listing memory l = listings[coll][id][msg.sender];
+        if (l.seller != msg.sender) revert NotOwner(); // seller == address(0) → not listed
+        delete listings[coll][id][msg.sender];
         emit Cancelled(coll, id, msg.sender);
     }
 
-    // ── Buy ───────────────────────────────────────────────────────────────
+    // ── Buy (taker pays 1.5% on top) ──────────────────────────────────────────
 
-    /// @notice Buy a listed token at exactly the listing price.
-    /// @dev FINAL on success. NFT → buyer, then 1.5% fee → feeRecipient wallet, remainder → seller.
-    ///      Entire tx reverts if NFT transfer fails — no fee is taken, listing remains valid.
-    function buy(address coll, uint256 id) external payable nonReentrant {
-        Listing memory l = listings[coll][id];
+    /// @notice Buy a listed token. Send `price + 1.5%` as msg.value.
+    /// @dev FINAL on success. NFT → buyer, fee → feeRecipient, full price → seller.
+    ///      The `seller` arg selects which listing to buy (listings are seller-keyed).
+    ///      Entire tx reverts if the NFT transfer fails (seller no longer owns/approves) —
+    ///      no fee is taken, the listing remains. This is how first-settle-wins works.
+    function buy(address coll, uint256 id, address seller) external payable nonReentrant {
+        Listing memory l = listings[coll][id][seller];
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp > l.expiresAt) revert Expired();
-        if (msg.value != l.price) revert WrongPrice();
 
-        delete listings[coll][id];
+        uint256 fee = _feeOf(l.price);
+        if (msg.value != uint256(l.price) + fee) revert WrongPrice();
+
+        delete listings[coll][id][seller];
 
         _transferToken(l.standard, coll, l.seller, msg.sender, id, l.amount);
-        uint256 fee = _splitAndPay(l.seller, msg.value);
+        _payFee(fee);
+        _pay(l.seller, l.price);
 
         emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee);
     }

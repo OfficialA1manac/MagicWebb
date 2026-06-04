@@ -5,7 +5,7 @@ import {Test}        from "forge-std/Test.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MockERC721}  from "./MockERC721.sol";
 
-/// @dev Tests for MarketplaceCore behaviour: fees, immutability, no-admin, no-pause.
+/// @dev Tests for MarketplaceCore behaviour: taker-pays fee, immutability, no-admin, no-pause.
 contract MarketplaceCoreTest is Test {
     Marketplace mp;
     MockERC721  nft;
@@ -19,14 +19,18 @@ contract MarketplaceCoreTest is Test {
         vm.deal(buyer, 10 ether);
     }
 
-    // ── Constructor guard ─────────────────────────────────────────────────
+    function _total(uint256 price) internal pure returns (uint256) {
+        return price + (price * 150) / 10_000;
+    }
+
+    // ── Constructor guard ───────────────────────────────────────────────────────
 
     function test_constructorZeroRecipientReverts() public {
         vm.expectRevert();
         new Marketplace(address(0));
     }
 
-    // ── Immutability ──────────────────────────────────────────────────────
+    // ── Immutability ────────────────────────────────────────────────────────────
 
     function test_feeRecipientImmutable() public view {
         assertEq(mp.feeRecipient(), creator);
@@ -36,38 +40,40 @@ contract MarketplaceCoreTest is Test {
         assertEq(mp.PLATFORM_FEE_BPS(), 150);
     }
 
-    // ── Fee routing ───────────────────────────────────────────────────────
-
-    function test_feePushedToFeeRecipient() public {
-        uint256 listingFee = (1 ether * 150) / 10_000;
-        vm.deal(seller, listingFee);
-        uint256 before_ = creator.balance;
-        vm.startPrank(seller);
-        uint256 id = nft.mint(seller);
-        nft.setApprovalForAll(address(mp), true);
-        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
-        vm.stopPrank();
-
-        vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
-        // listing fee (150 bps) + sale fee (150 bps) of 1 ether = 300 bps = 0.03 ether
-        assertEq(creator.balance - before_, 0.03 ether);
+    function test_minPriceConstant() public view {
+        assertEq(mp.MIN_PRICE(), 0.01 ether);
     }
 
-    // ── No pause / no admin ───────────────────────────────────────────────
+    // ── Fee routing (taker pays 1.5% on top, listing is free) ──────────────────
 
-    function test_noPauseFunctionExists() public {
-        // Marketplace no longer has pause/unpause — just verify basic buy works normally
-        uint256 listingFee = (1 ether * 150) / 10_000;
-        vm.deal(seller, listingFee);
+    function test_feePushedToFeeRecipient() public {
+        uint256 before_ = creator.balance;
+
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list{value: listingFee}(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days)); // free
         vm.stopPrank();
 
         vm.prank(buyer);
-        mp.buy{value: 1 ether}(address(nft), id);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
+
+        // Only the 1.5% sale premium reaches creator; seller keeps 100%.
+        assertEq(creator.balance - before_, 0.015 ether);
+        assertEq(seller.balance, 1 ether);
+    }
+
+    // ── No pause / no admin ────────────────────────────────────────────────────
+
+    function test_noPauseFunctionExists() public {
+        vm.startPrank(seller);
+        uint256 id = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 1 days));
+        vm.stopPrank();
+
+        vm.prank(buyer);
+        mp.buy{value: _total(1 ether)}(address(nft), id, seller);
         assertEq(nft.ownerOf(id), buyer);
     }
 }

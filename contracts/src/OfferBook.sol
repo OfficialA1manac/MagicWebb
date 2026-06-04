@@ -1,198 +1,173 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, WithdrawFailed} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, BelowMinPrice} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 error NotOwner();
-error NotEligible();
 error NoOffer();
 error NotApproved();
-error ZeroOffer();
+error InvalidExpiry();
 error InvalidAmount();
-error OfferExists();
+error WrongValue();
+error OfferActive();
+
+/// @dev Maximum offer lifetime from the latest top-up.
+uint64 constant MAX_OFFER_DURATION = 14 days;
 
 /// @title OfferBook
-/// @notice On-chain NFT offer system. Owners opt-in tokens to receive offers.
-///         Bidders deposit ETH; owners accept the offer they choose.
+/// @notice On-chain NFT offers with stacked positions and taker-paid fees.
 ///
-/// Flow (ERC-721):
-///   1. Owner calls markEligible(coll, tokenId) — signals willingness to receive offers.
-///   2. Bidder calls makeOffer(coll, tokenId) with msg.value = offer amount.
-///   3. Owner calls acceptOffer(coll, tokenId, bidder) — NFT → bidder,
-///      1.5% fee → feeRecipient, remainder → owner. Eligibility cleared automatically.
-///   4. Bidder may call withdrawOffer(coll, tokenId) at any time to reclaim ETH in full.
-///      No fee is taken on unaccepted offers.
-///   5. Owner calls removeEligible(coll, tokenId) to stop receiving new offers.
-///      Existing offers remain live (bidders withdraw them).
+/// Fee model (taker-pays, Option-4 stacked positions):
+///   - Anyone may offer on any NFT — no eligibility gate.
+///   - makeOffer is PAYABLE: send `principal + 1.5%`. The 1.5% fee is forwarded to the
+///     platform immediately and is NON-REFUNDABLE. Only `principal` is escrowed.
+///   - Multiple offers from the same bidder on the same NFT COMPOUND into one position;
+///     each top-up pays its own fee and refreshes the position's expiry.
+///   - There is NO individual withdrawal. A position is locked until accept / reject / expiry.
+///   - acceptOffer is FREE for the seller, who receives 100% of the escrowed principal.
+///   - rejectOffer (owner) or refundExpiredOffer (anyone, after expiry) returns the
+///     principal to the bidder. The fee is always retained by the platform.
 ///
-/// No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
+/// Non-custodial. No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
 contract OfferBook is MarketplaceCore {
-    // ── ERC-721 state ──────────────────────────────────────────────────────
-
-    /// @notice eligible[coll][tokenId] = address that marked it eligible (address(0) = not eligible).
-    mapping(address => mapping(uint256 => address)) public eligible;
-
-    /// @notice offers[coll][tokenId][bidder] = ETH offered (0 = no offer).
-    mapping(address => mapping(uint256 => mapping(address => uint256))) public offers;
-
-    // ── ERC-1155 state ─────────────────────────────────────────────────────
-
-    /// @notice eligible1155[coll][tokenId] = address that marked it eligible.
-    mapping(address => mapping(uint256 => address)) public eligible1155;
-
-    struct Offer1155 {
-        uint128 amount; // total ETH offered
-        uint128 units;  // number of ERC-1155 units desired
+    /// @notice A bidder's compounded offer on one NFT.
+    struct Position {
+        uint128       principal; // escrowed ETH (fees already removed)
+        uint128       units;     // ERC-1155 units desired (1 for ERC-721)
+        uint64        expiresAt; // refreshed on each top-up
+        TokenStandard standard;  // token kind this offer targets
     }
 
-    /// @notice offers1155[coll][tokenId][bidder] = offer details.
-    mapping(address => mapping(uint256 => mapping(address => Offer1155))) public offers1155;
+    /// @notice positions[coll][tokenId][bidder] → Position.
+    mapping(address => mapping(uint256 => mapping(address => Position))) public positions;
 
-    // ── Events ─────────────────────────────────────────────────────────────
+    // ── Events ──────────────────────────────────────────────────────────────────
 
-    event EligibilityMarked(address indexed coll, uint256 indexed tokenId, address indexed owner);
-    event EligibilityRemoved(address indexed coll, uint256 indexed tokenId, address indexed owner);
-    event Eligibility1155Marked(address indexed coll, uint256 indexed tokenId, address indexed owner);
-    event Eligibility1155Removed(address indexed coll, uint256 indexed tokenId, address indexed owner);
-    event OfferMade(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 amount);
-    event OfferWithdrawn(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 amount);
-    event OfferAccepted(address indexed coll, uint256 indexed tokenId, address indexed seller, address bidder, uint256 amount, uint256 fee);
-    event Offer1155Made(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint128 units, uint128 amount);
-    event Offer1155Withdrawn(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint128 amount);
-    event Offer1155Accepted(address indexed coll, uint256 indexed tokenId, address indexed seller, address bidder, uint128 units, uint128 amount, uint256 fee);
+    event OfferMade(
+        address indexed coll,
+        uint256 indexed tokenId,
+        address indexed bidder,
+        uint256 principal, // cumulative escrowed principal after this top-up
+        uint256 fee,       // fee paid on this top-up
+        uint128 units,
+        uint64  expiresAt
+    );
+    event OfferAccepted(
+        address indexed coll,
+        uint256 indexed tokenId,
+        address indexed seller,
+        address bidder,
+        uint256 principal,
+        uint128 units,
+        TokenStandard standard
+    );
+    event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
     constructor(address recipient)
         MarketplaceCore(recipient)
     {}
 
-    // ── ERC-721 eligibility ───────────────────────────────────────────────
+    // ── Make offer (taker pays 1.5% on top, fee non-refundable) ────────────────
 
-    /// @notice Mark an ERC-721 token as eligible to receive offers.
-    ///         Caller must be current owner. Can be called again after NFT transfer to refresh.
-    function markEligible(address coll, uint256 tokenId) external {
-        if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
-        eligible[coll][tokenId] = msg.sender;
-        emit EligibilityMarked(coll, tokenId, msg.sender);
+    /// @notice Offer on an ERC-721 token. Send `principal + 1.5%` as msg.value.
+    /// @param coll       NFT collection.
+    /// @param tokenId    Token ID.
+    /// @param principal  The escrowed offer amount (≥ MIN_PRICE). Fee is charged on top.
+    /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
+    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable {
+        _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
     }
 
-    /// @notice Remove ERC-721 token from offer eligibility. Caller must be the address that marked it.
-    ///         Existing offers from bidders persist — they must withdrawOffer to reclaim ETH.
-    function removeEligible(address coll, uint256 tokenId) external {
-        if (eligible[coll][tokenId] != msg.sender) revert NotOwner();
-        delete eligible[coll][tokenId];
-        emit EligibilityRemoved(coll, tokenId, msg.sender);
-    }
-
-    // ── ERC-721 offers ─────────────────────────────────────────────────────
-
-    /// @notice Submit an offer for an eligible ERC-721 token. msg.value = offer amount.
-    ///         Multiple calls accumulate — total stored is your current offer.
-    ///         To reduce your offer: call withdrawOffer then makeOffer with the new amount.
-    function makeOffer(address coll, uint256 tokenId) external payable {
-        if (eligible[coll][tokenId] == address(0)) revert NotEligible();
-        if (msg.value == 0) revert ZeroOffer();
-        offers[coll][tokenId][msg.sender] += msg.value;
-        emit OfferMade(coll, tokenId, msg.sender, offers[coll][tokenId][msg.sender]);
-    }
-
-    /// @notice Withdraw your entire offer for a token. Full ETH returned — no fee taken.
-    function withdrawOffer(address coll, uint256 tokenId) external nonReentrant {
-        uint256 amt = offers[coll][tokenId][msg.sender];
-        if (amt == 0) revert NoOffer();
-        delete offers[coll][tokenId][msg.sender];
-        (bool ok,) = msg.sender.call{value: amt}("");
-        if (!ok) revert WithdrawFailed();
-        emit OfferWithdrawn(coll, tokenId, msg.sender, amt);
-    }
-
-    /// @notice Accept a specific bidder's offer. Caller must be current NFT owner.
-    ///         NFT → bidder. 1.5% platform fee → feeRecipient. Remainder → seller.
-    ///         Eligibility is automatically cleared on acceptance.
-    function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
-        if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
-        if (!IERC721(coll).isApprovedForAll(msg.sender, address(this))
-            && IERC721(coll).getApproved(tokenId) != address(this)) revert NotApproved();
-
-        uint256 amt = offers[coll][tokenId][bidder];
-        if (amt == 0) revert NoOffer();
-
-        delete offers[coll][tokenId][bidder];
-        delete eligible[coll][tokenId];
-
-        _transferToken(TokenStandard.ERC721, coll, msg.sender, bidder, tokenId, 1);
-        uint256 fee = _splitAndPay(msg.sender, amt);
-
-        emit OfferAccepted(coll, tokenId, msg.sender, bidder, amt, fee);
-    }
-
-    // ── ERC-1155 eligibility ──────────────────────────────────────────────
-
-    /// @notice Mark an ERC-1155 token as eligible to receive offers.
-    ///         Caller must hold at least 1 unit of the token.
-    function markEligible1155(address coll, uint256 tokenId) external {
-        if (IERC1155(coll).balanceOf(msg.sender, tokenId) == 0) revert NotOwner();
-        eligible1155[coll][tokenId] = msg.sender;
-        emit Eligibility1155Marked(coll, tokenId, msg.sender);
-    }
-
-    /// @notice Remove ERC-1155 token from offer eligibility.
-    function removeEligible1155(address coll, uint256 tokenId) external {
-        if (eligible1155[coll][tokenId] != msg.sender) revert NotOwner();
-        delete eligible1155[coll][tokenId];
-        emit Eligibility1155Removed(coll, tokenId, msg.sender);
-    }
-
-    // ── ERC-1155 offers ───────────────────────────────────────────────────
-
-    /// @notice Submit an offer for eligible ERC-1155 tokens.
-    ///         One active offer per (coll, tokenId, bidder). Call withdrawOffer1155 first to update.
-    /// @param units  Number of ERC-1155 units you want.
-    function makeOffer1155(address coll, uint256 tokenId, uint128 units) external payable {
-        if (eligible1155[coll][tokenId] == address(0)) revert NotEligible();
-        if (msg.value == 0) revert ZeroOffer();
+    /// @notice Offer on ERC-1155 units. Send `principal + 1.5%` as msg.value.
+    /// @param units  Number of ERC-1155 units desired (latest top-up wins).
+    function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
+        external payable
+    {
         if (units == 0) revert InvalidAmount();
-        if (uint256(msg.value) > type(uint128).max) revert InvalidAmount();
-        if (offers1155[coll][tokenId][msg.sender].amount > 0) revert OfferExists();
-
-        offers1155[coll][tokenId][msg.sender] = Offer1155({
-            amount: uint128(msg.value),
-            units:  units
-        });
-        emit Offer1155Made(coll, tokenId, msg.sender, units, uint128(msg.value));
+        _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, expiresAt);
     }
 
-    /// @notice Withdraw your ERC-1155 offer. Full ETH returned — no fee taken.
-    function withdrawOffer1155(address coll, uint256 tokenId) external nonReentrant {
-        Offer1155 storage o = offers1155[coll][tokenId][msg.sender];
-        uint128 amt = o.amount;
-        if (amt == 0) revert NoOffer();
-        delete offers1155[coll][tokenId][msg.sender];
-        (bool ok,) = msg.sender.call{value: amt}("");
-        if (!ok) revert WithdrawFailed();
-        emit Offer1155Withdrawn(coll, tokenId, msg.sender, amt);
+    function _makeOffer(
+        TokenStandard standard,
+        address coll,
+        uint256 tokenId,
+        uint128 principal,
+        uint128 units,
+        uint64  expiresAt
+    ) internal {
+        if (principal < MIN_PRICE) revert BelowMinPrice();
+        if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
+
+        uint256 fee = _feeOf(principal);
+        if (msg.value != uint256(principal) + fee) revert WrongValue();
+        _payFee(fee); // non-refundable, forwarded immediately
+
+        Position storage p = positions[coll][tokenId][msg.sender];
+        uint256 newPrincipal = uint256(p.principal) + principal;
+        if (newPrincipal > type(uint128).max) revert InvalidAmount();
+        p.principal = uint128(newPrincipal);
+        p.units     = units;
+        p.expiresAt = expiresAt;
+        p.standard  = standard;
+
+        emit OfferMade(coll, tokenId, msg.sender, p.principal, fee, units, expiresAt);
     }
 
-    /// @notice Accept a specific bidder's ERC-1155 offer. Caller must be current holder.
-    ///         `units` tokens → bidder. 1.5% platform fee → feeRecipient. Remainder → seller.
-    ///         Eligibility is automatically cleared on acceptance.
-    function acceptOffer1155(address coll, uint256 tokenId, address bidder) external nonReentrant {
-        Offer1155 storage o = offers1155[coll][tokenId][bidder];
-        if (o.amount == 0) revert NoOffer();
+    // ── Accept (free for seller; seller gets 100% of principal) ────────────────
 
-        uint128 amt   = o.amount;
-        uint128 units = o.units;
+    /// @notice Accept a bidder's full position. Caller must currently own/hold the NFT.
+    ///         NFT → bidder, full escrowed principal → seller. Acceptance is free.
+    function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+        Position memory p = positions[coll][tokenId][bidder];
+        if (p.principal == 0) revert NoOffer();
 
-        if (IERC1155(coll).balanceOf(msg.sender, tokenId) < units) revert NotOwner();
-        if (!IERC1155(coll).isApprovedForAll(msg.sender, address(this))) revert NotApproved();
+        if (p.standard == TokenStandard.ERC721) {
+            if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
+            if (!IERC721(coll).isApprovedForAll(msg.sender, address(this))
+                && IERC721(coll).getApproved(tokenId) != address(this)) revert NotApproved();
+        } else {
+            if (IERC1155(coll).balanceOf(msg.sender, tokenId) < p.units) revert NotOwner();
+            if (!IERC1155(coll).isApprovedForAll(msg.sender, address(this))) revert NotApproved();
+        }
 
-        delete offers1155[coll][tokenId][bidder];
-        delete eligible1155[coll][tokenId];
+        delete positions[coll][tokenId][bidder];
 
-        _transferToken(TokenStandard.ERC1155, coll, msg.sender, bidder, tokenId, units);
-        uint256 fee = _splitAndPay(msg.sender, amt);
+        uint256 moveAmount = p.standard == TokenStandard.ERC721 ? 1 : p.units;
+        _transferToken(p.standard, coll, msg.sender, bidder, tokenId, moveAmount);
+        _pay(msg.sender, p.principal); // seller gets 100%
 
-        emit Offer1155Accepted(coll, tokenId, msg.sender, bidder, units, amt, fee);
+        emit OfferAccepted(coll, tokenId, msg.sender, bidder, p.principal, p.units, p.standard);
+    }
+
+    // ── Reject / expire (principal refunded, fee kept) ─────────────────────────
+
+    /// @notice Owner rejects a bidder's offer, refunding the principal (fee kept).
+    function rejectOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+        Position memory p = positions[coll][tokenId][bidder];
+        if (p.principal == 0) revert NoOffer();
+
+        if (p.standard == TokenStandard.ERC721) {
+            if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
+        } else {
+            if (IERC1155(coll).balanceOf(msg.sender, tokenId) == 0) revert NotOwner();
+        }
+
+        delete positions[coll][tokenId][bidder];
+        _pay(bidder, p.principal); // fee already retained at make time
+        emit OfferRefunded(coll, tokenId, bidder, p.principal);
+    }
+
+    /// @notice Reclaim an expired position's principal. Permissionless (keeper or bidder).
+    ///         The fee remains retained by the platform.
+    function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+        Position memory p = positions[coll][tokenId][bidder];
+        if (p.principal == 0) revert NoOffer();
+        if (block.timestamp <= p.expiresAt) revert OfferActive();
+
+        delete positions[coll][tokenId][bidder];
+        _pay(bidder, p.principal);
+        emit OfferRefunded(coll, tokenId, bidder, p.principal);
     }
 }

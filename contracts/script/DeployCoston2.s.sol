@@ -29,17 +29,17 @@ contract DeployCoston2 is Script {
 
         vm.stopBroadcast();
 
-        console2.log("# Magic Webb Coston2 deploy -- paste into backend/.env");
+        console2.log("# Magic Webb Coston2 deploy -- paste into backend/.env + frontend wallet.js");
         console2.log("CHAIN_ID=",         block.chainid);
         console2.log("MARKETPLACE_ADDR=", address(marketplace));
         console2.log("AUCTION_ADDR=",     address(auction));
         console2.log("OFFERBOOK_ADDR=",   address(offerBook));
-        console2.log("# paste into frontend/.env.local");
-        console2.log("NEXT_PUBLIC_CHAIN_ID=",         block.chainid);
-        console2.log("NEXT_PUBLIC_MARKETPLACE_ADDR=", address(marketplace));
-        console2.log("NEXT_PUBLIC_AUCTION_ADDR=",     address(auction));
-        console2.log("NEXT_PUBLIC_OFFER_ADDR=",       address(offerBook));
-        console2.log("CREATOR_ADDR=",  creator);
-        console2.log("FEE=",           "1.5% (150 bps, hardcoded)");
+        console2.log("CREATOR_ADDR=",     creator);
+        console2.log("FEE=",              "1.5% (150 bps, hardcoded, taker-pays)");
+        // Sanity: every contract must report the same immutable fee recipient.
+        require(marketplace.feeRecipient() == creator, "MARKETPLACE feeRecipient mismatch");
+        require(auction.feeRecipient()     == creator, "AUCTION feeRecipient mismatch");
+        require(offerBook.feeRecipient()   == creator, "OFFERBOOK feeRecipient mismatch");
+        console2.log("feeRecipient verified on all three contracts ==", creator);
     }
 }
