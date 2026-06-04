@@ -1,16 +1,16 @@
 package api
 
 import (
+	"math/big"
 	"strconv"
 	"strings"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
+// listOffers returns offer positions, filterable by collection/token/bidder/owner/status.
 func listOffers(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		f := db.OffersFilter{
@@ -36,57 +36,36 @@ func listOffers(q *db.Q) fiber.Handler {
 	}
 }
 
-type offerRequest struct {
-	Bidder     string `json:"bidder"`
-	Collection string `json:"collection"`
-	TokenID    string `json:"token_id"`
-	AmountWei  string `json:"amount_wei"`
-	Nonce      string `json:"nonce"`
-	ExpiresAt  int64  `json:"expires_at"`
-	Signature  string `json:"signature"`
-}
-
-func cancelOffer(q *db.Q) fiber.Handler {
+// offerPosition aggregates all pending positions on one token: the individual
+// stacked positions plus the highest position and total escrowed across bidders.
+func offerPosition(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		offerID := strings.TrimSpace(c.Params("id"))
-		if offerID == "" {
-			return writeErr(c, fiber.StatusBadRequest, "offer id required")
-		}
-		caller, ok := c.Locals(string(auth.CallerKey)).(string)
-		if !ok || caller == "" {
-			return writeErr(c, fiber.StatusUnauthorized, "unauthorized")
-		}
-		if err := q.CancelOffer(c.Context(), offerID, caller); err != nil {
-			return writeErr(c, fiber.StatusInternalServerError, "internal error")
-		}
-		return c.SendStatus(fiber.StatusNoContent)
-	}
-}
-
-func notifyOffer(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		var req offerRequest
-		if err := bodyDecode(c, &req); err != nil {
-			return writeErr(c, fiber.StatusBadRequest, "invalid request body")
-		}
-		if req.Bidder == "" || req.Collection == "" || req.AmountWei == "" ||
-			req.Nonce == "" || req.Signature == "" || req.ExpiresAt == 0 {
-			return writeErr(c, fiber.StatusBadRequest, "missing required fields")
-		}
-		row := db.OfferRow{
-			Bidder:     req.Bidder,
-			Collection: req.Collection,
-			TokenID:    req.TokenID,
-			AmountWei:  req.AmountWei,
-			Nonce:      req.Nonce,
-			ExpiresAt:  time.Unix(req.ExpiresAt, 0).UTC(),
-			Signature:  req.Signature,
-			Status:     "pending",
-		}
-		id, err := q.InsertOffer(c.Context(), row)
+		coll := strings.ToLower(c.Params("collection"))
+		tokenID := c.Params("id")
+		rows, err := q.GetActiveOffersForToken(c.Context(), coll, tokenID)
 		if err != nil {
 			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		return c.Status(fiber.StatusCreated).JSON(fiber.Map{"offer_id": id})
+		if rows == nil {
+			rows = []db.OfferRow{}
+		}
+		total := new(big.Int)
+		best := "0"
+		for _, r := range rows {
+			if p, ok := new(big.Int).SetString(r.AmountWei, 10); ok {
+				total.Add(total, p)
+			}
+		}
+		if len(rows) > 0 {
+			best = rows[0].AmountWei // rows ordered principal DESC
+		}
+		return c.JSON(fiber.Map{
+			"collection": coll,
+			"token_id":   tokenID,
+			"positions":  rows,
+			"count":      len(rows),
+			"highest":    best,
+			"total_wei":  total.String(),
+		})
 	}
 }

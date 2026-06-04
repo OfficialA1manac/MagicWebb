@@ -61,6 +61,10 @@ type Config struct {
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
 
+	// AdminAllowlist is the set of lowercased addresses permitted to call admin
+	// endpoints (e.g. profile verification). Off-chain admin = env allowlist + SIWE JWT.
+	AdminAllowlist []string
+
 	// ServerTimeMs is set by the indexer on each new block (used by /api/v1/server-time).
 	// Accessed atomically via sync/atomic in the indexer runner.
 	ServerTimeMs int64
@@ -101,6 +105,8 @@ func Load() {
 		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
+
+		AdminAllowlist: parseAddrList(envOrDefault("ADMIN_ALLOWLIST", "")),
 	}
 
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)
@@ -131,6 +137,32 @@ func requiredUint64(key string) uint64 {
 		os.Exit(1)
 	}
 	return n
+}
+
+// parseAddrList splits a comma-separated address list and lowercases each entry.
+func parseAddrList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.ToLower(strings.TrimSpace(p)); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
+}
+
+// IsAdmin reports whether addr is in the admin allowlist (case-insensitive).
+func (c *Config) IsAdmin(addr string) bool {
+	addr = strings.ToLower(strings.TrimSpace(addr))
+	for _, a := range c.AdminAllowlist {
+		if a == addr {
+			return true
+		}
+	}
+	return false
 }
 
 func envOrDefault(key, def string) string {

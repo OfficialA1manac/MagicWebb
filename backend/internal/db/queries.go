@@ -150,20 +150,21 @@ type ListingRow struct {
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
 	_, err := q.pool.Exec(ctx,
-		`INSERT INTO listings(collection, token_id, seller, price_wei, amount, standard, expires_at, listed_at, tx_hash, active)
-		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true)
-		 ON CONFLICT(collection, token_id) DO UPDATE
-		 SET seller=EXCLUDED.seller, price_wei=EXCLUDED.price_wei, amount=EXCLUDED.amount,
+		`INSERT INTO listings(collection, token_id, seller, price_wei, amount, standard, expires_at, listed_at, tx_hash, active, orphaned)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true,false)
+		 ON CONFLICT(collection, token_id, seller) DO UPDATE
+		 SET price_wei=EXCLUDED.price_wei, amount=EXCLUDED.amount,
 		     standard=EXCLUDED.standard, expires_at=EXCLUDED.expires_at, listed_at=EXCLUDED.listed_at,
-		     tx_hash=EXCLUDED.tx_hash, active=true`,
+		     tx_hash=EXCLUDED.tx_hash, active=true, orphaned=false`,
 		r.Collection, r.TokenID, r.Seller, r.PriceWei, r.Amount, r.Standard, r.ExpiresAt, r.ListedAt, r.TxHash)
 	return err
 }
 
-func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID string) error {
+// DeactivateListing closes one seller's listing for a token (multi-listing key).
+func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID, seller string) error {
 	_, err := q.pool.Exec(ctx,
-		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2`,
-		collection, tokenID)
+		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2 AND seller=$3`,
+		collection, tokenID, seller)
 	return err
 }
 
@@ -567,12 +568,14 @@ type OfferRow struct {
 	OfferID    string
 	Bidder     string
 	Collection string
-	TokenID    string // empty = collection-wide offer
-	AmountWei  string
-	Nonce      string
+	TokenID    string
+	AmountWei  string // principal_wei: cumulative escrowed principal (fee excluded)
+	FeeWei     string
+	Units      int64
+	Standard   string
 	ExpiresAt  time.Time
-	Signature  string
 	Status     string
+	MakeTx     string
 	CreatedAt  time.Time
 }
 
@@ -585,35 +588,17 @@ type OffersFilter struct {
 	Limit      int
 }
 
-func (q *Q) InsertOffer(ctx context.Context, r OfferRow) (string, error) {
-	var id string
-	tokenIDParam := interface{}(nil)
-	if r.TokenID != "" {
-		tokenIDParam = r.TokenID
-	}
-	err := q.pool.QueryRow(ctx,
-		`INSERT INTO offers(bidder, collection, token_id, amount_wei, nonce, expires_at, signature, status)
-		 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
-		 RETURNING offer_id::text`,
-		r.Bidder, r.Collection, tokenIDParam, r.AmountWei, r.Nonce, r.ExpiresAt, r.Signature, r.Status).
-		Scan(&id)
-	return id, err
-}
-
 func (q *Q) GetOffer(ctx context.Context, offerID string) (*OfferRow, error) {
 	var r OfferRow
-	var tokenID *string
 	err := q.pool.QueryRow(ctx,
-		`SELECT offer_id::text, bidder, collection, token_id::text, amount_wei::text,
-		        nonce::text, expires_at, signature, status::text, created_at
+		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
+		        fee_wei::text, units, standard::text, expires_at, status::text,
+		        COALESCE(make_tx,''), created_at
 		 FROM offers WHERE offer_id=$1`, offerID).
-		Scan(&r.OfferID, &r.Bidder, &r.Collection, &tokenID,
-			&r.AmountWei, &r.Nonce, &r.ExpiresAt, &r.Signature, &r.Status, &r.CreatedAt)
+		Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
+			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("offer not found: %s", offerID)
-	}
-	if tokenID != nil {
-		r.TokenID = *tokenID
 	}
 	return &r, err
 }
@@ -643,14 +628,14 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 	if f.Owner != "" {
 		args = append(args, f.Owner)
 		where += fmt.Sprintf(` AND EXISTS (
-			SELECT 1 FROM nft_tokens t
-			WHERE t.collection=o.collection AND t.token_id=o.token_id AND t.owner=$%d
+			SELECT 1 FROM nft_ownership n
+			WHERE n.collection=o.collection AND n.token_id=o.token_id AND n.owner=$%d AND n.units > 0
 		)`, len(args))
 	}
 	rows, err := q.pool.Query(ctx,
 		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text,
-		        o.amount_wei::text, o.nonce::text, o.expires_at, o.signature,
-		        o.status::text, o.created_at
+		        o.principal_wei::text, o.fee_wei::text, o.units, o.standard::text,
+		        o.expires_at, o.status::text, COALESCE(o.make_tx,''), o.created_at
 		 FROM offers o `+where+` ORDER BY o.created_at DESC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
@@ -659,13 +644,10 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 	var out []OfferRow
 	for rows.Next() {
 		var r OfferRow
-		var tokenID *string
-		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &tokenID,
-			&r.AmountWei, &r.Nonce, &r.ExpiresAt, &r.Signature, &r.Status, &r.CreatedAt); err != nil {
+		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID,
+			&r.AmountWei, &r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt,
+			&r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
 			return nil, err
-		}
-		if tokenID != nil {
-			r.TokenID = *tokenID
 		}
 		out = append(out, r)
 	}

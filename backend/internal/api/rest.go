@@ -22,7 +22,7 @@ import (
 func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config) {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL),
-		AllowMethods:     "GET,POST,OPTIONS",
+		AllowMethods:     "GET,POST,PUT,OPTIONS",
 		AllowHeaders:     "Content-Type,Authorization",
 		AllowCredentials: true,
 	}))
@@ -44,6 +44,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
 	api.Get("/listings", listListings(q))
+	api.Get("/listings/:collection/:id/preflight", listingPreflight(q))
 	api.Get("/listings/:collection/:id", getListing(q))
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address", getCollection(q))
@@ -55,8 +56,22 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/server-time", serverTime())
 
 	api.Get("/offers", listOffers(q))
-	api.Post("/offers", notifyOffer(q))
-	api.Delete("/offers/:id", jwtMiddleware(cfg), cancelOffer(q))
+	api.Get("/offers/:collection/:id/position", offerPosition(q))
+
+	// Wallet NFT enumeration (picker source).
+	api.Get("/wallet/:addr/nfts", walletNFTs(q))
+
+	// Notifications (in-app, SSE-backed).
+	api.Get("/notifications", jwtMiddleware(cfg), listNotifications(q))
+	api.Post("/notifications/read", jwtMiddleware(cfg), markNotificationsRead(q))
+
+	// Profiles.
+	api.Get("/profile/:addr", getProfile(q))
+	api.Put("/profile/:addr", jwtMiddleware(cfg), putProfile(q))
+
+	// Trust & safety.
+	api.Post("/reports", jwtMiddleware(cfg), createReport(q))
+	api.Post("/admin/verify", jwtMiddleware(cfg), adminVerify(q, cfg))
 
 	api.Get("/search", search(q))
 	api.Get("/metrics", marketMetrics(q))

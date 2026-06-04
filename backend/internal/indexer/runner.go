@@ -58,9 +58,15 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runOfferExpirySweeper(ctx) }()
 
+	wg.Add(1)
+	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
+
 	if r.cfg.KeeperKey != "" {
 		wg.Add(1)
 		go func() { defer wg.Done(); r.runAuctionKeeper(ctx) }()
+
+		wg.Add(1)
+		go func() { defer wg.Done(); r.runOfferKeeper(ctx) }()
 	}
 
 	wg.Wait()
@@ -75,7 +81,7 @@ func (r *Runner) runWatcher(ctx context.Context) {
 		common.HexToAddress(r.cfg.AuctionAddr),
 		common.HexToAddress(r.cfg.OfferBookAddr),
 	}
-	topics := allTopics()
+	topics := coreTopics()
 
 	fromBlock, err := r.q.GetIndexedBlock(ctx, chainID)
 	if err != nil {
@@ -161,8 +167,43 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: dispatch")
 		}
 	}
+
+	r.processTransfers(ctx, from, to, blockTimes)
+
 	if err := r.q.SetIndexedBlock(ctx, chainID, to); err != nil {
 		log.Error().Err(err).Uint64("block", to).Msg("watcher: set indexed block")
+	}
+}
+
+// processTransfers watches NFT Transfer events on every tracked collection in the
+// block range, maintaining ownership and orphaning listings whose seller moved out.
+func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTimes map[uint64]uint64) {
+	tracked, err := r.q.ListTrackedCollections(ctx)
+	if err != nil || len(tracked) == 0 {
+		return
+	}
+	addrs := make([]common.Address, len(tracked))
+	for i, a := range tracked {
+		addrs[i] = common.HexToAddress(a)
+	}
+	logs, err := r.eth.FilterLogs(ctx, ethereum.FilterQuery{
+		FromBlock: big.NewInt(int64(from)),
+		ToBlock:   big.NewInt(int64(to)),
+		Addresses: addrs,
+		Topics:    transferTopics(),
+	})
+	if err != nil {
+		log.Warn().Err(err).Uint64("from", from).Uint64("to", to).Msg("watcher: transfer logs")
+		return
+	}
+	for _, l := range logs {
+		bt, ok := blockTimes[l.BlockNumber]
+		if !ok {
+			bt = uint64(time.Now().Unix())
+		}
+		if err := r.h.dispatch(ctx, l, bt); err != nil {
+			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: transfer dispatch")
+		}
 	}
 }
 
@@ -326,6 +367,85 @@ func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, fr
 		Nonce:     nonce,
 		To:        &to,
 		Gas:       150_000,
+		GasFeeCap: feeCap,
+		GasTipCap: tipCap,
+		Data:      data,
+	})
+	signed, err := types.SignTx(tx, signer, key)
+	if err != nil {
+		return err
+	}
+	return r.eth.SendTransaction(ctx, signed)
+}
+
+// ── Offer Keeper (on-chain refund of expired positions) ────────────────────
+
+var refundOfferSelector = crypto.Keccak256([]byte("refundExpiredOffer(address,uint256,address)"))[:4]
+
+func (r *Runner) runOfferKeeper(ctx context.Context) {
+	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	if err != nil {
+		log.Error().Err(err).Msg("offer keeper: invalid KEEPER_KEY")
+		return
+	}
+	keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
+	offerAddr := common.HexToAddress(r.cfg.OfferBookAddr)
+	chainIDBig := big.NewInt(int64(r.cfg.ChainID))
+	signer := types.NewLondonSigner(chainIDBig)
+
+	log.Info().Str("keeper", keeperAddr.Hex()).Msg("offer keeper: started")
+	ticker := time.NewTicker(60 * time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			offers, err := r.q.GetRefundableExpiredOffers(ctx)
+			if err != nil {
+				log.Error().Err(err).Msg("offer keeper: list expired")
+				continue
+			}
+			for _, o := range offers {
+				data := append([]byte(nil), refundOfferSelector...)
+				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Collection).Bytes(), 32)...)
+				tid, _ := new(big.Int).SetString(o.TokenID, 10)
+				if tid == nil {
+					tid = big.NewInt(0)
+				}
+				idBytes := make([]byte, 32)
+				tid.FillBytes(idBytes)
+				data = append(data, idBytes...)
+				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Bidder).Bytes(), 32)...)
+
+				if err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000); err != nil {
+					log.Error().Err(err).Str("bidder", o.Bidder).Msg("offer keeper: refund tx failed")
+				} else {
+					log.Info().Str("coll", o.Collection).Str("token", o.TokenID).Str("bidder", o.Bidder).
+						Msg("offer keeper: refund tx sent")
+				}
+			}
+		}
+	}
+}
+
+// sendRaw signs and broadcasts an arbitrary calldata tx from the keeper.
+func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, data []byte, gas uint64) error {
+	nonce, err := r.eth.PendingNonceAt(ctx, from)
+	if err != nil {
+		return err
+	}
+	tipCap, _ := r.eth.SuggestGasTipCap(ctx)
+	gasPrice, err := r.eth.SuggestGasPrice(ctx)
+	if err != nil {
+		return err
+	}
+	feeCap := new(big.Int).Add(tipCap, new(big.Int).Mul(gasPrice, big.NewInt(2)))
+	tx := types.NewTx(&types.DynamicFeeTx{
+		ChainID:   chainID,
+		Nonce:     nonce,
+		To:        &to,
+		Gas:       gas,
 		GasFeeCap: feeCap,
 		GasTipCap: tipCap,
 		Data:      data,

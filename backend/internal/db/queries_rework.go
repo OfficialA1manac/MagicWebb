@@ -1,0 +1,500 @@
+package db
+
+import (
+	"context"
+	"strings"
+	"time"
+
+	"github.com/jackc/pgx/v5"
+)
+
+const zeroAddr = "0x0000000000000000000000000000000000000000"
+
+func lcStandard(s string) string {
+	s = strings.ToLower(s)
+	if s != "erc1155" {
+		return "erc721"
+	}
+	return "erc1155"
+}
+
+// ── Collection auto-indexing ───────────────────────────────────────────────
+
+// EnsureCollection registers a collection (and its tracked_collections row) the
+// first time it is seen via any marketplace event. Idempotent.
+func (q *Q) EnsureCollection(ctx context.Context, addr, standard string, block uint64) error {
+	std := lcStandard(standard)
+	if _, err := q.pool.Exec(ctx,
+		`INSERT INTO collections(address, standard, deploy_block, tracked)
+		 VALUES($1,$2,$3,true)
+		 ON CONFLICT(address) DO NOTHING`,
+		addr, std, block); err != nil {
+		return err
+	}
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO tracked_collections(address, standard, first_seen_block, last_indexed_block)
+		 VALUES($1,$2,$3,$3)
+		 ON CONFLICT(address) DO NOTHING`,
+		addr, std, block)
+	return err
+}
+
+// ListTrackedCollections returns every collection the indexer watches for transfers.
+func (q *Q) ListTrackedCollections(ctx context.Context) ([]string, error) {
+	rows, err := q.pool.Query(ctx, `SELECT address FROM tracked_collections`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// ── Ownership + orphaning (from Transfer events) ───────────────────────────
+
+func (q *Q) GetTokenOwner(ctx context.Context, collection, tokenID string) (string, error) {
+	var owner string
+	err := q.pool.QueryRow(ctx,
+		`SELECT owner FROM nft_ownership
+		 WHERE collection=$1 AND token_id=$2 AND units > 0
+		 ORDER BY units DESC LIMIT 1`, collection, tokenID).Scan(&owner)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return owner, err
+}
+
+// ApplyTransfer721 sets the single owner of an ERC-721 token and orphans any
+// active listing whose seller is no longer the holder.
+func (q *Q) ApplyTransfer721(ctx context.Context, collection, tokenID, to string) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx,
+		`DELETE FROM nft_ownership WHERE collection=$1 AND token_id=$2`, collection, tokenID); err != nil {
+		return err
+	}
+	if to != zeroAddr {
+		if _, err = tx.Exec(ctx,
+			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+			 VALUES($1,$2,$3,1,'erc721')`, collection, tokenID, to); err != nil {
+			return err
+		}
+	}
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO nft_tokens(collection, token_id, owner) VALUES($1,$2,$3)
+		 ON CONFLICT(collection, token_id) DO UPDATE SET owner=EXCLUDED.owner`,
+		collection, tokenID, to); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx,
+		`UPDATE listings SET orphaned=true, active=false
+		 WHERE collection=$1 AND token_id=$2 AND seller<>$3 AND active=true`,
+		collection, tokenID, to); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// ApplyTransfer1155 moves `units` of a token between holders and orphans the
+// sender's listing once their balance reaches zero.
+func (q *Q) ApplyTransfer1155(ctx context.Context, collection, tokenID, from, to, units string) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if to != zeroAddr {
+		if _, err = tx.Exec(ctx,
+			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+			 VALUES($1,$2,$3,$4,'erc1155')
+			 ON CONFLICT(collection, token_id, owner)
+			 DO UPDATE SET units = nft_ownership.units + EXCLUDED.units, updated_at=now()`,
+			collection, tokenID, to, units); err != nil {
+			return err
+		}
+	}
+	if from != zeroAddr {
+		if _, err = tx.Exec(ctx,
+			`UPDATE nft_ownership SET units = GREATEST(units - $4::numeric, 0), updated_at=now()
+			 WHERE collection=$1 AND token_id=$2 AND owner=$3`,
+			collection, tokenID, from, units); err != nil {
+			return err
+		}
+		// Orphan the sender's listing if they no longer hold any units.
+		if _, err = tx.Exec(ctx,
+			`UPDATE listings SET orphaned=true, active=false
+			 WHERE collection=$1 AND token_id=$2 AND seller=$3 AND active=true
+			   AND NOT EXISTS (
+			       SELECT 1 FROM nft_ownership n
+			       WHERE n.collection=$1 AND n.token_id=$2 AND n.owner=$3 AND n.units > 0)`,
+			collection, tokenID, from); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// ── Offer positions (Model A stacked) ──────────────────────────────────────
+
+// UpsertOfferPosition records a bidder's compounded position. The contract emits
+// the cumulative principal, so we overwrite rather than add.
+func (q *Q) UpsertOfferPosition(ctx context.Context, r OfferRow) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO offers(collection, token_id, bidder, principal_wei, fee_wei, units, standard, expires_at, status, make_tx)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
+		 ON CONFLICT(collection, token_id, bidder) WHERE status='pending'
+		 DO UPDATE SET principal_wei=EXCLUDED.principal_wei,
+		     fee_wei = offers.fee_wei + EXCLUDED.fee_wei,
+		     units=EXCLUDED.units, expires_at=EXCLUDED.expires_at, make_tx=EXCLUDED.make_tx`,
+		r.Collection, r.TokenID, r.Bidder, r.AmountWei, r.FeeWei, r.Units,
+		lcStandard(r.Standard), r.ExpiresAt, r.MakeTx)
+	return err
+}
+
+func (q *Q) SetOfferStatus(ctx context.Context, collection, tokenID, bidder, status string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE offers SET status=$4
+		 WHERE collection=$1 AND token_id=$2 AND bidder=$3 AND status='pending'`,
+		collection, tokenID, bidder, status)
+	return err
+}
+
+// GetActiveOffersForToken returns all pending positions on a token, high to low.
+func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID string) ([]OfferRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
+		        fee_wei::text, units, standard::text, expires_at, status::text,
+		        COALESCE(make_tx,''), created_at
+		 FROM offers
+		 WHERE collection=$1 AND token_id=$2 AND status='pending' AND expires_at > now()
+		 ORDER BY principal_wei::numeric DESC`, collection, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OfferRow
+	for rows.Next() {
+		var r OfferRow
+		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
+			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetRefundableExpiredOffers returns positions past expiry still marked pending,
+// for the keeper to refund on-chain.
+func (q *Q) GetRefundableExpiredOffers(ctx context.Context) ([]OfferRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
+		        fee_wei::text, units, standard::text, expires_at, status::text,
+		        COALESCE(make_tx,''), created_at
+		 FROM offers
+		 WHERE status='pending' AND expires_at < now()
+		 LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OfferRow
+	for rows.Next() {
+		var r OfferRow
+		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
+			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// ── Wallet NFTs (for the picker) + preflight ───────────────────────────────
+
+type OwnedNFT struct {
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id"`
+	Units      string `json:"units"`
+	Standard   string `json:"standard"`
+	Name       string `json:"name"`
+	ImageURI   string `json:"image_uri"`
+}
+
+func (q *Q) WalletNFTs(ctx context.Context, owner string) ([]OwnedNFT, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT n.collection, n.token_id::text, n.units::text, n.standard::text,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
+		 FROM nft_ownership n
+		 LEFT JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
+		 LEFT JOIN nft_tokens   t ON t.collection=n.collection AND t.token_id=n.token_id
+		 WHERE n.owner=$1 AND n.units > 0
+		 ORDER BY n.updated_at DESC LIMIT 500`, owner)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []OwnedNFT
+	for rows.Next() {
+		var o OwnedNFT
+		if err := rows.Scan(&o.Collection, &o.TokenID, &o.Units, &o.Standard, &o.Name, &o.ImageURI); err != nil {
+			return nil, err
+		}
+		out = append(out, o)
+	}
+	return out, rows.Err()
+}
+
+type Preflight struct {
+	Listed     bool   `json:"listed"`
+	Orphaned   bool   `json:"orphaned"`
+	SellerOwns bool   `json:"seller_owns"`
+	Seller     string `json:"seller"`
+	PriceWei   string `json:"price_wei"`
+}
+
+// ListingPreflight reports whether a (collection, token, seller) listing can
+// still be filled: active, not orphaned, and the seller still holds the token.
+func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller string) (*Preflight, error) {
+	p := &Preflight{Seller: seller}
+	err := q.pool.QueryRow(ctx,
+		`SELECT (l.active AND NOT l.orphaned), l.orphaned, l.price_wei::text,
+		        EXISTS(SELECT 1 FROM nft_ownership n
+		               WHERE n.collection=l.collection AND n.token_id=l.token_id
+		                 AND n.owner=l.seller AND n.units > 0)
+		 FROM listings l
+		 WHERE l.collection=$1 AND l.token_id=$2 AND l.seller=$3`,
+		collection, tokenID, seller).Scan(&p.Listed, &p.Orphaned, &p.PriceWei, &p.SellerOwns)
+	if err == pgx.ErrNoRows {
+		return p, nil
+	}
+	return p, err
+}
+
+// ── Notifications ──────────────────────────────────────────────────────────
+
+type NotificationRow struct {
+	ID        int64     `json:"id"`
+	Kind      string    `json:"kind"`
+	Title     string    `json:"title"`
+	Body      string    `json:"body"`
+	Link      string    `json:"link"`
+	Read      bool      `json:"read"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+func (q *Q) InsertNotification(ctx context.Context, addr, kind, title, body, link string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO notifications(user_addr, kind, title, body, link)
+		 VALUES($1,$2,$3,$4,NULLIF($5,''))`,
+		strings.ToLower(addr), kind, title, body, link)
+	return err
+}
+
+func (q *Q) ListNotifications(ctx context.Context, addr string, limit int) ([]NotificationRow, error) {
+	if limit == 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT id, kind::text, title, body, COALESCE(link,''), read, created_at
+		 FROM notifications WHERE user_addr=$1
+		 ORDER BY created_at DESC LIMIT $2`, strings.ToLower(addr), limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []NotificationRow
+	for rows.Next() {
+		var n NotificationRow
+		if err := rows.Scan(&n.ID, &n.Kind, &n.Title, &n.Body, &n.Link, &n.Read, &n.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, n)
+	}
+	return out, rows.Err()
+}
+
+func (q *Q) UnreadCount(ctx context.Context, addr string) (int, error) {
+	var n int
+	err := q.pool.QueryRow(ctx,
+		`SELECT count(*) FROM notifications WHERE user_addr=$1 AND read=false`,
+		strings.ToLower(addr)).Scan(&n)
+	return n, err
+}
+
+func (q *Q) MarkNotificationsRead(ctx context.Context, addr string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE notifications SET read=true WHERE user_addr=$1 AND read=false`,
+		strings.ToLower(addr))
+	return err
+}
+
+// ── Profiles ───────────────────────────────────────────────────────────────
+
+type ProfileRow struct {
+	Address     string `json:"address"`
+	DisplayName string `json:"display_name"`
+	Bio         string `json:"bio"`
+	AvatarURI   string `json:"avatar_uri"`
+	BannerURI   string `json:"banner_uri"`
+	Twitter     string `json:"twitter"`
+	Website     string `json:"website"`
+	Verified    bool   `json:"verified"`
+}
+
+func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
+	p := &ProfileRow{Address: strings.ToLower(addr)}
+	err := q.pool.QueryRow(ctx,
+		`SELECT display_name, bio, COALESCE(avatar_uri,''), COALESCE(banner_uri,''),
+		        COALESCE(twitter,''), COALESCE(website,''), verified
+		 FROM profiles WHERE address=$1`, strings.ToLower(addr)).
+		Scan(&p.DisplayName, &p.Bio, &p.AvatarURI, &p.BannerURI, &p.Twitter, &p.Website, &p.Verified)
+	if err == pgx.ErrNoRows {
+		return p, nil // empty profile is valid
+	}
+	return p, err
+}
+
+// UpsertProfile writes user-editable fields only; `verified` is admin-controlled.
+func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO profiles(address, display_name, bio, avatar_uri, banner_uri, twitter, website, updated_at)
+		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''), now())
+		 ON CONFLICT(address) DO UPDATE
+		 SET display_name=EXCLUDED.display_name, bio=EXCLUDED.bio, avatar_uri=EXCLUDED.avatar_uri,
+		     banner_uri=EXCLUDED.banner_uri, twitter=EXCLUDED.twitter, website=EXCLUDED.website,
+		     updated_at=now()`,
+		strings.ToLower(p.Address), p.DisplayName, p.Bio, p.AvatarURI, p.BannerURI, p.Twitter, p.Website)
+	return err
+}
+
+func (q *Q) SetVerified(ctx context.Context, addr string, verified bool) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO profiles(address, verified, updated_at) VALUES($1,$2, now())
+		 ON CONFLICT(address) DO UPDATE SET verified=EXCLUDED.verified, updated_at=now()`,
+		strings.ToLower(addr), verified)
+	return err
+}
+
+// ── Reports ────────────────────────────────────────────────────────────────
+
+func (q *Q) InsertReport(ctx context.Context, reporter, targetType, targetID, reason, detail string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO reports(reporter, target_type, target_id, reason, detail)
+		 VALUES($1,$2,$3,$4,$5)`,
+		strings.ToLower(reporter), targetType, targetID, reason, detail)
+	return err
+}
+
+// ── Metadata + attributes ──────────────────────────────────────────────────
+
+type MissingToken struct {
+	Collection string
+	TokenID    string
+	Standard   string
+}
+
+func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]MissingToken, error) {
+	if limit == 0 || limit > 200 {
+		limit = 100
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT n.collection, n.token_id::text, n.standard::text
+		 FROM nft_ownership n
+		 LEFT JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
+		 WHERE m.collection IS NULL
+		 GROUP BY n.collection, n.token_id, n.standard
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []MissingToken
+	for rows.Next() {
+		var t MissingToken
+		if err := rows.Scan(&t.Collection, &t.TokenID, &t.Standard); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
+type Trait struct{ Type, Value string }
+
+func (q *Q) UpsertMetadata(ctx context.Context, collection, tokenID, name, desc, image, animation, uri string, traits []Trait) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO nft_metadata(collection, token_id, name, description, image_uri, animation_uri, metadata_uri, fetched_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7, now())
+		 ON CONFLICT(collection, token_id) DO UPDATE
+		 SET name=EXCLUDED.name, description=EXCLUDED.description, image_uri=EXCLUDED.image_uri,
+		     animation_uri=EXCLUDED.animation_uri, metadata_uri=EXCLUDED.metadata_uri, fetched_at=now()`,
+		collection, tokenID, name, desc, image, animation, uri); err != nil {
+		return err
+	}
+	// Mirror onto nft_tokens for legacy reads.
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO nft_tokens(collection, token_id, name, description, image_uri, metadata_uri)
+		 VALUES($1,$2,$3,$4,$5,$6)
+		 ON CONFLICT(collection, token_id) DO UPDATE
+		 SET name=EXCLUDED.name, description=EXCLUDED.description,
+		     image_uri=EXCLUDED.image_uri, metadata_uri=EXCLUDED.metadata_uri`,
+		collection, tokenID, name, desc, image, uri); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx,
+		`DELETE FROM nft_attributes WHERE collection=$1 AND token_id=$2`, collection, tokenID); err != nil {
+		return err
+	}
+	for _, t := range traits {
+		if t.Type == "" {
+			continue
+		}
+		if _, err = tx.Exec(ctx,
+			`INSERT INTO nft_attributes(collection, token_id, trait_type, value)
+			 VALUES($1,$2,$3,$4) ON CONFLICT(collection, token_id, trait_type) DO UPDATE SET value=EXCLUDED.value`,
+			collection, tokenID, t.Type, t.Value); err != nil {
+			return err
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// ListTraitValues returns distinct trait values for a collection, powering filters.
+func (q *Q) ListTraitValues(ctx context.Context, collection string) (map[string][]string, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT trait_type, value, count(*) FROM nft_attributes
+		 WHERE collection=$1 GROUP BY trait_type, value ORDER BY trait_type, value`, collection)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	out := map[string][]string{}
+	for rows.Next() {
+		var tt, v string
+		var c int
+		if err := rows.Scan(&tt, &v, &c); err != nil {
+			return nil, err
+		}
+		out[tt] = append(out[tt], v)
+	}
+	return out, rows.Err()
+}
