@@ -1,0 +1,29 @@
+# Normalize line endings: store LF in the repo, check out native on Windows.
+* text=auto eol=lf
+
+# Explicitly LF for source/text the toolchains expect to be LF.
+*.go      text eol=lf
+*.sol     text eol=lf
+*.sql     text eol=lf
+*.js      text eol=lf
+*.css     text eol=lf
+*.html    text eol=lf
+*.md      text eol=lf
+*.yml     text eol=lf
+*.yaml    text eol=lf
+*.toml    text eol=lf
+*.sh      text eol=lf
+*.ps1     text eol=crlf
+Makefile  text eol=lf
+
+# Binary / generated — never normalize or diff.
+*.png     binary
+*.jpg     binary
+*.jpeg    binary
+*.gif     binary
+*.ico     binary
+*.woff    binary
+*.woff2   binary
+*.exe     binary
+*.pb.go   linguist-generated=true
+go.sum    -diff
