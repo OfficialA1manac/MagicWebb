@@ -45,6 +45,7 @@ var partialPaths = []string{
 	"partials/listing_cards.html",
 	"partials/auction_cards.html",
 	"partials/activity_feed.html",
+	"partials/nft_picker.html",
 }
 
 var pagePaths = []string{

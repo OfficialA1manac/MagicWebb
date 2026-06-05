@@ -2,7 +2,45 @@
 {{define "content"}}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
   <h1 class="text-2xl font-bold text-neutral-200">Active Listings</h1>
-  <span class="text-sm text-neutral-500">{{len .Listings}} items</span>
+  <div class="flex items-center gap-3">
+    <span class="text-sm text-neutral-500">{{len .Listings}} items</span>
+    <button @click="$dispatch('open-nft-picker', {action: 'list'})"
+            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
+      <span class="text-base leading-none">+</span> List an NFT
+    </button>
+  </div>
+</div>
+
+<!-- Trait filters (collapsible, populated from /collections/:address/traits) -->
+<div x-data="{ open: false, traits: {}, sel: {},
+       async load() {
+         const coll = '{{.Collection}}';
+         if (!coll) { toast('Enter a collection above to filter by traits.', 'info'); return; }
+         if (!Object.keys(this.traits).length) {
+           try { const res = await fetch('/api/v1/collections/' + coll + '/traits'); if (res.ok) this.traits = await res.json(); } catch {}
+         }
+         this.open = !this.open;
+       },
+       apply() {
+         const p = new URLSearchParams();
+         p.set('collection', '{{.Collection}}');
+         for (const [k, v] of Object.entries(this.sel)) { if (v) p.set('trait_' + k, v); }
+         location.search = p.toString();
+       } }" class="mb-6">
+  <button @click="load()" class="text-xs text-neutral-400 hover:text-white transition">⚙ Trait filters</button>
+  <div x-show="open" x-cloak class="mt-3 flex flex-wrap gap-3 items-end bg-neutral-900 rounded-xl p-4">
+    <template x-if="Object.keys(traits).length === 0"><p class="text-xs text-neutral-600">No traits indexed for this collection yet.</p></template>
+    <template x-for="(values, type) in traits" :key="type">
+      <div>
+        <label class="block text-xs text-neutral-500 mb-1" x-text="type"></label>
+        <select x-model="sel[type]" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
+          <option value="">Any</option>
+          <template x-for="v in values" :key="v"><option :value="v" x-text="v"></option></template>
+        </select>
+      </div>
+    </template>
+    <button x-show="Object.keys(traits).length > 0" @click="apply()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Apply</button>
+  </div>
 </div>
 
 <!-- Filter + sort controls -->

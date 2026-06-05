@@ -69,7 +69,7 @@
       <div class="flex gap-2">
         <input x-model="bidAmt" type="number" step="0.01" min="0" placeholder="Bid amount (FLR)"
                class="flex-1 bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
-        <button @click="$store.wallet.bid({{.AuctionID}}, (parseFloat(bidAmt)*1e18).toString())"
+        <button @click="$store.wallet.bid({{.AuctionID}}, (parseFloat(bidAmt)*1e18).toString(), {{.EndsAt.Unix}})"
                 class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-bold text-sm transition">
           Bid
         </button>

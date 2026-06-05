@@ -1,19 +1,59 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div class="mb-8 flex items-center justify-between">
-  <div class="flex items-center gap-4">
-    <div class="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-2xl">👤</div>
-    <div>
-      <h1 class="text-xl font-bold text-white font-mono break-all">{{.Addr}}</h1>
-      <p class="text-sm text-neutral-500">
-        {{len .Listings}} active listing{{if ne (len .Listings) 1}}s{{end}}
-      </p>
+<div x-data="{
+       p: { display_name: '', bio: '', avatar_uri: '', twitter: '', website: '', verified: false },
+       editing: false,
+       get isMe() { return $store.wallet.address === '{{lower .Addr}}'; },
+       async init() {
+         try { const r = await fetch('/api/v1/profile/{{lower .Addr}}'); if (r.ok) this.p = await r.json(); } catch {}
+       },
+       save() { $store.wallet.saveProfile({
+         display_name: this.p.display_name, bio: this.p.bio, avatar_uri: this.p.avatar_uri,
+         twitter: this.p.twitter, website: this.p.website }); }
+     }" class="mb-8">
+  <div class="flex items-start justify-between gap-4">
+    <div class="flex items-center gap-4 min-w-0">
+      <div class="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-2xl overflow-hidden">
+        <template x-if="p.avatar_uri"><img :src="p.avatar_uri" class="w-full h-full object-cover"></template>
+        <template x-if="!p.avatar_uri"><span>👤</span></template>
+      </div>
+      <div class="min-w-0">
+        <div class="flex items-center gap-2">
+          <h1 class="text-xl font-bold text-white truncate" x-text="p.display_name || '{{shortAddr .Addr}}'"></h1>
+          <span x-show="p.verified" x-cloak title="Verified"
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold">✔ Verified</span>
+        </div>
+        <p class="text-xs text-neutral-500 font-mono break-all">{{.Addr}}</p>
+        <p class="text-sm text-neutral-500 mt-1">{{len .Listings}} active listing{{if ne (len .Listings) 1}}s{{end}}</p>
+        <p x-show="p.bio" x-cloak class="text-sm text-neutral-400 mt-2" x-text="p.bio"></p>
+      </div>
+    </div>
+    <div class="flex items-center gap-2 shrink-0">
+      <template x-if="isMe">
+        <button @click="editing = !editing" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Edit Profile</button>
+      </template>
+      <template x-if="!isMe">
+        <button @click="$store.wallet.report('user', '{{lower .Addr}}', 'reported from profile')"
+                class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-sm font-semibold transition">⚑ Report</button>
+      </template>
+      <a href="/offers?addr={{.Addr}}" class="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-semibold transition">View Offers</a>
     </div>
   </div>
-  <a href="/offers?addr={{.Addr}}"
-     class="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-semibold transition">
-    View Offers
-  </a>
+
+  <!-- Edit panel (owner only) -->
+  <div x-show="editing" x-cloak class="mt-4 bg-neutral-900 rounded-2xl p-5 space-y-3">
+    <div class="grid sm:grid-cols-2 gap-3">
+      <input x-model="p.display_name" maxlength="64" placeholder="Display name" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <input x-model="p.avatar_uri" placeholder="Avatar URL" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <input x-model="p.twitter" placeholder="Twitter / X handle" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <input x-model="p.website" placeholder="Website" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+    </div>
+    <textarea x-model="p.bio" maxlength="500" rows="3" placeholder="Bio" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500"></textarea>
+    <div class="flex gap-2">
+      <button @click="save()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Save</button>
+      <button @click="editing = false" class="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-semibold transition">Cancel</button>
+    </div>
+  </div>
 </div>
 
 <div x-data="{tab: 'listings'}">

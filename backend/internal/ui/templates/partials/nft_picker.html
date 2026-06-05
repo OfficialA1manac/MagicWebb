@@ -1,0 +1,57 @@
+{{define "partials/nft_picker.html"}}
+<!-- Global wallet NFT picker modal. Open via: $dispatch('open-nft-picker', {action:'list'}) -->
+<div x-data="{
+       open: false, action: 'list', loading: false, nfts: [],
+       async show(detail) {
+         this.action = (detail && detail.action) || 'list';
+         this.open = true; this.loading = true; this.nfts = [];
+         if (!$store.wallet.address) { await $store.wallet.connect(); }
+         if (!$store.wallet.address) { this.open = false; return; }
+         try {
+           const res = await fetch('/api/v1/wallet/' + $store.wallet.address + '/nfts');
+           if (res.ok) this.nfts = await res.json();
+         } catch {}
+         this.loading = false;
+       },
+       pick(n) {
+         this.open = false;
+         window.location.href = '/token/' + n.collection + '/' + n.token_id + '?action=' + this.action;
+       }
+     }"
+     x-on:open-nft-picker.window="show($event.detail)">
+  <div x-show="open" x-cloak class="fixed inset-0 z-[60] flex items-center justify-center p-4"
+       x-transition.opacity>
+    <div class="absolute inset-0 bg-black/70" @click="open = false"></div>
+    <div class="relative bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
+        <h3 class="text-sm font-semibold text-white">
+          Pick an NFT to <span x-text="action"></span>
+        </h3>
+        <button @click="open = false" class="text-neutral-500 hover:text-white text-xl leading-none">&times;</button>
+      </div>
+      <div class="p-5 overflow-y-auto">
+        <template x-if="loading"><p class="text-center text-neutral-600 text-sm py-10">Loading your NFTs…</p></template>
+        <template x-if="!loading && nfts.length === 0">
+          <p class="text-center text-neutral-600 text-sm py-10">No NFTs found in your wallet for tracked collections.</p>
+        </template>
+        <div x-show="!loading && nfts.length > 0" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+          <template x-for="n in nfts" :key="n.collection + '-' + n.token_id">
+            <button @click="pick(n)"
+                    class="text-left bg-neutral-800 hover:bg-neutral-700 rounded-xl overflow-hidden transition group">
+              <div class="aspect-square bg-neutral-950 flex items-center justify-center text-3xl overflow-hidden">
+                <template x-if="n.image_uri"><img :src="n.image_uri" class="w-full h-full object-cover" loading="lazy"></template>
+                <template x-if="!n.image_uri"><span>🖼</span></template>
+              </div>
+              <div class="p-2">
+                <p class="text-xs font-medium text-neutral-200 truncate" x-text="n.name || ('#' + n.token_id)"></p>
+                <p class="text-[10px] text-neutral-500 font-mono truncate" x-text="n.collection"></p>
+                <p class="text-[10px] text-neutral-600" x-show="n.standard === 'erc1155'" x-text="'x' + n.units"></p>
+              </div>
+            </button>
+          </template>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}

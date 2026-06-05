@@ -47,6 +47,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/listings/:collection/:id/preflight", listingPreflight(q))
 	api.Get("/listings/:collection/:id", getListing(q))
 	api.Get("/collections", listCollections(q))
+	api.Get("/collections/:address/traits", collectionTraits(q))
 	api.Get("/collections/:address", getCollection(q))
 	api.Get("/trending", getTrending(q))
 

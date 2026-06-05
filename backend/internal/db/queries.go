@@ -189,7 +189,8 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 type ListingsFilter struct {
 	Collection string
 	Seller     string
-	Sort       string // "recent" | "price_asc" | "price_desc"
+	Sort       string            // "recent" | "price_asc" | "price_desc"
+	Traits     map[string]string // trait_type -> value (AND across traits)
 	Limit      int
 	Cursor     string
 }
@@ -199,7 +200,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		f.Limit = 50
 	}
 	args := []any{f.Limit}
-	where := "WHERE l.active=true AND l.expires_at > now()"
+	where := "WHERE l.active=true AND NOT l.orphaned AND l.expires_at > now()"
 	if f.Collection != "" {
 		args = append(args, f.Collection)
 		where += fmt.Sprintf(" AND l.collection=$%d", len(args))
@@ -207,6 +208,18 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	if f.Seller != "" {
 		args = append(args, f.Seller)
 		where += fmt.Sprintf(" AND l.seller=$%d", len(args))
+	}
+	for tt, v := range f.Traits {
+		if tt == "" || v == "" {
+			continue
+		}
+		args = append(args, tt)
+		ttIdx := len(args)
+		args = append(args, v)
+		vIdx := len(args)
+		where += fmt.Sprintf(` AND EXISTS (SELECT 1 FROM nft_attributes a
+			WHERE a.collection=l.collection AND a.token_id=l.token_id
+			  AND a.trait_type=$%d AND a.value=$%d)`, ttIdx, vIdx)
 	}
 	orderBy := "l.listed_at DESC"
 	switch f.Sort {

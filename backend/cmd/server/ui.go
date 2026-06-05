@@ -48,9 +48,16 @@ func uiHome(q *db.Q) fiber.Handler {
 func uiListings(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		sort := c.Query("sort", "recent")
+		traits := map[string]string{}
+		for k, v := range c.Queries() {
+			if len(k) > 6 && k[:6] == "trait_" && v != "" {
+				traits[k[6:]] = v
+			}
+		}
 		f := db.ListingsFilter{
 			Collection: c.Query("collection"),
 			Sort:       sort,
+			Traits:     traits,
 			Limit:      48,
 		}
 		rows, _ := q.ListActiveListings(c.Context(), f)

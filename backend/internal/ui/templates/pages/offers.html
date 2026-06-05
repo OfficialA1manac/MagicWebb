@@ -1,6 +1,12 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<h1 class="text-2xl font-bold text-neutral-200 mb-6">Offers</h1>
+<div class="flex flex-wrap items-center justify-between gap-3 mb-6">
+  <h1 class="text-2xl font-bold text-neutral-200">Offers</h1>
+  <button @click="$dispatch('open-nft-picker', {action: 'offer'})"
+          class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
+    <span class="text-base leading-none">+</span> Make an Offer
+  </button>
+</div>
 
 {{if not .Addr}}
 <div class="bg-neutral-900 rounded-xl p-8 mb-6 text-center">
@@ -45,8 +51,12 @@
           <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
           {{if eq .Status "pending"}}
           <button class="px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition"
-                  @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{.Bidder}}')">
+                  @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">
             Accept
+          </button>
+          <button class="px-3 py-1.5 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-xs font-semibold transition"
+                  @click="$store.wallet.rejectOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">
+            Reject
           </button>
           {{else}}
           <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
@@ -76,22 +86,7 @@
         <div class="flex items-center gap-2 flex-shrink-0">
           <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
           {{if eq .Status "pending"}}
-          <button class="px-3 py-1.5 rounded-lg bg-neutral-700 hover:bg-neutral-600 text-neutral-300 text-xs font-semibold transition"
-                  @click="$store.wallet.withdrawOffer('{{.Collection}}', '{{.TokenID}}')">
-            Withdraw
-          </button>
-          <button class="px-3 py-1.5 rounded-lg bg-red-900/40 hover:bg-red-900/60 text-red-400 text-xs font-semibold transition"
-                  @click="
-                    const tok = localStorage.getItem('mw_jwt');
-                    if (!tok) { alert('Sign in first'); return; }
-                    if (!confirm('Remove this offer notification?')) return;
-                    fetch('/api/v1/offers/{{.OfferID}}', {
-                      method: 'DELETE',
-                      headers: {'Authorization': 'Bearer ' + tok}
-                    }).then(r => { if (r.ok) $el.closest('.bg-neutral-900').remove(); });
-                  ">
-            Cancel
-          </button>
+          <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-500" title="Offers are locked until accepted, rejected, or expired. The 1.5% fee was non-refundable.">🔒 Locked</span>
           {{else}}
           <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
           {{end}}

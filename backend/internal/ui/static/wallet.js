@@ -1,62 +1,90 @@
 // MagicWebb wallet — Alpine.js store + ethers.js contract interactions
-// Chain: Coston2 testnet (chainId 114 = 0x72)
+// Chain: Coston2 testnet (chainId 114 = 0x72). Taker-pays 1.5% fee model.
 const CHAIN_ID = 114;
-const RPC_URL   = 'https://coston2-api.flare.network/ext/C/rpc';
+const RPC_URL  = 'https://coston2-api.flare.network/ext/C/rpc';
 
-// Contract addresses (Coston2 testnet)
+// Contract addresses (Coston2 testnet) — update after redeploy.
 const MARKETPLACE = '0xec47a481513da81ff59a6c4002a98803039994e5';
 const AUCTION     = '0xf62e931d807f87ebd90cc3254b0a34a76c326331';
 const OFFERBOOK   = '0x7e88e86f61e6ad80abd828b6bcedaa86311736f0';
 
-// Platform fee: 1.5% = 150 bps
+// Platform fee: 1.5% = 150 bps. Taker pays this ON TOP of the commitment.
 const FEE_BPS = 150n;
+function withFee(wei)  { const a = BigInt(wei); return a + (a * FEE_BPS) / 10000n; }
 
-// ── ABIs (minimal, matching deployed contracts) ───────────────────────────────
+// WalletConnect v2 project id (https://cloud.walletconnect.com). Optional.
+const WC_PROJECT_ID = window.MW_WC_PROJECT_ID || '';
+
+// Anti-snipe window mirrored from AuctionHouse.EXTENSION_WINDOW (3 minutes).
+const EXTENSION_WINDOW = 180;
+
+// ── ABIs (minimal, matching the reworked taker-pays contracts) ─────────────────
 
 const MARKETPLACE_ABI = [
-  // list(coll, id, price, expiresAt) payable — msg.value = price * 150 / 10000
-  'function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external payable',
-  // cancel(coll, id) — seller only
+  'function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external',
+  'function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external',
   'function cancel(address coll, uint256 id) external',
-  // buy(coll, id) payable — msg.value = price
-  'function buy(address coll, uint256 id) external payable',
+  // buy: msg.value = price + 1.5%; seller selects which listing to fill.
+  'function buy(address coll, uint256 id, address seller) external payable',
 ];
 
 const AUCTION_ABI = [
-  // create(coll, tokenId, reserve, endsAt, minIncBps) — needs approval first
-  'function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps) external returns (uint256)',
-  // bid(id, bidAmount) payable — msg.value = bidAmount + bidAmount*150/10000
+  'function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
+  'function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
+  // bid: msg.value = bidAmount + 1.5% (fee non-refundable on outbid).
   'function bid(uint256 id, uint128 bidAmount) external payable',
-  // settle(id) — anyone can call after endsAt
   'function settle(uint256 id) external',
-  // cancelEarly(id) — seller only, before endsAt
   'function cancelEarly(uint256 id) external',
 ];
 
 const OFFERBOOK_ABI = [
-  // markEligible(coll, tokenId) — owner opts token in to receive offers
-  'function markEligible(address coll, uint256 tokenId) external',
-  // removeEligible(coll, tokenId) — owner opts out
-  'function removeEligible(address coll, uint256 tokenId) external',
-  // makeOffer(coll, tokenId) payable — bidder deposits ETH as offer
-  'function makeOffer(address coll, uint256 tokenId) external payable',
-  // withdrawOffer(coll, tokenId) — bidder reclaims ETH
-  'function withdrawOffer(address coll, uint256 tokenId) external',
-  // acceptOffer(coll, tokenId, bidder) — NFT owner accepts a specific offer
+  // makeOffer: msg.value = principal + 1.5% (fee non-refundable). Positions stack.
+  'function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable',
+  'function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt) external payable',
   'function acceptOffer(address coll, uint256 tokenId, address bidder) external',
-  // eligible(coll, tokenId) view — returns address that marked eligible (0 = not eligible)
-  'function eligible(address, uint256) external view returns (address)',
-  // offers(coll, tokenId, bidder) view — returns offer amount in wei (0 = no offer)
-  'function offers(address, uint256, address) external view returns (uint256)',
+  'function rejectOffer(address coll, uint256 tokenId, address bidder) external',
+  'function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external',
+  'function positions(address, uint256, address) external view returns (uint128 principal, uint128 units, uint64 expiresAt, uint8 standard)',
 ];
 
 const ERC721_ABI = [
-  'function approve(address to, uint256 tokenId) external',
   'function setApprovalForAll(address op, bool approved) external',
   'function isApprovedForAll(address owner, address op) external view returns (bool)',
-  'function getApproved(uint256 tokenId) external view returns (address)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
 ];
+
+// ── Plain-English revert mapping ───────────────────────────────────────────────
+
+function revertMessage(e) {
+  if (e && (e.code === 4001 || e.code === 'ACTION_REJECTED')) return 'You rejected the request.';
+  const raw = [e?.reason, e?.shortMessage, e?.info?.error?.message, e?.data?.message, e?.message]
+    .filter(Boolean).join(' ');
+  const map = [
+    ['WrongValue',     "Amount sent doesn't match the required total (offer + 1.5% fee)."],
+    ['WrongBidValue',  "Amount sent doesn't match the bid + 1.5% fee."],
+    ['WrongPrice',     "Amount sent doesn't match the price + 1.5% fee."],
+    ['BelowMinPrice',  'Minimum is 0.01 FLR.'],
+    ['BidTooLow',      'Your bid is below the minimum increment.'],
+    ['NotApproved',    'Approve the contract to manage this NFT first.'],
+    ['NotOwner',       "You don't hold this NFT."],
+    ['NotSeller',      'Only the seller can do that.'],
+    ['Expired',        'This listing or offer has expired.'],
+    ['InvalidExpiry',  'Pick an expiry within the allowed window.'],
+    ['AuctionEnded',   'This auction has already ended.'],
+    ['AuctionLive',    'This auction is still live.'],
+    ['OfferActive',    "This offer hasn't expired yet."],
+    ['NoOffer',        'No active offer found.'],
+    ['InvalidWindow',  'Duration is outside the allowed range.'],
+    ['insufficient funds', 'Not enough FLR to cover the amount plus gas.'],
+  ];
+  for (const [needle, msg] of map) {
+    if (raw.toLowerCase().includes(needle.toLowerCase())) return msg;
+  }
+  if (/revert|CALL_EXCEPTION/i.test(raw)) {
+    return 'Transaction reverted — the item may have just sold or changed. Refresh and retry.';
+  }
+  return raw || 'Transaction failed.';
+}
 
 // ── Alpine store ───────────────────────────────────────────────────────────────
 
@@ -67,35 +95,59 @@ document.addEventListener('alpine:init', () => {
     address:  null,
     chainId:  null,
     jwt:      localStorage.getItem('mw_jwt') || null,
+    unread:   0,
 
     get shortAddr() {
       return this.address ? this.address.slice(0, 6) + '…' + this.address.slice(-4) : '';
     },
     get connected() { return !!this.address; },
 
-    // ── Connect ────────────────────────────────────────────────────────────
+    // ── Connect (MetaMask | WalletConnect v2) ─────────────────────────────
 
-    async connect() {
-      if (!window.ethereum) {
-        toast('No wallet detected. Install MetaMask.', 'error');
-        return;
-      }
+    async connect(kind = 'injected') {
       try {
-        const provider = new ethers.BrowserProvider(window.ethereum);
+        let eip1193;
+        if (kind === 'walletconnect') {
+          eip1193 = await this._wcProvider();
+        } else {
+          if (!window.ethereum) { toast('No wallet detected. Install MetaMask or use WalletConnect.', 'error'); return; }
+          eip1193 = window.ethereum;
+        }
+        const provider = new ethers.BrowserProvider(eip1193);
         const accounts = await provider.send('eth_requestAccounts', []);
         const network  = await provider.getNetwork();
-        if (Number(network.chainId) !== CHAIN_ID) await this._switchChain();
+        if (Number(network.chainId) !== CHAIN_ID && kind === 'injected') await this._switchChain();
         this.provider = provider;
         this.signer   = await provider.getSigner();
         this.address  = accounts[0].toLowerCase();
         this.chainId  = Number(network.chainId);
         localStorage.setItem('mw_addr', this.address);
-        // SIWE auth for signed actions
+        localStorage.setItem('mw_kind', kind);
         await this._authenticate();
+        await this.refreshUnread();
         toast('Wallet connected', 'success');
       } catch (e) {
-        toast(e.message || 'Connection failed', 'error');
+        toast(revertMessage(e), 'error');
       }
+    },
+
+    async _wcProvider() {
+      if (!WC_PROJECT_ID) throw new Error('WalletConnect not configured');
+      const { EthereumProvider } = await import('https://esm.sh/@walletconnect/ethereum-provider@2.11.2');
+      const wc = await EthereumProvider.init({
+        projectId: WC_PROJECT_ID,
+        chains: [CHAIN_ID],
+        rpcMap: { [CHAIN_ID]: RPC_URL },
+        showQrModal: true,
+      });
+      await wc.connect();
+      return wc;
+    },
+
+    disconnect() {
+      this.provider = this.signer = this.address = null;
+      this.jwt = null; this.unread = 0;
+      localStorage.removeItem('mw_addr'); localStorage.removeItem('mw_jwt'); localStorage.removeItem('mw_kind');
     },
 
     async _switchChain() {
@@ -127,17 +179,38 @@ document.addEventListener('alpine:init', () => {
         this.jwt = token;
         localStorage.setItem('mw_jwt', token);
       } catch (e) {
-        // Auth failure is non-fatal — read-only actions still work
         console.warn('SIWE auth failed:', e);
       }
     },
 
-    // ── Approvals ──────────────────────────────────────────────────────────
+    authHeaders() {
+      return this.jwt ? { 'Authorization': 'Bearer ' + this.jwt, 'Content-Type': 'application/json' }
+                      : { 'Content-Type': 'application/json' };
+    },
+
+    // ── Notifications ─────────────────────────────────────────────────────
+
+    async refreshUnread() {
+      if (!this.jwt) return;
+      try {
+        const res = await fetch('/api/v1/notifications?limit=1', { headers: this.authHeaders() });
+        if (res.ok) this.unread = (await res.json()).unread || 0;
+      } catch {}
+    },
+
+    async markNotificationsRead() {
+      if (!this.jwt) return;
+      try {
+        await fetch('/api/v1/notifications/read', { method: 'POST', headers: this.authHeaders() });
+        this.unread = 0;
+      } catch {}
+    },
+
+    // ── Approvals ─────────────────────────────────────────────────────────
 
     async _approveOperator(collection, operator) {
       const c = new ethers.Contract(collection, ERC721_ABI, this.signer);
-      const approved = await c.isApprovedForAll(this.address, operator);
-      if (!approved) {
+      if (!(await c.isApprovedForAll(this.address, operator))) {
         toast('Approving contract…', 'info');
         const tx = await c.setApprovalForAll(operator, true);
         await tx.wait();
@@ -145,42 +218,49 @@ document.addEventListener('alpine:init', () => {
       }
     },
 
-    // ── Marketplace: Buy ───────────────────────────────────────────────────
-
-    async buy(collection, tokenId, priceWei) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
-      try {
-        const c = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, this.signer);
-        toast('Sending buy transaction…', 'info');
-        const tx = await c.buy(collection, tokenId, { value: BigInt(priceWei) });
-        toast('Transaction submitted', 'info');
-        await tx.wait();
-        toast('Purchase confirmed!', 'success');
-      } catch (e) { toast(e.reason || e.message || 'Transaction failed', 'error'); }
+    async _ensure() {
+      if (!this.signer) { await this.connect(localStorage.getItem('mw_kind') || 'injected'); }
+      return !!this.signer;
     },
 
-    // ── Marketplace: List ──────────────────────────────────────────────────
-    // list fee = price * 150 / 10000 must be sent as msg.value
+    // ── Marketplace: Buy (price + 1.5%, with stale-listing preflight) ─────
+
+    async buy(collection, tokenId, seller, priceWei) {
+      if (!(await this._ensure())) return;
+      try {
+        const pf = await fetch(`/api/v1/listings/${collection}/${tokenId}/preflight?seller=${seller}`)
+          .then(r => r.ok ? r.json() : null).catch(() => null);
+        if (pf && !pf.ok) {
+          toast('This listing is no longer fillable (sold, cancelled, or the NFT moved).', 'error');
+          return;
+        }
+        if (pf && pf.price_wei) priceWei = pf.price_wei;
+        const c = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, this.signer);
+        toast('Sending buy (price + 1.5% fee)…', 'info');
+        const tx = await c.buy(collection, tokenId, seller, { value: withFee(priceWei) });
+        await tx.wait();
+        toast('Purchase confirmed!', 'success');
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) { toast(revertMessage(e), 'error'); }
+    },
+
+    // ── Marketplace: List (FREE — no fee at listing) ──────────────────────
 
     async list(collection, tokenId, priceWei, expiresAt) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+      if (!(await this._ensure())) return;
       try {
         await this._approveOperator(collection, MARKETPLACE);
         const c = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, this.signer);
-        const priceBig = BigInt(priceWei);
-        const listFee  = priceBig * FEE_BPS / 10000n;
-        toast('Creating listing…', 'info');
-        const tx = await c.list(collection, tokenId, priceBig, Math.floor(expiresAt), { value: listFee });
+        toast('Creating listing (free)…', 'info');
+        const tx = await c.list(collection, tokenId, BigInt(priceWei), Math.floor(expiresAt));
         await tx.wait();
         toast('Listed successfully!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Listing failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── Marketplace: Cancel ────────────────────────────────────────────────
-
     async cancel(collection, tokenId) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+      if (!(await this._ensure())) return;
       try {
         const c = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, this.signer);
         toast('Cancelling listing…', 'info');
@@ -188,51 +268,49 @@ document.addEventListener('alpine:init', () => {
         await tx.wait();
         toast('Listing cancelled!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Cancel failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── AuctionHouse: Create ───────────────────────────────────────────────
+    // ── AuctionHouse: Create (with flat minimum increment) ────────────────
 
-    async createAuction(collection, tokenId, reserveWei, endsAt, minIncBps) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+    async createAuction(collection, tokenId, reserveWei, endsAt, minIncBps, minIncFlatWei) {
+      if (!(await this._ensure())) return;
       try {
         await this._approveOperator(collection, AUCTION);
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
-        toast('Creating auction…', 'info');
+        toast('Creating auction (free)…', 'info');
         const tx = await c.create(
           collection, tokenId,
           BigInt(reserveWei || '0'),
           Math.floor(endsAt),
           minIncBps || 500,
+          BigInt(minIncFlatWei || '0'),
         );
         await tx.wait();
         toast('Auction created!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Create auction failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── AuctionHouse: Bid ──────────────────────────────────────────────────
-    // msg.value = bidAmount + bidAmount * 150 / 10000
+    // ── AuctionHouse: Bid (bid + 1.5%, anti-snipe aware) ──────────────────
 
-    async bid(auctionId, bidAmountWei) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+    async bid(auctionId, bidAmountWei, endsAt) {
+      if (!(await this._ensure())) return;
       try {
+        if (endsAt && (Number(endsAt) - Math.floor(Date.now() / 1000)) < EXTENSION_WINDOW) {
+          toast('Last-minute bid — this extends the auction by 3 minutes (anti-snipe).', 'info');
+        }
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
-        const bidBig = BigInt(bidAmountWei);
-        const fee    = bidBig * FEE_BPS / 10000n;
-        const total  = bidBig + fee;
-        toast('Placing bid…', 'info');
-        const tx = await c.bid(auctionId, bidBig, { value: total });
+        toast('Placing bid (bid + 1.5% fee)…', 'info');
+        const tx = await c.bid(auctionId, BigInt(bidAmountWei), { value: withFee(bidAmountWei) });
         await tx.wait();
         toast('Bid placed!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Bid failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── AuctionHouse: Settle ───────────────────────────────────────────────
-
     async settle(auctionId) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+      if (!(await this._ensure())) return;
       try {
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
         toast('Settling auction…', 'info');
@@ -240,13 +318,11 @@ document.addEventListener('alpine:init', () => {
         await tx.wait();
         toast('Auction settled!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Settle failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── AuctionHouse: Cancel Early ─────────────────────────────────────────
-
     async cancelEarly(auctionId) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+      if (!(await this._ensure())) return;
       try {
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
         toast('Cancelling auction…', 'info');
@@ -254,108 +330,117 @@ document.addEventListener('alpine:init', () => {
         await tx.wait();
         toast('Auction cancelled!', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Cancel failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── OfferBook: Mark Eligible ───────────────────────────────────────────
+    // ── OfferBook: Make Offer (principal + 1.5%, stacked, non-withdrawable) ─
 
-    async markEligible(collection, tokenId) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+    async makeOffer(collection, tokenId, principalWei, expiresAt) {
+      if (!(await this._ensure())) return;
       try {
         const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
-        toast('Enabling offers…', 'info');
-        const tx = await c.markEligible(collection, tokenId);
+        toast('Submitting offer (offer + 1.5% fee)…', 'info');
+        const tx = await c.makeOffer(collection, tokenId, BigInt(principalWei), Math.floor(expiresAt), { value: withFee(principalWei) });
         await tx.wait();
-        toast('Offers enabled!', 'success');
+        toast('Offer placed! (locked until accept / reject / expiry)', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Enable offers failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── OfferBook: Make Offer ──────────────────────────────────────────────
-    // Deposits ETH on-chain. Token must be marked eligible by owner.
-
-    async makeOffer(collection, tokenId, amountWei) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
-      try {
-        const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
-        toast('Submitting offer…', 'info');
-        const tx = await c.makeOffer(collection, tokenId, { value: BigInt(amountWei) });
-        await tx.wait();
-        toast('Offer placed!', 'success');
-        setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Offer failed', 'error'); }
-    },
-
-    // ── OfferBook: Withdraw Offer ──────────────────────────────────────────
-
-    async withdrawOffer(collection, tokenId) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
-      try {
-        const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
-        toast('Withdrawing offer…', 'info');
-        const tx = await c.withdrawOffer(collection, tokenId);
-        await tx.wait();
-        toast('Offer withdrawn!', 'success');
-        setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Withdraw failed', 'error'); }
-    },
-
-    // ── OfferBook: Accept Offer ────────────────────────────────────────────
-    // NFT owner calls this. Must have approved OFFERBOOK first.
+    // ── OfferBook: Accept one position ────────────────────────────────────
 
     async acceptOffer(collection, tokenId, bidder) {
-      if (!this.signer) { await this.connect(); if (!this.signer) return; }
+      if (!(await this._ensure())) return;
       try {
         await this._approveOperator(collection, OFFERBOOK);
         const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
         toast('Accepting offer…', 'info');
         const tx = await c.acceptOffer(collection, tokenId, bidder);
         await tx.wait();
-        toast('Offer accepted!', 'success');
+        toast('Offer accepted! Seller receives 100% of the offer.', 'success');
         setTimeout(() => location.reload(), 1200);
-      } catch (e) { toast(e.reason || e.message || 'Accept failed', 'error'); }
+      } catch (e) { toast(revertMessage(e), 'error'); }
+    },
+
+    // ── OfferBook: Reject a bidder's position (refund principal, fee kept) ─
+
+    async rejectOffer(collection, tokenId, bidder) {
+      if (!(await this._ensure())) return;
+      try {
+        const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
+        toast('Rejecting offer…', 'info');
+        const tx = await c.rejectOffer(collection, tokenId, bidder);
+        await tx.wait();
+        toast('Offer rejected — principal refunded to bidder.', 'success');
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) { toast(revertMessage(e), 'error'); }
+    },
+
+    // ── Reports ───────────────────────────────────────────────────────────
+
+    async report(targetType, targetId, reason, detail) {
+      if (!(await this._ensure())) return;
+      try {
+        const res = await fetch('/api/v1/reports', {
+          method: 'POST', headers: this.authHeaders(),
+          body: JSON.stringify({ target_type: targetType, target_id: targetId, reason, detail: detail || '' }),
+        });
+        if (!res.ok) throw new Error('report failed');
+        toast('Report submitted. Thank you.', 'success');
+      } catch (e) { toast('Could not submit report.', 'error'); }
+    },
+
+    async saveProfile(fields) {
+      if (!(await this._ensure())) return;
+      try {
+        const res = await fetch(`/api/v1/profile/${this.address}`, {
+          method: 'PUT', headers: this.authHeaders(), body: JSON.stringify(fields),
+        });
+        if (!res.ok) throw new Error('save failed');
+        toast('Profile saved.', 'success');
+        setTimeout(() => location.reload(), 800);
+      } catch (e) { toast('Could not save profile.', 'error'); }
     },
   });
 
-  // Auto-reconnect if previously connected
+  // Auto-reconnect if previously connected.
   const saved = localStorage.getItem('mw_addr');
-  if (saved && window.ethereum) {
-    Alpine.store('wallet').connect().catch(() => {});
+  const kind  = localStorage.getItem('mw_kind') || 'injected';
+  if (saved && (window.ethereum || kind === 'walletconnect')) {
+    Alpine.store('wallet').connect(kind).catch(() => {});
   }
 });
 
-// Convenience alias for x-data="walletStore()" pattern
 function walletStore() { return Alpine.store('wallet'); }
 
 // ── Toast notifications ───────────────────────────────────────────────────────
 
 function toast(msg, type = 'info') {
-  const colors = {
-    success: 'bg-emerald-600',
-    error:   'bg-red-600',
-    info:    'bg-neutral-700',
-  };
+  const colors = { success: 'bg-emerald-600', error: 'bg-red-600', info: 'bg-neutral-700' };
   const el = document.createElement('div');
   el.className = `pointer-events-auto px-4 py-3 rounded-xl text-white text-sm font-medium shadow-xl transition-opacity duration-300 ${colors[type] || colors.info}`;
   el.textContent = msg;
   document.getElementById('toasts')?.appendChild(el);
-  setTimeout(() => { el.style.opacity = '0'; }, 3000);
-  setTimeout(() => el.remove(), 3400);
+  setTimeout(() => { el.style.opacity = '0'; }, 3600);
+  setTimeout(() => el.remove(), 4000);
 }
 
 // ── Event bus listeners ────────────────────────────────────────────────────────
 
 window.addEventListener('buy', e => {
-  const { collection, tokenId, price } = e.detail;
-  Alpine.store('wallet').buy(collection, tokenId, price);
+  const { collection, tokenId, seller, price } = e.detail;
+  Alpine.store('wallet').buy(collection, tokenId, seller, price);
 });
-
 window.addEventListener('cancel-listing', e => {
   const { collection, tokenId } = e.detail;
   Alpine.store('wallet').cancel(collection, tokenId);
 });
-
 window.addEventListener('settle-auction', e => {
-  const { auctionId } = e.detail;
-  Alpine.store('wallet').settle(auctionId);
+  Alpine.store('wallet').settle(e.detail.auctionId);
+});
+
+// Live notification badge via SSE.
+window.addEventListener('mw-notification', () => {
+  const w = Alpine.store('wallet');
+  if (w?.jwt) w.refreshUnread();
 });

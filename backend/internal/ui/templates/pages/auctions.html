@@ -1,8 +1,14 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div class="mb-6 flex items-center justify-between">
+<div class="mb-6 flex items-center justify-between gap-4">
   <h1 class="text-2xl font-bold text-neutral-200">Live Auctions</h1>
-  <span class="text-sm text-neutral-500">{{len .Auctions}} active</span>
+  <div class="flex items-center gap-3">
+    <span class="text-sm text-neutral-500">{{len .Auctions}} active</span>
+    <button @click="$dispatch('open-nft-picker', {action: 'auction'})"
+            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
+      <span class="text-base leading-none">+</span> Auction an NFT
+    </button>
+  </div>
 </div>
 
 <div id="auctions-grid"
