@@ -1,0 +1,8 @@
+# gitleaks allowlist — confirmed false positives.
+#
+# Fingerprint format: <commit>:<file>:<rule>:<startLine>
+#
+# generic-api-key flagged the string "CGO_ENABLED=1" (a Go build flag) in the now-deleted
+# backend/Makefile. Verified non-secret (entropy 3.55, plain build env var). The file has been
+# removed from the working tree; this suppresses the lingering history match so CI stays green.
+cd791cea38ccc6880c2a3816597153d0e80b21a3:backend/Makefile:generic-api-key:52

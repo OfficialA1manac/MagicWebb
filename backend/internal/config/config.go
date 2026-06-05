@@ -36,7 +36,7 @@ type Config struct {
 	// Auth
 	SIWEDomain string
 	JWTSecret  string
-	NonceTTL   time.Duration // Redis TTL for SIWE nonces
+	NonceTTL   time.Duration // TTL for SIWE nonces (in-memory store)
 
 	// Indexer
 	IndexFromBlock  uint64 // start block (override for reindex)

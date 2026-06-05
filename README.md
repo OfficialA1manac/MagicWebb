@@ -69,7 +69,7 @@ render.yaml       Render.com deployment manifest
 
 ## Configuration
 
-The backend reads configuration from environment variables (see `backend/.env.example`). Provide them via your shell, a `.env` file loaded by `dev.ps1`, or your host's secret manager. Required: `RPC_URL`, `CHAIN_ID`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `POSTGRES_URL`, `JWT_SECRET` (≥32 chars).
+The backend reads configuration from environment variables (see `.env.example`). Provide them via your shell, a `.env` file loaded by `dev.ps1`, or your host's secret manager. Required: `RPC_URL`, `CHAIN_ID`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `POSTGRES_URL`, `JWT_SECRET` (≥32 chars).
 
 ## Run locally
 
@@ -96,7 +96,7 @@ forge script script/DeployCoston2.s.sol --rpc-url coston2 --broadcast   # deploy
 slither .                        # static analysis
 ```
 
-Deployed Coston2 addresses are configured in `backend/.env.example` / `render.yaml`.
+Deployed Coston2 addresses are configured in `.env.example` / `render.yaml`.
 
 ## Deployment
 

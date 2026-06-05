@@ -1,59 +1,62 @@
 # MagicWebb — System Overview
 
-MagicWebb is a non-custodial NFT marketplace on Flare (Coston2 testnet / Flare mainnet).
-NFTs stay in the seller's wallet until a transaction settles on-chain. No deposits, no wrapping.
+MagicWebb is a **non-custodial** NFT marketplace on Flare (Coston2 testnet, chain `114`;
+Flare mainnet, chain `14`, gated behind a readiness review). NFTs stay in the seller's
+wallet until a transaction settles on-chain — no deposits, no wrapping, no escrow of the
+token itself.
 
 ## Architecture
 
+Everything ships as a **single Go binary**. The browser talks to the contracts directly
+(the wallet signs every transaction); the backend only *observes* the chain and projects
+state into Postgres for fast reads and live updates.
+
 ```
-┌─────────────────────────────────────────────────────────┐
-│                     Browser / Wallet                    │
-│   Next.js 14 (App Router)  wagmi v2  viem               │
-└────────────────────┬────────────────────────────────────┘
-                     │ REST / SSE
-┌────────────────────▼────────────────────────────────────┐
-│                 Go API Server (:8080)                    │
-│  REST handlers  •  Redis pub/sub SSE  •  SIWE auth      │
-└────┬────────────────────────────────────────────────────┘
-     │ PostgreSQL (Supabase)        │ Redis
-┌────▼────────────────────────────────────────────────────┐
-│  Go Indexer (background worker)                         │
-│  • Chain watcher (polls every 2 s)                      │
-│  • Auction keeper (polls every 30 s — auto-settles)     │
-│  • Inactivity sweeper (auto-cancels 0-bid auctions)     │
-│  • Trending score worker (every 60 s)                   │
-└────────────────────┬────────────────────────────────────┘
-                     │ eth_getLogs / eth_sendRawTransaction
-┌────────────────────▼────────────────────────────────────┐
-│            Flare Coston2 (chain 114) / Flare (chain 14)  │
-│   Marketplace  •  AuctionHouse  •  OfferBook             │
-└─────────────────────────────────────────────────────────┘
+┌──────────────────────────────────────────────────────────┐
+│                     Browser / Wallet                      │
+│   HTMX 2  •  Alpine.js 3  •  ethers.js 6  •  WalletConnect │
+└───────────────────────────┬──────────────────────────────┘
+                            │ HTTP (HTMX partials) + SSE (live events)
+┌───────────────────────────▼──────────────────────────────┐
+│              Go Fiber binary  (cmd/server, :8080)         │
+│  • REST API + HTMX page handlers   (internal/api, ui)     │
+│  • SIWE auth → JWT                  (internal/auth)        │
+│  • Real-time hub (in-memory SSE)    (internal/sse)        │
+│  • Chain indexer + auction keeper   (internal/indexer)    │
+└─────────┬─────────────────────────────────┬──────────────┘
+          │ pgx                             │ JSON-RPC (eth_getLogs / sendRawTx)
+┌─────────▼──────────────┐      ┌───────────▼──────────────────────────────┐
+│  PostgreSQL (Supabase) │      │  Flare Coston2 (114) / Flare (14)         │
+│  projected read model  │      │  Marketplace • AuctionHouse • OfferBook   │
+└────────────────────────┘      └───────────────────────────────────────────┘
 ```
+
+There is **no Redis, no separate frontend service, and no Docker Compose** — the SSE hub is
+in-process and the UI is server-rendered from the same binary via `embed.FS`.
 
 ## Smart contracts
 
 | Contract | Purpose |
 |----------|---------|
-| `Marketplace` | Fixed-price ERC-721/1155 listings. `list`, `batchList` (up to 50 tokens), `cancel`, `buy`. |
-| `AuctionHouse` | English auctions. Single-step bidding. Auto-settled by keeper. Push-refunds for outbid bidders. |
-| `OfferBook` | On-chain ETH offers. Owners mark tokens eligible; bidders deposit ETH; owners accept. |
+| `Marketplace` | Fixed-price ERC-721/1155 listings. Free to list. `list`, `list1155`, `batchList` (up to 50 ERC-721), `cancel`, `buy`. Non-custodial: the NFT stays with the seller until `buy` settles. |
+| `AuctionHouse` | English auctions. Single-step bidding; the previous high bidder is refunded automatically (with a pull-pattern fallback). Anti-snipe time extension. Settled by an off-chain keeper after the end time. |
+| `OfferBook` | On-chain escrowed ETH offers. A bidder locks ETH (`makeOffer`); the owner accepts (`acceptOffer`) or rejects (`rejectOffer`); expired offers are refundable by anyone (`refundExpiredOffer`). No off-chain signatures. |
 
-Platform fee: **1.5%** (`PLATFORM_FEE_BPS = 150`, hardcoded constant). Applied to all settlement operations. Fee sent directly to the immutable `feeRecipient` wallet set at deploy time. No vault, no intermediary.
-
-No royalties. The platform does not route or enforce any royalty payments.
+**Fee model: taker-pays 1.5%.** `PLATFORM_FEE_BPS = 150` is a hardcoded constant. Listings are
+free; the buyer / bidder / offerer pays 1.5% on top, so the seller always nets 100% of their ask.
+The fee goes directly to the immutable `feeRecipient` set at deploy time. **No royalties.**
 
 ## Key design decisions
 
 | Decision | Rationale |
 |----------|-----------|
-| Unstoppable contracts | No pause, no admin. Once deployed, contracts run forever. Cannot be frozen by any key compromise. |
-| Non-custodial | Tokens stay with seller; no escrow risk. |
-| Fixed auction time | `endsAt` set at creation, immutable after. |
-| Single-step bidding | No commit-reveal. Bidder sends bid + 1.5% fee in one tx. Simple, automatic. |
-| Push-refunds | Outbid bidder receives full payment back (including fee) automatically in the same tx as the new bid. No manual reclaim. |
-| Bidder-pays auction fee | 1.5% on top of bid at bid time. Losing bidders get it back. Platform keeps it only from the winner. |
-| Auto-settle | Keeper bot calls `settle()` on expired auctions. No user action needed. |
-| Auto-cancel | 30-minute window: zero-bid auctions are cancelled automatically if no one bids. |
-| On-chain offer eligibility | Owners explicitly mark NFTs eligible for offers. No off-chain signatures. |
-| Batch listing | Up to 50 ERC-721 tokens from any collections listed in one `batchList()` transaction. |
-| `restart: always` | All Docker services auto-restart on crash or reboot. |
+| Unstoppable contracts | No pause, no admin, no owner withdrawal, no upgrade proxy. A key compromise cannot freeze or drain the market. |
+| Non-custodial | The token never leaves the seller's wallet pre-settlement — no escrow risk. |
+| Taker-pays fee | Sellers receive their full ask; the 1.5% is added on top for the buyer/bidder/offerer. |
+| Immutable fee + recipient | `feeRecipient` and the 150 bps rate are fixed at deploy; changing them means deploying new contracts. |
+| On-chain offers | `OfferBook` escrows real ETH on-chain (no EIP-712 signatures / nonces) — an accepted offer always has funds behind it. |
+| Keeper-settled auctions | An off-chain keeper calls `settle()` after the end time so winners don't have to. (Operational dependency — see `READINESS.md`.) |
+| Batch listing | Up to 50 ERC-721 tokens listed in a single `batchList()` transaction. |
+
+See `SYSTEM.md` and `CONTRACTS_ANNOTATED.md` for contract-level detail, `WALKTHROUGH.md` for
+end-to-end user/developer flows, and `TECH_STACK.md` for the component inventory.

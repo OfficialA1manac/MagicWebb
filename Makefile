@@ -6,7 +6,7 @@ BINARY  := bin/magicwebb
 SERVER  := ./backend/cmd/server
 HTTP_ADDR ?= :8080
 
-.PHONY: help dev build run migrate contracts-build contracts-test deploy load-addrs regen-abi clean
+.PHONY: help dev build run migrate migrate-status test lint contracts-build contracts-test deploy load-addrs regen-abi clean
 
 help: ## show available targets
 	@grep -E '^[a-zA-Z_-]+:.*?## ' $(MAKEFILE_LIST) | awk 'BEGIN{FS=":.*?## "}{printf "  %-20s %s\n", $$1, $$2}'
@@ -24,8 +24,11 @@ build: ## compile single binary → bin/magicwebb
 run: build ## build then run
 	./$(BINARY)
 
-migrate: ## run DB migrations
-	cd backend && go run ./cmd/migrate 2>/dev/null || go run ./internal/db/migrate/main.go
+migrate: ## run DB migrations (goose up) — note: the server also auto-migrates on startup
+	cd backend && go run github.com/pressly/goose/v3/cmd/goose -dir internal/db/migrations postgres "$(POSTGRES_URL)" up
+
+migrate-status: ## show DB migration status
+	cd backend && go run github.com/pressly/goose/v3/cmd/goose -dir internal/db/migrations postgres "$(POSTGRES_URL)" status
 
 # ── Contracts ─────────────────────────────────────────────────────────────────
 
@@ -59,6 +62,14 @@ load-addrs: ## sync deployed contract addresses into .env
 regen-abi: ## regenerate wallet.js ABIs from forge build (updates static/wallet.js constants)
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
 	@echo "  ABIs embedded in backend/internal/ui/static/wallet.js — update manually if needed"
+
+# ── Quality ───────────────────────────────────────────────────────────────────
+
+test: ## run Go test suite with the race detector
+	cd backend && go test ./... -race -count=1 -timeout 120s
+
+lint: ## run golangci-lint over the backend
+	cd backend && golangci-lint run ./...
 
 # ── Housekeeping ──────────────────────────────────────────────────────────────
 

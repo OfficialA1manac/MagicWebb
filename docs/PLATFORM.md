@@ -1,93 +1,79 @@
-# MagicWebb Platform Guide
+# MagicWebb Platform & Operations Guide
+
+MagicWebb runs as a **single Go binary** that serves the REST API, the server-rendered HTMX
+UI, the live SSE event stream, and the on-chain indexer — backed by one Postgres database.
+There is no Docker Compose stack, no Redis, and no separate frontend service.
 
 ## Prerequisites
+
 | Tool | Purpose |
 |------|---------|
-| Docker + Docker Compose 24+ | Run all services |
-| Foundry (`forge`, `cast`) | Contract build/deploy |
-| Node.js 20+ | Frontend build |
-| `jq` | ABI regen + address sync |
-| Go 1.22+ | Backend build (optional — Docker handles it) |
+| Go 1.25+ | Build/run the binary |
+| Foundry (`forge`, `cast`) | Contract build/test/deploy |
+| PostgreSQL (e.g. a free Supabase project) | Read model + projections |
+| `jq` | Deploy address sync (`make load-addrs`) |
+| `goose` (or `go run …/goose`) | Manual migrations (the server also auto-migrates on startup) |
 
 ## First-time setup
+
 ```bash
 git clone https://github.com/OfficialA1manac/MagicWebb && cd MagicWebb
-make install
-cp backend/.env.example .env          # backend/indexer env
-cp frontend/.env.example frontend/.env.local  # frontend env
-# Fill in: POSTGRES_URL, PRIVATE_KEY, CREATOR_ADDR, KEEPER_KEY, JWT_SECRET
+cp .env.example .env       # fill in POSTGRES_URL, RPC_URL, contract addrs, JWT_SECRET (≥32 chars)
+make build                 # → bin/magicwebb
 ```
 
-## Full deploy (one command)
+## Run
+
 ```bash
-make fresh-deploy
-# builds contracts → tests → deploys to Coston2 → regenerates ABIs
-# → updates .env + frontend/.env.local + render.yaml → starts Docker
+make dev      # go run, no build step (hot path for development)
+make run      # build then run the single binary
+# Windows:
+./dev.ps1     # loads .env and starts the server
 ```
 
-## Daily operations
-```bash
-make up      # start all services (restart:always — survives reboots + crashes)
-make down    # stop all services
-make logs    # tail all logs (Ctrl-C to stop)
-make health  # HTTP health check
-make status  # process/port/chain status
-```
+The server listens on `$HTTP_ADDR` (default `:8080`). Liveness at `/healthz`. Migrations run
+automatically on boot via embedded goose; run them manually with `make migrate` if needed.
 
-## Services
-| Service | Port | Description |
-|---------|------|-------------|
-| `api` | 8080 | REST API + SSE events |
-| `indexer` | — | Chain watcher + keeper bot + sweepers |
-| `redis` | 6379 | Event pub/sub + rate limiting |
-| `frontend` | 3000 | Next.js SSR app |
+## Make targets
 
-All services have `restart: always` — they restart automatically on crash or Docker daemon restart. `make up` once = runs forever.
+| Target | Description |
+|--------|-------------|
+| `make dev` | Run locally with `go run` |
+| `make build` / `make run` | Compile → `bin/magicwebb` / build then run |
+| `make migrate` / `make migrate-status` | Apply / inspect DB migrations (goose) |
+| `make test` | Go test suite with the race detector |
+| `make lint` | `golangci-lint` over the backend |
+| `make contracts-build` / `make contracts-test` | `forge build --sizes` / `forge test -vvv` |
+| `make deploy` | Deploy contracts to Coston2, then sync addresses into `.env` |
+| `make load-addrs` | Sync deployed addresses from the Foundry broadcast into `.env` |
+| `make clean` | Remove `bin/`, `contracts/out`, `cache`, `broadcast` |
 
 ## Auction keeper bot
-Enabled by setting `KEEPER_KEY` in `.env`. The keeper runs two sweeps every 30 seconds:
 
-**Auto-settle:** Calls `settle(auctionId)` on expired auctions that have at least one bid.
-- Contract: NFT → winner, fee (upfront from bidder) → feeRecipient, full bid → seller.
+Set `KEEPER_KEY` (a funded hex ECDSA private key) to enable the indexer's keeper, which:
 
-**Auto-cancel:** Calls `cancelIfInactive(auctionId)` on auctions with zero bids past the 30-minute window.
+- **Auto-settles** expired auctions that have at least one bid — `settle(auctionId)` sends the
+  NFT to the winner, the fee to `feeRecipient`, and the proceeds to the seller.
+- **Auto-cancels** auctions left with zero bids past their inactivity window.
 
-Fund the keeper wallet with small amounts of FLR for gas.
+Fund the keeper wallet with a small amount of FLR/C2FLR for gas. The keeper is an operational
+single point of failure for *automatic* settlement — see `READINESS.md`.
 
-## ABI regeneration
-After redeploying contracts, regenerate TypeScript ABIs:
-```bash
-make contracts-build   # compile
-make regen-abi         # writes frontend/lib/abi/*.ts from compiled JSON
-```
+## Configuration
 
-## Environment variables
-### Root `.env` (backend + indexer)
-| Key | Required | Description |
-|-----|----------|-------------|
-| `POSTGRES_URL` | yes | Supabase connection string |
-| `REDIS_URL` | yes | Redis (default: `redis://redis:6379` in Docker) |
-| `RPC_URL` | yes | Flare/Coston2 JSON-RPC |
-| `CHAIN_ID` | yes | `114` (Coston2) or `14` (mainnet) |
-| `MARKETPLACE_ADDR` | yes | Deployed Marketplace address |
-| `AUCTION_ADDR` | yes | Deployed AuctionHouse address |
-| `OFFERBOOK_ADDR` | yes | Deployed OfferBook address |
-| `JWT_SECRET` | yes | 32+ byte hex for SIWE JWT signing |
-| `FRONTEND_URL` | yes | CORS origin |
-| `KEEPER_KEY` | yes | Keeper wallet private key (auto-settles/cancels auctions) |
-| `INDEX_FROM_BLOCK` | opt | Start block (auto-set by `make deploy`) |
+All variables live in `.env` (template: `.env.example`); the authoritative list is
+`backend/internal/config/config.go`. Required: `POSTGRES_URL`, `RPC_URL`, `CHAIN_ID`,
+`MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `JWT_SECRET`. Everything else is optional
+with sane defaults (server, indexer tuning, trending weights, keeper/admin, integrations).
 
-### `frontend/.env.local`
-| Key | Description |
-|-----|-------------|
-| `NEXT_PUBLIC_API_URL` | Backend URL |
-| `NEXT_PUBLIC_CHAIN_ID` | `114` / `14` |
-| `NEXT_PUBLIC_RPC_URL` | Chain RPC for wagmi |
-| `NEXT_PUBLIC_MARKETPLACE_ADDR` | Marketplace address |
-| `NEXT_PUBLIC_AUCTION_ADDR` | AuctionHouse address |
-| `NEXT_PUBLIC_OFFER_ADDR` | OfferBook address |
+## Deployment (Render)
+
+Deployed via `render.yaml` as a single Go web service (health check `/healthz`).
+`POSTGRES_URL` and `KEEPER_KEY` are set as secrets; `JWT_SECRET` is generated by Render.
 
 ## Contract addresses are permanent
-Once deployed, contract addresses and `feeRecipient` cannot change. The 1.5% platform fee is hardcoded as `PLATFORM_FEE_BPS = 150` — not overridable by any env var or admin key. Contracts have no pause function and no admin role — they run forever. To change the fee recipient or fee rate: deploy new contracts and run `make fresh-deploy`.
 
-No royalties are supported or enforced by any contract.
+Once deployed, contract addresses and `feeRecipient` cannot change, and the 1.5% fee
+(`PLATFORM_FEE_BPS = 150`) is not overridable by any env var or admin key — the contracts have
+no pause and no admin role. To change the recipient or rate, deploy new contracts and update the
+addresses in `.env` and `wallet.js`. No royalties are supported or enforced.
