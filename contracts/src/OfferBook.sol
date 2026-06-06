@@ -76,14 +76,14 @@ contract OfferBook is MarketplaceCore {
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). Fee is charged on top.
     /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
-    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable {
+    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant {
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
     }
 
     /// @notice Offer on ERC-1155 units. Send `principal + 1.5%` as msg.value.
     /// @param units  Number of ERC-1155 units desired (latest top-up wins).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
-        external payable
+        external payable nonReentrant
     {
         if (units == 0) revert InvalidAmount();
         _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, expiresAt);
@@ -102,7 +102,6 @@ contract OfferBook is MarketplaceCore {
 
         uint256 fee = _feeOf(principal);
         if (msg.value != uint256(principal) + fee) revert WrongValue();
-        _payFee(fee); // non-refundable, forwarded immediately
 
         Position storage p = positions[coll][tokenId][msg.sender];
         uint256 newPrincipal = uint256(p.principal) + principal;
@@ -111,6 +110,8 @@ contract OfferBook is MarketplaceCore {
         p.units     = units;
         p.expiresAt = expiresAt;
         p.standard  = standard;
+
+        _payFee(fee); // interaction last (CEI); non-refundable, forwarded immediately
 
         emit OfferMade(coll, tokenId, msg.sender, p.principal, fee, units, expiresAt);
     }

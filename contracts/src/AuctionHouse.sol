@@ -71,8 +71,10 @@ contract AuctionHouse is MarketplaceCore {
     uint256 public nextAuctionId;
     mapping(uint256 => Auction) public auctions;
 
-    /// @notice Emergency fallback for push-refund failures (e.g. bidder is a non-receiving contract).
-    ///         Stores the BID amount only (the fee is always retained by the platform).
+    /// @notice Pull-pattern fallback for any push payment that fails (a non-receiving
+    ///         contract): outbid/early-cancel refunds (bid only), a winner's full refund
+    ///         when settlement cannot deliver the NFT, and seller proceeds / fees that
+    ///         bounce at settle. Recoverable via withdrawRefund().
     mapping(address => uint256) public pendingReturns;
 
     // ── Events ──────────────────────────────────────────────────────────────────
@@ -276,14 +278,31 @@ contract AuctionHouse is MarketplaceCore {
         // Fee = exact premium paid by winner (no rounding loss)
         uint128       fee      = winTotal - winBid;
 
-        _transferToken(std, coll, sel, winner, tid, amt);
-
-        if (fee > 0) {
-            (bool ok,) = feeRecipient.call{value: fee}("");
-            if (!ok) revert WithdrawFailed();
+        // Attempt the NFT transfer. If it fails (seller moved the token or revoked
+        // approval after the auction closed, or the winner cannot receive it), refund the
+        // winner their full payment and cancel — the winner's escrow is never left locked.
+        bool moved;
+        if (std == TokenStandard.ERC721) {
+            try IERC721(coll).safeTransferFrom(sel, winner, tid) { moved = true; } catch {}
+        } else {
+            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {}
         }
-        (bool ok2,) = sel.call{value: winBid}("");
-        if (!ok2) revert WithdrawFailed();
+        if (!moved) {
+            (bool refunded,) = winner.call{value: winTotal}("");
+            if (!refunded) pendingReturns[winner] += winTotal;
+            emit RefundPushed(winner, winTotal);
+            emit AuctionCancelled(id);
+            return;
+        }
+
+        // Payouts never revert: a non-receiving recipient falls back to pull-withdrawal,
+        // so a finished, transferred auction can never be bricked at the payout step.
+        if (fee > 0) {
+            (bool okFee,) = feeRecipient.call{value: fee}("");
+            if (!okFee) pendingReturns[feeRecipient] += fee;
+        }
+        (bool okSel,) = sel.call{value: winBid}("");
+        if (!okSel) pendingReturns[sel] += winBid;
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
