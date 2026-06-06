@@ -17,6 +17,7 @@ var (
 	// AuctionHouse
 	TopicAuctionCreated   = crypto.Keccak256Hash([]byte("AuctionCreated(uint256,address,uint256,address,uint8,uint128,uint128,uint64,uint64)"))
 	TopicBidPlaced        = crypto.Keccak256Hash([]byte("BidPlaced(uint256,address,uint128,uint128)"))
+	TopicAuctionExtended  = crypto.Keccak256Hash([]byte("AuctionExtended(uint256,uint64)"))
 	TopicAuctionSettled   = crypto.Keccak256Hash([]byte("AuctionSettled(uint256,address,address,uint128,uint256)"))
 	TopicAuctionCancelled = crypto.Keccak256Hash([]byte("AuctionCancelled(uint256)"))
 
@@ -36,7 +37,7 @@ var (
 func coreTopics() [][]common.Hash {
 	return [][]common.Hash{{
 		TopicListed, TopicCancelled, TopicBought,
-		TopicAuctionCreated, TopicBidPlaced,
+		TopicAuctionCreated, TopicBidPlaced, TopicAuctionExtended,
 		TopicAuctionSettled, TopicAuctionCancelled,
 		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded,
 	}}

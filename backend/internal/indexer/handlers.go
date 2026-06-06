@@ -67,6 +67,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onAuctionCreated(ctx, l)
 	case TopicBidPlaced:
 		return h.onBidPlaced(ctx, l, blockTime)
+	case TopicAuctionExtended:
+		return h.onAuctionExtended(ctx, l)
 	case TopicAuctionSettled:
 		return h.onAuctionSettled(ctx, l)
 	case TopicAuctionCancelled:
@@ -235,6 +237,22 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 	}
 	h.pub("auction-updated", map[string]any{
 		"event": "BidPlaced", "auctionId": auctionID, "bidder": bidder, "amtWei": amtWei,
+	})
+	return nil
+}
+
+// AuctionExtended(uint256 indexed id, uint64 newEndsAt) — anti-snipe close-time bump.
+func (h *handlers) onAuctionExtended(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 2 || len(l.Data) < 32 {
+		return fmt.Errorf("onAuctionExtended: short log")
+	}
+	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
+	newEndsAt := tsUnix(chunk(l.Data, 0))
+	if err := h.q.ExtendAuction(ctx, auctionID, newEndsAt); err != nil {
+		return fmt.Errorf("onAuctionExtended: %w", err)
+	}
+	h.pub("auction-updated", map[string]any{
+		"event": "AuctionExtended", "auctionId": auctionID, "endsAt": newEndsAt.Unix(),
 	})
 	return nil
 }

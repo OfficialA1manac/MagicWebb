@@ -295,6 +295,14 @@ func (q *Q) SetAuctionStatus(ctx context.Context, auctionID int64, status string
 	return err
 }
 
+// ExtendAuction pushes out an active auction's end time after an on-chain anti-snipe
+// extension (the AuctionExtended event). No-op on non-active auctions.
+func (q *Q) ExtendAuction(ctx context.Context, auctionID int64, endsAt time.Time) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE auctions SET ends_at=$1 WHERE auction_id=$2 AND status='active'`, endsAt, auctionID)
+	return err
+}
+
 func (q *Q) UpdateAuctionBid(ctx context.Context, r AuctionRow) error {
 	_, err := q.pool.Exec(ctx,
 		`UPDATE auctions SET highest_bid_wei=$1, highest_bidder=$2 WHERE auction_id=$3`,
