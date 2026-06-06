@@ -104,7 +104,14 @@ Deployed on [Render](https://render.com) via `render.yaml` (single Go web servic
 
 ## Documentation
 
-See [`docs/`](docs/) — `OVERVIEW.md`, `SYSTEM.md`, `PLATFORM.md`, `USER_GUIDE.md`, `WHITEPAPER.md`, `CONTRACTS_ANNOTATED.md`, `TROUBLESHOOTING.md`.
+See [`docs/`](docs/):
+- **`OVERVIEW.md`** — system overview & design decisions
+- **`WALKTHROUGH.md`** — end-to-end flows (user / developer / backend lenses)
+- **`TECH_STACK.md`** — component inventory with keep/update/replace calls
+- **`COMPETITIVE.md`** — comparison vs OpenSea/Blur/Magic Eden & Sparkles (Flare)
+- **`READINESS.md`** — mainnet go/no-go verdict (contracts + app/ops)
+- **`PLATFORM.md`** — operations & deployment guide · **`TROUBLESHOOTING.md`** — recovery steps
+- **`SYSTEM.md`**, **`CONTRACTS_ANNOTATED.md`**, **`USER_GUIDE.md`**, **`WHITEPAPER.md`**, **`WHITEPAPER_TECHNICAL.md`** — deep references
 
 ## License
 
