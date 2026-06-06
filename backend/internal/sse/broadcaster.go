@@ -40,25 +40,33 @@ func (b *Broadcaster) Publish(ev Event) {
 	}
 }
 
-// Subscribe returns a channel of formatted SSE messages and a cancel func.
-func (b *Broadcaster) Subscribe() (<-chan string, func()) {
+// MaxClients caps concurrent SSE subscribers, bounding memory against connection-bombing.
+const MaxClients = 10_000
+
+// Subscribe registers a subscriber and returns its message channel and a cancel func.
+// ok is false when the subscriber cap is reached — the caller should reject the request.
+func (b *Broadcaster) Subscribe() (ch <-chan string, cancel func(), ok bool) {
 	id := uuid.New().String()
-	ch := make(chan string, 64)
+	c := make(chan string, 64)
 
 	b.mu.Lock()
-	b.clients[id] = ch
+	if len(b.clients) >= MaxClients {
+		b.mu.Unlock()
+		return nil, nil, false
+	}
+	b.clients[id] = c
 	b.mu.Unlock()
 
-	cancel := func() {
+	cancel = func() {
 		b.mu.Lock()
 		delete(b.clients, id)
 		b.mu.Unlock()
 		// drain to unblock any sender
-		for len(ch) > 0 {
-			<-ch
+		for len(c) > 0 {
+			<-c
 		}
 	}
-	return ch, cancel
+	return c, cancel, true
 }
 
 func (b *Broadcaster) loop() {

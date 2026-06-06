@@ -147,6 +147,11 @@ func verifyHandler(ns *nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if !found || !strings.Contains(req.Message, n) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "nonce not found or expired"})
 		}
+		// Bind the signed message to our domain so a signature obtained for another
+		// site cannot be replayed here (SIWE domain binding).
+		if d := config.C.SIWEDomain; d != "" && !strings.Contains(req.Message, d) {
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
+		}
 		ok, err := verifyEIP191(req.Message, req.Signature, req.Address)
 		if err != nil || !ok {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "signature verification failed"})

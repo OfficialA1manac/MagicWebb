@@ -149,7 +149,10 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 		c.Set("Connection", "keep-alive")
 		c.Set("X-Accel-Buffering", "no")
 
-		ch, cancel := bcast.Subscribe()
+		ch, cancel, ok := bcast.Subscribe()
+		if !ok {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
+		}
 		defer cancel()
 
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
