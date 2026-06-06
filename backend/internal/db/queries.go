@@ -7,13 +7,13 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
-	"github.com/jackc/pgx/v5/pgxpool"
 )
 
-// Q wraps a pgxpool.Pool and exposes typed query methods.
-type Q struct{ pool *pgxpool.Pool }
+// Q wraps a connection pool and exposes typed query methods.
+type Q struct{ pool PgxPool }
 
-func New(pool *pgxpool.Pool) *Q { return &Q{pool} }
+// New builds a Q over any PgxPool (a *pgxpool.Pool in production, a mock in tests).
+func New(pool PgxPool) *Q { return &Q{pool} }
 
 // Ping verifies the DB connection is alive.
 func (q *Q) Ping(ctx context.Context) error { return q.pool.Ping(ctx) }
