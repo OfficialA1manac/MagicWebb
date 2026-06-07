@@ -17,18 +17,18 @@ error OfferActive();
 uint64 constant MAX_OFFER_DURATION = 14 days;
 
 /// @title OfferBook
-/// @notice On-chain NFT offers with stacked positions and taker-paid fees.
+/// @notice On-chain NFT offers with stacked positions; the seller pays the fee on acceptance.
 ///
-/// Fee model (taker-pays, Option-4 stacked positions):
-///   - Anyone may offer on any NFT — no eligibility gate.
-///   - makeOffer is PAYABLE: send `principal + 1.5%`. The 1.5% fee is forwarded to the
-///     platform immediately and is NON-REFUNDABLE. Only `principal` is escrowed.
+/// Fee model (seller-pays, Option-4 stacked positions):
+///   - Anyone may offer on any NFT — no eligibility gate. Making an offer is FREE.
+///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
+///     offerer pays no fee.
 ///   - Multiple offers from the same bidder on the same NFT COMPOUND into one position;
-///     each top-up pays its own fee and refreshes the position's expiry.
+///     each top-up refreshes the position's expiry.
 ///   - There is NO individual withdrawal. A position is locked until accept / reject / expiry.
-///   - acceptOffer is FREE for the seller, who receives 100% of the escrowed principal.
-///   - rejectOffer (owner) or refundExpiredOffer (anyone, after expiry) returns the
-///     principal to the bidder. The fee is always retained by the platform.
+///   - acceptOffer DEDUCTS a 1.5% platform fee from the principal; the seller receives 98.5%.
+///   - rejectOffer (owner) or refundExpiredOffer (anyone, after expiry) returns the FULL
+///     principal to the bidder — an offer that never sells costs nothing.
 ///
 /// Non-custodial. No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
 contract OfferBook is MarketplaceCore {
@@ -50,7 +50,6 @@ contract OfferBook is MarketplaceCore {
         uint256 indexed tokenId,
         address indexed bidder,
         uint256 principal, // cumulative escrowed principal after this top-up
-        uint256 fee,       // fee paid on this top-up
         uint128 units,
         uint64  expiresAt
     );
@@ -59,7 +58,8 @@ contract OfferBook is MarketplaceCore {
         uint256 indexed tokenId,
         address indexed seller,
         address bidder,
-        uint256 principal,
+        uint256 principal, // gross accepted principal
+        uint256 fee,       // 1.5% platform fee deducted from the seller
         uint128 units,
         TokenStandard standard
     );
@@ -69,18 +69,18 @@ contract OfferBook is MarketplaceCore {
         MarketplaceCore(recipient)
     {}
 
-    // ── Make offer (taker pays 1.5% on top, fee non-refundable) ────────────────
+    // ── Make offer (free; full principal escrowed) ─────────────────────────────
 
-    /// @notice Offer on an ERC-721 token. Send `principal + 1.5%` as msg.value.
+    /// @notice Offer on an ERC-721 token. Send exactly `principal` as msg.value. FREE.
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
-    /// @param principal  The escrowed offer amount (≥ MIN_PRICE). Fee is charged on top.
+    /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
     /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
     function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant {
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
     }
 
-    /// @notice Offer on ERC-1155 units. Send `principal + 1.5%` as msg.value.
+    /// @notice Offer on ERC-1155 units. Send exactly `principal` as msg.value. FREE.
     /// @param units  Number of ERC-1155 units desired (latest top-up wins).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
         external payable nonReentrant
@@ -100,8 +100,7 @@ contract OfferBook is MarketplaceCore {
         if (principal < MIN_PRICE) revert BelowMinPrice();
         if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
 
-        uint256 fee = _feeOf(principal);
-        if (msg.value != uint256(principal) + fee) revert WrongValue();
+        if (msg.value != uint256(principal)) revert WrongValue();
 
         Position storage p = positions[coll][tokenId][msg.sender];
         uint256 newPrincipal = uint256(p.principal) + principal;
@@ -111,15 +110,13 @@ contract OfferBook is MarketplaceCore {
         p.expiresAt = expiresAt;
         p.standard  = standard;
 
-        _payFee(fee); // interaction last (CEI); non-refundable, forwarded immediately
-
-        emit OfferMade(coll, tokenId, msg.sender, p.principal, fee, units, expiresAt);
+        emit OfferMade(coll, tokenId, msg.sender, p.principal, units, expiresAt);
     }
 
-    // ── Accept (free for seller; seller gets 100% of principal) ────────────────
+    // ── Accept (seller pays 1.5%; seller nets 98.5% of principal) ──────────────
 
     /// @notice Accept a bidder's full position. Caller must currently own/hold the NFT.
-    ///         NFT → bidder, full escrowed principal → seller. Acceptance is free.
+    ///         NFT → bidder, 1.5% fee → feeRecipient, principal − fee → seller.
     function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
@@ -135,16 +132,18 @@ contract OfferBook is MarketplaceCore {
 
         delete positions[coll][tokenId][bidder];
 
+        uint256 fee = _feeOf(p.principal);
         uint256 moveAmount = p.standard == TokenStandard.ERC721 ? 1 : p.units;
         _transferToken(p.standard, coll, msg.sender, bidder, tokenId, moveAmount);
-        _pay(msg.sender, p.principal); // seller gets 100%
+        _payFee(fee);
+        _pay(msg.sender, uint256(p.principal) - fee); // seller nets 98.5%
 
-        emit OfferAccepted(coll, tokenId, msg.sender, bidder, p.principal, p.units, p.standard);
+        emit OfferAccepted(coll, tokenId, msg.sender, bidder, p.principal, fee, p.units, p.standard);
     }
 
-    // ── Reject / expire (principal refunded, fee kept) ─────────────────────────
+    // ── Reject / expire (full principal refunded — offers are free) ────────────
 
-    /// @notice Owner rejects a bidder's offer, refunding the principal (fee kept).
+    /// @notice Owner rejects a bidder's offer, refunding the full principal.
     function rejectOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
@@ -156,12 +155,12 @@ contract OfferBook is MarketplaceCore {
         }
 
         delete positions[coll][tokenId][bidder];
-        _pay(bidder, p.principal); // fee already retained at make time
+        _pay(bidder, p.principal); // full refund — no fee was charged at offer time
         emit OfferRefunded(coll, tokenId, bidder, p.principal);
     }
 
     /// @notice Reclaim an expired position's principal. Permissionless (keeper or bidder).
-    ///         The fee remains retained by the platform.
+    ///         Full principal refunded — no fee was charged at offer time.
     function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();

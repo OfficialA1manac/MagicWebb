@@ -14,9 +14,10 @@ error BelowMinPrice();
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @title MarketplaceCore
-/// @notice Shared base: immutable fee config, price floor, taker-pays fee math, NFT dispatch.
-/// @dev Single 1.5% platform fee, paid ON TOP by the taker (buyer/bidder/offerer) — sellers never pay.
-///      feeRecipient immutable post-deploy. No pause, no admin — contracts are unstoppable once deployed.
+/// @notice Shared base: immutable fee config, price floor, seller-pays fee math, NFT dispatch.
+/// @dev Single 1.5% platform fee, charged ONLY on a successful sale and DEDUCTED from the seller's
+///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient immutable
+///      post-deploy. No pause, no admin — contracts are unstoppable once deployed.
 abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
     uint16 public constant PLATFORM_FEE_BPS = 150;
@@ -32,9 +33,9 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         feeRecipient = recipient;
     }
 
-    // ── Taker-pays fee math ──────────────────────────────────────────────────
+    // ── Seller-pays fee math ─────────────────────────────────────────────────
 
-    /// @dev 1.5% fee for a given commitment. The taker always pays this ON TOP — sellers keep 100%.
+    /// @dev 1.5% fee for a given sale price. Deducted from the seller's proceeds at settlement.
     function _feeOf(uint256 commitment) internal pure returns (uint256) {
         return (commitment * PLATFORM_FEE_BPS) / 10_000;
     }

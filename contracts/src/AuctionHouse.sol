@@ -23,20 +23,20 @@ error NothingToWithdraw();
 ///
 /// Auction flow:
 ///   1. Seller calls `create` → AuctionCreated event. Auction starts immediately.
-///   2. Bidder calls `bid(id, bidAmount)` with msg.value = bidAmount + 1.5% platform fee.
+///   2. Bidder calls `bid(id, bidAmount)` with msg.value = bidAmount. Bidding is FREE.
 ///      The first bid must be ≥ reserve. Each later bid must clear
 ///      max(currentHigh * minIncrementBps, minIncrementFlat). BidPlaced event.
 ///   3. Anti-snipe: a bid landing within EXTENSION_WINDOW of `endsAt` pushes `endsAt`
 ///      out to now + EXTENSION_WINDOW. AuctionExtended event.
-///   4. After `endsAt`, keeper bot calls `settle(id)` → NFT → winner,
-///      fee → feeRecipient, full bid → seller. AuctionSettled event.
+///   4. After `endsAt`, keeper bot calls `settle(id)` → NFT → winner, 1.5% fee →
+///      feeRecipient (deducted from the seller), bid − fee → seller. AuctionSettled event.
 ///   5. Auto-cancel: if no bid within NO_BID_CANCEL_WINDOW, keeper calls `settle(id)` which
 ///      triggers `_cancelIfInactive` internally. Not directly callable externally.
 ///   6. Owner early cancel: seller calls `cancelEarly` any time before expiry.
 ///
-/// Fee semantics: the bidder pays 1.5% ON TOP of their bid, and the fee is NON-REFUNDABLE.
-/// When outbid, the previous leader is refunded their BID amount only — the platform keeps
-/// the 1.5%. The winner's fee → feeRecipient, the full winning bid → seller (seller gets 100%).
+/// Fee semantics: bidding is FREE. When outbid (or on early cancel) the previous leader is
+/// refunded their full bid. At settlement a 1.5% platform fee is DEDUCTED from the winning
+/// bid: fee → feeRecipient, bid − fee → seller (seller receives 98.5%).
 ///
 /// Non-custodial: seller keeps NFT until settle. Approval must remain valid through auction end.
 /// Unstoppable: no pause, no admin.
@@ -61,10 +61,9 @@ contract AuctionHouse is MarketplaceCore {
         uint64        endsAt;
         uint256       tokenId;
         uint128       reserve;
-        uint128       highestBid;       // bid amount proper (used for reserve/increment checks)
+        uint128       highestBid;       // current highest bid (full ETH escrowed; bidding is free)
         address       highestBidder;
         uint128       amount;           // token amount (always 1 for ERC-721)
-        uint128       highestTotal;     // exact ETH held for highest bidder: bid + fee
         uint128       minIncrementFlat; // absolute minimum increment in wei (seller-set, may be 0)
     }
 
@@ -72,7 +71,7 @@ contract AuctionHouse is MarketplaceCore {
     mapping(uint256 => Auction) public auctions;
 
     /// @notice Pull-pattern fallback for any push payment that fails (a non-receiving
-    ///         contract): outbid/early-cancel refunds (bid only), a winner's full refund
+    ///         contract): outbid/early-cancel refunds (full bid), a winner's full refund
     ///         when settlement cannot deliver the NFT, and seller proceeds / fees that
     ///         bounce at settle. Recoverable via withdrawRefund().
     mapping(address => uint256) public pendingReturns;
@@ -174,7 +173,6 @@ contract AuctionHouse is MarketplaceCore {
             highestBid:       0,
             highestBidder:    address(0),
             amount:           amount,
-            highestTotal:     0,
             minIncrementFlat: minIncFlat
         });
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
@@ -182,22 +180,20 @@ contract AuctionHouse is MarketplaceCore {
 
     // ── Bid ───────────────────────────────────────────────────────────────────
 
-    /// @notice Place a bid. Send bidAmount + 1.5% platform fee as msg.value.
-    ///         The fee is NON-REFUNDABLE. If you are later outbid you are refunded your
-    ///         BID amount only — the platform keeps the 1.5%.
+    /// @notice Place a bid. Send exactly `bidAmount` as msg.value — bidding is FREE.
+    ///         If you are later outbid, your full bid is refunded.
     /// @param id         Auction ID.
-    /// @param bidAmount  The bid value (not including the fee).
-    ///                   msg.value must equal bidAmount + floor(bidAmount * 150 / 10000).
+    /// @param bidAmount  The bid value. msg.value must equal bidAmount.
+    // Safe: nonReentrant guards every state-changing entrypoint, so no reentry is
+    // possible. The only post-call writes are the pull-payment fallback (un-brickable
+    // refunds) and the anti-snipe extension on this already-guarded auction.
+    // slither-disable-next-line reentrancy-eth
     function bid(uint256 id, uint128 bidAmount) external payable nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
 
-        // Compute required fee and validate exact payment
-        uint128 fee = uint128(uint256(bidAmount) * PLATFORM_FEE_BPS / 10_000);
-        if (uint256(bidAmount) + uint256(fee) > type(uint128).max) revert BidOverflow();
-        uint128 totalRequired = bidAmount + fee;
-        if (msg.value != totalRequired) revert WrongBidValue();
+        if (msg.value != bidAmount) revert WrongBidValue();
 
         // Enforce minimum bid: first bid ≥ reserve, later bids clear the effective increment.
         uint128 prevHigh = a.highestBid;
@@ -217,21 +213,18 @@ contract AuctionHouse is MarketplaceCore {
         // Snapshot previous leader before overwriting
         address prevBidder = a.highestBidder;
         uint128 prevBid    = a.highestBid;
-        uint128 prevTotal  = a.highestTotal;
 
         // Record new leader
         a.highestBid    = bidAmount;
         a.highestBidder = msg.sender;
-        a.highestTotal  = totalRequired;
 
-        // Refund the outbid bidder their BID only; the platform keeps their fee.
+        // Refund the outbid bidder in full — bidding is free.
         if (prevBidder != address(0)) {
-            _payFee(prevTotal - prevBid); // retain the outbid bidder's 1.5%
             (bool ok,) = prevBidder.call{value: prevBid}("");
             if (ok) {
                 emit RefundPushed(prevBidder, prevBid);
             } else {
-                // Fallback: store bid (fee already retained) for manual withdrawal
+                // Fallback: store the bid for manual withdrawal
                 pendingReturns[prevBidder] += prevBid;
             }
         }
@@ -243,15 +236,19 @@ contract AuctionHouse is MarketplaceCore {
             emit AuctionExtended(id, newEnd);
         }
 
-        emit BidPlaced(id, msg.sender, bidAmount, totalRequired);
+        emit BidPlaced(id, msg.sender, bidAmount, bidAmount);
     }
 
     // ── Settle ──────────────────────────────────────────────────────────────────
 
     /// @notice Settle a finished auction. Keeper bot calls this after endsAt.
-    ///         NFT → winner. Fee (exact premium paid by winner) → feeRecipient.
-    ///         Full winning bid → seller (seller gets 100%).
+    ///         NFT → winner. 1.5% platform fee (deducted from the seller) → feeRecipient.
+    ///         Winning bid − fee → seller (seller receives 98.5%).
     ///         If no bids and NO_BID_CANCEL_WINDOW has elapsed, cancels internally.
+    // Safe: nonReentrant guards every state-changing entrypoint, so no reentry is
+    // possible. `settled` is set before any external call (CEI); the only post-call
+    // writes are the pull-payment fallback for a bounced push payout.
+    // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
@@ -274,23 +271,22 @@ contract AuctionHouse is MarketplaceCore {
         uint256       tid      = a.tokenId;
         uint128       amt      = a.amount;
         uint128       winBid   = a.highestBid;
-        uint128       winTotal = a.highestTotal;
-        // Fee = exact premium paid by winner (no rounding loss)
-        uint128       fee      = winTotal - winBid;
+        // 1.5% platform fee, deducted from the seller's proceeds.
+        uint128       fee      = uint128(_feeOf(winBid));
 
         // Attempt the NFT transfer. If it fails (seller moved the token or revoked
         // approval after the auction closed, or the winner cannot receive it), refund the
         // winner their full payment and cancel — the winner's escrow is never left locked.
-        bool moved;
+        bool moved = false;
         if (std == TokenStandard.ERC721) {
             try IERC721(coll).safeTransferFrom(sel, winner, tid) { moved = true; } catch {}
         } else {
             try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {}
         }
         if (!moved) {
-            (bool refunded,) = winner.call{value: winTotal}("");
-            if (!refunded) pendingReturns[winner] += winTotal;
-            emit RefundPushed(winner, winTotal);
+            (bool refunded,) = winner.call{value: winBid}("");
+            if (!refunded) pendingReturns[winner] += winBid;
+            emit RefundPushed(winner, winBid);
             emit AuctionCancelled(id);
             return;
         }
@@ -301,8 +297,9 @@ contract AuctionHouse is MarketplaceCore {
             (bool okFee,) = feeRecipient.call{value: fee}("");
             if (!okFee) pendingReturns[feeRecipient] += fee;
         }
-        (bool okSel,) = sel.call{value: winBid}("");
-        if (!okSel) pendingReturns[sel] += winBid;
+        uint128 proceeds = winBid - fee;
+        (bool okSel,) = sel.call{value: proceeds}("");
+        if (!okSel) pendingReturns[sel] += proceeds;
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
@@ -319,8 +316,7 @@ contract AuctionHouse is MarketplaceCore {
     // ── Cancel: owner early ────────────────────────────────────────────────────
 
     /// @notice Seller cancels the auction early, before endsAt.
-    ///         If a highest bidder exists, their BID is refunded — the platform keeps
-    ///         the 1.5% fee (fees are non-refundable).
+    ///         If a highest bidder exists, their full bid is refunded (bidding is free).
     function cancelEarly(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller != msg.sender) revert NotSeller();
@@ -331,10 +327,8 @@ contract AuctionHouse is MarketplaceCore {
 
         address hiBidder = a.highestBidder;
         uint128 hiBid    = a.highestBid;
-        uint128 hiTotal  = a.highestTotal;
 
         if (hiBidder != address(0)) {
-            _payFee(hiTotal - hiBid); // retain the high bidder's 1.5%
             (bool ok,) = hiBidder.call{value: hiBid}("");
             if (ok) {
                 emit RefundPushed(hiBidder, hiBid);

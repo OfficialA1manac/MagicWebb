@@ -20,8 +20,8 @@ uint64 constant MAX_LISTING_DURATION = 90 days;
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
 /// @dev Non-custodial: tokens stay with seller until buyer settles. Approval required.
-///      Listing is FREE. The buyer pays a 1.5% platform fee ON TOP of the price —
-///      the seller receives 100% of their asking price.
+///      Listing is FREE. The buyer pays exactly the asking price; a 1.5% platform fee is
+///      deducted from the seller's proceeds (the seller receives 98.5%).
 ///      Listings are keyed by (collection, tokenId, seller): ERC-1155 holders each keep
 ///      their own stacked listing; for ERC-721 only the true owner's listing is
 ///      settle-able (a stale listing from a prior owner simply reverts on `buy`).
@@ -141,10 +141,10 @@ contract Marketplace is MarketplaceCore {
         emit Cancelled(coll, id, msg.sender);
     }
 
-    // ── Buy (taker pays 1.5% on top) ──────────────────────────────────────────
+    // ── Buy (seller pays 1.5% on the sale) ────────────────────────────────────
 
-    /// @notice Buy a listed token. Send `price + 1.5%` as msg.value.
-    /// @dev FINAL on success. NFT → buyer, fee → feeRecipient, full price → seller.
+    /// @notice Buy a listed token. Send exactly `price` as msg.value.
+    /// @dev FINAL on success. NFT → buyer, 1.5% fee → feeRecipient, price − fee → seller.
     ///      The `seller` arg selects which listing to buy (listings are seller-keyed).
     ///      Entire tx reverts if the NFT transfer fails (seller no longer owns/approves) —
     ///      no fee is taken, the listing remains. This is how first-settle-wins works.
@@ -153,14 +153,14 @@ contract Marketplace is MarketplaceCore {
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp > l.expiresAt) revert Expired();
 
+        if (msg.value != uint256(l.price)) revert WrongPrice();
         uint256 fee = _feeOf(l.price);
-        if (msg.value != uint256(l.price) + fee) revert WrongPrice();
 
         delete listings[coll][id][seller];
 
         _transferToken(l.standard, coll, l.seller, msg.sender, id, l.amount);
         _payFee(fee);
-        _pay(l.seller, l.price);
+        _pay(l.seller, uint256(l.price) - fee);
 
         emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee);
     }
