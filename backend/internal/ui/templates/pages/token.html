@@ -44,7 +44,7 @@
     <div class="bg-neutral-900 rounded-xl p-4 mb-4">
       <p class="text-xs text-neutral-500">Listed price</p>
       <p class="text-2xl font-bold text-emerald-400 mt-1">{{wei2eth .PriceWei}} FLR</p>
-      <p class="text-xs text-neutral-600 mt-1">Buyer pays +1.5% fee · Seller {{shortAddr .Seller}} · Expires {{.ExpiresAt.Format "Jan 2 2006"}}</p>
+      <p class="text-xs text-neutral-600 mt-1">Seller pays 1.5% fee · Seller {{shortAddr .Seller}} · Expires {{.ExpiresAt.Format "Jan 2 2006"}}</p>
     </div>
     {{end}}
 
@@ -67,7 +67,7 @@
       <div x-show="action==='buy'" class="space-y-2">
         <button class="w-full py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition"
                 @click="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{lower .Seller}}', price: '{{.PriceWei}}'})">
-          Buy Now — {{wei2eth .PriceWei}} FLR <span class="font-normal">+1.5%</span>
+          Buy Now — {{wei2eth .PriceWei}} FLR
         </button>
         <template x-if="isSeller">
           <button class="w-full py-2 rounded-xl bg-red-900/40 hover:bg-red-900/60 text-red-400 text-sm font-semibold transition"
@@ -78,9 +78,9 @@
       </div>
       {{end}}
 
-      <!-- Make Offer (free to submit? no — offer + 1.5%, locked until accept/reject/expiry) -->
+      <!-- Make Offer (free; full principal escrowed, locked until accept/reject/expiry) -->
       <div x-show="action==='offer'" class="space-y-3">
-        <p class="text-xs text-neutral-500">You pay offer + 1.5% fee now. The fee is non-refundable; the offer is locked until accepted, rejected, or expired.</p>
+        <p class="text-xs text-neutral-500">Free to offer — you escrow only your offer amount. It's fully refundable and locked until accepted, rejected, or expired.</p>
         <input x-model="offerAmt" type="number" step="0.001" min="0.01" placeholder="Offer amount (FLR, min 0.01)"
                class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
         <select x-model="offerDays" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
@@ -100,7 +100,7 @@
 
       <!-- List for Sale (FREE) -->
       <div x-show="action==='list'" class="space-y-3">
-        <p class="text-xs text-neutral-500">Listing is free — no upfront fee. The buyer pays the 1.5% fee on purchase. Requires a one-time NFT approval.</p>
+        <p class="text-xs text-neutral-500">Listing is free. On a sale the 1.5% platform fee is deducted from your proceeds — you receive 98.5%. Requires a one-time NFT approval.</p>
         <input x-model="listPrice" type="number" step="0.001" min="0.01" placeholder="Price (FLR, min 0.01)"
                class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
         <select x-model="listDays" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
@@ -116,7 +116,7 @@
 
       <!-- Create Auction (max 7d, flat min increment) -->
       <div x-show="action==='auction'" class="space-y-3">
-        <p class="text-xs text-neutral-500">English auction, max 7 days. Bids within the final 3 minutes extend it (anti-snipe). Bidders pay +1.5%.</p>
+        <p class="text-xs text-neutral-500">English auction, max 7 days. Bids within the final 3 minutes extend it (anti-snipe). Bidding is free; the 1.5% fee is deducted from the seller on settlement.</p>
         <input x-model="auctionReserve" type="number" step="0.001" min="0.01" placeholder="Reserve price (FLR, min 0.01)"
                class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
         <input x-model="auctionMinInc" type="number" step="0.001" min="0" placeholder="Flat min increment (FLR, optional)"
@@ -161,7 +161,7 @@
     </div>
     {{end}}
   </div>
-  <p class="text-xs text-neutral-600 mt-2">Accepting pays you 100% of that offer. Rejecting refunds the bidder's principal (the 1.5% fee stays with the platform).</p>
+  <p class="text-xs text-neutral-600 mt-2">Accepting pays you 98.5% of that offer (1.5% platform fee). Rejecting refunds the bidder's full principal.</p>
 </div>
 {{end}}
 {{end}}

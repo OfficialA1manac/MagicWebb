@@ -86,7 +86,7 @@
         <div class="flex items-center gap-2 flex-shrink-0">
           <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
           {{if eq .Status "pending"}}
-          <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-500" title="Offers are locked until accepted, rejected, or expired. The 1.5% fee was non-refundable.">🔒 Locked</span>
+          <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-500" title="Offers are locked until accepted, rejected, or expired, then fully refundable.">🔒 Locked</span>
           {{else}}
           <span class="text-xs px-2 py-1 rounded bg-neutral-800 text-neutral-400">{{.Status}}</span>
           {{end}}

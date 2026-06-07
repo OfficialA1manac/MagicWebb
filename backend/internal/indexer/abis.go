@@ -7,7 +7,7 @@ import (
 
 // Event topic hashes — keccak256 of canonical ABI signatures.
 // TokenStandard enum → uint8 in canonical form. These MUST match the reworked
-// taker-pays contracts exactly; a stale signature silently drops the event.
+// the deployed contracts exactly; a stale signature silently drops the event.
 var (
 	// Marketplace
 	TopicListed    = crypto.Keccak256Hash([]byte("Listed(address,uint256,address,uint8,uint128,uint128,uint64)"))
@@ -22,8 +22,8 @@ var (
 	TopicAuctionCancelled = crypto.Keccak256Hash([]byte("AuctionCancelled(uint256)"))
 
 	// OfferBook (Model A: stacked positions, fee taken at make)
-	TopicOfferMade     = crypto.Keccak256Hash([]byte("OfferMade(address,uint256,address,uint256,uint256,uint128,uint64)"))
-	TopicOfferAccepted = crypto.Keccak256Hash([]byte("OfferAccepted(address,uint256,address,address,uint256,uint128,uint8)"))
+	TopicOfferMade     = crypto.Keccak256Hash([]byte("OfferMade(address,uint256,address,uint256,uint128,uint64)"))
+	TopicOfferAccepted = crypto.Keccak256Hash([]byte("OfferAccepted(address,uint256,address,address,uint256,uint256,uint128,uint8)"))
 	TopicOfferRefunded = crypto.Keccak256Hash([]byte("OfferRefunded(address,uint256,address,uint256)"))
 
 	// NFT collections (ERC-721 / ERC-1155) — watched on tracked collections to

@@ -222,10 +222,10 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	bidder := addrStr(l.Topics[2].Bytes())
-	amtWei := bigStr(chunk(l.Data, 0)) // bidAmount (excludes the 1.5% fee)
+	amtWei := bigStr(chunk(l.Data, 0)) // bidAmount (bidding is free; fee taken from seller at settle)
 	placedAt := time.Unix(int64(blockTime), 0)
 
-	// Notify the previous highest bidder that they were outbid (bid refunded, fee kept).
+	// Notify the previous highest bidder that they were outbid (bid refunded in full).
 	if prev, err := h.q.GetAuction(ctx, auctionID); err == nil && prev != nil &&
 		prev.HighestBidder != "" && prev.HighestBidder != bidder {
 		h.notify(ctx, prev.HighestBidder, "outbid", "You were outbid",
@@ -297,18 +297,18 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 // ── OfferBook (Model A: stacked positions, fee taken at make) ──────────────────
 
 // OfferMade(address indexed coll, uint256 indexed tokenId, address indexed bidder,
-//           uint256 principal, uint256 fee, uint128 units, uint64 expiresAt)
+//           uint256 principal, uint128 units, uint64 expiresAt)
 func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
-	if len(l.Topics) < 4 || len(l.Data) < 4*32 {
+	if len(l.Topics) < 4 || len(l.Data) < 3*32 {
 		return fmt.Errorf("onOfferMade: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
 	bidder := addrStr(l.Topics[3].Bytes())
 	principal := bigStr(chunk(l.Data, 0)) // cumulative escrowed principal
-	feeWei := bigStr(chunk(l.Data, 1))
-	units := bigInt(chunk(l.Data, 2)).Int64()
-	expiresAt := tsUnix(chunk(l.Data, 3))
+	feeWei := "0"                          // offers are free; the fee is charged from the seller at acceptance
+	units := bigInt(chunk(l.Data, 1)).Int64()
+	expiresAt := tsUnix(chunk(l.Data, 2))
 	standard := "ERC721"
 	if units > 1 {
 		standard = "ERC1155"
@@ -339,9 +339,9 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 }
 
 // OfferAccepted(address indexed coll, uint256 indexed tokenId, address indexed seller,
-//               address bidder, uint256 principal, uint128 units, uint8 standard)
+//               address bidder, uint256 principal, uint256 fee, uint128 units, uint8 standard)
 func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime uint64) error {
-	if len(l.Topics) < 4 || len(l.Data) < 3*32 {
+	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
 		return fmt.Errorf("onOfferAccepted: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
@@ -349,14 +349,15 @@ func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime u
 	seller := addrStr(l.Topics[3].Bytes())
 	bidder := addrStr(chunk(l.Data, 0))
 	principal := bigStr(chunk(l.Data, 1))
+	feeWei := bigStr(chunk(l.Data, 2)) // 1.5% deducted from the seller on acceptance
 	occurredAt := time.Unix(int64(blockTime), 0)
 
 	if err := h.q.SetOfferStatus(ctx, collection, tokenID, bidder, "accepted"); err != nil {
 		return fmt.Errorf("onOfferAccepted status: %w", err)
 	}
-	// Fee was already collected at make time; sale fee recorded as 0 here.
+	// Sale fee is charged at acceptance, deducted from the seller's proceeds.
 	if err := h.q.InsertSale(ctx, collection, tokenID, seller, bidder,
-		principal, "0", "0", l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
+		principal, feeWei, "0", l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
 		return fmt.Errorf("onOfferAccepted sale: %w", err)
 	}
 	h.notify(ctx, bidder, "offer_accepted", "Your offer was accepted",

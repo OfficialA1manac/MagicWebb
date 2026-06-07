@@ -24,16 +24,6 @@
       const s = diff%60;
       return h > 0 ? h+'h '+m+'m '+s+'s' : m+'m '+s+'s';
     },
-    get feeDisplay() {
-      const b = parseFloat(this.bidAmt);
-      if (isNaN(b) || b <= 0) return '0.0000';
-      return (b * 0.015).toFixed(4);
-    },
-    get totalDisplay() {
-      const b = parseFloat(this.bidAmt);
-      if (isNaN(b) || b <= 0) return '0.0000';
-      return (b * 1.015).toFixed(4);
-    },
     sellerAddr: '{{lower .Seller}}',
     init() { setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000); }
   }">
@@ -75,8 +65,7 @@
         </button>
       </div>
       <p class="text-xs text-neutral-600">
-        1.5% fee: <span class="text-neutral-400" x-text="feeDisplay"></span> FLR ·
-        Total: <span class="text-neutral-400" x-text="totalDisplay"></span> FLR
+        Free to bid — you pay only your bid. If outbid, you're refunded in full.
       </p>
     </div>
     {{end}}

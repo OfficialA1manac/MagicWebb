@@ -1,5 +1,5 @@
 // MagicWebb wallet — Alpine.js store + ethers.js contract interactions
-// Chain: Coston2 testnet (chainId 114 = 0x72). Taker-pays 1.5% fee model.
+// Chain: Coston2 testnet (chainId 114 = 0x72). Seller-pays 1.5% fee model.
 const CHAIN_ID = 114;
 const RPC_URL  = 'https://coston2-api.flare.network/ext/C/rpc';
 
@@ -8,9 +8,11 @@ const MARKETPLACE = '0xec47a481513da81ff59a6c4002a98803039994e5';
 const AUCTION     = '0xf62e931d807f87ebd90cc3254b0a34a76c326331';
 const OFFERBOOK   = '0x7e88e86f61e6ad80abd828b6bcedaa86311736f0';
 
-// Platform fee: 1.5% = 150 bps. Taker pays this ON TOP of the commitment.
+// Platform fee: 1.5% = 150 bps. Charged on a successful sale, deducted from the seller.
+// Buyers, bidders and offerers send exactly their amount — no fee on top.
 const FEE_BPS = 150n;
-function withFee(wei)  { const a = BigInt(wei); return a + (a * FEE_BPS) / 10000n; }
+function feeOf(wei)    { const a = BigInt(wei); return (a * FEE_BPS) / 10000n; }
+function netOfFee(wei) { const a = BigInt(wei); return a - feeOf(a); }
 
 // WalletConnect v2 project id (https://cloud.walletconnect.com). Optional.
 const WC_PROJECT_ID = window.MW_WC_PROJECT_ID || '';
@@ -18,7 +20,7 @@ const WC_PROJECT_ID = window.MW_WC_PROJECT_ID || '';
 // Anti-snipe window mirrored from AuctionHouse.EXTENSION_WINDOW (3 minutes).
 const EXTENSION_WINDOW = 180;
 
-// ── ABIs (minimal, matching the reworked taker-pays contracts) ─────────────────
+// ── ABIs (minimal, matching the seller-pays contracts) ─────────────────────────
 
 const MARKETPLACE_ABI = [
   'function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external',
@@ -31,14 +33,14 @@ const MARKETPLACE_ABI = [
 const AUCTION_ABI = [
   'function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
   'function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
-  // bid: msg.value = bidAmount + 1.5% (fee non-refundable on outbid).
+  // bid: msg.value = bidAmount (free; full refund if outbid).
   'function bid(uint256 id, uint128 bidAmount) external payable',
   'function settle(uint256 id) external',
   'function cancelEarly(uint256 id) external',
 ];
 
 const OFFERBOOK_ABI = [
-  // makeOffer: msg.value = principal + 1.5% (fee non-refundable). Positions stack.
+  // makeOffer: msg.value = principal (free; fully refundable). Positions stack.
   'function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable',
   'function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt) external payable',
   'function acceptOffer(address coll, uint256 tokenId, address bidder) external',
@@ -60,9 +62,9 @@ function revertMessage(e) {
   const raw = [e?.reason, e?.shortMessage, e?.info?.error?.message, e?.data?.message, e?.message]
     .filter(Boolean).join(' ');
   const map = [
-    ['WrongValue',     "Amount sent doesn't match the required total (offer + 1.5% fee)."],
-    ['WrongBidValue',  "Amount sent doesn't match the bid + 1.5% fee."],
-    ['WrongPrice',     "Amount sent doesn't match the price + 1.5% fee."],
+    ['WrongValue',     "Amount sent must equal the offer amount exactly."],
+    ['WrongBidValue',  "Amount sent must equal the bid amount exactly."],
+    ['WrongPrice',     "Amount sent must equal the listing price exactly."],
     ['BelowMinPrice',  'Minimum is 0.01 FLR.'],
     ['BidTooLow',      'Your bid is below the minimum increment.'],
     ['NotApproved',    'Approve the contract to manage this NFT first.'],
@@ -236,8 +238,8 @@ document.addEventListener('alpine:init', () => {
         }
         if (pf && pf.price_wei) priceWei = pf.price_wei;
         const c = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, this.signer);
-        toast('Sending buy (price + 1.5% fee)…', 'info');
-        const tx = await c.buy(collection, tokenId, seller, { value: withFee(priceWei) });
+        toast('Sending buy (you pay the listed price)…', 'info');
+        const tx = await c.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
         await tx.wait();
         toast('Purchase confirmed!', 'success');
         setTimeout(() => location.reload(), 1200);
@@ -301,8 +303,8 @@ document.addEventListener('alpine:init', () => {
           toast('Last-minute bid — this extends the auction by 3 minutes (anti-snipe).', 'info');
         }
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
-        toast('Placing bid (bid + 1.5% fee)…', 'info');
-        const tx = await c.bid(auctionId, BigInt(bidAmountWei), { value: withFee(bidAmountWei) });
+        toast('Placing bid (free — you pay only your bid)…', 'info');
+        const tx = await c.bid(auctionId, BigInt(bidAmountWei), { value: BigInt(bidAmountWei) });
         await tx.wait();
         toast('Bid placed!', 'success');
         setTimeout(() => location.reload(), 1200);
@@ -333,14 +335,14 @@ document.addEventListener('alpine:init', () => {
       } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── OfferBook: Make Offer (principal + 1.5%, stacked, non-withdrawable) ─
+    // ── OfferBook: Make Offer (free; full principal escrowed, stacked) ─────
 
     async makeOffer(collection, tokenId, principalWei, expiresAt) {
       if (!(await this._ensure())) return;
       try {
         const c = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, this.signer);
-        toast('Submitting offer (offer + 1.5% fee)…', 'info');
-        const tx = await c.makeOffer(collection, tokenId, BigInt(principalWei), Math.floor(expiresAt), { value: withFee(principalWei) });
+        toast('Submitting offer (free — fully refundable)…', 'info');
+        const tx = await c.makeOffer(collection, tokenId, BigInt(principalWei), Math.floor(expiresAt), { value: BigInt(principalWei) });
         await tx.wait();
         toast('Offer placed! (locked until accept / reject / expiry)', 'success');
         setTimeout(() => location.reload(), 1200);
@@ -357,12 +359,12 @@ document.addEventListener('alpine:init', () => {
         toast('Accepting offer…', 'info');
         const tx = await c.acceptOffer(collection, tokenId, bidder);
         await tx.wait();
-        toast('Offer accepted! Seller receives 100% of the offer.', 'success');
+        toast('Offer accepted! Seller receives 98.5% (1.5% platform fee).', 'success');
         setTimeout(() => location.reload(), 1200);
       } catch (e) { toast(revertMessage(e), 'error'); }
     },
 
-    // ── OfferBook: Reject a bidder's position (refund principal, fee kept) ─
+    // ── OfferBook: Reject a bidder's position (full principal refunded) ────
 
     async rejectOffer(collection, tokenId, bidder) {
       if (!(await this._ensure())) return;
