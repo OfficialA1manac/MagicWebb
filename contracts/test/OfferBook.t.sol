@@ -34,7 +34,7 @@ contract OfferBookTest is Test {
     }
 
     function _total(uint256 p) internal pure returns (uint256) {
-        return p + _fee(p);
+        return p; // offers are free; the full principal is escrowed
     }
 
     function _exp() internal view returns (uint64) {
@@ -52,9 +52,9 @@ contract OfferBookTest is Test {
         (p,,,) = ob.positions(coll, tid, who);
     }
 
-    // ── Make offer (taker pays 1.5% upfront, non-refundable) ───────────────────
+    // ── Make offer (free; full principal escrowed) ─────────────────────────────
 
-    function test_makeOfferStoresPrincipalAndChargesFee() public {
+    function test_makeOfferStoresPrincipalNoFee() public {
         uint256 tid = _mintAndApprove(seller);
 
         uint256 vaultBefore = feeRecipient.balance;
@@ -62,7 +62,7 @@ contract OfferBookTest is Test {
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
 
         assertEq(_principalOf(address(nft), tid, bidder), 1 ether);
-        assertEq(feeRecipient.balance, vaultBefore + _fee(1 ether)); // fee taken immediately
+        assertEq(feeRecipient.balance, vaultBefore); // no fee at offer time
     }
 
     function test_makeOfferAnyoneCanOffer() public {
@@ -81,7 +81,7 @@ contract OfferBookTest is Test {
         ob.makeOffer{value: _total(0.5 ether)}(address(nft), tid, 0.5 ether, _exp());
         vm.stopPrank();
 
-        // Principals compound into one position; each top-up paid its own fee.
+        // Principals compound into one position; offers are free.
         assertEq(_principalOf(address(nft), tid, bidder), 1.5 ether);
     }
 
@@ -89,7 +89,7 @@ contract OfferBookTest is Test {
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         vm.expectRevert(WrongValue.selector);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, _exp()); // missing fee
+        ob.makeOffer{value: 1 ether + 1}(address(nft), tid, 1 ether, _exp()); // value must equal principal
     }
 
     function test_makeOfferBelowMinPriceReverts() public {
@@ -112,9 +112,9 @@ contract OfferBookTest is Test {
         assertTrue(true);
     }
 
-    // ── Accept (free; seller gets 100% of principal) ───────────────────────────
+    // ── Accept (seller pays 1.5%; seller nets 98.5% of principal) ──────────────
 
-    function test_acceptOfferPaysSellerFull() public {
+    function test_acceptOfferPaysSellerNet() public {
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -126,9 +126,9 @@ contract OfferBookTest is Test {
         ob.acceptOffer(address(nft), tid, bidder);
 
         assertEq(nft.ownerOf(tid), bidder);
-        // Seller receives the full principal; the fee was already taken at make time.
-        assertEq(seller.balance, sellerBefore + 1 ether);
-        assertEq(feeRecipient.balance, vaultBefore); // no fee at accept
+        // Seller receives principal − fee; the 1.5% fee is taken at acceptance.
+        assertEq(seller.balance, sellerBefore + 1 ether - _fee(1 ether));
+        assertEq(feeRecipient.balance, vaultBefore + _fee(1 ether)); // fee at accept
         assertEq(_principalOf(address(nft), tid, bidder), 0);
     }
 
@@ -149,9 +149,9 @@ contract OfferBookTest is Test {
         ob.acceptOffer(address(nft), tid, bidder);
     }
 
-    // ── Reject / expiry (principal refunded, fee kept) ─────────────────────────
+    // ── Reject / expiry (full principal refunded — offers are free) ────────────
 
-    function test_rejectOfferRefundsPrincipalKeepsFee() public {
+    function test_rejectOfferRefundsFullPrincipal() public {
         uint256 tid = _mintAndApprove(seller);
         uint256 balBefore = bidder.balance;
         vm.prank(bidder);
@@ -160,8 +160,8 @@ contract OfferBookTest is Test {
         vm.prank(seller);
         ob.rejectOffer(address(nft), tid, bidder);
 
-        // Bidder gets principal back but loses the fee.
-        assertEq(bidder.balance, balBefore - _fee(1 ether));
+        // Bidder gets the full principal back — offers are free.
+        assertEq(bidder.balance, balBefore);
         assertEq(_principalOf(address(nft), tid, bidder), 0);
     }
 
@@ -187,7 +187,7 @@ contract OfferBookTest is Test {
         vm.prank(bidder2);
         ob.refundExpiredOffer(address(nft), tid, bidder);
 
-        assertEq(bidder.balance, balBefore - _fee(1 ether));
+        assertEq(bidder.balance, balBefore);
         assertEq(_principalOf(address(nft), tid, bidder), 0);
     }
 
@@ -241,12 +241,12 @@ contract OfferBookTest is Test {
         ob.acceptOffer(address(multi), 42, bidder);
 
         assertEq(multi.balanceOf(bidder, 42), 5);
-        assertEq(seller.balance - sellerBefore, 2 ether); // seller gets 100%
+        assertEq(seller.balance - sellerBefore, 2 ether - _fee(2 ether)); // seller nets 98.5%
     }
 
     // ── Fuzz ────────────────────────────────────────────────────────────────────
 
-    function testFuzz_feeChargedAtMakeNotAccept(uint128 principal) public {
+    function testFuzz_feeChargedAtAcceptNotMake(uint128 principal) public {
         principal = uint128(bound(principal, 0.01 ether, 100 ether));
 
         uint256 tid = _mintAndApprove(seller);
@@ -256,15 +256,15 @@ contract OfferBookTest is Test {
         vm.prank(bidder);
         ob.makeOffer{value: _total(uint256(principal))}(address(nft), tid, principal, _exp());
 
-        // Fee is taken up-front, exactly 1.5% of principal.
-        assertEq(feeRecipient.balance - vaultBefore, _fee(uint256(principal)));
+        // No fee at make time — the full principal is escrowed.
+        assertEq(feeRecipient.balance - vaultBefore, 0);
 
         uint256 sellerBefore = seller.balance;
         vm.prank(seller);
         ob.acceptOffer(address(nft), tid, bidder);
 
-        // Accept is free for the seller — they get the full principal, no extra fee.
-        assertEq(seller.balance - sellerBefore, uint256(principal));
+        // Fee is charged on acceptance, deducted from the seller's proceeds.
         assertEq(feeRecipient.balance - vaultBefore, _fee(uint256(principal)));
+        assertEq(seller.balance - sellerBefore, uint256(principal) - _fee(uint256(principal)));
     }
 }

@@ -5,7 +5,7 @@ import {Test}        from "forge-std/Test.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MockERC721}  from "./MockERC721.sol";
 
-/// @dev Tests for MarketplaceCore behaviour: taker-pays fee, immutability, no-admin, no-pause.
+/// @dev Tests for MarketplaceCore behaviour: seller-pays fee, immutability, no-admin, no-pause.
 contract MarketplaceCoreTest is Test {
     Marketplace mp;
     MockERC721  nft;
@@ -20,7 +20,7 @@ contract MarketplaceCoreTest is Test {
     }
 
     function _total(uint256 price) internal pure returns (uint256) {
-        return price + (price * 150) / 10_000;
+        return price; // buyer sends exactly the price; the fee is taken from the seller
     }
 
     // ── Constructor guard ───────────────────────────────────────────────────────
@@ -44,7 +44,7 @@ contract MarketplaceCoreTest is Test {
         assertEq(mp.MIN_PRICE(), 0.01 ether);
     }
 
-    // ── Fee routing (taker pays 1.5% on top, listing is free) ──────────────────
+    // ── Fee routing (seller pays 1.5% on the sale, listing is free) ────────────
 
     function test_feePushedToFeeRecipient() public {
         uint256 before_ = creator.balance;
@@ -58,9 +58,9 @@ contract MarketplaceCoreTest is Test {
         vm.prank(buyer);
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
-        // Only the 1.5% sale premium reaches creator; seller keeps 100%.
+        // The 1.5% fee reaches creator; seller nets 98.5%.
         assertEq(creator.balance - before_, 0.015 ether);
-        assertEq(seller.balance, 1 ether);
+        assertEq(seller.balance, 1 ether - 0.015 ether);
     }
 
     // ── No pause / no admin ────────────────────────────────────────────────────

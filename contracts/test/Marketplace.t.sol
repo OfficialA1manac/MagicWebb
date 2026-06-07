@@ -24,14 +24,14 @@ contract MarketplaceTest is Test {
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    /// @dev 1.5% fee the buyer pays ON TOP of `price`.
+    /// @dev 1.5% platform fee, deducted from the seller's proceeds.
     function _fee(uint256 price) internal pure returns (uint256) {
         return (price * 150) / 10_000;
     }
 
-    /// @dev Total msg.value a buyer sends: price + 1.5%.
+    /// @dev Total msg.value a buyer sends: exactly `price` (no buyer-side fee).
     function _total(uint256 price) internal pure returns (uint256) {
-        return price + _fee(price);
+        return price;
     }
 
     function _list(uint256 price, uint64 exp) internal returns (uint256 id) {
@@ -59,10 +59,10 @@ contract MarketplaceTest is Test {
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
         assertEq(nft.ownerOf(id), buyer);
-        // Taker pays 1.5% on top; only the sale fee reaches creator.
+        // Seller pays the 1.5% fee; it reaches the creator/feeRecipient.
         assertEq(creator.balance, 0.015 ether);
-        // Seller receives 100% of the asking price.
-        assertEq(seller.balance,  1 ether);
+        // Seller receives 98.5% of the asking price.
+        assertEq(seller.balance,  1 ether - 0.015 ether);
     }
 
     function test_buyWrongSellerReverts() public {
@@ -91,8 +91,8 @@ contract MarketplaceTest is Test {
     function test_wrongPriceReverts() public {
         uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
         vm.prank(buyer);
-        vm.expectRevert(); // bare price, missing the fee
-        mp.buy{value: 1 ether}(address(nft), id, seller);
+        vm.expectRevert(); // value must equal the price exactly
+        mp.buy{value: 1 ether + 1}(address(nft), id, seller);
     }
 
     function test_belowMinPriceReverts() public {
@@ -147,8 +147,8 @@ contract MarketplaceTest is Test {
 
         assertEq(multi.balanceOf(buyer,  1), 5);
         assertEq(multi.balanceOf(seller, 1), 0);
-        assertEq(creator.balance, 0.03 ether); // 1.5% of 2 ether
-        assertEq(seller.balance,  2 ether);    // seller keeps 100%
+        assertEq(creator.balance, 0.03 ether);           // 1.5% of 2 ether
+        assertEq(seller.balance,  2 ether - 0.03 ether); // seller nets 98.5%
     }
 
     function test_list1155ZeroAmountReverts() public {
@@ -248,7 +248,7 @@ contract MarketplaceTest is Test {
 
     // ── Fuzz ────────────────────────────────────────────────────────────────────
 
-    function testFuzz_buyerPaysPricePlusFee(uint128 price) public {
+    function testFuzz_sellerPaysFee(uint128 price) public {
         price = uint128(bound(price, 0.01 ether, 100 ether));
 
         Marketplace freshMp = new Marketplace(creator);
@@ -272,8 +272,8 @@ contract MarketplaceTest is Test {
         uint256 fees   = creator.balance     - creatorBefore;
         uint256 payout = freshSeller.balance - sellerBefore;
 
-        // Seller gets 100% of price; platform gets exactly the 1.5% premium.
-        assertEq(payout, uint256(price));
+        // Seller nets price − fee; platform gets exactly the 1.5% fee.
+        assertEq(payout, uint256(price) - _fee(uint256(price)));
         assertEq(fees,   _fee(uint256(price)));
         assertEq(address(freshMp).balance, 0);
     }

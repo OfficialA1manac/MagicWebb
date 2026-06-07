@@ -34,10 +34,9 @@ contract AuctionHouseTest is Test {
         vm.stopPrank();
     }
 
-    /// @dev Required msg.value for a bidAmount (bid + 1.5% fee).
+    /// @dev Required msg.value for a bidAmount. Bidding is free, so it's just the bid.
     function _bidTotal(uint128 bidAmount) internal pure returns (uint128) {
-        uint128 fee = uint128(uint256(bidAmount) * 150 / 10_000);
-        return bidAmount + fee;
+        return bidAmount;
     }
 
     function _fee(uint128 bidAmount) internal pure returns (uint256) {
@@ -55,12 +54,12 @@ contract AuctionHouseTest is Test {
     function test_firstBidAtReserveSucceeds() public {
         (uint256 id,) = _createAuction();
         _bid(id, alice, 1 ether);
-        (,,,,,,,,, uint128 hi,,,,) = ah.auctions(id);
+        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
         assertEq(hi, 1 ether);
     }
 
-    /// @dev Outbid bidder is refunded their BID only; the platform keeps their 1.5% fee.
-    function test_outbidRefundsBidOnly() public {
+    /// @dev Outbid bidder is refunded in full — bidding is free, no fee on the bid.
+    function test_outbidRefundsFull() public {
         (uint256 id,) = _createAuction();
         uint128 aliceBid = 1 ether;
         uint128 bobBid   = 2 ether;
@@ -70,12 +69,12 @@ contract AuctionHouseTest is Test {
         _bid(id, alice, aliceBid);
         _bid(id, bob, bobBid);
 
-        // Alice lost only her fee (bid returned).
-        assertApproxEqAbs(alice.balance, 100 ether - _fee(aliceBid), 1);
-        // Platform pocketed Alice's fee immediately on the outbid.
-        assertEq(feeRecipient.balance, vaultBefore + _fee(aliceBid));
-        // Contract now holds exactly Bob's payment.
-        assertEq(address(ah).balance, _bidTotal(bobBid));
+        // Alice got her full bid back.
+        assertEq(alice.balance, 100 ether);
+        // No fee is taken until a sale settles.
+        assertEq(feeRecipient.balance, vaultBefore);
+        // Contract now holds exactly Bob's bid.
+        assertEq(address(ah).balance, bobBid);
     }
 
     function test_wrongBidValueReverts() public {
@@ -83,7 +82,7 @@ contract AuctionHouseTest is Test {
         uint128 bidAmount = 1 ether;
         vm.prank(alice);
         vm.expectRevert(WrongBidValue.selector);
-        ah.bid{value: bidAmount}(id, bidAmount); // missing fee
+        ah.bid{value: uint256(bidAmount) + 1}(id, bidAmount); // value must equal bidAmount exactly
     }
 
     function test_bidBelowReserveReverts() public {
@@ -122,7 +121,7 @@ contract AuctionHouseTest is Test {
         ah.bid{value: _bidTotal(tooLow)}(id, tooLow);
 
         _bid(id, bob, 1.5 ether);
-        (,,,,,,,,, uint128 hi,,,,) = ah.auctions(id);
+        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
         assertEq(hi, 1.5 ether);
     }
 
@@ -140,7 +139,7 @@ contract AuctionHouseTest is Test {
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
 
-        (,,,,,, uint64 newEnd,,,,,,,) = ah.auctions(id);
+        (,,,,,, uint64 newEnd,,,,,,) = ah.auctions(id);
         assertEq(newEnd, uint64(block.timestamp) + ah.EXTENSION_WINDOW());
     }
 
@@ -173,7 +172,7 @@ contract AuctionHouseTest is Test {
 
         vm.warp(block.timestamp + 8 days);
 
-        uint256 feeExpected  = _fee(bidAmt); // exact premium paid
+        uint256 feeExpected  = _fee(bidAmt); // 1.5% deducted from the seller
         uint256 vaultBefore  = feeRecipient.balance;
         uint256 sellerBefore = seller.balance;
 
@@ -181,7 +180,7 @@ contract AuctionHouseTest is Test {
 
         assertEq(nft.ownerOf(tid), bob);
         assertEq(feeRecipient.balance, vaultBefore  + feeExpected);
-        assertEq(seller.balance,       sellerBefore + bidAmt); // seller gets 100%
+        assertEq(seller.balance,       sellerBefore + bidAmt - feeExpected); // seller nets 98.5%
     }
 
     function test_settleBeforeExpiryReverts() public {
@@ -195,7 +194,7 @@ contract AuctionHouseTest is Test {
         (uint256 id,) = _createAuction();
         vm.warp(block.timestamp + 8 days);
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
 
@@ -214,7 +213,7 @@ contract AuctionHouseTest is Test {
         (uint256 id,) = _createAuction();
         vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() + 1);
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
 
@@ -239,12 +238,12 @@ contract AuctionHouseTest is Test {
         (uint256 id,) = _createAuction();
         vm.prank(seller);
         ah.cancelEarly(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
 
-    /// @dev Seller cancel refunds the bidder their BID only; the platform keeps the fee.
-    function test_cancelEarlyWithBidRefundsBidOnly() public {
+    /// @dev Seller cancel refunds the bidder in full — bidding is free.
+    function test_cancelEarlyWithBidRefundsFull() public {
         (uint256 id,) = _createAuction();
         uint128 bidAmt   = 1 ether;
         uint256 vaultBefore = feeRecipient.balance;
@@ -253,8 +252,8 @@ contract AuctionHouseTest is Test {
         vm.prank(seller);
         ah.cancelEarly(id);
 
-        assertApproxEqAbs(alice.balance, 100 ether - _fee(bidAmt), 1);
-        assertEq(feeRecipient.balance, vaultBefore + _fee(bidAmt));
+        assertEq(alice.balance, 100 ether);
+        assertEq(feeRecipient.balance, vaultBefore);
     }
 
     function test_cancelEarlyNotSellerReverts() public {
@@ -317,7 +316,7 @@ contract AuctionHouseTest is Test {
         uint256 sellerActual = seller.balance       - sellerBefore;
 
         assertEq(feeActual,    _fee(bidAmt));
-        assertEq(sellerActual, uint256(bidAmt));
+        assertEq(sellerActual, uint256(bidAmt) - _fee(bidAmt));
         assertEq(feeActual + sellerActual, _bidTotal(bidAmt));
     }
 
@@ -346,7 +345,7 @@ contract AuctionHouseTest is Test {
         uint128 validBid = uint128(uint256(reserve) + (inc == 0 ? 1 : inc) + 1);
         vm.deal(bob, uint256(_bidTotal(validBid)) + 1 ether);
         _bid(id, bob, validBid);
-        (,,,,,,,,, uint128 hi,,,,) = ah.auctions(id);
+        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
         assertEq(hi, validBid);
     }
 
@@ -369,9 +368,9 @@ contract AuctionHouseTest is Test {
         _bid(id, alice, firstBid);
         _bid(id, bob,   secondBid);
 
-        // Contract holds exactly bob's payment — alice's bid was refunded (fee kept).
+        // Contract holds exactly bob's bid — alice's bid was refunded in full.
         assertEq(address(ah).balance, _bidTotal(secondBid));
-        // Alice keeps her leftover float plus her returned bid, minus her fee.
+        // Alice keeps her leftover float plus her returned bid.
         assertApproxEqAbs(alice.balance, uint256(firstBid) + 1 ether, 1);
     }
 }

@@ -28,7 +28,7 @@ contract AuctionHouseSettleSafetyTest is Test {
     }
 
     function _bidTotal(uint128 bidAmount) internal pure returns (uint128) {
-        return bidAmount + uint128(uint256(bidAmount) * 150 / 10_000);
+        return bidAmount; // bidding is free; msg.value equals the bid
     }
 
     function _setupAuctionWithBid() internal returns (uint256 id, uint256 tid, uint128 total) {
@@ -44,7 +44,7 @@ contract AuctionHouseSettleSafetyTest is Test {
     }
 
     /// Seller moves the NFT out after the auction ends → settle must refund the winner
-    /// in full (bid + fee) and not leave funds locked.
+    /// in full (the bid) and not leave funds locked.
     function test_settleRefundsWinnerWhenSellerMovedNft() public {
         (uint256 id, uint256 tid, uint128 total) = _setupAuctionWithBid();
         vm.warp(block.timestamp + 2 days);
@@ -99,11 +99,12 @@ contract AuctionHouseSettleSafetyTest is Test {
         ah2.bid{value: total}(id, bidAmount);
 
         vm.warp(block.timestamp + 2 days);
+        uint256 fee = uint256(bidAmount) * 150 / 10_000;
         uint256 sellerBefore = seller.balance;
         ah2.settle(id);
 
         assertEq(nft.ownerOf(tid), alice, "winner receives NFT");
-        assertEq(seller.balance, sellerBefore + bidAmount, "seller paid 100% of winning bid");
-        assertEq(ah2.pendingReturns(address(rej)), total - bidAmount, "bounced fee parked for pull-withdrawal");
+        assertEq(seller.balance, sellerBefore + bidAmount - fee, "seller nets bid minus fee");
+        assertEq(ah2.pendingReturns(address(rej)), fee, "bounced fee parked for pull-withdrawal");
     }
 }
