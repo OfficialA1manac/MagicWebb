@@ -6,3 +6,8 @@
 # backend/Makefile. Verified non-secret (entropy 3.55, plain build env var). The file has been
 # removed from the working tree; this suppresses the lingering history match so CI stays green.
 cd791cea38ccc6880c2a3816597153d0e80b21a3:backend/Makefile:generic-api-key:52
+
+# generic-api-key flagged a deliberately-fake JWT test fixture
+# ("test-secret-at-least-32-chars-long-xx") used to satisfy the 32-char JWT_SECRET
+# minimum in unit tests. Not a real credential — a hardcoded test constant.
+45eafc4be2527ce07dfe868f00513b4bee55dced:backend/internal/auth/jwt_test.go:generic-api-key:11
