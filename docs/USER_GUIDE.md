@@ -29,14 +29,14 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 
 ## Bid on an auction
 1. Open an active auction → enter bid amount
-2. Click **Bid** → confirm wallet — your bid + 1.5% fee is sent in one transaction
-3. If someone outbids you, your full payment (bid + fee) is returned to your wallet automatically — no action needed
-4. At auction end, the keeper bot settles automatically: NFT goes to winner, seller receives the full bid amount
+2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
+3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed
+4. At auction end, the keeper bot settles automatically: NFT goes to winner, seller receives the winning bid minus the 1.5% platform fee (98.5%)
 
-## Auction fees for bidders
-- You pay: `bid + 1.5% of bid` upfront
-- If you win: the 1.5% goes to the platform, seller gets the full bid
-- If you lose: you get back the full amount you paid (bid + fee) — no fee kept
+## Auction fees
+- Bidding is free — you send only your bid amount.
+- If you win: the seller pays the 1.5% platform fee, so the seller receives 98.5% of the winning bid.
+- If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept.
 
 ## Offer on an NFT
 Offers work on tokens the owner has marked as eligible:
@@ -45,7 +45,7 @@ Offers work on tokens the owner has marked as eligible:
 2. Enter offer amount → click **Submit Offer** → confirm wallet (ETH deposited on-chain)
 3. Owner reviews and may accept or ignore
 4. If accepted: NFT transfers to you automatically
-5. To cancel: click **Withdraw Offer** → confirm wallet → full ETH returned, no fee
+5. Your offer is free and locked until the owner accepts or rejects it, or it expires — then your full amount is refunded
 
 ## Enable offers on your NFT (owner)
 1. Open any token you own → click **Accept Offers**
@@ -59,4 +59,4 @@ Go to **Offers → Received** → click **Accept** next to the offer you want �
 NFT goes to bidder, you receive ETH minus 1.5% platform fee.
 
 ## No royalties
-MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 100% of the sale price minus the 1.5% platform fee.
+MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted).

@@ -36,7 +36,7 @@ Wallet <-> Frontend (Next.js + wagmi/viem) <-> Flare RPC <-> Contracts
 
 ### 3.2 Platform fee (single, unified, immutable)
 
-MagicWebb charges a single **1.5% platform fee** (`PLATFORM_FEE_BPS = 150`) applied to **all operations**: listing, buying, auction settlement, and offer acceptance. There is no separate listing fee vs. trade fee — one constant governs everything.
+MagicWebb charges a single **1.5% platform fee** (`PLATFORM_FEE_BPS = 150`), applied **only on a successful sale** and **deducted from the seller's proceeds**. Listing, auction creation, bidding, and making offers are all free. One constant governs every settlement path.
 
 The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or mutable storage variable. It cannot be changed by any admin key, environment variable, or upgrade path. Changing it requires deploying new contracts.
 
@@ -46,13 +46,12 @@ Deploy scripts require only `CREATOR_ADDR` (the fee recipient + admin wallet). N
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
-**Where the 1.5% fee applies.** The platform fee is charged on:
-- **Listing:** 1.5% of listing price, paid upfront by the seller when calling `list`, `list1155`, or `batchList`. Sent directly to `feeRecipient` immediately.
-- **Buy:** 1.5% of sale price, deducted from seller proceeds via `_splitAndPay` in the same atomic transaction as the NFT transfer.
+**Where the 1.5% fee applies.** The platform fee is charged only when a sale settles, deducted from the seller's proceeds:
+- **Buy:** 1.5% of sale price, deducted from seller proceeds (`_payFee` + `_pay`) in the same atomic transaction as the NFT transfer. The buyer sends exactly the price.
 - **Auction settlement:** 1.5% of the winning bid, deducted from seller proceeds when `settle()` is called.
 - **Offer acceptance:** 1.5% of the offer amount, deducted from seller proceeds when `acceptOffer()` / `acceptOffer1155()` is called.
 
-**What is NOT charged:** Auction-creation, bid placement, outbid refunds, offer signing, listing cancellation, zero-bid auction cancellation — none of these trigger `_splitAndPay` or any fee deduction.
+**What is NOT charged:** Listing, auction creation, bid placement, outbid refunds, making/topping-up offers, offer rejection/expiry refunds, and listing cancellation — none of these deduct any fee. Bids and offer principals are fully refundable.
 
 **Auction bids (no fee applied on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
 

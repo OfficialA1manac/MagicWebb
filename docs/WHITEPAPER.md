@@ -74,7 +74,7 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 ### 4.1 Single hardcoded fee
 
-The `PLATFORM_FEE_BPS` constant in `MarketplaceCore.sol` is 150 (1.5%). It is a `constant` — not a variable, not a mutable storage slot. It applies uniformly to listing, buying, auction settlement, and offer acceptance. Changing it requires deploying a new contract with a different address, so users can verify the rate themselves.
+The `PLATFORM_FEE_BPS` constant in `MarketplaceCore.sol` is 150 (1.5%). It is a `constant` — not a variable, not a mutable storage slot. It is charged only on a successful sale (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds; listing, auction creation, bidding, and making offers are free. Changing the rate requires deploying a new contract with a different address, so users can verify it themselves.
 
 Fees are sent directly to the `feeRecipient` wallet via `.call{value: fee}("")` — no intermediary contract, no vault, no accumulator step.
 
