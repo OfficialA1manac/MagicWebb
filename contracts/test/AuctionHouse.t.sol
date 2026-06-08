@@ -1,10 +1,10 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test}         from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, WrongBidValue, AuctionLive, AuctionEnded, NotSeller} from "../src/AuctionHouse.sol";
-import {MockERC721}   from "./MockERC721.sol";
-import {MockERC1155}  from "./MockERC1155.sol";
+import {Test}        from "forge-std/Test.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount} from "../src/AuctionHouse.sol";
+import {MockERC721}  from "./MockERC721.sol";
+import {MockERC1155} from "./MockERC1155.sol";
 
 contract AuctionHouseTest is Test {
     AuctionHouse ah;
@@ -14,6 +14,7 @@ contract AuctionHouseTest is Test {
     address seller       = address(0xBEEF);
     address alice        = address(0xA11CE);
     address bob          = address(0xB0B);
+    address carol        = address(0xCab01);
 
     function setUp() public {
         ah    = new AuctionHouse(feeRecipient);
@@ -21,356 +22,273 @@ contract AuctionHouseTest is Test {
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);
         vm.deal(bob,   100 ether);
+        vm.deal(carol, 100 ether);
     }
 
     // ── Helpers ───────────────────────────────────────────────────────────────
 
-    function _createAuction() internal returns (uint256 id, uint256 tid) {
+    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 150 / 10_000; }
+
+    function _create() internal returns (uint256 id, uint256 tid) {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint64 end = uint64(block.timestamp + 7 days);
-        id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
+        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
         vm.stopPrank();
     }
 
-    /// @dev Required msg.value for a bidAmount. Bidding is free, so it's just the bid.
-    function _bidTotal(uint128 bidAmount) internal pure returns (uint128) {
-        return bidAmount;
+    function _bid(uint256 id, address who, uint128 amt) internal {
+        vm.prank(who);
+        ah.bid{value: amt}(id);
     }
 
-    function _fee(uint128 bidAmount) internal pure returns (uint256) {
-        return uint256(bidAmount) * 150 / 10_000;
+    function _leader(uint256 id) internal view returns (address l, uint128 t) {
+        (,,,,,,,,,, l, t,) = ah.auctions(id);
     }
 
-    function _bid(uint256 id, address bidder, uint128 bidAmount) internal {
-        uint128 total = _bidTotal(bidAmount);
-        vm.prank(bidder);
-        ah.bid{value: total}(id, bidAmount);
-    }
+    // ── Cumulative bidding ──────────────────────────────────────────────────────
 
-    // ── Core bid flow ─────────────────────────────────────────────────────────
-
-    function test_firstBidAtReserveSucceeds() public {
-        (uint256 id,) = _createAuction();
+    function test_firstBidAtReserveLeads() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
-        assertEq(hi, 1 ether);
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, alice);
+        assertEq(t, 1 ether);
+        assertEq(ah.cumulative(id, alice), 1 ether);
     }
 
-    /// @dev Outbid bidder is refunded in full — bidding is free, no fee on the bid.
-    function test_outbidRefundsFull() public {
-        (uint256 id,) = _createAuction();
-        uint128 aliceBid = 1 ether;
-        uint128 bobBid   = 2 ether;
-
-        uint256 vaultBefore = feeRecipient.balance;
-
-        _bid(id, alice, aliceBid);
-        _bid(id, bob, bobBid);
-
-        // Alice got her full bid back.
-        assertEq(alice.balance, 100 ether);
-        // No fee is taken until a sale settles.
-        assertEq(feeRecipient.balance, vaultBefore);
-        // Contract now holds exactly Bob's bid.
-        assertEq(address(ah).balance, bobBid);
+    function test_subReserveAccumulatesButNoLead() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 0.4 ether);
+        (address l,) = _leader(id);
+        assertEq(l, address(0));                 // below reserve → no leader
+        assertEq(ah.cumulative(id, alice), 0.4 ether);
+        _bid(id, alice, 0.6 ether);              // cumulative now 1 ether == reserve
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice);
+        assertEq(t2, 1 ether);
     }
 
-    function test_wrongBidValueReverts() public {
-        (uint256 id,) = _createAuction();
-        uint128 bidAmount = 1 ether;
-        vm.prank(alice);
-        vm.expectRevert(WrongBidValue.selector);
-        ah.bid{value: uint256(bidAmount) + 1}(id, bidAmount); // value must equal bidAmount exactly
-    }
-
-    function test_bidBelowReserveReverts() public {
-        (uint256 id,) = _createAuction();
-        uint128 low = 0.5 ether;
-        vm.prank(alice);
-        vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: _bidTotal(low)}(id, low);
-    }
-
-    function test_bidBelowIncrementReverts() public {
-        (uint256 id,) = _createAuction();
+    function test_outbidNoRefundThenReclaim() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        // minIncrementBps = 500 (5%) → next min = 1.05 ether; 1.01 ether is below
-        uint128 tooLow = 1.01 ether;
+        _bid(id, bob, 2 ether);                  // bob leads; alice NOT refunded
+        assertEq(ah.cumulative(id, alice), 1 ether, "alice escrow stays");
+        assertEq(alice.balance, 99 ether, "alice not refunded on outbid");
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, bob); assertEq(t, 2 ether);
+        // alice tops up cumulatively: 1 + 1.2 = 2.2 > 2 + 5% → reclaims lead
+        _bid(id, alice, 1.2 ether);
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice); assertEq(t2, 2.2 ether);
+        assertEq(ah.cumulative(id, alice), 2.2 ether);
+    }
+
+    function test_outbidEmitsNotification() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        vm.expectEmit(true, true, false, true, address(ah));
+        emit AuctionHouse.OutbidNotification(id, alice, 2 ether);
+        _bid(id, bob, 2 ether);
+    }
+
+    function test_takeLeadBelowIncrementReverts() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);                // leader 1 ether, 5% inc → min next 1.05
         vm.prank(bob);
         vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: _bidTotal(tooLow)}(id, tooLow);
+        ah.bid{value: 1.01 ether}(id);           // 1.01 < 1.05 and > leaderTotal → reverts
     }
 
-    // ── Flat minimum increment ──────────────────────────────────────────────────
-
-    function test_flatMinIncrementEnforced() public {
-        vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        // 1% bps but a flat 0.5 ether floor — flat dominates on a 1 ether high bid.
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 100, 0.5 ether);
-        vm.stopPrank();
-
-        _bid(id, alice, 1 ether);
-        // pct increment = 0.01 ether, flat = 0.5 ether → min next = 1.5 ether. 1.2 too low.
-        uint128 tooLow = 1.2 ether;
-        vm.prank(bob);
-        vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: _bidTotal(tooLow)}(id, tooLow);
-
-        _bid(id, bob, 1.5 ether);
-        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
-        assertEq(hi, 1.5 ether);
+    function test_belowReserveFirstBidAccumulates() public {
+        (uint256 id,) = _create();
+        _bid(id, bob, 0.9 ether);                // below reserve, no leader yet → accumulates
+        (address l,) = _leader(id);
+        assertEq(l, address(0));
+        assertEq(ah.cumulative(id, bob), 0.9 ether);
     }
 
-    // ── Anti-snipe extension ────────────────────────────────────────────────────
+    function test_zeroBidReverts() public {
+        (uint256 id,) = _create();
+        vm.prank(alice);
+        vm.expectRevert(InvalidAmount.selector);
+        ah.bid{value: 0}(id);
+    }
 
-    function test_antiSnipeExtendsEnd() public {
+    // ── Anti-snipe ────────────────────────────────────────────────────────────
+
+    function test_antiSnipeExtends() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         uint64 end = uint64(block.timestamp + 1 hours);
         uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
         vm.stopPrank();
-
-        // Warp into the final 3-minute window, then bid.
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
-
-        (,,,,,, uint64 newEnd,,,,,,) = ah.auctions(id);
+        (,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
         assertEq(newEnd, uint64(block.timestamp) + ah.EXTENSION_WINDOW());
     }
 
-    // ── Create guards ───────────────────────────────────────────────────────────
+    // ── Settle ──────────────────────────────────────────────────────────────────
 
-    function test_reserveBelowMinReverts() public {
-        vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        vm.expectRevert();
-        ah.create(address(nft), tid, 0.009 ether, uint64(block.timestamp + 1 days), 500, 0);
-        vm.stopPrank();
-    }
-
-    function test_durationBeyondMaxReverts() public {
-        vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        vm.expectRevert();
-        ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 8 days), 500, 0);
-        vm.stopPrank();
-    }
-
-    // ── Settle ────────────────────────────────────────────────────────────────
-
-    function test_settleAfterExpiry() public {
-        (uint256 id, uint256 tid) = _createAuction();
-        uint128 bidAmt = 2 ether;
-        _bid(id, bob, bidAmt);
-
+    function test_settleDistributesAndConsumesWinner() public {
+        (uint256 id, uint256 tid) = _create();
+        _bid(id, alice, 1 ether);
+        _bid(id, bob, 3 ether);                  // bob wins
         vm.warp(block.timestamp + 8 days);
 
-        uint256 feeExpected  = _fee(bidAmt); // 1.5% deducted from the seller
-        uint256 vaultBefore  = feeRecipient.balance;
         uint256 sellerBefore = seller.balance;
-
-        ah.settle(id);
+        uint256 vaultBefore  = feeRecipient.balance;
+        ah.settle(id);                            // permissionless (test contract calls)
 
         assertEq(nft.ownerOf(tid), bob);
-        assertEq(feeRecipient.balance, vaultBefore  + feeExpected);
-        assertEq(seller.balance,       sellerBefore + bidAmt - feeExpected); // seller nets 98.5%
+        assertEq(feeRecipient.balance, vaultBefore + _fee(3 ether));
+        assertEq(seller.balance, sellerBefore + 3 ether - _fee(3 ether));
+        assertEq(ah.cumulative(id, bob), 0, "winner escrow consumed");
+        assertEq(ah.cumulative(id, alice), 1 ether, "loser escrow awaits refund");
     }
 
-    function test_settleBeforeExpiryReverts() public {
-        (uint256 id,) = _createAuction();
+    function test_settlePermissionlessByAnyone() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        vm.warp(block.timestamp + 8 days);
+        vm.prank(carol);                          // not keeper, not party
+        ah.settle(id);
+        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
+        assertTrue(settled);
+    }
+
+    function test_settleBeforeEndReverts() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.expectRevert(AuctionLive.selector);
         ah.settle(id);
     }
 
-    function test_settleNoBidsCancelsInactive() public {
-        (uint256 id,) = _createAuction();
+    function test_settleNoLeaderCancels() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 0.5 ether);               // below reserve → no leader
         vm.warp(block.timestamp + 8 days);
         ah.settle(id);
         (,,,bool settled,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
+        assertEq(ah.cumulative(id, alice), 0.5 ether, "refundable, not consumed");
     }
 
-    function test_settleAlreadySettledReverts() public {
-        (uint256 id,) = _createAuction();
+    function test_doubleSettleReverts() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + 8 days);
         ah.settle(id);
-        vm.expectRevert();
+        vm.expectRevert(NotActive.selector);
         ah.settle(id);
     }
 
-    // ── cancelIfInactive (triggered via settle) ────────────────────────────────
+    // ── refundLosers ──────────────────────────────────────────────────────────
 
-    function test_cancelIfInactiveAfterWindow() public {
-        (uint256 id,) = _createAuction();
-        vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() + 1);
-        ah.settle(id);
-        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
-        assertTrue(settled);
-    }
-
-    function test_cancelIfInactiveTooEarlyReverts() public {
-        (uint256 id,) = _createAuction();
-        vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() - 1);
-        vm.expectRevert(AuctionLive.selector);
-        ah.settle(id);
-    }
-
-    function test_cancelIfInactiveWithBidsReverts() public {
-        (uint256 id,) = _createAuction();
+    function test_refundLosersPaysNonWinnersSkipsWinner() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + ah.NO_BID_CANCEL_WINDOW() + 1);
-        vm.expectRevert(AuctionLive.selector);
+        _bid(id, bob, 2 ether);
+        _bid(id, carol, 3 ether);                 // carol wins
+        vm.warp(block.timestamp + 8 days);
         ah.settle(id);
+
+        uint256 aBefore = alice.balance;
+        uint256 bBefore = bob.balance;
+        address[] memory batch = new address[](3);
+        batch[0] = alice; batch[1] = bob; batch[2] = carol;
+        ah.refundLosers(id, batch);
+
+        assertEq(alice.balance, aBefore + 1 ether);
+        assertEq(bob.balance,   bBefore + 2 ether);
+        assertEq(ah.cumulative(id, alice), 0);
+        assertEq(ah.cumulative(id, bob), 0);
+        // idempotent: second call refunds nothing
+        uint256 aMid = alice.balance;
+        ah.refundLosers(id, batch);
+        assertEq(alice.balance, aMid);
     }
 
-    // ── cancelEarly ───────────────────────────────────────────────────────────
-
-    function test_cancelEarlyNoBids() public {
-        (uint256 id,) = _createAuction();
-        vm.prank(seller);
-        ah.cancelEarly(id);
-        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
-        assertTrue(settled);
+    function test_refundLosersBeforeSettleReverts() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        address[] memory batch = new address[](1);
+        batch[0] = alice;
+        vm.expectRevert(NotSettled.selector);
+        ah.refundLosers(id, batch);
     }
 
-    /// @dev Seller cancel refunds the bidder in full — bidding is free.
-    function test_cancelEarlyWithBidRefundsFull() public {
-        (uint256 id,) = _createAuction();
-        uint128 bidAmt   = 1 ether;
-        uint256 vaultBefore = feeRecipient.balance;
-        _bid(id, alice, bidAmt);
+    // ── cancelEarly ─────────────────────────────────────────────────────────────
 
+    function test_cancelEarlyRefundsAllViaLosers() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        _bid(id, bob, 2 ether);
         vm.prank(seller);
         ah.cancelEarly(id);
-
-        assertEq(alice.balance, 100 ether);
-        assertEq(feeRecipient.balance, vaultBefore);
+        address[] memory batch = new address[](2);
+        batch[0] = alice; batch[1] = bob;
+        uint256 aB = alice.balance; uint256 bB = bob.balance;
+        ah.refundLosers(id, batch);
+        assertEq(alice.balance, aB + 1 ether);
+        assertEq(bob.balance,   bB + 2 ether);    // even the would-be winner refunded
     }
 
     function test_cancelEarlyNotSellerReverts() public {
-        (uint256 id,) = _createAuction();
+        (uint256 id,) = _create();
         vm.prank(alice);
         vm.expectRevert(NotSeller.selector);
         ah.cancelEarly(id);
     }
 
-    function test_cancelEarlyAfterExpiryReverts() public {
-        (uint256 id,) = _createAuction();
-        vm.warp(block.timestamp + 8 days);
-        vm.prank(seller);
-        vm.expectRevert(AuctionEnded.selector);
-        ah.cancelEarly(id);
-    }
+    // ── Escrow invariant ──────────────────────────────────────────────────────
 
-    // ── ERC-1155 auction ────────────────────────────────────────────────────────
-
-    function test_create1155AndSettleTransfersAmount() public {
-        vm.startPrank(seller);
-        multi.mint(seller, 99, 5);
-        multi.setApprovalForAll(address(ah), true);
-        uint64 end = uint64(block.timestamp + 7 days);
-        uint256 id = ah.create1155(address(multi), 99, 5, 1 ether, end, 500, 0);
-        vm.stopPrank();
-
+    function test_escrowEqualsSumOfCumulatives() public {
+        (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + 8 days);
-
-        uint256 vaultBefore = feeRecipient.balance;
-        ah.settle(id);
-
-        assertEq(multi.balanceOf(alice,  99), 5);
-        assertEq(multi.balanceOf(seller, 99), 0);
-        assertGt(feeRecipient.balance, vaultBefore);
+        _bid(id, bob, 2 ether);
+        _bid(id, carol, 1.5 ether);
+        // contract holds alice+bob+carol
+        assertEq(address(ah).balance, 4.5 ether);
+        assertEq(
+            uint256(ah.cumulative(id, alice)) + ah.cumulative(id, bob) + ah.cumulative(id, carol),
+            4.5 ether
+        );
     }
 
-    // ── Fee invariants ──────────────────────────────────────────────────────────
+    // ── ERC-1155 ────────────────────────────────────────────────────────────────
 
-    function testFuzz_feeExactAtSettle(uint128 bidAmt) public {
-        bidAmt = uint128(bound(bidAmt, 1 ether, 50 ether));
-        vm.deal(alice, uint256(bidAmt) * 2);
-
+    function test_erc1155SettleTransfersAmount() public {
         vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, bidAmt, uint64(block.timestamp + 7 days), 0, 0);
+        multi.mint(seller, 7, 5);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
         vm.stopPrank();
-
-        _bid(id, alice, bidAmt);
+        _bid(id, alice, 2 ether);
         vm.warp(block.timestamp + 8 days);
-
-        uint256 vaultBefore  = feeRecipient.balance;
         uint256 sellerBefore = seller.balance;
-
         ah.settle(id);
-
-        uint256 feeActual    = feeRecipient.balance - vaultBefore;
-        uint256 sellerActual = seller.balance       - sellerBefore;
-
-        assertEq(feeActual,    _fee(bidAmt));
-        assertEq(sellerActual, uint256(bidAmt) - _fee(bidAmt));
-        assertEq(feeActual + sellerActual, _bidTotal(bidAmt));
+        assertEq(multi.balanceOf(alice, 7), 5);
+        assertEq(seller.balance, sellerBefore + 2 ether - _fee(2 ether));
     }
 
-    function testFuzz_bidIncrementEnforced(uint128 reserve, uint16 incBps) public {
-        reserve = uint128(bound(reserve, 0.01 ether, 10 ether));
-        incBps  = uint16(bound(incBps, 100, ah.MAX_MIN_INCREMENT_BPS()));
+    // ── Fuzz: fee math at settle ──────────────────────────────────────────────
 
-        vm.deal(alice, uint256(reserve) * 3);
-        vm.deal(bob,   uint256(reserve) * 3);
-
+    function testFuzz_feeExactAtSettle(uint128 amt) public {
+        amt = uint128(bound(amt, 1 ether, 50 ether));
+        vm.deal(alice, uint256(amt) + 1 ether);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id  = ah.create(address(nft), tid, reserve,
-            uint64(block.timestamp + 7 days), incBps, 0);
+        uint256 id = ah.create(address(nft), tid, amt, uint64(block.timestamp + 7 days), 0, 0);
         vm.stopPrank();
-
-        _bid(id, alice, reserve);
-
-        uint128 tooLow = reserve;
-        vm.prank(bob);
-        vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: _bidTotal(tooLow)}(id, tooLow);
-
-        uint256 inc      = uint256(reserve) * incBps / 10_000;
-        uint128 validBid = uint128(uint256(reserve) + (inc == 0 ? 1 : inc) + 1);
-        vm.deal(bob, uint256(_bidTotal(validBid)) + 1 ether);
-        _bid(id, bob, validBid);
-        (,,,,,,,,, uint128 hi,,,) = ah.auctions(id);
-        assertEq(hi, validBid);
-    }
-
-    function testFuzz_contractHoldsOnlyCurrentBid(uint128 firstBid, uint128 secondBid) public {
-        firstBid  = uint128(bound(firstBid,  1 ether, 10 ether));
-        uint256 inc      = uint256(firstBid) * 500 / 10_000;
-        uint256 minNext  = uint256(firstBid) + (inc == 0 ? 1 : inc);
-        secondBid = uint128(bound(secondBid, minNext, minNext + 50 ether));
-
-        vm.deal(alice, uint256(_bidTotal(firstBid))  + 1 ether);
-        vm.deal(bob,   uint256(_bidTotal(secondBid)) + 1 ether);
-
-        vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        uint256 id  = ah.create(address(nft), tid, firstBid,
-            uint64(block.timestamp + 7 days), 0, 0);
-        vm.stopPrank();
-
-        _bid(id, alice, firstBid);
-        _bid(id, bob,   secondBid);
-
-        // Contract holds exactly bob's bid — alice's bid was refunded in full.
-        assertEq(address(ah).balance, _bidTotal(secondBid));
-        // Alice keeps her leftover float plus her returned bid.
-        assertApproxEqAbs(alice.balance, uint256(firstBid) + 1 ether, 1);
+        _bid(id, alice, amt);
+        vm.warp(block.timestamp + 8 days);
+        uint256 sb = seller.balance; uint256 vb = feeRecipient.balance;
+        ah.settle(id);
+        assertEq(feeRecipient.balance - vb, _fee(amt));
+        assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
     }
 }

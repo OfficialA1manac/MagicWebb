@@ -1,25 +1,22 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Test}       from "forge-std/Test.sol";
+import {Test}        from "forge-std/Test.sol";
 import {AuctionHouse, NotActive} from "../src/AuctionHouse.sol";
-import {MockERC721} from "./MockERC721.sol";
+import {MockERC721}  from "./MockERC721.sol";
 
-/// @dev Rejects all incoming ETH — used to exercise the pull-pattern fallback.
+/// Recipient that rejects all ETH (no receive/fallback) → forces pull-fallback.
 contract RejectEther {
-    receive() external payable { revert("no ether"); }
+    // no receive(); any plain transfer reverts
 }
 
-/// @notice Regression tests for the settle() locked-funds fix (finding H1):
-///         a finished auction must never strand the winner's escrow, and must never
-///         revert because a payout recipient cannot receive ETH.
 contract AuctionHouseSettleSafetyTest is Test {
     AuctionHouse ah;
     MockERC721   nft;
     address feeRecipient = address(0x1111000000000000000000000000000000111100);
     address seller = address(0xBEEF);
     address alice  = address(0xA11CE);
-    address carol  = address(0xCED1);
+    address carol  = address(0xCab01);
 
     function setUp() public {
         ah  = new AuctionHouse(feeRecipient);
@@ -27,62 +24,55 @@ contract AuctionHouseSettleSafetyTest is Test {
         vm.deal(alice, 100 ether);
     }
 
-    function _bidTotal(uint128 bidAmount) internal pure returns (uint128) {
-        return bidAmount; // bidding is free; msg.value equals the bid
-    }
+    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 150 / 10_000; }
 
-    function _setupAuctionWithBid() internal returns (uint256 id, uint256 tid, uint128 total) {
+    function _setup() internal returns (uint256 id, uint256 tid) {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
         vm.stopPrank();
-
-        total = _bidTotal(1 ether);
         vm.prank(alice);
-        ah.bid{value: total}(id, 1 ether);
+        ah.bid{value: 2 ether}(id);
     }
 
-    /// Seller moves the NFT out after the auction ends → settle must refund the winner
-    /// in full (the bid) and not leave funds locked.
+    /// Seller moves the NFT out after the auction ends → settle refunds the winner
+    /// their full bid and cancels; no fee taken.
     function test_settleRefundsWinnerWhenSellerMovedNft() public {
-        (uint256 id, uint256 tid, uint128 total) = _setupAuctionWithBid();
+        (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
-
-        // seller front-runs settlement by transferring the NFT elsewhere
         vm.prank(seller);
         nft.transferFrom(seller, carol, tid);
 
-        uint256 aliceBefore = alice.balance;
+        uint256 before = alice.balance;
         ah.settle(id);
 
-        assertEq(alice.balance, aliceBefore + total, "winner fully refunded");
+        assertEq(alice.balance, before + 2 ether, "winner fully refunded");
         assertEq(nft.ownerOf(tid), carol, "NFT not delivered to winner");
-        assertEq(feeRecipient.balance, 0, "no fee taken on failed settlement");
+        assertEq(feeRecipient.balance, 0, "no fee on failed settlement");
+        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed");
 
-        // auction is closed — a second settle reverts
         vm.expectRevert(NotActive.selector);
         ah.settle(id);
     }
 
-    /// Seller revokes approval after the auction ends → same full refund of the winner.
+    /// Seller revokes approval after end → same full refund of the winner.
     function test_settleRefundsWinnerWhenApprovalRevoked() public {
-        (uint256 id, uint256 tid, uint128 total) = _setupAuctionWithBid();
+        (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
-
         vm.prank(seller);
         nft.setApprovalForAll(address(ah), false);
 
-        uint256 aliceBefore = alice.balance;
+        uint256 before = alice.balance;
         ah.settle(id);
 
-        assertEq(alice.balance, aliceBefore + total, "winner fully refunded");
+        assertEq(alice.balance, before + 2 ether, "winner fully refunded");
         assertEq(nft.ownerOf(tid), seller, "NFT stays with seller");
-        assertEq(feeRecipient.balance, 0, "no fee taken");
+        assertEq(feeRecipient.balance, 0, "no fee");
     }
 
     /// feeRecipient cannot receive ETH → settle still completes: NFT → winner,
-    /// the fee is parked in pendingReturns instead of bricking the auction.
+    /// seller paid bid−fee, the bounced fee parked in pendingReturns.
     function test_settleCompletesWhenFeeRecipientRejectsEther() public {
         RejectEther rej = new RejectEther();
         AuctionHouse ah2 = new AuctionHouse(address(rej));
@@ -93,18 +83,16 @@ contract AuctionHouseSettleSafetyTest is Test {
         uint256 id = ah2.create(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
         vm.stopPrank();
 
-        uint128 bidAmount = 1 ether;
-        uint128 total = _bidTotal(bidAmount);
+        uint128 bidAmt = 2 ether;
         vm.prank(alice);
-        ah2.bid{value: total}(id, bidAmount);
+        ah2.bid{value: bidAmt}(id);
 
         vm.warp(block.timestamp + 2 days);
-        uint256 fee = uint256(bidAmount) * 150 / 10_000;
         uint256 sellerBefore = seller.balance;
         ah2.settle(id);
 
         assertEq(nft.ownerOf(tid), alice, "winner receives NFT");
-        assertEq(seller.balance, sellerBefore + bidAmount - fee, "seller nets bid minus fee");
-        assertEq(ah2.pendingReturns(address(rej)), fee, "bounced fee parked for pull-withdrawal");
+        assertEq(seller.balance, sellerBefore + bidAmt - _fee(bidAmt), "seller nets bid minus fee");
+        assertEq(ah2.pendingReturns(address(rej)), _fee(bidAmt), "bounced fee parked");
     }
 }
