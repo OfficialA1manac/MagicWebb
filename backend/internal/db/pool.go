@@ -9,6 +9,7 @@ import (
 	"net/url"
 	"strings"
 
+	"github.com/jackc/pgx/v5"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/pressly/goose/v3"
 	"github.com/rs/zerolog/log"
@@ -45,6 +46,15 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(sanitizeDSN(dsn))
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)
+	}
+
+	// Supabase transaction-mode pooler (port 6543) rotates the backing server
+	// connection per transaction, so server-side prepared statements cached by
+	// pgx fail with "prepared statement \"...\" does not exist". Simple protocol
+	// sends each query inline with no prepared-statement cache → pooler-safe.
+	if cfg.ConnConfig.Port == 6543 {
+		cfg.ConnConfig.DefaultQueryExecMode = pgx.QueryExecModeSimpleProtocol
+		log.Info().Msg("pgx: simple query protocol (transaction-mode pooler on :6543)")
 	}
 
 	pool, err := pgxpool.NewWithConfig(ctx, cfg)

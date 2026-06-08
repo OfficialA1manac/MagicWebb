@@ -466,6 +466,39 @@ func (q *Q) GetBidsForAuction(ctx context.Context, auctionID int64) ([]BidRow, e
 	return out, rows.Err()
 }
 
+// EffectiveBidRow is one bidder's cumulative position on an auction.
+type EffectiveBidRow struct {
+	Bidder       string    `json:"bidder"`
+	EffectiveWei string    `json:"effective_wei"`
+	BidCount     int64     `json:"bid_count"`
+	LastBidAt    time.Time `json:"last_bid_at"`
+}
+
+// GetEffectiveBids returns per-bidder cumulative totals for an auction,
+// highest effective bid first. The leader (row 0) is the current/settlement
+// winner under the cumulative-bid model. Backed by the effective_bids view.
+func (q *Q) GetEffectiveBids(ctx context.Context, auctionID int64) ([]EffectiveBidRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT bidder, effective_wei::text, bid_count, last_bid_at
+		   FROM effective_bids
+		  WHERE auction_id = $1
+		  ORDER BY effective_wei DESC, last_bid_at ASC`,
+		auctionID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []EffectiveBidRow
+	for rows.Next() {
+		var r EffectiveBidRow
+		if err := rows.Scan(&r.Bidder, &r.EffectiveWei, &r.BidCount, &r.LastBidAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ── Sales ─────────────────────────────────────────────────────────────────
 
 func (q *Q) InsertSale(ctx context.Context,
