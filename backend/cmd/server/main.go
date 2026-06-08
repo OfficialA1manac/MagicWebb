@@ -49,12 +49,14 @@ func main() {
 	defer pool.Close()
 	q := db.New(pool)
 
-	// SSE broadcaster (replaces Redis pub/sub)
-	bcast := sse.New()
+	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY
+	// (session DSN: the transaction pooler can't LISTEN). Degrades to local-only
+	// delivery if the session conn is unavailable.
+	bcast := sse.NewBridged(ctx, pool, db.SessionDSN(config.C.PostgresURL))
 
-	// Rate limiter (in-memory, per-instance). Nonce store is Postgres-backed so
-	// SIWE nonces are consumable across instances (single-use, atomic GetDel).
-	rl := ratelimit.New()
+	// Shared (Postgres) rate limiter + nonce store, so limits and single-use
+	// SIWE nonces hold across instances.
+	rl := ratelimit.NewPg(pool)
 	ns := nonce.NewPg(pool)
 
 	// Ethereum client
@@ -87,7 +89,7 @@ func main() {
 	api.Mount(app, q, bcast, rl, &config.C)
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
-	authRL := ratelimit.New()
+	authRL := ratelimit.NewPg(pool)
 	app.Get("/auth/nonce", nonceHandler(ns, authRL))
 	app.Post("/auth/verify", verifyHandler(ns, authRL))
 

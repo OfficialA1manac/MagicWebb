@@ -41,6 +41,11 @@ func migrationDSN(dsn string) string {
 	return strings.ReplaceAll(sanitizeDSN(dsn), ":6543/", ":5432/")
 }
 
+// SessionDSN returns a session-mode DSN (Supabase pooler 6543 → 5432, pgx-unknown
+// params stripped). Required for LISTEN/NOTIFY, which the transaction-mode pooler
+// does not support.
+func SessionDSN(dsn string) string { return migrationDSN(dsn) }
+
 // Connect opens a pgxpool with default settings and runs Goose migrations.
 func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	cfg, err := pgxpool.ParseConfig(sanitizeDSN(dsn))
