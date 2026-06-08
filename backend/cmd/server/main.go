@@ -52,9 +52,10 @@ func main() {
 	// SSE broadcaster (replaces Redis pub/sub)
 	bcast := sse.New()
 
-	// Rate limiter + nonce store (in-memory, replaces Redis)
+	// Rate limiter (in-memory, per-instance). Nonce store is Postgres-backed so
+	// SIWE nonces are consumable across instances (single-use, atomic GetDel).
 	rl := ratelimit.New()
-	ns := nonce.New()
+	ns := nonce.NewPg(pool)
 
 	// Ethereum client
 	eth, err := ethclient.DialContext(ctx, config.C.RPCURL)
@@ -116,7 +117,7 @@ type tokenResp struct {
 	Address string `json:"address"`
 }
 
-func nonceHandler(ns *nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
+func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := c.IP()
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
@@ -132,7 +133,7 @@ func nonceHandler(ns *nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	}
 }
 
-func verifyHandler(ns *nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
+func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := c.IP()
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {

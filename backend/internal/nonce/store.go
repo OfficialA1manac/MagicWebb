@@ -1,4 +1,7 @@
-// Package nonce provides an in-memory SIWE nonce store with TTL.
+// Package nonce provides a single-use SIWE nonce store with TTL.
+// MemStore is in-memory (single instance / tests); PgStore is Postgres-backed
+// for multi-instance deployments (a nonce issued by one instance must be
+// consumable by any other).
 package nonce
 
 import (
@@ -6,26 +9,32 @@ import (
 	"time"
 )
 
+// Store is a single-use, TTL'd nonce store keyed by address.
+type Store interface {
+	Set(address, nonce string, ttl time.Duration)
+	GetDel(address string) (string, bool)
+}
+
 type record struct {
 	value     string
 	expiresAt time.Time
 }
 
-// Store is a thread-safe single-use nonce store.
-type Store struct {
+// MemStore is a thread-safe, in-memory single-use nonce store.
+type MemStore struct {
 	mu      sync.Mutex
 	entries map[string]record // address → record
 }
 
-// New creates a Store and starts background TTL cleanup.
-func New() *Store {
-	s := &Store{entries: make(map[string]record)}
+// New creates an in-memory MemStore and starts background TTL cleanup.
+func New() *MemStore {
+	s := &MemStore{entries: make(map[string]record)}
 	go s.cleanup()
 	return s
 }
 
 // Set stores nonce for address with given TTL.
-func (s *Store) Set(address, nonce string, ttl time.Duration) {
+func (s *MemStore) Set(address, nonce string, ttl time.Duration) {
 	s.mu.Lock()
 	s.entries[address] = record{value: nonce, expiresAt: time.Now().Add(ttl)}
 	s.mu.Unlock()
@@ -33,7 +42,7 @@ func (s *Store) Set(address, nonce string, ttl time.Duration) {
 
 // GetDel atomically retrieves and deletes the nonce (single-use).
 // Returns ("", false) if not found or expired.
-func (s *Store) GetDel(address string) (string, bool) {
+func (s *MemStore) GetDel(address string) (string, bool) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
 
@@ -46,7 +55,7 @@ func (s *Store) GetDel(address string) (string, bool) {
 	return r.value, true
 }
 
-func (s *Store) cleanup() {
+func (s *MemStore) cleanup() {
 	t := time.NewTicker(time.Minute)
 	defer t.Stop()
 	for range t.C {
