@@ -35,7 +35,7 @@ contract DeployFlare is Script {
         console2.log("AUCTION_ADDR=",     address(auction));
         console2.log("OFFERBOOK_ADDR=",   address(offerBook));
         console2.log("CREATOR_ADDR=",     creator);
-        console2.log("FEE=",              "1.5% (150 bps, hardcoded, taker-pays)");
+        console2.log("FEE=",              "1.5% (150 bps, hardcoded, seller-pays on sale)");
         // Sanity: every contract must report the same immutable fee recipient.
         require(marketplace.feeRecipient() == creator, "MARKETPLACE feeRecipient mismatch");
         require(auction.feeRecipient()     == creator, "AUCTION feeRecipient mismatch");
