@@ -23,7 +23,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Open any token you own → click **Auction**
 2. Set reserve price (0 = accept any bid), end time, min increment (bps, e.g. 500 = 5%)
 3. Click **Create auction** — approve AuctionHouse if prompted
-4. Auction starts immediately. End time is fixed and never extended.
+4. Auction starts immediately. A bid in the final 3 minutes extends the end time by 3 minutes (anti-snipe).
 5. If nobody bids within 30 minutes, the auction is cancelled automatically.
 6. To cancel early: click **Cancel Auction** → approve the wallet transaction manually.
 
@@ -39,20 +39,13 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 - If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept.
 
 ## Offer on an NFT
-Offers work on tokens the owner has marked as eligible:
+You can offer on **any** NFT — there is no eligibility gate, and offering is free:
 
-1. Browse token → if owner enabled offers, click **Make Offer**
-2. Enter offer amount → click **Submit Offer** → confirm wallet (ETH deposited on-chain)
-3. Owner reviews and may accept or ignore
-4. If accepted: NFT transfers to you automatically
-5. Your offer is free and locked until the owner accepts or rejects it, or it expires — then your full amount is refunded
-
-## Enable offers on your NFT (owner)
-1. Open any token you own → click **Accept Offers**
-2. Confirm wallet — token is now marked eligible
-3. Bidders can make on-chain ETH offers
-4. Review offers in **My Offers → Received** → click **Accept** on your preferred offer
-5. To stop receiving offers: click **Remove Eligibility** → confirm wallet
+1. Browse to any token → click **Make Offer**
+2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your FLR is escrowed on-chain)
+3. The owner may accept, reject, or let it expire
+4. If accepted: the NFT transfers to you automatically
+5. Your offer is free and locked until accepted, rejected, or expired — then your full amount is refunded. Repeat offers on the same NFT stack into one position; there is no early withdrawal.
 
 ## Accept an offer (owner)
 Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.

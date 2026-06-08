@@ -6,23 +6,24 @@
 
 ## 1. Abstract
 
-MagicWebb is a non-custodial NFT marketplace built as a single application with a direct contract model: **Next.js frontend + on-chain contracts**. It supports fixed-price listings, English auctions, and EIP-712 signed offers across ERC-721 and ERC-1155 assets.
+MagicWebb is a non-custodial NFT marketplace shipped as a **single Go binary** (Go Fiber server + server-rendered HTMX/Alpine UI + an on-chain event indexer) talking to **immutable on-chain contracts**. It supports fixed-price listings, English auctions, and fully on-chain escrowed offers across ERC-721 and ERC-1155 assets.
 
 ## 2. Design goals
 
 | Goal | Rationale |
 |---|---|
 | Non-custodial | NFTs remain in seller custody until atomic settlement. |
-| Minimal architecture | Remove service sprawl and runtime drift by keeping only frontend + contracts. |
+| Minimal architecture | One Go binary (server + UI + indexer) plus the contracts. No separate frontend service, no Node build, no container required. |
 | Hybrid 721/1155 | One marketplace surface for both token standards. |
-| Off-chain signatures, on-chain settlement | Offers are signed off-chain and accepted atomically on-chain. |
-| Predictable operations | Single env file (`frontend/.env.local`) and one Makefile lifecycle (`start`, `stop`, `restart`, `status`, `health`). |
+| Fully on-chain offers | Offers escrow native FLR in `OfferBook` on-chain — no off-chain signatures, deposits, or relayers. |
+| Predictable operations | Single `.env` and a Makefile lifecycle (`dev`, `build`, `run`, `migrate`, `test`, `deploy`, `load-addrs`). |
 | Wallet-only surface area | The app submits transactions when chain state requires it; users **connect and confirm** (or reject) in the wallet — no separate manual “claim” or “settle” hunting except on failure retry. |
 
 ## 3. System architecture
 
 ```
-Wallet <-> Frontend (Next.js + wagmi/viem) <-> Flare RPC <-> Contracts
+Wallet (ethers.js) --writes--> Flare RPC --> Contracts --events--> Indexer
+   --> Postgres --> Go Fiber server (HTMX UI + SSE) --reads--> Wallet / Browser
 ```
 
 ### 3.1 Contract roles
@@ -31,8 +32,8 @@ Wallet <-> Frontend (Next.js + wagmi/viem) <-> Flare RPC <-> Contracts
 |---|---|
 | `Marketplace` | **All** fixed-price, native-token listings. Listings are time-bounded (expiry); price and terms are set on-chain by the seller. |
 | `AuctionHouse` | **All** English auctions (ERC-721 and ERC-1155). Auction copy, timers, and bid semantics should be **internationalized in the app** so every locale can follow reserve, increments, anti-snipe, and settlement without relying on English-only chain data. |
-| `OfferBook` | **All** offer lifecycle: bidder **deposits**, EIP-712 **signed** offers off-chain, **acceptance** or **cancellation** on-chain. Nonces, deposits, and events give a clear **open vs. closed** picture; the contract is the source of truth for what can still execute. |
-| `MarketplaceCore` | Shared **immutable** fee routing, `_splitAndPay`, standard-aware NFT transfer helpers, and `ReentrancyGuard`. No admin roles, no fee mutability, no pause switch—so listings, auctions, and offers **cannot** silently change fee economics or clash on shared settlement primitives. |
+| `OfferBook` | **All** offer lifecycle, fully on-chain: `makeOffer` is **payable** and escrows the full principal; offers from the same bidder on one NFT **stack** into a single position. Acceptance, rejection, and expiry refunds are on-chain. No signatures, no nonces, no separate deposit balance — the escrowed position is the source of truth. |
+| `MarketplaceCore` | Shared **immutable** fee math (`_feeOf`), payout helpers (`_payFee`, `_pay`), standard-aware NFT transfer helpers, and `ReentrancyGuard`. No admin roles, no fee mutability, no pause switch — so listings, auctions, and offers **cannot** silently change fee economics or clash on shared settlement primitives. |
 
 ### 3.2 Platform fee (single, unified, immutable)
 
@@ -42,7 +43,7 @@ The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or 
 
 **Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-Deploy scripts require only `CREATOR_ADDR` (the fee recipient + admin wallet). No `FEE_BPS` variable exists — the rate is fixed in code.
+Deploy scripts require only `CREATOR_ADDR` (the immutable `feeRecipient`; there is no admin wallet). No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
@@ -55,7 +56,7 @@ Deploy scripts require only `CREATOR_ADDR` (the fee recipient + admin wallet). N
 
 **Auction bids (no fee applied on bids).** Losing bidders are credited **100%** of their superseded high bid in `pendingReturns` (no skim). They reclaim funds via `withdrawRefund`. The **current high bidder** may **raise their own bid** by sending only the **increment** as `msg.value`; it is **compounded** onto their existing high bid without routing the prior amount through `pendingReturns`. A **new** bidder still sends the **full** new winning amount as `msg.value`. The contract holds one active high bid plus aggregate pull-refund liabilities—no per-bid siloed “deposit accounts.”
 
-**When the fee is applied (after NFT transfer).** On every settlement path, the implementation performs the standard-aware **NFT transfer first**, then `_splitAndPay` so the platform fee is **applied** to the seller’s proceeds. If the transfer reverts, the whole transaction reverts: **the fee is not applied** and no sale state is finalized.
+**When the fee is applied (after NFT transfer).** On every settlement path, the implementation performs the standard-aware **NFT transfer first**, then `_payFee` (fee → `feeRecipient`) and `_pay` (proceeds → seller). If the transfer reverts, the whole transaction reverts: **the fee is not applied** and no sale state is finalized.
 
 **Expired or cancelled listings / unsold auctions.** If nothing sells, **no trade proceeds exist** and **the platform fee is not applied**—there is no separate “fee escrow” to unwind. `buy` on an expired listing simply reverts (`Expired`). A seller-cancelled listing is deleted with no payment flow.
 
@@ -67,7 +68,7 @@ Concrete behavior (reference implementation):
 
 - **Auction end:** When an auction has bids and has passed `endsAt`, opening the auction page with a connected wallet triggers `settle` automatically (wallet confirmation).
 - **Outbid refunds:** Opening your profile when `pendingReturns` is positive triggers `withdrawRefund` automatically (wallet confirmation). After a successful refund, state resets so a future outbid can prompt again.
-- **OfferBook deposit:** “Withdraw all” withdraws the full on-chain deposit with one confirmation; partial amounts remain an optional path.
+- **Offer expiry refunds:** `refundExpiredOffer` is permissionless — anyone (a keeper or the bidder) can trigger the full-principal refund of an expired offer; the app prompts the bidder when one of theirs has lapsed.
 
 Optional operations hardening (not required by contracts): a small **relayer** balance can call `settle` on users’ behalf so winners receive the NFT with **zero** signatures from them; that is a deployment choice and does not change fee **application** rules.
 
@@ -80,11 +81,11 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 3. Contract validates the listing, transfers the NFT, then splits payment (platform fee collected, remainder → seller) in the same atomic transaction, emits events.
 4. Frontend refreshes chain-backed reads after transaction receipt.
 
-### 4.2 Signed offer acceptance
+### 4.2 On-chain offer acceptance
 
-1. Bidder **deposits** native token into `OfferBook` and signs an EIP-712 `Offer` / `Offer1155` off-chain.
-2. Owner receives `{offer, signature}` and calls `acceptOffer` / `acceptOffer1155`.
-3. Contract validates signature, nonce, expiry, ownership/approval, debits deposit, transfers the NFT, then settles payment (fee + seller) in the same atomic transaction.
+1. Bidder calls `makeOffer` / `makeOffer1155` (**payable**), escrowing the full principal in `OfferBook`. Repeat offers on the same NFT stack into one position and refresh its expiry. Offering is free.
+2. Owner calls `acceptOffer` / `acceptOffer1155` (must currently own and have approved the NFT).
+3. Contract validates the position and ownership/approval, transfers the NFT to the bidder, then pays the seller `principal − 1.5%` and the fee to `feeRecipient` — one atomic transaction. Rejected or expired offers refund the full principal.
 
 ### 4.3 Auction settlement
 
@@ -98,7 +99,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 |---|---|
 | Reentrancy on payable flows | `ReentrancyGuard` + checks-effects-interactions |
 | Auction griefing via refund callback | Pull-pattern refunds (`withdrawRefund`) |
-| Signature replay | EIP-712 domain includes `chainId` and `verifyingContract`; nonce burn map |
+| Offer / escrow integrity | Offers are on-chain payable positions (no signatures to replay); escrowed balance always equals the sum of active principals — enforced by an invariant test |
 | Fee abuse | `PLATFORM_FEE_BPS` is a hardcoded `constant` (1.5%); no admin key, env var, or upgrade path can change it |
 | Listing overwrite by third party | Seller collision checks (`AlreadyListed`) |
 
@@ -109,31 +110,30 @@ Residual accepted risks:
 
 ## 6. Operations
 
-Canonical runtime controls:
+Canonical Makefile targets:
 
-- `make start`
-- `make stop`
-- `make restart`
-- `make status`
-- `make health`
-
-Production uses the same targets: build with `make build`, run with `make start` (see `README.md`).
+- `make dev` — run the server locally (hot reload)
+- `make build` — compile the single binary to `bin/magicwebb`
+- `make run` — build then run
+- `make migrate` — apply Postgres migrations (also auto-applied at startup)
+- `make test` / `make contracts-test` — Go (`-race`) and Forge suites
+- `make deploy` / `make load-addrs` — deploy contracts to Coston2 and sync addresses into `.env`
 
 Configuration source of truth:
 
-- committed template: `frontend/.env.example`
-- local / production runtime: `frontend/.env.local` (copy the template, then edit — the only env file)
+- committed template: `.env.example`
+- local / production runtime: `.env` (copy the template, then edit)
 
 ## 7. Roadmap
 
 | Phase | Scope |
 |---|---|
-| Phase 1 | Coston2 with fixed-price, auctions, and signed offers. |
+| Phase 1 | Coston2 with fixed-price, auctions, and on-chain escrowed offers. |
 | Phase 2 | Mainnet rollout and multisig operational hardening. |
 | Phase 3 | UX/performance iteration and broader collection coverage. |
 
 ## 8. Appendix — core event families
 
 - `Marketplace`: `Listed`, `Cancelled`, `Bought`
-- `AuctionHouse`: `AuctionCreated`, `BidPlaced`, `AuctionSettled`, `AuctionCancelled`, `RefundWithdrawn`, `AuctionExtended`
-- `OfferBook`: `OfferAccepted`, `Offer1155Accepted`, `OfferCancelled`, `Deposited`, `Withdrawn`
+- `AuctionHouse`: `AuctionCreated`, `BidPlaced`, `AuctionExtended`, `AuctionSettled`, `AuctionCancelled`, `RefundPushed`
+- `OfferBook`: `OfferMade`, `OfferAccepted`, `OfferRefunded`

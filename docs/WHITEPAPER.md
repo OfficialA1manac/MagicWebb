@@ -9,7 +9,7 @@
 
 MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and signed off-chain offers. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 1.5% platform fee across all operations (listing, buying, auctions, offers). The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
 
-This document explains what MagicWebb is, who it serves, why it exists, and where it is going. A separate **technical whitepaper** (`WHITEPAPER_TECHNICAL.md`) covers the smart-contract design and threat model in depth; a **line-by-line annotation** (`CONTRACTS_ANNOTATED.md`) walks every line of every Solidity file.
+This document explains what MagicWebb is, who it serves, why it exists, and where it is going. A separate **technical whitepaper** (`WHITEPAPER_TECHNICAL.md`) covers the smart-contract design and threat model in depth.
 
 ---
 
@@ -57,10 +57,10 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 ### Offers (the bidder side)
 
-1. Deposit some FLR into the OfferBook contract once.
-2. Sign offers off-chain (no gas, no per-offer fee).
-3. If your offer is accepted, the contract debits your deposit and transfers the NFT to you.
-4. Withdraw any unspent deposit any time.
+1. Make an offer on any NFT — the contract escrows your FLR on-chain. Offering is free.
+2. Repeat offers on the same NFT stack into one position; each refreshes the expiry.
+3. If the owner accepts, the NFT transfers to you and your escrow pays the seller (minus the 1.5% fee).
+4. If the offer is rejected or expires, your full principal is refunded. Offers are locked until then — there is no early withdrawal.
 
 ### Auctions (the bidder side)
 
@@ -94,7 +94,7 @@ MagicWebb credits outbid amounts to a per-bidder balance (`pendingReturns`). The
 
 ### 4.4 Anti-snipe
 
-Last-second bids would be disheartening for both bidders and sellers. MagicWebb extends the auction by 5 minutes if a winning bid arrives in the last 5 minutes. Each subsequent qualifying bid extends again. The auction ends when bids stop arriving in the window — a fair market clearing rather than a contest of latency.
+Last-second bids would be disheartening for both bidders and sellers. MagicWebb extends the auction by 3 minutes if a winning bid arrives in the last 3 minutes. Each subsequent qualifying bid extends again. The auction ends when bids stop arriving in the window — a fair market clearing rather than a contest of latency.
 
 ### 4.5 Hybrid standards
 
@@ -108,13 +108,13 @@ Whether you are trading a 1-of-1 generative art piece (ERC-721) or 1,000 collect
 On-chain (Flare Coston2)
    ├── Marketplace        — fixed-price listings
    ├── AuctionHouse       — English auctions
-   ├── OfferBook          — signed off-chain offers
-   └── MarketplaceCore    — shared fee, pause, transfer logic
+   ├── OfferBook          — on-chain payable offers (escrowed, stacked)
+   └── MarketplaceCore    — shared fee + transfer logic (immutable, no admin/pause)
 
-Off-chain
-   ├── Indexer (Go + Zig) — listens to events, populates Postgres
-   ├── API (Go + GraphQL) — read API for the frontend, SIWE auth
-   └── Frontend (Next.js) — wagmi-powered web app
+Off-chain (single Go binary)
+   ├── Indexer (Go)        — listens to events, populates Postgres
+   ├── Server (Go Fiber)   — REST + server-rendered HTMX UI, SSE live updates, SIWE auth
+   └── UI (HTMX + Alpine + ethers.js) — embedded in the binary; wallet writes go direct to chain
 ```
 
 The off-chain layer is a convenience layer for fast browsing. Trading is on-chain; the off-chain layer cannot censor, freeze, or front-run a trade.
@@ -125,10 +125,10 @@ The off-chain layer is a convenience layer for fast browsing. Trading is on-chai
 
 MagicWebb has been:
 - **Statically analysed** with Slither (latest stable). All real findings patched; remaining detector hits are accepted-design (paying authenticated parties, timestamp use for expiry checks).
-- **Manually audited** by claude-opus-4-7 against the standard NFT-marketplace threat list (reentrancy, signature replay, integer truncation, fee-cap bypass, DOS-by-revert, sniping).
-- **Tested** with 49 forge tests across all 5 contracts, including dedicated regressions for every patched finding.
+- **Manually reviewed** against the standard NFT-marketplace threat list (reentrancy, integer truncation, fee-cap bypass, DOS-by-revert, sniping). Offers carry no signatures, so signature-replay does not apply.
+- **Tested** with 98 forge tests across the 4 contracts, including dedicated regressions for every patched finding, plus static analysis (Slither: 0 high / 0 medium).
 
-Pre-mainnet, MagicWebb will commission an independent professional audit and move admin keys to a multisig.
+Pre-mainnet, MagicWebb will commission an independent professional audit and set the immutable `feeRecipient` to a multisig.
 
 ---
 
@@ -140,7 +140,7 @@ This is a deliberate choice:
 
 - A token would create an alignment between the platform and short-term price action that we do not want. We are building infrastructure, not a meme.
 - The Flare Network already has FLR; introducing a second token to a niche venue would fragment liquidity.
-- All decisions that *could* be governed (pauser changes, fee recipient address) are visible on-chain via the AccessControl events. The fee rate itself cannot be governed — it is a compile-time constant.
+- There is nothing to govern on-chain: the contracts have no admin, no pause, and no upgrade path. The fee rate is a compile-time constant and `feeRecipient` is immutable — both fixed at deploy.
 
 If user feedback ever justifies governance, it will be added via a separate mechanism — not retroactively jammed in by minting a token.
 
@@ -162,7 +162,7 @@ If user feedback ever justifies governance, it will be added via a separate mech
 | Risk | What happens | What we do |
 |---|---|---|
 | Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty, no upgradeability that could change behavior post-deploy |
-| Operator key compromised | Admin role changes | Fee rate is a hardcoded constant — no admin can change it; worst case is pausing the contracts; pre-mainnet handover to multisig |
+| Deployer key compromised | No effect on a live market | Contracts have no admin, pause, or upgrade path — nothing about a deployed market can be changed. `feeRecipient` is immutable; set it to a multisig at deploy |
 | Frontend disappears | Inconvenient | Contracts remain callable via Flarescan or any wallet's "contract interaction" panel |
 | Indexer lags | Stale UI | Frontend shows "syncing" badge; on-chain trades still settle in real time |
 | Approval phishing | Drained NFTs | Per-collection approvals; user education in app; we never request blanket setApprovalForAll for unknown contracts |
@@ -184,6 +184,5 @@ The NFT space spent its first cycle on speculation, the second on infrastructure
 ---
 
 **Find us:** github.com/<repo>
-**Read the code:** `contracts/src/`, `frontend/`
+**Read the code:** `contracts/src/`, `backend/`
 **Read the technical whitepaper:** `WHITEPAPER_TECHNICAL.md`
-**Read every line:** `CONTRACTS_ANNOTATED.md`
