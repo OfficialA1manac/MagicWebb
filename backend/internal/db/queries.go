@@ -423,6 +423,58 @@ func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 	return out, rows.Err()
 }
 
+// ── Loser refunds (keeper) ────────────────────────────────────────────────
+
+// RefundableAuction is a finalized auction whose losing bidders' escrow has not
+// yet been returned on-chain. Winner is the highest_bidder ("" when the auction
+// cancelled with no qualifying bid — every bidder is then a loser to refund).
+type RefundableAuction struct {
+	AuctionID int64
+	Status    string // "settled" | "cancelled"
+	Winner    string
+}
+
+// GetSettledUnrefundedAuctions returns finalized auctions still owing loser
+// refunds, throttled so a just-attempted auction is skipped for 2 minutes
+// (refundLosers is idempotent on-chain, so re-sends are safe but wasteful).
+func (q *Q) GetSettledUnrefundedAuctions(ctx context.Context) ([]RefundableAuction, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT auction_id, status::text, COALESCE(highest_bidder,'')
+		   FROM auctions
+		  WHERE status IN ('settled', 'cancelled') AND NOT losers_refunded
+		    AND (refund_attempt_at IS NULL OR refund_attempt_at < now() - interval '2 minutes')
+		  ORDER BY auction_id ASC LIMIT 100`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []RefundableAuction
+	for rows.Next() {
+		var r RefundableAuction
+		if err := rows.Scan(&r.AuctionID, &r.Status, &r.Winner); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkLosersRefunded flags an auction as fully refunded so the sweeper stops
+// re-sending refundLosers for it.
+func (q *Q) MarkLosersRefunded(ctx context.Context, auctionID int64) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE auctions SET losers_refunded = TRUE WHERE auction_id=$1`, auctionID)
+	return err
+}
+
+// SetRefundAttempt records that the sweeper just broadcast refundLosers for an
+// auction, throttling the next attempt.
+func (q *Q) SetRefundAttempt(ctx context.Context, auctionID int64) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE auctions SET refund_attempt_at = now() WHERE auction_id=$1`, auctionID)
+	return err
+}
+
 // ── Bids ──────────────────────────────────────────────────────────────────
 
 func (q *Q) InsertBid(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {

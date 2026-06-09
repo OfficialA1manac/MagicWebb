@@ -147,3 +147,66 @@ func TestInsertBidAndUpdateAuctionRollsBackOnUpdateFailure(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+func TestGetSettledUnrefundedAuctions(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	rows := mock.NewRows([]string{"auction_id", "status", "winner"}).
+		AddRow(int64(5), "settled", "0xwinner").
+		AddRow(int64(8), "cancelled", "")
+	mock.ExpectQuery(`FROM auctions\s+WHERE status IN \('settled', 'cancelled'\) AND NOT losers_refunded`).
+		WillReturnRows(rows)
+
+	got, err := q.GetSettledUnrefundedAuctions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("len = %d, want 2", len(got))
+	}
+	if got[0].AuctionID != 5 || got[0].Status != "settled" || got[0].Winner != "0xwinner" {
+		t.Fatalf("row0 = %+v", got[0])
+	}
+	if got[1].AuctionID != 8 || got[1].Status != "cancelled" || got[1].Winner != "" {
+		t.Fatalf("row1 = %+v", got[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestMarkLosersRefunded(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectExec(`UPDATE auctions SET losers_refunded\s*=\s*TRUE`).
+		WithArgs(int64(5)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	if err := q.MarkLosersRefunded(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetRefundAttempt(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectExec(`UPDATE auctions SET refund_attempt_at\s*=\s*now\(\)`).
+		WithArgs(int64(5)).
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+
+	if err := q.SetRefundAttempt(context.Background(), 5); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

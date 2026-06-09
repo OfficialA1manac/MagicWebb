@@ -67,6 +67,9 @@ func (r *Runner) Run(ctx context.Context) {
 
 		wg.Add(1)
 		go func() { defer wg.Done(); r.runOfferKeeper(ctx) }()
+
+		wg.Add(1)
+		go func() { defer wg.Done(); r.runLoserRefundSweeper(ctx) }()
 	}
 
 	wg.Wait()
