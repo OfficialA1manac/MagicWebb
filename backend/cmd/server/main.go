@@ -7,8 +7,10 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"os/signal"
 	"strings"
 	"sync/atomic"
+	"syscall"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
@@ -70,8 +72,10 @@ func main() {
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
 
-	// Start indexer in background
-	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs)
+	// Start indexer in background. Keepers gate on a Postgres advisory lock so
+	// only one instance broadcasts settle/refund txs (failover via lock release).
+	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
+		WithKeeperGate(func(c context.Context) (func(), error) { return db.WaitKeeperLock(c, pool) })
 	go func() {
 		log.Info().Msg("indexer starting")
 		runner.Run(ctx)
@@ -96,6 +100,19 @@ func main() {
 
 	// Serve HTMX templates + static files
 	mountUI(app, q, &serverTimeMs)
+
+	// Graceful shutdown: SIGINT/SIGTERM stops accepting traffic, then cancels
+	// ctx so the indexer/keepers drain (no settle broadcast cut mid-flight).
+	go func() {
+		sig := make(chan os.Signal, 1)
+		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
+		s := <-sig
+		log.Info().Str("signal", s.String()).Msg("shutting down")
+		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
+			log.Error().Err(err).Msg("http shutdown")
+		}
+		cancel()
+	}()
 
 	log.Info().Str("addr", config.C.HTTPAddr).Msg("server starting")
 	if err := app.Listen(config.C.HTTPAddr); err != nil {

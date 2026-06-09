@@ -35,13 +35,18 @@ type EthClient interface {
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 }
 
+// KeeperGate blocks until this instance may run keeper broadcasts (cluster
+// single-flight), returning a release func. nil gate = keepers start at once.
+type KeeperGate func(ctx context.Context) (release func(), err error)
+
 // Runner orchestrates all indexer workers.
 type Runner struct {
-	cfg   *config.Config
-	q     *db.Q
-	bcast *sse.Broadcaster
-	eth   EthClient
-	h     *handlers
+	cfg        *config.Config
+	q          *db.Q
+	bcast      *sse.Broadcaster
+	eth        EthClient
+	h          *handlers
+	keeperGate KeeperGate
 	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
 	serverTimeMs *int64
 }
@@ -56,6 +61,13 @@ func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, ser
 		h:            &handlers{q: q, bcast: bcast},
 		serverTimeMs: serverTimeMs,
 	}
+}
+
+// WithKeeperGate sets the single-flight gate the keeper workers must win
+// before broadcasting transactions.
+func (r *Runner) WithKeeperGate(g KeeperGate) *Runner {
+	r.keeperGate = g
+	return r
 }
 
 // Run starts all workers and blocks until ctx is cancelled.
@@ -76,13 +88,22 @@ func (r *Runner) Run(ctx context.Context) {
 
 	if r.cfg.KeeperKey != "" {
 		wg.Add(1)
-		go func() { defer wg.Done(); r.runAuctionKeeper(ctx) }()
-
-		wg.Add(1)
-		go func() { defer wg.Done(); r.runOfferKeeper(ctx) }()
-
-		wg.Add(1)
-		go func() { defer wg.Done(); r.runLoserRefundSweeper(ctx) }()
+		go func() {
+			defer wg.Done()
+			if r.keeperGate != nil {
+				release, err := r.keeperGate(ctx)
+				if err != nil {
+					return // ctx cancelled while waiting for the lock
+				}
+				defer release()
+			}
+			var kwg sync.WaitGroup
+			kwg.Add(3)
+			go func() { defer kwg.Done(); r.runAuctionKeeper(ctx) }()
+			go func() { defer kwg.Done(); r.runOfferKeeper(ctx) }()
+			go func() { defer kwg.Done(); r.runLoserRefundSweeper(ctx) }()
+			kwg.Wait()
+		}()
 	}
 
 	wg.Wait()
