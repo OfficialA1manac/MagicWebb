@@ -27,9 +27,13 @@ contract DeployCoston2 is Script {
 
         require(creator != address(0), "CREATOR_ADDR required");
 
+        address deployer = vm.addr(pk);
+
         vm.startBroadcast(pk);
 
-        MarketplaceManager manager = new MarketplaceManager(creator);
+        // Deployer is temporary admin for setup; control is handed to CREATOR_ADDR
+        // and every deployer role renounced before the broadcast ends.
+        MarketplaceManager manager = new MarketplaceManager(deployer);
 
         Marketplace  marketplace = new Marketplace (creator, address(manager));
         AuctionHouse auction     = new AuctionHouse(creator, address(manager));
@@ -39,6 +43,10 @@ contract DeployCoston2 is Script {
         if (keeper != address(0)) {
             manager.grantRole(manager.KEEPER_ROLE(), keeper);
         }
+        manager.grantRole(manager.DEFAULT_ADMIN_ROLE(), creator);
+        manager.grantRole(manager.OPERATOR_ROLE(), creator);
+        manager.renounceRole(manager.OPERATOR_ROLE(), deployer);
+        manager.renounceRole(manager.DEFAULT_ADMIN_ROLE(), deployer);
 
         vm.stopBroadcast();
 
@@ -58,6 +66,8 @@ contract DeployCoston2 is Script {
         require(auction.manager()     == address(manager), "AUCTION manager mismatch");
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
         require(manager.entriesAllowed(), "manager must deploy unpaused");
-        console2.log("feeRecipient + manager verified on all three cores");
+        require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
+        require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
+        console2.log("feeRecipient + manager + admin handover verified");
     }
 }
