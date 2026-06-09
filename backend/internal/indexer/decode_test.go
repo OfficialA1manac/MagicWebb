@@ -3,6 +3,8 @@ package indexer
 import (
 	"math/big"
 	"testing"
+
+	"github.com/ethereum/go-ethereum/common"
 )
 
 func word(setLowByte byte) []byte {
@@ -49,19 +51,29 @@ func TestBigStrAndTsUnix(t *testing.T) {
 }
 
 // Guards against the M1 bug class: an event the contract emits but the indexer never
-// filters for (silently dropped). AuctionExtended must be in the core topic filter.
+// filters for (silently dropped). Every AuctionHouse v2 event the keeper/UI relies on
+// must be in the core topic filter — including the cumulative-bid additions
+// (OutbidNotification, LoserRefunded).
 func TestCoreTopicsIncludesAuctionExtended(t *testing.T) {
 	topics := coreTopics()[0]
-	if len(topics) != 11 {
-		t.Fatalf("core topics = %d, want 11", len(topics))
+	if len(topics) != 13 {
+		t.Fatalf("core topics = %d, want 13", len(topics))
 	}
-	found := false
-	for _, h := range topics {
-		if h == TopicAuctionExtended {
-			found = true
+	has := func(want common.Hash) bool {
+		for _, h := range topics {
+			if h == want {
+				return true
+			}
 		}
+		return false
 	}
-	if !found {
+	if !has(TopicAuctionExtended) {
 		t.Fatal("AuctionExtended missing from coreTopics filter — extensions would be dropped")
+	}
+	if !has(TopicOutbidNotification) {
+		t.Fatal("OutbidNotification missing from coreTopics filter — outbid pushes would be dropped")
+	}
+	if !has(TopicLoserRefunded) {
+		t.Fatal("LoserRefunded missing from coreTopics filter — refund sync would be dropped")
 	}
 }

@@ -67,10 +67,14 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onAuctionCreated(ctx, l)
 	case TopicBidPlaced:
 		return h.onBidPlaced(ctx, l, blockTime)
+	case TopicOutbidNotification:
+		return h.onOutbidNotification(ctx, l)
 	case TopicAuctionExtended:
 		return h.onAuctionExtended(ctx, l)
 	case TopicAuctionSettled:
 		return h.onAuctionSettled(ctx, l)
+	case TopicLoserRefunded:
+		return h.onLoserRefunded(ctx, l)
 	case TopicAuctionCancelled:
 		return h.onAuctionCancelled(ctx, l)
 	case TopicOfferMade:
@@ -215,28 +219,64 @@ func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 	return nil
 }
 
-// BidPlaced(uint256 indexed id, address indexed bidder, uint128 bidAmount, uint128 totalPaid)
+// BidPlaced(uint256 indexed id, address indexed bidder, uint256 amount, uint256 newTotal)
+// Cumulative model: amount is THIS bid's wei; newTotal is the bidder's cumulative.
+// The current leader is recomputed from the effective_bids view (lead changes are
+// signalled separately by OutbidNotification).
 func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint64) error {
-	if len(l.Topics) < 3 || len(l.Data) < 32 {
+	if len(l.Topics) < 3 || len(l.Data) < 2*32 {
 		return fmt.Errorf("onBidPlaced: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	bidder := addrStr(l.Topics[2].Bytes())
-	amtWei := bigStr(chunk(l.Data, 0)) // bidAmount (bidding is free; fee taken from seller at settle)
+	amtWei := bigStr(chunk(l.Data, 0))     // this bid's wei (escrowed; bidding is free)
+	newTotal := bigStr(chunk(l.Data, 1))   // bidder's cumulative after this bid
 	placedAt := time.Unix(int64(blockTime), 0)
 
-	// Notify the previous highest bidder that they were outbid (bid refunded in full).
-	if prev, err := h.q.GetAuction(ctx, auctionID); err == nil && prev != nil &&
-		prev.HighestBidder != "" && prev.HighestBidder != bidder {
-		h.notify(ctx, prev.HighestBidder, "outbid", "You were outbid",
-			"New high bid "+amtWei+" wei", "/auction/"+fmt.Sprint(auctionID))
-	}
-
+	// Insert the bid row and set the auction's highest to the current cumulative
+	// leader (max effective_wei). Idempotent on tx_hash.
 	if err := h.q.InsertBidAndUpdateAuction(ctx, auctionID, bidder, amtWei, l.TxHash.Hex(), placedAt); err != nil {
 		return fmt.Errorf("onBidPlaced: %w", err)
 	}
 	h.pub("auction-updated", map[string]any{
-		"event": "BidPlaced", "auctionId": auctionID, "bidder": bidder, "amtWei": amtWei,
+		"event": "BidPlaced", "auctionId": auctionID, "bidder": bidder,
+		"amtWei": amtWei, "effectiveWei": newTotal,
+	})
+	return nil
+}
+
+// OutbidNotification(uint256 indexed id, address indexed outbid, uint256 newLeaderTotal)
+func (h *handlers) onOutbidNotification(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 3 || len(l.Data) < 32 {
+		return fmt.Errorf("onOutbidNotification: short log")
+	}
+	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
+	outbid := addrStr(l.Topics[2].Bytes())
+	newLeaderTotal := bigStr(chunk(l.Data, 0))
+
+	h.notify(ctx, outbid, "outbid", "You were outbid",
+		"New leading total "+newLeaderTotal+" wei. Add to your bid to reclaim the lead.",
+		"/auction/"+fmt.Sprint(auctionID))
+	h.pub("auction-updated", map[string]any{
+		"event": "OutbidNotification", "auctionId": auctionID,
+		"outbid": outbid, "leaderTotalWei": newLeaderTotal,
+	})
+	return nil
+}
+
+// LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount)
+func (h *handlers) onLoserRefunded(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 3 || len(l.Data) < 32 {
+		return fmt.Errorf("onLoserRefunded: short log")
+	}
+	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
+	bidder := addrStr(l.Topics[2].Bytes())
+	amount := bigStr(chunk(l.Data, 0))
+
+	h.notify(ctx, bidder, "refund", "Auction escrow refunded",
+		amount+" wei returned", "/auction/"+fmt.Sprint(auctionID))
+	h.pub("auction-updated", map[string]any{
+		"event": "LoserRefunded", "auctionId": auctionID, "bidder": bidder, "amtWei": amount,
 	})
 	return nil
 }
