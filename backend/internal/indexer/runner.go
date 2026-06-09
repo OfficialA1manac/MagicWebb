@@ -14,7 +14,6 @@ import (
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
@@ -22,19 +21,33 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
+// EthClient is the chain-access surface the indexer and keepers need. Both
+// *ethclient.Client and *rpcpool.Pool satisfy it; production injects the pool
+// so every read, write and log filter gets rotation + failover.
+type EthClient interface {
+	BlockNumber(ctx context.Context) (uint64, error)
+	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
+	FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error)
+	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	PendingNonceAt(ctx context.Context, account common.Address) (uint64, error)
+	SuggestGasPrice(ctx context.Context) (*big.Int, error)
+	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
+	SendTransaction(ctx context.Context, tx *types.Transaction) error
+}
+
 // Runner orchestrates all indexer workers.
 type Runner struct {
 	cfg   *config.Config
 	q     *db.Q
 	bcast *sse.Broadcaster
-	eth   *ethclient.Client
+	eth   EthClient
 	h     *handlers
 	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
 	serverTimeMs *int64
 }
 
 // New creates a Runner with all dependencies injected.
-func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth *ethclient.Client, serverTimeMs *int64) *Runner {
+func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, serverTimeMs *int64) *Runner {
 	return &Runner{
 		cfg:          cfg,
 		q:            q,

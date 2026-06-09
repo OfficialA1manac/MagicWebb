@@ -18,7 +18,8 @@ type Config struct {
 	Env string // "development" | "production"
 
 	// Network
-	RPCURL  string
+	RPCURL  string   // primary RPC (back-compat / single endpoint)
+	RPCURLs []string // rotation set (RPC_URLS, comma-separated; falls back to [RPCURL])
 	ChainID uint64
 
 	// Contract addresses
@@ -114,6 +115,13 @@ func Load() {
 	C.OfferBookAddr   = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr     = strings.ToLower(C.RoyaltyAddr)
 
+	// RPC rotation set: prefer RPC_URLS (comma-separated) for failover headroom;
+	// fall back to the single required RPC_URL so existing deploys keep working.
+	C.RPCURLs = parseURLList(os.Getenv("RPC_URLS"))
+	if len(C.RPCURLs) == 0 {
+		C.RPCURLs = []string{C.RPCURL}
+	}
+
 	if len(C.JWTSecret) < 32 {
 		fmt.Fprintln(os.Stderr, "FATAL: JWT_SECRET must be at least 32 characters")
 		os.Exit(1)
@@ -137,6 +145,22 @@ func requiredUint64(key string) uint64 {
 		os.Exit(1)
 	}
 	return n
+}
+
+// parseURLList splits a comma-separated URL list, trimming whitespace and
+// dropping empties. Case is preserved (URL paths/tokens are case-sensitive).
+func parseURLList(v string) []string {
+	if strings.TrimSpace(v) == "" {
+		return nil
+	}
+	parts := strings.Split(v, ",")
+	out := make([]string, 0, len(parts))
+	for _, p := range parts {
+		if p = strings.TrimSpace(p); p != "" {
+			out = append(out, p)
+		}
+	}
+	return out
 }
 
 // parseAddrList splits a comma-separated address list and lowercases each entry.

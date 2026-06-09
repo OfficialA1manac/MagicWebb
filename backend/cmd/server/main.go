@@ -13,7 +13,6 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
-	"github.com/ethereum/go-ethereum/ethclient"
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -25,6 +24,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
@@ -59,12 +59,13 @@ func main() {
 	rl := ratelimit.NewPg(pool)
 	ns := nonce.NewPg(pool)
 
-	// Ethereum client
-	eth, err := ethclient.DialContext(ctx, config.C.RPCURL)
+	// Ethereum access: rotation + failover across every configured endpoint
+	// (RPC_URLS, falling back to RPC_URL). All indexer/keeper reads, writes and
+	// log filters go through the pool.
+	eth, err := rpcpool.New(ctx, config.C.RPCURLs, rpcpool.DefaultTimeout)
 	if err != nil {
-		log.Fatal().Err(err).Msg("eth client connect failed")
+		log.Fatal().Err(err).Msg("eth rpc pool init failed")
 	}
-	defer eth.Close()
 
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
