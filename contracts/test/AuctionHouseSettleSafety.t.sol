@@ -19,7 +19,7 @@ contract AuctionHouseSettleSafetyTest is Test {
     address carol  = address(0xCab01);
 
     function setUp() public {
-        ah  = new AuctionHouse(feeRecipient);
+        ah  = new AuctionHouse(feeRecipient, address(0));
         nft = new MockERC721();
         vm.deal(alice, 100 ether);
     }
@@ -75,7 +75,7 @@ contract AuctionHouseSettleSafetyTest is Test {
     /// seller paid bid−fee, the bounced fee parked in pendingReturns.
     function test_settleCompletesWhenFeeRecipientRejectsEther() public {
         RejectEther rej = new RejectEther();
-        AuctionHouse ah2 = new AuctionHouse(address(rej));
+        AuctionHouse ah2 = new AuctionHouse(address(rej), address(0));
 
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);

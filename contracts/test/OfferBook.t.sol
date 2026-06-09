@@ -18,7 +18,7 @@ contract OfferBookTest is Test {
     address bidder2      = address(0xB0B);
 
     function setUp() public {
-        ob    = new OfferBook(feeRecipient);
+        ob    = new OfferBook(feeRecipient, address(0));
         nft   = new MockERC721();
         multi = new MockERC1155();
 

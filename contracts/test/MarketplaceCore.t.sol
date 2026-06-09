@@ -14,7 +14,7 @@ contract MarketplaceCoreTest is Test {
     address buyer   = address(0xCAFE);
 
     function setUp() public {
-        mp  = new Marketplace(creator);
+        mp  = new Marketplace(creator, address(0));
         nft = new MockERC721();
         vm.deal(buyer, 10 ether);
     }
@@ -27,7 +27,7 @@ contract MarketplaceCoreTest is Test {
 
     function test_constructorZeroRecipientReverts() public {
         vm.expectRevert();
-        new Marketplace(address(0));
+        new Marketplace(address(0), address(0));
     }
 
     // ── Immutability ────────────────────────────────────────────────────────────

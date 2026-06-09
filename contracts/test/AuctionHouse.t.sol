@@ -17,7 +17,7 @@ contract AuctionHouseTest is Test {
     address carol        = address(0xCab01);
 
     function setUp() public {
-        ah    = new AuctionHouse(feeRecipient);
+        ah    = new AuctionHouse(feeRecipient, address(0));
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);

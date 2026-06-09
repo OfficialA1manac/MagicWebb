@@ -74,7 +74,7 @@ contract OfferBookInvariantTest is Test {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        ob = new OfferBook(feeRecipient);
+        ob = new OfferBook(feeRecipient, address(0));
         nft = new MockERC721();
         handler = new OfferHandler(ob, nft);
         targetContract(address(handler));

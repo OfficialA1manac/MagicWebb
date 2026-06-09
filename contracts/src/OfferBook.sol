@@ -65,8 +65,8 @@ contract OfferBook is MarketplaceCore {
     );
     event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
-    constructor(address recipient)
-        MarketplaceCore(recipient)
+    constructor(address recipient, address manager_)
+        MarketplaceCore(recipient, manager_)
     {}
 
     // ── Make offer (free; full principal escrowed) ─────────────────────────────
@@ -76,14 +76,14 @@ contract OfferBook is MarketplaceCore {
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
     /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
-    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant {
+    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant entryGate {
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
     }
 
     /// @notice Offer on ERC-1155 units. Send exactly `principal` as msg.value. FREE.
     /// @param units  Number of ERC-1155 units desired (latest top-up wins).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
-        external payable nonReentrant
+        external payable nonReentrant entryGate
     {
         if (units == 0) revert InvalidAmount();
         _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, expiresAt);
@@ -117,7 +117,7 @@ contract OfferBook is MarketplaceCore {
 
     /// @notice Accept a bidder's full position. Caller must currently own/hold the NFT.
     ///         NFT → bidder, 1.5% fee → feeRecipient, principal − fee → seller.
-    function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+    function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant entryGate {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
 

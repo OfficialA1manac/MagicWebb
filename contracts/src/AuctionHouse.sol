@@ -102,20 +102,20 @@ contract AuctionHouse is MarketplaceCore {
     event AuctionCancelled(uint256 indexed id);
     event RefundPushed(address indexed bidder, uint256 amount);
 
-    constructor(address recipient) MarketplaceCore(recipient) {}
+    constructor(address recipient, address manager_) MarketplaceCore(recipient, manager_) {}
 
     // ── Create (free) ───────────────────────────────────────────────────────────
 
     /// @notice Create an ERC-721 auction. Starts immediately.
     function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
-        external returns (uint256 id)
+        external entryGate returns (uint256 id)
     {
         return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, endsAt, minIncBps, minIncFlat);
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
     function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
-        external returns (uint256 id)
+        external entryGate returns (uint256 id)
     {
         if (amount == 0) revert InvalidAmount();
         return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, endsAt, minIncBps, minIncFlat);
@@ -167,7 +167,7 @@ contract AuctionHouse is MarketplaceCore {
     /// @notice Add `msg.value` to your cumulative bid on auction `id`. No refund on
     ///         being outbid — top up again to reclaim the lead. Your effective bid is
     ///         the sum of all your bids.
-    function bid(uint256 id) external payable nonReentrant {
+    function bid(uint256 id) external payable nonReentrant entryGate {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();

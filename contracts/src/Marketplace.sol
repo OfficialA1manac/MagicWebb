@@ -65,19 +65,19 @@ contract Marketplace is MarketplaceCore {
         uint256 fee
     );
 
-    constructor(address recipient)
-        MarketplaceCore(recipient)
+    constructor(address recipient, address manager_)
+        MarketplaceCore(recipient, manager_)
     {}
 
     // ── List (free) ───────────────────────────────────────────────────────────
 
     /// @notice List an ERC-721 token at a fixed price. FREE — no listing fee.
-    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external {
+    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external entryGate {
         _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
     }
 
     /// @notice List ERC-1155 units at a fixed price. FREE — no listing fee.
-    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external {
+    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external entryGate {
         if (amount == 0) revert InvalidAmount();
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
     }
@@ -93,7 +93,7 @@ contract Marketplace is MarketplaceCore {
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
     ///         Caller must have approved this contract on each collection.
-    function batchList(BatchItem[] calldata items) external {
+    function batchList(BatchItem[] calldata items) external entryGate {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         for (uint256 i; i < items.length; ++i) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);
@@ -148,7 +148,7 @@ contract Marketplace is MarketplaceCore {
     ///      The `seller` arg selects which listing to buy (listings are seller-keyed).
     ///      Entire tx reverts if the NFT transfer fails (seller no longer owns/approves) —
     ///      no fee is taken, the listing remains. This is how first-settle-wins works.
-    function buy(address coll, uint256 id, address seller) external payable nonReentrant {
+    function buy(address coll, uint256 id, address seller) external payable nonReentrant entryGate {
         Listing memory l = listings[coll][id][seller];
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp > l.expiresAt) revert Expired();

@@ -10,8 +10,14 @@ error TransferFailed();
 error WithdrawFailed();
 error ZeroAddress();
 error BelowMinPrice();
+error EntriesHalted();
 
 enum TokenStandard { ERC721, ERC1155 }
+
+/// @dev Read-only surface the cores consult on entry paths.
+interface IMarketplaceManager {
+    function entriesAllowed() external view returns (bool);
+}
 
 /// @title MarketplaceCore
 /// @notice Shared base: immutable fee config, price floor, seller-pays fee math, NFT dispatch.
@@ -28,9 +34,26 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     /// @notice Wallet that receives all platform fees. Immutable post-deploy.
     address public immutable feeRecipient;
 
-    constructor(address recipient) {
+    /// @notice Optional MarketplaceManager consulted on ENTRY paths only
+    ///         (list/buy/create/bid/makeOffer/acceptOffer). address(0) = ungated.
+    ///         EXIT paths (settle, refunds, withdrawals, cancels, reject) never
+    ///         consult it — escrowed funds can always leave regardless of any
+    ///         role, pause, or manager compromise.
+    address public immutable manager;
+
+    constructor(address recipient, address manager_) {
         if (recipient == address(0)) revert ZeroAddress();
         feeRecipient = recipient;
+        manager      = manager_;
+    }
+
+    /// @dev Circuit-breaker guard for entry paths. Fails open if no manager is
+    ///      configured; reverts with EntriesHalted while the manager is paused.
+    modifier entryGate() {
+        if (manager != address(0) && !IMarketplaceManager(manager).entriesAllowed()) {
+            revert EntriesHalted();
+        }
+        _;
     }
 
     // ── Seller-pays fee math ─────────────────────────────────────────────────
