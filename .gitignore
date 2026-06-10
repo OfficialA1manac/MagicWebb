@@ -54,3 +54,12 @@ backend/vendor/
 
 # Air live-reload build output
 backend/tmp/
+
+# Local-only dev/AI tooling (kept on disk, never in repo)
+CLAUDE.md
+TODOS.md
+dev.ps1
+Makefile
+.claude/
+docs/REVIEW_PRODUCTION_HARDENING.md
+docs/PERFORMANCE_AUDIT.md
