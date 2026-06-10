@@ -102,7 +102,13 @@ func (r *Runner) sweepLoserRefunds(
 			continue
 		}
 
-		allSent := true
+		// Broadcast every batch, then require a MINED, successful receipt for
+		// each before closing the auction out in the DB. A broadcast that never
+		// lands (dropped, replaced, "nonce too low" false-success upstream)
+		// must not flip the flag — the sweep retries next tick and
+		// refundLosers is idempotent on-chain (zeroed escrow is skipped).
+		allMined := true
+		var hashes []common.Hash
 		for start := 0; start < len(losers); start += refundBatchSize {
 			end := start + refundBatchSize
 			if end > len(losers) {
@@ -111,21 +117,31 @@ func (r *Runner) sweepLoserRefunds(
 			batch := losers[start:end]
 			data := encodeRefundLosers(a.AuctionID, batch)
 			gas := uint64(120_000 + 50_000*len(batch))
-			if err := r.sendRaw(ctx, key, keeperAddr, auctionAddr, signer, chainID, data, gas); err != nil {
+			h, err := r.sendRaw(ctx, key, keeperAddr, auctionAddr, signer, chainID, data, gas)
+			if err != nil {
 				log.Error().Err(err).Int64("auctionId", a.AuctionID).Int("batch", len(batch)).
 					Msg("refund sweeper: refundLosers tx failed")
-				allSent = false
+				allMined = false
 				break
 			}
-			log.Info().Int64("auctionId", a.AuctionID).Int("losers", len(batch)).
+			hashes = append(hashes, h)
+			log.Info().Int64("auctionId", a.AuctionID).Int("losers", len(batch)).Str("tx", h.Hex()).
 				Msg("refund sweeper: refundLosers tx sent")
 		}
+		if allMined {
+			for _, h := range hashes {
+				if err := r.waitMined(ctx, h, 60*time.Second); err != nil {
+					log.Error().Err(err).Int64("auctionId", a.AuctionID).
+						Msg("refund sweeper: refundLosers tx not confirmed")
+					allMined = false
+					break
+				}
+			}
+		}
 
-		// Mark only after every chunk broadcast cleanly. On partial failure we
-		// leave the flag unset and retry next tick (idempotent on-chain). On
-		// success we throttle and mark done; LoserRefunded events then sync the
-		// per-bidder refund rows for the UI.
-		if allSent {
+		// Mark only after every batch is confirmed on-chain. LoserRefunded
+		// events then sync the per-bidder refund rows for the UI.
+		if allMined {
 			if err := r.q.MarkLosersRefunded(ctx, a.AuctionID); err != nil {
 				log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("refund sweeper: mark refunded")
 			}

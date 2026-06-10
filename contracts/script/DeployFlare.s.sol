@@ -26,6 +26,9 @@ contract DeployFlare is Script {
         address keeper  = vm.envOr("KEEPER_ADDR", address(0));
 
         require(creator != address(0), "CREATOR_ADDR required");
+        // Mainnet gating: the admin/fee wallet must be a contract (Safe
+        // multisig), never a single EOA key.
+        require(creator.code.length > 0, "CREATOR_ADDR must be a multisig contract on mainnet");
 
         address deployer = vm.addr(pk);
 
@@ -67,7 +70,12 @@ contract DeployFlare is Script {
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
         require(manager.entriesAllowed(), "manager must deploy unpaused");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
+        require(manager.hasRole(manager.OPERATOR_ROLE(), creator),        "creator must hold operator");
         require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
+        require(!manager.hasRole(manager.OPERATOR_ROLE(), deployer),      "deployer must have renounced operator");
+        if (keeper != address(0)) {
+            require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");
+        }
         console2.log("feeRecipient + manager + admin handover verified");
     }
 }

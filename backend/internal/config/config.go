@@ -65,10 +65,6 @@ type Config struct {
 	// AdminAllowlist is the set of lowercased addresses permitted to call admin
 	// endpoints (e.g. profile verification). Off-chain admin = env allowlist + SIWE JWT.
 	AdminAllowlist []string
-
-	// ServerTimeMs is set by the indexer on each new block (used by /api/v1/server-time).
-	// Accessed atomically via sync/atomic in the indexer runner.
-	ServerTimeMs int64
 }
 
 // Load reads environment variables and panics on missing required values.
@@ -115,11 +111,14 @@ func Load() {
 	C.OfferBookAddr   = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr     = strings.ToLower(C.RoyaltyAddr)
 
-	// RPC rotation set: prefer RPC_URLS (comma-separated) for failover headroom;
-	// fall back to the single required RPC_URL so existing deploys keep working.
-	C.RPCURLs = parseURLList(os.Getenv("RPC_URLS"))
-	if len(C.RPCURLs) == 0 {
-		C.RPCURLs = []string{C.RPCURL}
+	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
+	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
+	// never silently drop the primary from rotation.
+	C.RPCURLs = []string{C.RPCURL}
+	for _, u := range parseURLList(os.Getenv("RPC_URLS")) {
+		if u != C.RPCURL {
+			C.RPCURLs = append(C.RPCURLs, u)
+		}
 	}
 
 	if len(C.JWTSecret) < 32 {

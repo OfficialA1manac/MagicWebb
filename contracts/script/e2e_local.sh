@@ -22,8 +22,8 @@ BOB=0x90F79bf6EB2c4f870365E785982E1f101E93b906
 CREATOR=0xa0Ee7A142d267C1f36714E4a8F75612F20a79720
 
 bal() { cast balance "$1" --rpc-url "$RPC"; }
-# diff <a> <b> -> a-b via python (wei values overflow 64-bit shell arithmetic)
-diff() { python3 -c "print($1-$2)"; }
+# sub <a> <b> -> a-b via python (wei values overflow 64-bit shell arithmetic)
+sub() { python3 -c "print($1-$2)"; }
 gt() { python3 -c "print(1 if $1-$2 > $3 else 0)"; }
 warp() { cast rpc evm_increaseTime "$1" --rpc-url "$RPC" >/dev/null; cast rpc evm_mine --rpc-url "$RPC" >/dev/null; }
 fail=0
@@ -44,8 +44,8 @@ S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
 cast send "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
 check "buyer owns token 1" "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 1 --rpc-url "$RPC")"
-check "seller +0.985"      "985000000000000000"  "$(diff $S1 $S0)"
-check "fee     +0.015"     "15000000000000000"   "$(diff $C1 $C0)"
+check "seller +0.985"      "985000000000000000"  "$(sub $S1 $S0)"
+check "fee     +0.015"     "15000000000000000"   "$(sub $C1 $C0)"
 
 echo "== B. auction -> bid -> outbid -> cumulative top-up -> settle -> loser refund =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 2
@@ -63,11 +63,11 @@ S0=$(bal "$SELLER"); C0=$(bal "$CREATOR"); B0=$(bal "$BOB")
 cast send "$AH" "settle(uint256)" "$AID" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
 check "auction NFT -> alice"   "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 2 --rpc-url "$RPC")"
-check "seller +1.47750"        "1477500000000000000" "$(diff $S1 $S0)"
-check "fee    +0.02250"        "22500000000000000"   "$(diff $C1 $C0)"
+check "seller +1.47750"        "1477500000000000000" "$(sub $S1 $S0)"
+check "fee    +0.02250"        "22500000000000000"   "$(sub $C1 $C0)"
 cast send "$AH" "refundLosers(uint256,address[])" "$AID" "[$BOB]" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
 B1=$(bal "$BOB")
-check "bob (loser) refunded 1.1e18" "1100000000000000000" "$(diff $B1 $B0)"
+check "bob (loser) refunded 1.1e18" "1100000000000000000" "$(sub $B1 $B0)"
 
 echo "== C. offer -> accept -> distribute =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 3
@@ -79,7 +79,7 @@ cast send "$OB" "acceptOffer(address,uint256,address)" "$NFT" 3 "$ALICE" --rpc-u
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
 check "offer NFT -> alice" "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 check "seller +1.97 (gas-adjusted >=1.96)" "1" "$(gt $S1 $S0 1960000000000000000)"
-check "fee    +0.03"       "30000000000000000" "$(diff $C1 $C0)"
+check "fee    +0.03"       "30000000000000000" "$(sub $C1 $C0)"
 
 echo "== D. offer expiry -> permissionless keeper refund =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 4
@@ -89,7 +89,7 @@ warp 7200
 B0=$(bal "$BOB")
 cast send "$OB" "refundExpiredOffer(address,uint256,address)" "$NFT" 4 "$BOB" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
 B1=$(bal "$BOB")
-check "expired offer refunded" "1000000000000000000" "$(diff $B1 $B0)"
+check "expired offer refunded" "1000000000000000000" "$(sub $B1 $B0)"
 
 echo "== E. circuit breaker: entries halt, exits run =="
 cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null 2>&1 \
@@ -104,6 +104,9 @@ cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000
   || echo "  PASS  list halted while paused"
 cast send "$MGR" "unpauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null
 check "entriesAllowed=true" "true" "$(cast call "$MGR" "entriesAllowed()(bool)" --rpc-url "$RPC")"
+# Recovery proof: an entry must actually succeed again after unpause.
+cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 $((NOW+86400)) --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
+echo "  PASS  entries recover after unpause"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "E2E PLAYTHROUGH: ALL CHECKS PASSED"; else echo "E2E PLAYTHROUGH: FAILURES PRESENT"; exit 1; fi

@@ -72,11 +72,17 @@ func main() {
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
 
-	// Start indexer in background. Keepers gate on a Postgres advisory lock so
-	// only one instance broadcasts settle/refund txs (failover via lock release).
+	// Start indexer in background. Keepers gate on a Postgres advisory lock
+	// (dedicated session connection — the transaction pooler cannot hold
+	// session locks) so only one instance broadcasts settle/refund txs; the
+	// returned lockCtx stops them the moment ownership is lost.
 	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
-		WithKeeperGate(func(c context.Context) (func(), error) { return db.WaitKeeperLock(c, pool) })
+		WithKeeperGate(func(c context.Context) (context.Context, func(), error) {
+			return db.WaitKeeperLock(c, config.C.PostgresURL)
+		})
+	indexerDone := make(chan struct{})
 	go func() {
+		defer close(indexerDone)
 		log.Info().Msg("indexer starting")
 		runner.Run(ctx)
 		log.Info().Msg("indexer stopped")
@@ -94,15 +100,15 @@ func main() {
 	api.Mount(app, q, bcast, rl, &config.C)
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
-	authRL := ratelimit.NewPg(pool)
-	app.Get("/auth/nonce", nonceHandler(ns, authRL))
-	app.Post("/auth/verify", verifyHandler(ns, authRL))
+	app.Get("/auth/nonce", nonceHandler(ns, rl))
+	app.Post("/auth/verify", verifyHandler(ns, rl))
 
 	// Serve HTMX templates + static files
 	mountUI(app, q, &serverTimeMs)
 
 	// Graceful shutdown: SIGINT/SIGTERM stops accepting traffic, then cancels
-	// ctx so the indexer/keepers drain (no settle broadcast cut mid-flight).
+	// ctx and WAITS for the indexer/keepers to drain so no settle/refund
+	// broadcast is cut mid-flight and the advisory lock releases cleanly.
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -111,12 +117,19 @@ func main() {
 		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
 			log.Error().Err(err).Msg("http shutdown")
 		}
-		cancel()
 	}()
 
 	log.Info().Str("addr", config.C.HTTPAddr).Msg("server starting")
 	if err := app.Listen(config.C.HTTPAddr); err != nil {
 		log.Fatal().Err(err).Msg("server failed")
+	}
+
+	cancel()
+	select {
+	case <-indexerDone:
+		log.Info().Msg("indexer drained")
+	case <-time.After(15 * time.Second):
+		log.Warn().Msg("indexer drain timed out")
 	}
 }
 
@@ -181,7 +194,7 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
 		}
-		return c.JSON(tokenResp{Token: token, Address: req.Address})
+		return c.JSON(tokenResp{Token: token, Address: addr})
 	}
 }
 

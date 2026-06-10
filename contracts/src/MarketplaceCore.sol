@@ -11,6 +11,7 @@ error WithdrawFailed();
 error ZeroAddress();
 error BelowMinPrice();
 error EntriesHalted();
+error BadManager();
 
 enum TokenStandard { ERC721, ERC1155 }
 
@@ -43,6 +44,12 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
 
     constructor(address recipient, address manager_) {
         if (recipient == address(0)) revert ZeroAddress();
+        // manager is immutable: a typo'd/EOA address would brick every entry
+        // path forever, so validate it answers the gate probe at deploy time.
+        if (manager_ != address(0)) {
+            if (manager_.code.length == 0) revert BadManager();
+            IMarketplaceManager(manager_).entriesAllowed(); // must not revert
+        }
         feeRecipient = recipient;
         manager      = manager_;
     }

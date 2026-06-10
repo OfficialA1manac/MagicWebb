@@ -4,6 +4,7 @@ package indexer
 import (
 	"context"
 	cryptoecdsa "crypto/ecdsa"
+	"fmt"
 	"math"
 	"math/big"
 	"sync"
@@ -23,7 +24,7 @@ import (
 
 // EthClient is the chain-access surface the indexer and keepers need. Both
 // *ethclient.Client and *rpcpool.Pool satisfy it; production injects the pool
-// so every read, write and log filter gets rotation + failover.
+// so every read, write and log filter gets sticky failover.
 type EthClient interface {
 	BlockNumber(ctx context.Context) (uint64, error)
 	HeaderByNumber(ctx context.Context, number *big.Int) (*types.Header, error)
@@ -33,11 +34,14 @@ type EthClient interface {
 	SuggestGasPrice(ctx context.Context) (*big.Int, error)
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
+	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 }
 
 // KeeperGate blocks until this instance may run keeper broadcasts (cluster
-// single-flight), returning a release func. nil gate = keepers start at once.
-type KeeperGate func(ctx context.Context) (release func(), err error)
+// single-flight). It returns a context that is cancelled if lock ownership is
+// later lost (keepers must stop immediately and re-acquire) plus a release
+// func. nil gate = keepers start at once under the parent ctx.
+type KeeperGate func(ctx context.Context) (lockCtx context.Context, release func(), err error)
 
 // Runner orchestrates all indexer workers.
 type Runner struct {
@@ -90,19 +94,32 @@ func (r *Runner) Run(ctx context.Context) {
 		wg.Add(1)
 		go func() {
 			defer wg.Done()
-			if r.keeperGate != nil {
-				release, err := r.keeperGate(ctx)
-				if err != nil {
-					return // ctx cancelled while waiting for the lock
+			// Acquire → run → (lock lost) → re-acquire, until shutdown. The
+			// keepers run under lockCtx so they stop the moment single-flight
+			// ownership can no longer be proven (no split-brain broadcasts).
+			for ctx.Err() == nil {
+				kctx, release := ctx, func() {}
+				if r.keeperGate != nil {
+					var err error
+					kctx, release, err = r.keeperGate(ctx)
+					if err != nil {
+						if ctx.Err() == nil {
+							log.Error().Err(err).Msg("keeper gate: acquisition failed")
+						}
+						return
+					}
 				}
-				defer release()
+				var kwg sync.WaitGroup
+				kwg.Add(3)
+				go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
+				go func() { defer kwg.Done(); r.runOfferKeeper(kctx) }()
+				go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
+				kwg.Wait()
+				release()
+				if r.keeperGate == nil {
+					return // no gate: keepers only stop on shutdown
+				}
 			}
-			var kwg sync.WaitGroup
-			kwg.Add(3)
-			go func() { defer kwg.Done(); r.runAuctionKeeper(ctx) }()
-			go func() { defer kwg.Done(); r.runOfferKeeper(ctx) }()
-			go func() { defer kwg.Done(); r.runLoserRefundSweeper(ctx) }()
-			kwg.Wait()
 		}()
 	}
 
@@ -110,6 +127,11 @@ func (r *Runner) Run(ctx context.Context) {
 }
 
 // ── Chain Watcher ─────────────────────────────────────────────────────────
+
+// headLag keeps the indexer this many blocks behind the reported head: cheap
+// reorg tolerance, and tolerance for a mid-iteration failover to an endpoint
+// whose own head slightly lags the one that answered BlockNumber.
+const headLag = 2
 
 func (r *Runner) runWatcher(ctx context.Context) {
 	chainID := int(r.cfg.ChainID)
@@ -128,41 +150,56 @@ func (r *Runner) runWatcher(ctx context.Context) {
 		fromBlock = r.cfg.IndexFromBlock
 	}
 
-	head, err := r.eth.BlockNumber(ctx)
-	if err != nil {
-		log.Error().Err(err).Msg("watcher: initial block number")
-	} else if fromBlock < head {
-		log.Info().Uint64("from", fromBlock).Uint64("to", head).Msg("watcher: backfill start")
-		r.backfill(ctx, fromBlock, head, contracts, topics, chainID)
-		log.Info().Msg("watcher: backfill complete")
-	}
+	// lastBlock is the highest block KNOWN indexed. It only ever advances after
+	// a fully successful range — a failed/partial range is retried next tick,
+	// so RPC failures can delay events but never permanently drop them.
+	lastBlock := fromBlock
+	backfilled := false
 
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
-	lastBlock := head
 	for {
 		select {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			newHead, err := r.eth.BlockNumber(ctx)
+			head, err := r.eth.BlockNumber(ctx)
 			if err != nil {
 				log.Warn().Err(err).Msg("watcher: block poll failed")
 				continue
 			}
-			if newHead <= lastBlock {
+			if head <= headLag {
 				continue
 			}
-			r.processRange(ctx, lastBlock+1, newHead, contracts, topics, chainID)
-			lastBlock = newHead
-			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(newHead))); err == nil {
+			target := head - headLag
+			if target <= lastBlock {
+				continue
+			}
+			if !backfilled {
+				log.Info().Uint64("from", lastBlock).Uint64("to", target).Msg("watcher: backfill start")
+			}
+			// backfill chunks every range, so cold start, outage catch-up and
+			// the steady 1-2 block tick all share one code path.
+			if err := r.backfill(ctx, lastBlock+1, target, contracts, topics, chainID); err != nil {
+				log.Error().Err(err).Uint64("from", lastBlock+1).Uint64("to", target).
+					Msg("watcher: range failed, will retry")
+				continue // lastBlock unchanged: the same range is retried next tick
+			}
+			lastBlock = target
+			if !backfilled {
+				backfilled = true
+				log.Info().Msg("watcher: backfill complete")
+			}
+			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
 				atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
 			}
 		}
 	}
 }
 
-func (r *Runner) backfill(ctx context.Context, from, to uint64, contracts []common.Address, topics [][]common.Hash, chainID int) {
+// backfill processes [from..to] in getLogs-cap-sized chunks, stopping at the
+// first failure so the caller never advances its cursor past an unindexed gap.
+func (r *Runner) backfill(ctx context.Context, from, to uint64, contracts []common.Address, topics [][]common.Hash, chainID int) error {
 	chunk := r.cfg.GetLogsChunk
 	if chunk == 0 {
 		chunk = 30
@@ -172,14 +209,19 @@ func (r *Runner) backfill(ctx context.Context, from, to uint64, contracts []comm
 		if end > to {
 			end = to
 		}
-		r.processRange(ctx, start, end, contracts, topics, chainID)
-		if ctx.Err() != nil {
-			return
+		if err := r.processRange(ctx, start, end, contracts, topics, chainID); err != nil {
+			return err
+		}
+		if err := ctx.Err(); err != nil {
+			return err
 		}
 	}
+	return nil
 }
 
-func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []common.Address, topics [][]common.Hash, chainID int) {
+// processRange indexes one block range. The persisted cursor advances only
+// when the whole range (core events + transfers) succeeded.
+func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []common.Address, topics [][]common.Hash, chainID int) error {
 	logs, err := r.eth.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(from)),
 		ToBlock:   big.NewInt(int64(to)),
@@ -187,8 +229,7 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 		Topics:    topics,
 	})
 	if err != nil {
-		log.Error().Err(err).Uint64("from", from).Uint64("to", to).Msg("watcher: filter logs")
-		return
+		return fmt.Errorf("filter logs [%d..%d]: %w", from, to, err)
 	}
 
 	blockTimes := make(map[uint64]uint64)
@@ -205,19 +246,27 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 		}
 	}
 
-	r.processTransfers(ctx, from, to, blockTimes)
+	if err := r.processTransfers(ctx, from, to, blockTimes); err != nil {
+		return err
+	}
 
 	if err := r.q.SetIndexedBlock(ctx, chainID, to); err != nil {
+		// Persistence failure is non-fatal: the in-memory cursor stays correct
+		// and a restart simply re-indexes (handlers are idempotent upserts).
 		log.Error().Err(err).Uint64("block", to).Msg("watcher: set indexed block")
 	}
+	return nil
 }
 
 // processTransfers watches NFT Transfer events on every tracked collection in the
 // block range, maintaining ownership and orphaning listings whose seller moved out.
-func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTimes map[uint64]uint64) {
+func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTimes map[uint64]uint64) error {
 	tracked, err := r.q.ListTrackedCollections(ctx)
-	if err != nil || len(tracked) == 0 {
-		return
+	if err != nil {
+		return fmt.Errorf("list tracked collections: %w", err)
+	}
+	if len(tracked) == 0 {
+		return nil
 	}
 	addrs := make([]common.Address, len(tracked))
 	for i, a := range tracked {
@@ -230,8 +279,7 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 		Topics:    transferTopics(),
 	})
 	if err != nil {
-		log.Warn().Err(err).Uint64("from", from).Uint64("to", to).Msg("watcher: transfer logs")
-		return
+		return fmt.Errorf("transfer logs [%d..%d]: %w", from, to, err)
 	}
 	for _, l := range logs {
 		bt, ok := blockTimes[l.BlockNumber]
@@ -242,6 +290,7 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: transfer dispatch")
 		}
 	}
+	return nil
 }
 
 // ── Trending Score Worker ─────────────────────────────────────────────────
@@ -387,32 +436,8 @@ func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, fr
 	big.NewInt(auctionID).FillBytes(idBytes)
 	data := append([]byte(nil), settleSelector...)
 	data = append(data, idBytes...)
-
-	nonce, err := r.eth.PendingNonceAt(ctx, from)
-	if err != nil {
-		return err
-	}
-	tipCap, _ := r.eth.SuggestGasTipCap(ctx)
-	gasPrice, err := r.eth.SuggestGasPrice(ctx)
-	if err != nil {
-		return err
-	}
-	feeCap := new(big.Int).Add(tipCap, new(big.Int).Mul(gasPrice, big.NewInt(2)))
-
-	tx := types.NewTx(&types.DynamicFeeTx{
-		ChainID:   chainID,
-		Nonce:     nonce,
-		To:        &to,
-		Gas:       150_000,
-		GasFeeCap: feeCap,
-		GasTipCap: tipCap,
-		Data:      data,
-	})
-	signed, err := types.SignTx(tx, signer, key)
-	if err != nil {
-		return err
-	}
-	return r.eth.SendTransaction(ctx, signed)
+	_, err := r.sendRaw(ctx, key, from, to, signer, chainID, data, 150_000)
+	return err
 }
 
 // ── Offer Keeper (on-chain refund of expired positions) ────────────────────
@@ -455,7 +480,7 @@ func (r *Runner) runOfferKeeper(ctx context.Context) {
 				data = append(data, idBytes...)
 				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Bidder).Bytes(), 32)...)
 
-				if err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000); err != nil {
+				if _, err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000); err != nil {
 					log.Error().Err(err).Str("bidder", o.Bidder).Msg("offer keeper: refund tx failed")
 				} else {
 					log.Info().Str("coll", o.Collection).Str("token", o.TokenID).Str("bidder", o.Bidder).
@@ -466,16 +491,17 @@ func (r *Runner) runOfferKeeper(ctx context.Context) {
 	}
 }
 
-// sendRaw signs and broadcasts an arbitrary calldata tx from the keeper.
-func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, data []byte, gas uint64) error {
+// sendRaw signs and broadcasts an arbitrary calldata tx from the keeper,
+// returning the tx hash for receipt confirmation.
+func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, data []byte, gas uint64) (common.Hash, error) {
 	nonce, err := r.eth.PendingNonceAt(ctx, from)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	tipCap, _ := r.eth.SuggestGasTipCap(ctx)
 	gasPrice, err := r.eth.SuggestGasPrice(ctx)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	feeCap := new(big.Int).Add(tipCap, new(big.Int).Mul(gasPrice, big.NewInt(2)))
 	tx := types.NewTx(&types.DynamicFeeTx{
@@ -489,7 +515,34 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	})
 	signed, err := types.SignTx(tx, signer, key)
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
-	return r.eth.SendTransaction(ctx, signed)
+	if err := r.eth.SendTransaction(ctx, signed); err != nil {
+		return common.Hash{}, err
+	}
+	return signed.Hash(), nil
+}
+
+// waitMined polls for a successful receipt. Returns an error if the tx
+// reverted or was not mined within the timeout — callers treat that as
+// "not done" and retry on their next tick (keeper calls are idempotent).
+func (r *Runner) waitMined(ctx context.Context, h common.Hash, timeout time.Duration) error {
+	deadline := time.Now().Add(timeout)
+	for {
+		rec, err := r.eth.TransactionReceipt(ctx, h)
+		if err == nil && rec != nil {
+			if rec.Status == types.ReceiptStatusSuccessful {
+				return nil
+			}
+			return fmt.Errorf("tx %s reverted", h.Hex())
+		}
+		if time.Now().After(deadline) {
+			return fmt.Errorf("tx %s not mined within %s", h.Hex(), timeout)
+		}
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		case <-time.After(3 * time.Second):
+		}
+	}
 }

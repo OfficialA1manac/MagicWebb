@@ -67,7 +67,12 @@ contract DeployCoston2 is Script {
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
         require(manager.entriesAllowed(), "manager must deploy unpaused");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
+        require(manager.hasRole(manager.OPERATOR_ROLE(), creator),        "creator must hold operator");
         require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
+        require(!manager.hasRole(manager.OPERATOR_ROLE(), deployer),      "deployer must have renounced operator");
+        if (keeper != address(0)) {
+            require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");
+        }
         console2.log("feeRecipient + manager + admin handover verified");
     }
 }

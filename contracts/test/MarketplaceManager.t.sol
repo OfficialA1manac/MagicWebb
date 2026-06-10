@@ -6,7 +6,7 @@ import {MarketplaceManager, ZeroAddr, NotContract, SameValue} from "../src/Marke
 import {Marketplace}  from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook}    from "../src/OfferBook.sol";
-import {EntriesHalted} from "../src/MarketplaceCore.sol";
+import {EntriesHalted, BadManager} from "../src/MarketplaceCore.sol";
 import {MockERC721}  from "./MockERC721.sol";
 
 /// Covers the manager itself (roles, breaker, registry, token slots) and the
@@ -268,6 +268,19 @@ contract MarketplaceManagerTest is Test {
         // The manager has no payable surface at all.
         (bool ok,) = address(mgr).call{value: 1 ether}("");
         assertFalse(ok);
+    }
+
+    // ── Constructor manager validation (immutable — a bad value is forever) ──
+
+    function test_coreRejectsEOAManager() public {
+        vm.expectRevert(BadManager.selector);
+        new Marketplace(feeRecipient, rando); // EOA: no code
+    }
+
+    function test_coreRejectsNonManagerContract() public {
+        // A contract without entriesAllowed() must fail the deploy probe.
+        vm.expectRevert();
+        new Marketplace(feeRecipient, address(nft));
     }
 
     // ── Ungated cores (manager == address(0)) stay fully open ────────────────
