@@ -12,6 +12,13 @@
   <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" defer></script>
   <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" defer></script>
+  <script>
+    // Server-injected runtime config (single source of truth: backend env).
+    window.MW_MARKETPLACE   = '{{.MarketplaceAddr}}';
+    window.MW_AUCTION       = '{{.AuctionAddr}}';
+    window.MW_OFFERBOOK     = '{{.OfferBookAddr}}';
+    window.MW_WC_PROJECT_ID = '{{.WCProjectID}}';
+  </script>
   <script src="/static/wallet.js" defer></script>
   <style>[x-cloak]{display:none}</style>
 </head>

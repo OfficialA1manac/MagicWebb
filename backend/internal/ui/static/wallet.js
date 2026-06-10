@@ -3,10 +3,15 @@
 const CHAIN_ID = 114;
 const RPC_URL  = 'https://coston2-api.flare.network/ext/C/rpc';
 
-// Contract addresses (Coston2 testnet) — update after redeploy.
-const MARKETPLACE = '0xec47a481513da81ff59a6c4002a98803039994e5';
-const AUCTION     = '0xf62e931d807f87ebd90cc3254b0a34a76c326331';
-const OFFERBOOK   = '0x7e88e86f61e6ad80abd828b6bcedaa86311736f0';
+// Contract addresses — injected by the layout from server config (single
+// source of truth: backend/.env). Never hardcode: a redeploy would silently
+// point every wallet action at dead contracts.
+const MARKETPLACE = window.MW_MARKETPLACE || '';
+const AUCTION     = window.MW_AUCTION || '';
+const OFFERBOOK   = window.MW_OFFERBOOK || '';
+if (!MARKETPLACE || !AUCTION || !OFFERBOOK) {
+  console.error('MagicWebb: contract addresses not injected — wallet actions disabled.');
+}
 
 // Platform fee: 1.5% = 150 bps. Charged on a successful sale, deducted from the seller.
 // Buyers, bidders and offerers send exactly their amount — no fee on top.

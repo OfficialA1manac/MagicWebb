@@ -11,15 +11,33 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ui"
 )
 
-// render executes the named template.
+// render executes the named template, injecting the contract addresses and
+// WalletConnect project id the layout passes to wallet.js — server config is
+// the single source of truth so a redeploy can never strand the frontend on
+// stale hardcoded addresses.
 func render(c *fiber.Ctx, name string, data any) error {
 	t, ok := ui.Templates[name]
 	if !ok {
 		return c.Status(fiber.StatusInternalServerError).SendString("template not found: " + name)
+	}
+	if m, ok := data.(fiber.Map); ok {
+		if _, present := m["MarketplaceAddr"]; !present {
+			m["MarketplaceAddr"] = config.C.MarketplaceAddr
+		}
+		if _, present := m["AuctionAddr"]; !present {
+			m["AuctionAddr"] = config.C.AuctionAddr
+		}
+		if _, present := m["OfferBookAddr"]; !present {
+			m["OfferBookAddr"] = config.C.OfferBookAddr
+		}
+		if _, present := m["WCProjectID"]; !present {
+			m["WCProjectID"] = config.C.WCProjectID
+		}
 	}
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	execName := filepath.Base(name)

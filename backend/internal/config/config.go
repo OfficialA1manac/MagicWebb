@@ -62,6 +62,10 @@ type Config struct {
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
 
+	// WCProjectID enables WalletConnect v2 in the UI (cloud.walletconnect.com).
+	// Empty = injected-wallet (MetaMask) only.
+	WCProjectID string
+
 	// AdminAllowlist is the set of lowercased addresses permitted to call admin
 	// endpoints (e.g. profile verification). Off-chain admin = env allowlist + SIWE JWT.
 	AdminAllowlist []string
@@ -102,6 +106,7 @@ func Load() {
 		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
+		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
 
 		AdminAllowlist: parseAddrList(envOrDefault("ADMIN_ALLOWLIST", "")),
 	}

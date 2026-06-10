@@ -1,33 +1,5 @@
 # TODOS
 
-## Indexer
-
-### Surface pendingReturns as "withdraw required" (review IN-03)
-**Priority:** P2
-After `LoserRefunded`/`RefundPushed` events, cross-check
-`AuctionHouse.pendingReturns(bidder)` via `CallContract`; flag rows where the push
-failed so the UI shows a "withdraw required" state instead of "refunded".
-`wallet.js` already exposes `withdrawRefund()`.
-
-## Frontend
-
-### Verified-collection badges
-**Priority:** P2
-Port from `origin/main` `ad06c3e`: `tracked_collections.verified` column (new
-migration on OUR schema), join through CollectionRow/ListingRow, green check on
-listing cards + collection page. Copy must say seller-pays (the source commit's
-"+1.5% per bid" wording is the dead taker-fee model — do not port the copy).
-
-### HTMX action sheet (mobile)
-**Priority:** P2
-Port the action-sheet component from `origin/main` `fa49414` onto the current
-templates.
-
-### WalletConnect support
-**Priority:** P3
-`origin/main` threads `WCProjectID` through config → layout → wallet.js. Port the
-plumbing and add WalletConnect as a connector alongside injected wallets.
-
 ## Deploy / Mainnet
 
 ### Mainnet launch gates
@@ -37,6 +9,25 @@ external audit sign-off, dedicated RPC endpoints in `RPC_URLS`. See
 docs/PERFORMANCE_AUDIT.md decision record.
 
 ## Completed
+
+### Surface pendingReturns as "withdraw required" (review IN-03)
+Events seed `pending_withdrawals`; 2-min sweeper verifies on-chain via
+`pendingReturns()`, profile banner + one-time notification on confirmed balances.
+**Completed:** 2026-06-10.
+
+### Verified-collection badges
+Migration 012 `collections.verified`, listing-card + collection-header badges,
+`POST /api/v1/admin/collections/verify` (allowlist+SIWE). **Completed:** 2026-06-10.
+
+### HTMX action sheet (mobile)
+Already present in the v2 token page ("Manage this NFT") — TODO was based on
+assuming it only existed on the old main line. **Completed:** pre-existing.
+
+### WalletConnect support
+Connector + provider already in wallet.js; completed the missing plumbing
+(`WC_PROJECT_ID` env → config → layout `window.MW_WC_PROJECT_ID`). Also fixed
+wallet.js hardcoding the DEAD v1 contract addresses — addresses now injected
+from server config. **Completed:** 2026-06-10.
 
 ### Port atomic tx wrappers from PR #1
 `onBought` now uses the transactional `DeactivateAndSale` (seller-scoped — the
