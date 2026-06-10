@@ -65,7 +65,9 @@
         </button>
       </div>
       <p class="text-xs text-neutral-600">
-        Free to bid — you pay only your bid. If outbid, you're refunded in full.
+        Free to bid — bids accumulate. Your effective bid is the sum of all your
+        bids; if outbid, your funds stay escrowed and you can top up to retake
+        the lead. Non-winners are refunded automatically after the auction settles.
       </p>
     </div>
     {{end}}
@@ -90,7 +92,27 @@
     </template>
     {{end}}
 
-    <!-- Bid history -->
+    <!-- Effective totals (cumulative model: sum of each bidder's bids) -->
+    {{if $.EffectiveBids}}
+    <div class="bg-neutral-900 rounded-xl p-4 mt-4">
+      <h2 class="text-sm font-semibold text-neutral-400 mb-3">Effective Bids</h2>
+      <div class="space-y-2 max-h-48 overflow-y-auto">
+        {{range $i, $b := $.EffectiveBids}}
+        <div class="flex justify-between items-center text-xs">
+          <span class="font-mono {{if eq $i 0}}text-emerald-400{{else}}text-neutral-400{{end}}">
+            {{shortAddr $b.Bidder}}{{if eq $i 0}} 👑{{end}}
+          </span>
+          <span class="text-neutral-500">{{$b.BidCount}} bid{{if ne $b.BidCount 1}}s{{end}}</span>
+          <span class="{{if eq $i 0}}text-emerald-400 font-bold{{else}}text-neutral-300{{end}}">
+            {{wei2eth $b.EffectiveWei}} FLR
+          </span>
+        </div>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+
+    <!-- Bid history (individual transactions) -->
     {{if $.Bids}}
     <div class="bg-neutral-900 rounded-xl p-4 mt-4">
       <h2 class="text-sm font-semibold text-neutral-400 mb-3">Bid History</h2>

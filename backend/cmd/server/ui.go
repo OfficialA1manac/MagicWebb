@@ -89,14 +89,18 @@ func uiAuctionDetail(q *db.Q) fiber.Handler {
 			return c.Status(fiber.StatusNotFound).SendString("auction not found")
 		}
 		bids, _ := q.GetBidsForAuction(c.Context(), id)
+		// Cumulative model: per-bidder effective totals (sum of all their bids),
+		// highest first — row 0 is the current winner-elect.
+		effective, _ := q.GetEffectiveBids(c.Context(), id)
 		now := time.Now()
 		return render(c, "pages/auction.html", fiber.Map{
-			"Title":      fmt.Sprintf("Auction #%d", auction.AuctionID),
-			"Auction":    auction,
-			"Bids":       bids,
-			"Now":        now.Unix(),
-			"Ended":      auction.EndsAt.Before(now),
-			"EndsAtUnix": auction.EndsAt.Unix(),
+			"Title":         fmt.Sprintf("Auction #%d", auction.AuctionID),
+			"Auction":       auction,
+			"Bids":          bids,
+			"EffectiveBids": effective,
+			"Now":           now.Unix(),
+			"Ended":         auction.EndsAt.Before(now),
+			"EndsAtUnix":    auction.EndsAt.Unix(),
 		})
 	}
 }

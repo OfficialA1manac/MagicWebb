@@ -33,10 +33,14 @@ const MARKETPLACE_ABI = [
 const AUCTION_ABI = [
   'function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
   'function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat) external returns (uint256)',
-  // bid: msg.value = bidAmount (free; full refund if outbid).
-  'function bid(uint256 id, uint128 bidAmount) external payable',
+  // bid: msg.value escrows and ADDS to your cumulative total (free; no refund
+  // on outbid — top up to retake the lead; losers auto-refunded after settle).
+  'function bid(uint256 id) external payable',
   'function settle(uint256 id) external',
   'function cancelEarly(uint256 id) external',
+  // Pull-fallback: only needed when an automatic push refund failed.
+  'function withdrawRefund() external',
+  'function pendingReturns(address) external view returns (uint256)',
 ];
 
 const OFFERBOOK_ABI = [
@@ -77,6 +81,11 @@ function revertMessage(e) {
     ['OfferActive',    "This offer hasn't expired yet."],
     ['NoOffer',        'No active offer found.'],
     ['InvalidWindow',  'Duration is outside the allowed range.'],
+    ['EntriesHalted',  'The marketplace is temporarily paused for new activity — settlements, refunds and withdrawals still work.'],
+    ['NotActive',      'This auction is not active.'],
+    ['NotSettled',     'This auction has not settled yet.'],
+    ['BidOverflow',    'Bid total exceeds the supported maximum.'],
+    ['NothingToWithdraw', 'No pending refund to withdraw.'],
     ['insufficient funds', 'Not enough FLR to cover the amount plus gas.'],
   ];
   for (const [needle, msg] of map) {
@@ -304,7 +313,7 @@ document.addEventListener('alpine:init', () => {
         }
         const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
         toast('Placing bid (free — you pay only your bid)…', 'info');
-        const tx = await c.bid(auctionId, BigInt(bidAmountWei), { value: BigInt(bidAmountWei) });
+        const tx = await c.bid(auctionId, { value: BigInt(bidAmountWei) });
         await tx.wait();
         toast('Bid placed!', 'success');
         setTimeout(() => location.reload(), 1200);
@@ -331,6 +340,25 @@ document.addEventListener('alpine:init', () => {
         const tx = await c.cancelEarly(auctionId);
         await tx.wait();
         toast('Auction cancelled!', 'success');
+        setTimeout(() => location.reload(), 1200);
+      } catch (e) { toast(revertMessage(e), 'error'); }
+    },
+
+    // ── AuctionHouse: pull-fallback withdrawal ──────────────────────────────
+    // Refunds are pushed automatically by the keeper; this path only matters
+    // when a push to the bidder's address failed (e.g. a contract wallet that
+    // rejected plain transfers). Checks the balance first to avoid a pointless
+    // reverting tx.
+    async withdrawRefund() {
+      if (!(await this._ensure())) return;
+      try {
+        const c = new ethers.Contract(AUCTION, AUCTION_ABI, this.signer);
+        const pending = await c.pendingReturns(this.address);
+        if (pending === 0n) { toast('No pending refund to withdraw.', 'info'); return; }
+        toast('Withdrawing pending refund…', 'info');
+        const tx = await c.withdrawRefund();
+        await tx.wait();
+        toast('Refund withdrawn!', 'success');
         setTimeout(() => location.reload(), 1200);
       } catch (e) { toast(revertMessage(e), 'error'); }
     },
