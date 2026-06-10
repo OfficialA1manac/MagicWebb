@@ -48,8 +48,10 @@ contract DeployFlare is Script {
         }
         manager.grantRole(manager.DEFAULT_ADMIN_ROLE(), creator);
         manager.grantRole(manager.OPERATOR_ROLE(), creator);
-        manager.renounceRole(manager.OPERATOR_ROLE(), deployer);
-        manager.renounceRole(manager.DEFAULT_ADMIN_ROLE(), deployer);
+        if (creator != deployer) {
+            manager.renounceRole(manager.OPERATOR_ROLE(), deployer);
+            manager.renounceRole(manager.DEFAULT_ADMIN_ROLE(), deployer);
+        }
 
         vm.stopBroadcast();
 
@@ -71,8 +73,10 @@ contract DeployFlare is Script {
         require(manager.entriesAllowed(), "manager must deploy unpaused");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
         require(manager.hasRole(manager.OPERATOR_ROLE(), creator),        "creator must hold operator");
-        require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
-        require(!manager.hasRole(manager.OPERATOR_ROLE(), deployer),      "deployer must have renounced operator");
+        if (creator != deployer) {
+            require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
+            require(!manager.hasRole(manager.OPERATOR_ROLE(), deployer),      "deployer must have renounced operator");
+        }
         if (keeper != address(0)) {
             require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");
         }
