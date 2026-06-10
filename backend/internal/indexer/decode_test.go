@@ -13,12 +13,15 @@ func word(setLowByte byte) []byte {
 	return b
 }
 
+// standardOf must emit the Postgres token_standard enum values VERBATIM —
+// lowercase. Uppercase variants are rejected by the DB (SQLSTATE 22P02),
+// which silently dropped every Listed/AuctionCreated event in production.
 func TestStandardOf(t *testing.T) {
-	if got := standardOf(word(0)); got != "ERC721" {
-		t.Fatalf("standardOf(0) = %q, want ERC721", got)
+	if got := standardOf(word(0)); got != "erc721" {
+		t.Fatalf("standardOf(0) = %q, want erc721", got)
 	}
-	if got := standardOf(word(1)); got != "ERC1155" {
-		t.Fatalf("standardOf(1) = %q, want ERC1155", got)
+	if got := standardOf(word(1)); got != "erc1155" {
+		t.Fatalf("standardOf(1) = %q, want erc1155", got)
 	}
 }
 

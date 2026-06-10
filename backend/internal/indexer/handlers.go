@@ -30,11 +30,14 @@ func addrStr(b []byte) string   { return common.BytesToAddress(b).Hex() }
 func bigInt(b []byte) *big.Int  { return new(big.Int).SetBytes(b) }
 func bigStr(b []byte) string    { return bigInt(b).String() }
 func tsUnix(b []byte) time.Time { return time.Unix(bigInt(b).Int64(), 0) }
+// standardOf maps the on-chain TokenStandard enum to the Postgres
+// token_standard enum — which is lowercase ('erc721'|'erc1155'); uppercase
+// values are rejected by the DB with SQLSTATE 22P02.
 func standardOf(b []byte) string {
 	if b[31] == 1 {
-		return "ERC1155"
+		return "erc1155"
 	}
-	return "ERC721"
+	return "erc721"
 }
 
 func (h *handlers) pub(evType string, payload any) {
@@ -110,7 +113,7 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 	expiresAt := tsUnix(chunk(l.Data, 3))
 
 	amount := int64(1)
-	if standard == "ERC1155" {
+	if standard == "erc1155" {
 		amount = amtRaw.Int64()
 	}
 	_ = h.q.EnsureCollection(ctx, collection, standard, l.BlockNumber)
@@ -349,9 +352,9 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 	feeWei := "0"                          // offers are free; the fee is charged from the seller at acceptance
 	units := bigInt(chunk(l.Data, 1)).Int64()
 	expiresAt := tsUnix(chunk(l.Data, 2))
-	standard := "ERC721"
+	standard := "erc721"
 	if units > 1 {
-		standard = "ERC1155"
+		standard = "erc1155"
 	}
 	if units < 1 {
 		units = 1
