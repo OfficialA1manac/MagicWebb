@@ -324,11 +324,6 @@ func (r *Runner) runScoreWorker(ctx context.Context) {
 }
 
 func (r *Runner) computeAllScores(ctx context.Context) {
-	cols, err := r.q.ListCollections(ctx, 500)
-	if err != nil {
-		log.Error().Err(err).Msg("score worker: list collections")
-		return
-	}
 	w := scoreWeights{
 		views: r.cfg.ScoreWViews, bids: r.cfg.ScoreWBids,
 		volume: r.cfg.ScoreWVolume, decayLambda: r.cfg.ScoreDecay,
@@ -341,19 +336,22 @@ func (r *Runner) computeAllScores(ctx context.Context) {
 		{"24h", 24 * time.Hour},
 		{"7d", 7 * 24 * time.Hour},
 	}
-	for _, col := range cols {
-		for _, win := range windows {
-			since := time.Now().Add(-win.since)
-			views, _ := r.q.GetCollectionViews(ctx, col.Address)
-			bids, _ := r.q.GetCollectionBidCount(ctx, col.Address, since)
-			volWei, _ := r.q.GetCollectionVolume(ctx, col.Address, since)
-			score := computeScore(uint64(views), uint64(bids), weiToEth(volWei), win.since.Hours(), w)
+	// One grouped query per window (3/min total) instead of 3 queries per
+	// collection per window (4,500/min at 500 collections).
+	for _, win := range windows {
+		stats, err := r.q.GetCollectionStatsSince(ctx, time.Now().Add(-win.since), 500)
+		if err != nil {
+			log.Error().Err(err).Str("window", win.name).Msg("score worker: stats query")
+			continue
+		}
+		for _, s := range stats {
+			score := computeScore(uint64(s.Views), uint64(s.Bids), weiToEth(s.VolumeWei), win.since.Hours(), w)
 			ts := db.TrendingScore{
-				Collection: col.Address, Window: win.name,
-				Score: score, Views: views, Bids: bids, VolumeWei: volWei,
+				Collection: s.Collection, Window: win.name,
+				Score: score, Views: s.Views, Bids: s.Bids, VolumeWei: s.VolumeWei,
 			}
 			if err := r.q.UpsertTrendingScore(ctx, ts); err != nil {
-				log.Warn().Err(err).Str("coll", col.Address).Msg("score worker: upsert")
+				log.Warn().Err(err).Str("coll", s.Collection).Msg("score worker: upsert")
 			}
 		}
 	}

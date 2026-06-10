@@ -64,6 +64,39 @@ func TestSetIndexedBlock(t *testing.T) {
 	}
 }
 
+func TestGetCollectionStatsSince(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	since := time.Unix(1_700_000_000, 0)
+	rows := mock.NewRows([]string{"address", "views", "bids", "volume"}).
+		AddRow("0xabc", int64(42), int64(7), "1500000000000000000").
+		AddRow("0xdef", int64(0), int64(0), "0")
+	mock.ExpectQuery(`FROM collections c`).
+		WithArgs(since, 500).WillReturnRows(rows)
+
+	got, err := q.GetCollectionStatsSince(context.Background(), since, 500)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("rows = %d, want 2", len(got))
+	}
+	if got[0].Collection != "0xabc" || got[0].Views != 42 || got[0].Bids != 7 {
+		t.Fatalf("row0 = %+v", got[0])
+	}
+	if got[0].VolumeWei.String() != "1500000000000000000" {
+		t.Fatalf("volume = %s", got[0].VolumeWei)
+	}
+	if got[1].VolumeWei.Sign() != 0 {
+		t.Fatalf("zero volume parsed as %s", got[1].VolumeWei)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestExtendAuction(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()

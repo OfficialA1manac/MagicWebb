@@ -594,6 +594,50 @@ func (q *Q) GetCollectionViews(ctx context.Context, collection string) (int64, e
 	return views, err
 }
 
+// CollectionStatsRow is one collection's aggregate inputs to the trending score.
+type CollectionStatsRow struct {
+	Collection string
+	Views      int64
+	Bids       int64
+	VolumeWei  *big.Int
+}
+
+// GetCollectionStatsSince returns views/bids/volume for every collection in one
+// grouped query, replacing the per-collection N+1 the score worker used to
+// issue (3 queries × collections × windows per minute).
+func (q *Q) GetCollectionStatsSince(ctx context.Context, since time.Time, limit int) ([]CollectionStatsRow, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT c.address,
+		       COALESCE(v.views, 0),
+		       COALESCE(b.bids, 0),
+		       COALESCE(s.volume, '0')
+		  FROM collections c
+		  LEFT JOIN (SELECT collection, SUM(views) AS views
+		               FROM nft_tokens GROUP BY collection) v ON v.collection = c.address
+		  LEFT JOIN (SELECT a.collection, COUNT(*) AS bids
+		               FROM bids bd JOIN auctions a ON a.auction_id = bd.auction_id
+		              WHERE bd.placed_at >= $1 GROUP BY a.collection) b ON b.collection = c.address
+		  LEFT JOIN (SELECT collection, SUM(price_wei)::text AS volume
+		               FROM sales WHERE occurred_at >= $1 GROUP BY collection) s ON s.collection = c.address
+		 LIMIT $2`, since, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollectionStatsRow
+	for rows.Next() {
+		var r CollectionStatsRow
+		var volStr string
+		if err := rows.Scan(&r.Collection, &r.Views, &r.Bids, &volStr); err != nil {
+			return nil, err
+		}
+		r.VolumeWei = new(big.Int)
+		r.VolumeWei.SetString(volStr, 10)
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ── Trending scores ───────────────────────────────────────────────────────
 
 type TrendingScore struct {
