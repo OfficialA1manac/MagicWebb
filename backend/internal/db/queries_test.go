@@ -64,6 +64,32 @@ func TestSetIndexedBlock(t *testing.T) {
 	}
 }
 
+// DeactivateAndSale must scope the deactivation to the SELLER: listings are
+// keyed (collection, token_id, seller) and other holders' stacked 1155
+// listings for the same token must stay active.
+func TestDeactivateAndSaleIsSellerScopedAndAtomic(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	at := time.Unix(1_700_000_000, 0)
+	mock.ExpectBegin()
+	mock.ExpectExec(`UPDATE listings SET active=false WHERE collection=\$1 AND token_id=\$2 AND seller=\$3`).
+		WithArgs("0xc", "1", "0xs").
+		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
+	mock.ExpectExec(`INSERT INTO sales`).
+		WithArgs("0xc", "1", "0xs", "0xb", "100", "1", "0", "0xhash", uint64(7), at).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+	mock.ExpectCommit()
+
+	if err := q.DeactivateAndSale(context.Background(), "0xc", "1", "0xs", "0xb", "100", "1", "0", "0xhash", 7, at); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestGetCollectionStatsSince(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()

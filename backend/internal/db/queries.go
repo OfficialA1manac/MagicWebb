@@ -912,9 +912,11 @@ func (q *Q) DeactivateAndSale(ctx context.Context,
 	if err != nil {
 		return err
 	}
+	// Seller-keyed: listings PK is (collection, token_id, seller) — other
+	// holders' stacked 1155 listings for the same token must stay active.
 	if _, err := tx.Exec(ctx,
-		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2`,
-		collection, tokenID); err != nil {
+		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2 AND seller=$3`,
+		collection, tokenID, seller); err != nil {
 		_ = tx.Rollback(ctx)
 		return fmt.Errorf("deactivate: %w", err)
 	}

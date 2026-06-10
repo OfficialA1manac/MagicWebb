@@ -2,14 +2,6 @@
 
 ## Indexer
 
-### Port atomic tx wrappers from PR #1
-**Priority:** P2
-Replace the two-step `DeactivateListing` + `InsertSale` in `onBought` (and the bid
-insert/auction update pair) with the transactional `DeactivateAndSale` /
-`InsertBidAndUpdateAuction` from `origin/main` PR #1 (`fa49414`,
-`backend/internal/db/queries.go:842`). Closes the partial-write window on crash;
-today's idempotent re-index heals it, a tx prevents it. Adapt to pgxmock tests.
-
 ### Surface pendingReturns as "withdraw required" (review IN-03)
 **Priority:** P2
 After `LoserRefunded`/`RefundPushed` events, cross-check
@@ -45,3 +37,9 @@ external audit sign-off, dedicated RPC endpoints in `RPC_URLS`. See
 docs/PERFORMANCE_AUDIT.md decision record.
 
 ## Completed
+
+### Port atomic tx wrappers from PR #1
+`onBought` now uses the transactional `DeactivateAndSale` (seller-scoped — the
+PR #1 version would have deactivated other holders' stacked 1155 listings);
+`onBidPlaced` already used `InsertBidAndUpdateAuction`. pgxmock test pins the
+seller-scoped WHERE. **Completed:** 2026-06-10.

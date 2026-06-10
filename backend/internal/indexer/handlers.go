@@ -167,12 +167,11 @@ func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) 
 	feeWei := bigStr(chunk(l.Data, 4))
 	occurredAt := time.Unix(int64(blockTime), 0)
 
-	if err := h.q.DeactivateListing(ctx, collection, tokenID, seller); err != nil {
-		return fmt.Errorf("onBought deactivate: %w", err)
-	}
-	if err := h.q.InsertSale(ctx, collection, tokenID, seller, buyer,
+	// Atomic: deactivate + sale in one tx so a crash between the two can never
+	// leave a sold listing active (or a sale without its deactivation).
+	if err := h.q.DeactivateAndSale(ctx, collection, tokenID, seller, buyer,
 		priceWei, feeWei, "0", l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
-		return fmt.Errorf("onBought sale: %w", err)
+		return fmt.Errorf("onBought: %w", err)
 	}
 	h.notify(ctx, seller, "sold", "Your NFT sold", priceWei+" wei", "/token/"+collection+"/"+tokenID)
 	h.pub("listing-updated", map[string]any{
