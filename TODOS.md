@@ -10,6 +10,15 @@ docs/PERFORMANCE_AUDIT.md decision record.
 
 ## Completed
 
+### Coston2 v2 redeploy (seller-pays contracts)
+Deployed 2026-06-10, block 31610228 — Marketplace
+`0x6E5d2332a30bE3aBC35a0dC795583a06cfedFc9C`, AuctionHouse
+`0xAF76199b6BB77fEB1E1D8541C30557f3231F6F5c`, OfferBook
+`0x9D38CB500551BfDD106CA8052C9Bfd146A5f6CbA`, Manager
+`0xFDcAE06C12d5E54Ff3304B29C415F006B553627F`. Fee recipient + admin handover
+verified on-chain; keeper registered under KEEPER_ROLE. VPS deploy runbook:
+docs/DEPLOY_VPS.md. **Completed:** 2026-06-10.
+
 ### Surface pendingReturns as "withdraw required" (review IN-03)
 Events seed `pending_withdrawals`; 2-min sweeper verifies on-chain via
 `pendingReturns()`, profile banner + one-time notification on confirmed balances.
