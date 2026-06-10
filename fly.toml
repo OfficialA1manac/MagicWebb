@@ -1,0 +1,40 @@
+app = "magicwebb"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+
+# Non-secret config. Secrets (POSTGRES_URL, JWT_SECRET, KEEPER_KEY,
+# SERVICE_TOKEN, WC_PROJECT_ID, PINATA_JWT) go through `fly secrets set`.
+[env]
+  ENV = "production"
+  HTTP_ADDR = ":8080"
+  RPC_URL = "https://coston2-api.flare.network/ext/C/rpc"
+  CHAIN_ID = "114"
+  MARKETPLACE_ADDR = "0x6E5d2332a30bE3aBC35a0dC795583a06cfedFc9C"
+  AUCTION_ADDR = "0xAF76199b6BB77fEB1E1D8541C30557f3231F6F5c"
+  OFFERBOOK_ADDR = "0x9D38CB500551BfDD106CA8052C9Bfd146A5f6CbA"
+  INDEX_FROM_BLOCK = "31610228"
+  SIWE_DOMAIN = "magicwebb.fly.dev"
+  FRONTEND_URL = "https://magicwebb.fly.dev"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Indexer + keeper run in-process: the machine must never scale to zero.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"
