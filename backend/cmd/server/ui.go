@@ -121,14 +121,18 @@ func uiOffers(q *db.Q) fiber.Handler {
 
 func uiProfile(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		addr := c.Params("addr")
+		addr := strings.ToLower(c.Params("addr"))
 		listings, _ := q.ListActiveListings(c.Context(), db.ListingsFilter{Seller: addr, Limit: 24})
 		activity, _ := q.GetRecentTransactions(c.Context(), 20)
+		// "Withdraw required": sweeper-verified pendingReturns balance — the
+		// rare case where the contract's automatic refund push failed.
+		pendingWei, _ := q.GetVerifiedPendingWithdrawal(c.Context(), addr)
 		return render(c, "pages/profile.html", fiber.Map{
-			"Title":    "Profile",
-			"Addr":     addr,
-			"Listings": listings,
-			"Activity": activity,
+			"Title":      "Profile",
+			"Addr":       addr,
+			"Listings":   listings,
+			"Activity":   activity,
+			"PendingWei": pendingWei,
 		})
 	}
 }

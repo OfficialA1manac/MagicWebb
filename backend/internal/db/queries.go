@@ -49,6 +49,7 @@ type CollectionRow struct {
 	Symbol      string
 	Standard    string // "erc721" | "erc1155"
 	DeployBlock uint64
+	Verified    bool // curation badge (admin-set)
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
@@ -64,9 +65,9 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
 	err := q.pool.QueryRow(ctx,
-		`SELECT address, name, symbol, standard::text, deploy_block
+		`SELECT address, name, symbol, standard::text, deploy_block, verified
 		 FROM collections WHERE address=$1`, address).
-		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock)
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("collection not found: %s", address)
 	}
@@ -146,6 +147,8 @@ type ListingRow struct {
 	// Denormalised from nft_tokens (may be empty)
 	Name     string
 	ImageURI string
+	// Denormalised from collections
+	CollectionVerified bool
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -232,9 +235,11 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		        COALESCE(t.name,''), COALESCE(t.image_uri,''),
+		        COALESCE(c.verified,false)
 		 FROM listings l
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN collections c ON c.address=l.collection
 		 `+where+`
 		 ORDER BY `+orderBy+` LIMIT $1`, args...)
 	if err != nil {
@@ -246,7 +251,8 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	for rows.Next() {
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI); err != nil {
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
+			&r.CollectionVerified); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -898,6 +904,89 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 		out = append(out, r)
 	}
 	return out, rows.Err()
+}
+
+// ── Pending withdrawals ("withdraw required" tracking) ────────────────────
+
+// SeedPendingWithdrawal records an address whose refund MAY have fallen back
+// to pull-withdrawal (LoserRefunded/RefundPushed fire on both push outcomes).
+// The withdrawal sweeper verifies against on-chain pendingReturns afterwards.
+func (q *Q) SeedPendingWithdrawal(ctx context.Context, address string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO pending_withdrawals(address, verified, updated_at)
+		 VALUES($1, false, now())
+		 ON CONFLICT(address) DO UPDATE SET updated_at = now()`,
+		address)
+	return err
+}
+
+// PendingWithdrawalRow is one address owing (or suspected of owing) a withdrawal.
+type PendingWithdrawalRow struct {
+	Address   string `json:"address"`
+	AmountWei string `json:"amount_wei"`
+	Verified  bool   `json:"verified"`
+}
+
+// ListPendingWithdrawals returns all candidate/verified rows for the sweeper.
+func (q *Q) ListPendingWithdrawals(ctx context.Context, limit int) ([]PendingWithdrawalRow, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT address, amount_wei::text, verified FROM pending_withdrawals
+		  ORDER BY updated_at ASC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []PendingWithdrawalRow
+	for rows.Next() {
+		var r PendingWithdrawalRow
+		if err := rows.Scan(&r.Address, &r.AmountWei, &r.Verified); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// MarkPendingWithdrawalVerified stores the on-chain owed amount. Returns true
+// when this flipped the row from candidate to verified (first confirmation),
+// so the caller can notify the user exactly once.
+func (q *Q) MarkPendingWithdrawalVerified(ctx context.Context, address, amountWei string) (bool, error) {
+	var wasVerified bool
+	err := q.pool.QueryRow(ctx,
+		`UPDATE pending_withdrawals AS pw
+		    SET amount_wei = $2, verified = true, updated_at = now()
+		  FROM (SELECT verified FROM pending_withdrawals WHERE address = $1) prev
+		  WHERE pw.address = $1
+		  RETURNING prev.verified`,
+		address, amountWei).Scan(&wasVerified)
+	return !wasVerified, err
+}
+
+// DeletePendingWithdrawal removes a row once on-chain pendingReturns is zero
+// (the push landed after all, or the user withdrew).
+func (q *Q) DeletePendingWithdrawal(ctx context.Context, address string) error {
+	_, err := q.pool.Exec(ctx, `DELETE FROM pending_withdrawals WHERE address = $1`, address)
+	return err
+}
+
+// GetVerifiedPendingWithdrawal returns the owed amount for an address, or ""
+// when nothing verified is owed. Drives the profile-page withdraw banner.
+func (q *Q) GetVerifiedPendingWithdrawal(ctx context.Context, address string) (string, error) {
+	var amt string
+	err := q.pool.QueryRow(ctx,
+		`SELECT amount_wei::text FROM pending_withdrawals
+		  WHERE address = $1 AND verified = true`, address).Scan(&amt)
+	if err == pgx.ErrNoRows {
+		return "", nil
+	}
+	return amt, err
+}
+
+// SetCollectionVerified flips the curation badge on a collection.
+func (q *Q) SetCollectionVerified(ctx context.Context, address string, verified bool) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE collections SET verified = $2 WHERE address = $1`, address, verified)
+	return err
 }
 
 // ── Atomic combined writes ────────────────────────────────────────────────

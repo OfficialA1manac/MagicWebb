@@ -22,6 +22,7 @@ var (
 	TopicAuctionSettled     = crypto.Keccak256Hash([]byte("AuctionSettled(uint256,address,address,uint128,uint256)"))
 	TopicLoserRefunded      = crypto.Keccak256Hash([]byte("LoserRefunded(uint256,address,uint256)"))
 	TopicAuctionCancelled   = crypto.Keccak256Hash([]byte("AuctionCancelled(uint256)"))
+	TopicRefundPushed       = crypto.Keccak256Hash([]byte("RefundPushed(address,uint256)"))
 
 	// OfferBook (Model A: stacked positions, fee taken at make)
 	TopicOfferMade     = crypto.Keccak256Hash([]byte("OfferMade(address,uint256,address,uint256,uint128,uint64)"))
@@ -41,6 +42,7 @@ func coreTopics() [][]common.Hash {
 		TopicListed, TopicCancelled, TopicBought,
 		TopicAuctionCreated, TopicBidPlaced, TopicOutbidNotification, TopicAuctionExtended,
 		TopicAuctionSettled, TopicLoserRefunded, TopicAuctionCancelled,
+		TopicRefundPushed,
 		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded,
 	}}
 }

@@ -224,3 +224,22 @@ func adminVerify(q *db.Q, cfg *config.Config) fiber.Handler {
 		return c.JSON(fiber.Map{"address": strings.ToLower(req.Address), "verified": req.Verified})
 	}
 }
+
+// adminVerifyCollection flips the curation badge on a collection (same
+// allowlist + SIWE JWT gate as profile verification).
+func adminVerifyCollection(q *db.Q, cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		addr := caller(c)
+		if addr == "" || !cfg.IsAdmin(addr) {
+			return writeErr(c, fiber.StatusForbidden, "admin only")
+		}
+		var req verifyRequest
+		if err := bodyDecode(c, &req); err != nil || req.Address == "" {
+			return writeErr(c, fiber.StatusBadRequest, "address required")
+		}
+		if err := q.SetCollectionVerified(c.Context(), strings.ToLower(req.Address), req.Verified); err != nil {
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		return c.JSON(fiber.Map{"collection": strings.ToLower(req.Address), "verified": req.Verified})
+	}
+}

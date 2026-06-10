@@ -8,6 +8,7 @@ import (
 
 	"github.com/ethereum/go-ethereum/common"
 	"github.com/ethereum/go-ethereum/core/types"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
@@ -80,6 +81,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onLoserRefunded(ctx, l)
 	case TopicAuctionCancelled:
 		return h.onAuctionCancelled(ctx, l)
+	case TopicRefundPushed:
+		return h.onRefundPushed(ctx, l)
 	case TopicOfferMade:
 		return h.onOfferMade(ctx, l)
 	case TopicOfferAccepted:
@@ -277,9 +280,31 @@ func (h *handlers) onLoserRefunded(ctx context.Context, l types.Log) error {
 
 	h.notify(ctx, bidder, "refund", "Auction escrow refunded",
 		amount+" wei returned", "/auction/"+fmt.Sprint(auctionID))
+	// The event fires whether the ETH push landed or fell back to
+	// pendingReturns — seed a candidate; the withdrawal sweeper verifies
+	// on-chain and clears or confirms it.
+	if err := h.q.SeedPendingWithdrawal(ctx, bidder); err != nil {
+		log.Warn().Err(err).Str("bidder", bidder).Msg("seed pending withdrawal")
+	}
 	h.pub("auction-updated", map[string]any{
 		"event": "LoserRefunded", "auctionId": auctionID, "bidder": bidder, "amtWei": amount,
 	})
+	return nil
+}
+
+// RefundPushed(address indexed bidder, uint256 amount) — emitted when settle
+// returns a winner's escrow (undeliverable NFT path), push or pull alike.
+func (h *handlers) onRefundPushed(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 2 || len(l.Data) < 32 {
+		return fmt.Errorf("onRefundPushed: short log")
+	}
+	bidder := addrStr(l.Topics[1].Bytes())
+	amount := bigStr(chunk(l.Data, 0))
+
+	h.notify(ctx, bidder, "refund", "Auction refund issued", amount+" wei", "/profile/"+bidder)
+	if err := h.q.SeedPendingWithdrawal(ctx, bidder); err != nil {
+		log.Warn().Err(err).Str("bidder", bidder).Msg("seed pending withdrawal")
+	}
 	return nil
 }
 

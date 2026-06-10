@@ -73,6 +73,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// Trust & safety.
 	api.Post("/reports", jwtMiddleware(cfg), createReport(q))
 	api.Post("/admin/verify", jwtMiddleware(cfg), adminVerify(q, cfg))
+	api.Post("/admin/collections/verify", jwtMiddleware(cfg), adminVerifyCollection(q, cfg))
 
 	api.Get("/search", search(q))
 	api.Get("/metrics", marketMetrics(q))

@@ -90,6 +90,9 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
 
+	wg.Add(1)
+	go func() { defer wg.Done(); r.runWithdrawalSweeper(ctx) }()
+
 	if r.cfg.KeeperKey != "" {
 		wg.Add(1)
 		go func() {
@@ -372,6 +375,59 @@ func (r *Runner) runOfferExpirySweeper(ctx context.Context) {
 				log.Error().Err(err).Msg("offer sweeper: expire failed")
 			} else if n > 0 {
 				log.Info().Int64("expired", n).Msg("offer sweeper: offers expired")
+			}
+		}
+	}
+}
+
+// ── Withdrawal Sweeper ("withdraw required" verification) ─────────────────
+
+var pendingReturnsSelector = crypto.Keccak256([]byte("pendingReturns(address)"))[:4]
+
+// runWithdrawalSweeper verifies seeded pending-withdrawal candidates against
+// AuctionHouse.pendingReturns on-chain. Refund events fire whether a push
+// landed or fell back to pull, and withdrawRefund emits nothing — so this is
+// the only honest source of "you must click withdraw". Zero balance deletes
+// the row; a positive balance verifies it (UI banner) and notifies once.
+func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
+	auctionAddr := common.HexToAddress(r.cfg.AuctionAddr)
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			rows, err := r.q.ListPendingWithdrawals(ctx, 200)
+			if err != nil {
+				log.Error().Err(err).Msg("withdrawal sweeper: list")
+				continue
+			}
+			for _, row := range rows {
+				data := append([]byte(nil), pendingReturnsSelector...)
+				data = append(data, common.LeftPadBytes(common.HexToAddress(row.Address).Bytes(), 32)...)
+				out, err := r.eth.CallContract(ctx, ethereum.CallMsg{To: &auctionAddr, Data: data}, nil)
+				if err != nil || len(out) < 32 {
+					log.Warn().Err(err).Str("addr", row.Address).Msg("withdrawal sweeper: pendingReturns call")
+					continue
+				}
+				owed := new(big.Int).SetBytes(out[:32])
+				if owed.Sign() == 0 {
+					if err := r.q.DeletePendingWithdrawal(ctx, row.Address); err != nil {
+						log.Warn().Err(err).Str("addr", row.Address).Msg("withdrawal sweeper: delete")
+					}
+					continue
+				}
+				first, err := r.q.MarkPendingWithdrawalVerified(ctx, row.Address, owed.String())
+				if err != nil {
+					log.Warn().Err(err).Str("addr", row.Address).Msg("withdrawal sweeper: verify")
+					continue
+				}
+				if first {
+					r.h.notify(ctx, row.Address, "refund", "Action needed: withdraw your refund",
+						owed.String()+" wei is waiting in the auction contract — automatic delivery failed.",
+						"/profile/"+row.Address)
+				}
 			}
 		}
 	}
