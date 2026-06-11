@@ -10,7 +10,6 @@
   </script>
   <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js" defer></script>
   <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
@@ -19,7 +18,12 @@
     window.MW_OFFERBOOK     = '{{.OfferBookAddr}}';
     window.MW_WC_PROJECT_ID = '{{.WCProjectID}}';
   </script>
+  <!-- wallet.js MUST load before Alpine: it registers the $store.wallet on
+       alpine:init, which fires the moment Alpine executes. Deferred scripts
+       run in document order — Alpine first would fire the event before the
+       listener exists and every wallet UI element silently disappears. -->
   <script src="/static/wallet.js" defer></script>
+  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.x.x/dist/cdn.min.js" defer></script>
   <style>[x-cloak]{display:none}</style>
 </head>
 <body hx-ext="sse" sse-connect="/events" x-data>
@@ -32,6 +36,7 @@
 
     <!-- Desktop links -->
     <div class="hidden md:flex items-center gap-6 text-sm text-neutral-400">
+      <a href="/" class="hover:text-white transition">Home</a>
       <a href="/listings" class="hover:text-white transition">Listings</a>
       <a href="/auctions" class="hover:text-white transition">Auctions</a>
       <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="hover:text-white transition">Offers</a>
@@ -98,6 +103,7 @@
 
   <!-- Mobile menu -->
   <div x-show="open" x-cloak class="md:hidden border-t border-neutral-800 px-4 py-3 space-y-1 text-sm">
+    <a href="/"          class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Home</a>
     <a href="/listings"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Listings</a>
     <a href="/auctions"  class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Auctions</a>
     <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Offers</a>
