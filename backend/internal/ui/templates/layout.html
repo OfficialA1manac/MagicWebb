@@ -4,7 +4,7 @@
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
-  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.tailwindcss.com?plugins=typography"></script>
   <script>
     tailwind.config = { theme: { extend: { colors: { neutral: { 950: '#0a0a0a' } } } } }
   </script>
@@ -37,6 +37,7 @@
       <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="hover:text-white transition">Offers</a>
       <a href="/search" class="hover:text-white transition">Search</a>
       <a href="/metrics" class="hover:text-white transition">Metrics</a>
+      <a href="/docs" class="hover:text-white transition">Docs</a>
     </div>
 
     <!-- Right: wallet + hamburger -->
@@ -102,6 +103,7 @@
     <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Offers</a>
     <a href="/search"    class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Search</a>
     <a href="/metrics"   class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Metrics</a>
+    <a href="/docs"      class="block py-2 px-3 rounded-lg text-neutral-400 hover:text-white hover:bg-neutral-800 transition">Docs</a>
   </div>
 </nav>
 

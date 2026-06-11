@@ -9,7 +9,7 @@ import (
 	"time"
 )
 
-//go:embed all:templates all:static
+//go:embed all:templates all:static all:docs
 var FS embed.FS
 
 var funcMap = template.FuncMap{
@@ -59,6 +59,7 @@ var pagePaths = []string{
 	"pages/token.html",
 	"pages/search.html",
 	"pages/metrics.html",
+	"pages/docs.html",
 }
 
 // Templates maps page/partial keys to parsed template sets.
