@@ -855,7 +855,7 @@ func (q *Q) GetEventCounts(ctx context.Context) (total, last1h uint64, err error
 // ── Search ────────────────────────────────────────────────────────────────
 
 type SearchResult struct {
-	Kind       string `json:"kind"`              // "nft" | "collection"
+	Kind       string `json:"kind"` // "nft" | "collection"
 	Collection string `json:"collection"`
 	TokenID    string `json:"token_id,omitempty"`
 	Name       string `json:"name"`

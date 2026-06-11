@@ -31,6 +31,7 @@ func addrStr(b []byte) string   { return common.BytesToAddress(b).Hex() }
 func bigInt(b []byte) *big.Int  { return new(big.Int).SetBytes(b) }
 func bigStr(b []byte) string    { return bigInt(b).String() }
 func tsUnix(b []byte) time.Time { return time.Unix(bigInt(b).Int64(), 0) }
+
 // standardOf maps the on-chain TokenStandard enum to the Postgres
 // token_standard enum — which is lowercase ('erc721'|'erc1155'); uppercase
 // values are rejected by the DB with SQLSTATE 22P02.
@@ -102,7 +103,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 // ── Marketplace ───────────────────────────────────────────────────────────────
 
 // Listed(address indexed coll, uint256 indexed id, address indexed seller,
-//         uint8 standard, uint128 amount, uint128 price, uint64 expiresAt)
+//
+//	uint8 standard, uint128 amount, uint128 price, uint64 expiresAt)
 func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 4*32 {
 		return fmt.Errorf("onListed: short log tx=%s", l.TxHash.Hex())
@@ -157,7 +159,8 @@ func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 }
 
 // Bought(address indexed coll, uint256 indexed id, address indexed buyer,
-//        address seller, uint8 standard, uint128 amount, uint128 price, uint256 fee)
+//
+//	address seller, uint8 standard, uint128 amount, uint128 price, uint256 fee)
 func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
 		return fmt.Errorf("onBought: short log")
@@ -187,7 +190,8 @@ func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) 
 // ── AuctionHouse ──────────────────────────────────────────────────────────────
 
 // AuctionCreated(uint256 indexed id, address indexed coll, uint256 indexed tokenId,
-//                address seller, uint8 standard, uint128 amount, uint128 reserve, uint64 startsAt, uint64 endsAt)
+//
+//	address seller, uint8 standard, uint128 amount, uint128 reserve, uint64 startsAt, uint64 endsAt)
 func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 6*32 {
 		return fmt.Errorf("onAuctionCreated: short log")
@@ -234,8 +238,8 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	bidder := addrStr(l.Topics[2].Bytes())
-	amtWei := bigStr(chunk(l.Data, 0))     // this bid's wei (escrowed; bidding is free)
-	newTotal := bigStr(chunk(l.Data, 1))   // bidder's cumulative after this bid
+	amtWei := bigStr(chunk(l.Data, 0))   // this bid's wei (escrowed; bidding is free)
+	newTotal := bigStr(chunk(l.Data, 1)) // bidder's cumulative after this bid
 	placedAt := time.Unix(int64(blockTime), 0)
 
 	// Insert the bid row and set the auction's highest to the current cumulative
@@ -325,7 +329,8 @@ func (h *handlers) onAuctionExtended(ctx context.Context, l types.Log) error {
 }
 
 // AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller,
-//                uint128 bidAmount, uint256 fee)
+//
+//	uint128 bidAmount, uint256 fee)
 func (h *handlers) onAuctionSettled(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 2*32 {
 		return fmt.Errorf("onAuctionSettled: short log")
@@ -364,7 +369,8 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 // ── OfferBook (Model A: stacked positions, fee taken at make) ──────────────────
 
 // OfferMade(address indexed coll, uint256 indexed tokenId, address indexed bidder,
-//           uint256 principal, uint128 units, uint64 expiresAt)
+//
+//	uint256 principal, uint128 units, uint64 expiresAt)
 func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 3*32 {
 		return fmt.Errorf("onOfferMade: short log")
@@ -373,7 +379,7 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 	tokenID := bigStr(l.Topics[2].Bytes())
 	bidder := addrStr(l.Topics[3].Bytes())
 	principal := bigStr(chunk(l.Data, 0)) // cumulative escrowed principal
-	feeWei := "0"                          // offers are free; the fee is charged from the seller at acceptance
+	feeWei := "0"                         // offers are free; the fee is charged from the seller at acceptance
 	units := bigInt(chunk(l.Data, 1)).Int64()
 	expiresAt := tsUnix(chunk(l.Data, 2))
 	standard := "erc721"
@@ -406,7 +412,8 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 }
 
 // OfferAccepted(address indexed coll, uint256 indexed tokenId, address indexed seller,
-//               address bidder, uint256 principal, uint256 fee, uint128 units, uint8 standard)
+//
+//	address bidder, uint256 principal, uint256 fee, uint128 units, uint8 standard)
 func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
 		return fmt.Errorf("onOfferAccepted: short log")

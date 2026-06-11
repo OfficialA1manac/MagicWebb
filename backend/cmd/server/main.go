@@ -160,7 +160,7 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if address == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "address required"})
 		}
-		n := fmt.Sprintf("%x", crypto.Keccak256([]byte(address+fmt.Sprint(time.Now().UnixNano())))[:8])
+		n := fmt.Sprintf("%x", crypto.Keccak256([]byte(address + fmt.Sprint(time.Now().UnixNano())))[:8])
 		ns.Set(address, n, 5*time.Minute)
 		return c.JSON(nonceResp{Nonce: n})
 	}

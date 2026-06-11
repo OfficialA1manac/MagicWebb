@@ -160,7 +160,9 @@ contract Marketplace is MarketplaceCore {
 
         _transferToken(l.standard, coll, l.seller, msg.sender, id, l.amount);
         _payFee(fee);
-        _pay(l.seller, uint256(l.price) - fee);
+        uint256 proceeds;
+        unchecked { proceeds = uint256(l.price) - fee; } // fee = 1.5% of price, always < price
+        _pay(l.seller, proceeds);
 
         emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee);
     }

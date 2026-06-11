@@ -56,7 +56,6 @@ func TestEncodeRefundLosersEmpty(t *testing.T) {
 	}
 }
 
-
 func TestCollectLosersExcludesWinnerOnSettle(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()

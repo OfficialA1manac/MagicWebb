@@ -136,7 +136,9 @@ contract OfferBook is MarketplaceCore {
         uint256 moveAmount = p.standard == TokenStandard.ERC721 ? 1 : p.units;
         _transferToken(p.standard, coll, msg.sender, bidder, tokenId, moveAmount);
         _payFee(fee);
-        _pay(msg.sender, uint256(p.principal) - fee); // seller nets 98.5%
+        uint256 proceeds;
+        unchecked { proceeds = uint256(p.principal) - fee; } // fee = 1.5% of principal, always < principal
+        _pay(msg.sender, proceeds); // seller nets 98.5%
 
         emit OfferAccepted(coll, tokenId, msg.sender, bidder, p.principal, fee, p.units, p.standard);
     }

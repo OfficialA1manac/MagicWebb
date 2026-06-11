@@ -112,9 +112,9 @@ func Load() {
 	}
 
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)
-	C.AuctionAddr     = strings.ToLower(C.AuctionAddr)
-	C.OfferBookAddr   = strings.ToLower(C.OfferBookAddr)
-	C.RoyaltyAddr     = strings.ToLower(C.RoyaltyAddr)
+	C.AuctionAddr = strings.ToLower(C.AuctionAddr)
+	C.OfferBookAddr = strings.ToLower(C.OfferBookAddr)
+	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
 
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
 	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,

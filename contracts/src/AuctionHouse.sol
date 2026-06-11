@@ -71,8 +71,10 @@ contract AuctionHouse is MarketplaceCore {
     /// @notice cumulative[auctionId][bidder] → total wei this bidder has escrowed.
     mapping(uint256 => mapping(address => uint128)) public cumulative;
     /// @notice Distinct bidders per auction, for off-chain enumeration + refund batching.
+    ///         First-bid detection rides on `cumulative == 0`: escrow never decreases
+    ///         while an auction is active (refunds/consumption only happen after
+    ///         `settled`, which blocks further bids), so no separate flag is needed.
     mapping(uint256 => address[]) private _bidders;
-    mapping(uint256 => mapping(address => bool)) private _hasBid;
 
     /// @notice Pull-pattern fallback for any push payment that fails (non-receiving
     ///         contract): loser refunds, the winner's full refund when settlement
@@ -173,13 +175,14 @@ contract AuctionHouse is MarketplaceCore {
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
         if (msg.value == 0) revert InvalidAmount();
 
-        uint256 nt = uint256(cumulative[id][msg.sender]) + msg.value;
+        uint128 prevCum = cumulative[id][msg.sender];
+        uint256 nt;
+        unchecked { nt = uint256(prevCum) + msg.value; } // uint128 + msg.value cannot overflow uint256
         if (nt > type(uint128).max) revert BidOverflow();
         uint128 newTotal = uint128(nt);
 
-        if (!_hasBid[id][msg.sender]) {
-            _hasBid[id][msg.sender] = true;
-            _bidders[id].push(msg.sender);
+        if (prevCum == 0) {
+            _bidders[id].push(msg.sender); // first bid on this auction
         }
         cumulative[id][msg.sender] = newTotal;
 
@@ -208,11 +211,14 @@ contract AuctionHouse is MarketplaceCore {
         }
         // else (newTotal <= leaderTotal): escrow accumulates, no lead change — allowed.
 
-        // Anti-snipe.
-        if (a.endsAt - block.timestamp < EXTENSION_WINDOW) {
-            uint64 newEnd = uint64(block.timestamp) + EXTENSION_WINDOW;
-            a.endsAt = newEnd;
-            emit AuctionExtended(id, newEnd);
+        // Anti-snipe. Underflow-safe: the AuctionEnded check above guarantees
+        // block.timestamp < a.endsAt here.
+        unchecked {
+            if (a.endsAt - block.timestamp < EXTENSION_WINDOW) {
+                uint64 newEnd = uint64(block.timestamp) + EXTENSION_WINDOW;
+                a.endsAt = newEnd;
+                emit AuctionExtended(id, newEnd);
+            }
         }
 
         emit BidPlaced(id, msg.sender, msg.value, newTotal);
@@ -270,7 +276,8 @@ contract AuctionHouse is MarketplaceCore {
             (bool okFee,) = feeRecipient.call{value: fee}("");
             if (!okFee) pendingReturns[feeRecipient] += fee;
         }
-        uint128 proceeds = winBid - fee;
+        uint128 proceeds;
+        unchecked { proceeds = winBid - fee; } // fee = 1.5% of winBid, always < winBid
         (bool okSel,) = sel.call{value: proceeds}("");
         if (!okSel) pendingReturns[sel] += proceeds;
 
