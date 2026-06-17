@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"math/big"
 	"strings"
 	"time"
 
@@ -11,6 +12,8 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
+
+const maxInt64 = int64(1<<63 - 1)
 
 // listingPreflightWithChain reports fillability and repairs stale nft_ownership
 // rows by verifying the seller on-chain when the DB projection is missing.
@@ -72,11 +75,25 @@ func verifySellerOnChain(ctx context.Context, eth chain.Caller, collection, toke
 	bal, err1155 := chain.Balance1155(ctx, eth, collection, tokenID, seller)
 	if err1155 == nil {
 		if bal.Sign() > 0 {
-			return true, "erc1155", bal.Int64(), true, nil
+			return true, "erc1155", boundedPositiveAmount(bal), true, nil
 		}
 		return false, "erc1155", 0, true, nil
 	}
 	return false, "", 0, false, err721
+}
+
+func boundedPositiveAmount(v *big.Int) int64 {
+	if v == nil || v.Sign() <= 0 {
+		return 0
+	}
+	if !v.IsInt64() {
+		return maxInt64
+	}
+	n := v.Int64()
+	if n < 1 {
+		return 1
+	}
+	return n
 }
 
 // mediaProxy serves external NFT images through same-origin with SSRF guards.
@@ -90,29 +107,31 @@ func mediaProxy() fiber.Handler {
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 		}
-		ct := detectContentType(raw, body)
+		ct, ok := safeImageContentType(body)
+		if !ok {
+			return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
+		}
 		c.Set("Content-Type", ct)
 		c.Set("Cache-Control", "public, max-age=86400")
 		return c.Send(body)
 	}
 }
 
-func detectContentType(url string, body []byte) string {
-	lower := strings.ToLower(url)
+func safeImageContentType(body []byte) (string, bool) {
 	switch {
-	case strings.HasSuffix(lower, ".png"):
-		return "image/png"
-	case strings.HasSuffix(lower, ".jpg"), strings.HasSuffix(lower, ".jpeg"):
-		return "image/jpeg"
-	case strings.HasSuffix(lower, ".gif"):
-		return "image/gif"
-	case strings.HasSuffix(lower, ".webp"):
-		return "image/webp"
-	case strings.HasSuffix(lower, ".svg"):
-		return "image/svg+xml"
+	case len(body) >= 8 &&
+		body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' &&
+		body[4] == '\r' && body[5] == '\n' && body[6] == 0x1a && body[7] == '\n':
+		return "image/png", true
+	case len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff:
+		return "image/jpeg", true
+	case len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a"):
+		return "image/gif", true
+	case len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP":
+		return "image/webp", true
+	case len(body) >= 12 && string(body[4:8]) == "ftyp" &&
+		(strings.HasPrefix(string(body[8:12]), "avif") || strings.HasPrefix(string(body[8:12]), "avis")):
+		return "image/avif", true
 	}
-	if len(body) > 0 && body[0] == '{' {
-		return "application/json"
-	}
-	return "image/jpeg"
+	return "", false
 }

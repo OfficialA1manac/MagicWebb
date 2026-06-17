@@ -299,14 +299,18 @@ func (q *Q) OrphanListing(ctx context.Context, collection, tokenID, seller strin
 }
 
 // ListingPreflight reports whether a (collection, token, seller) listing can
-// still be filled: active, not orphaned, unexpired, and the seller still holds the token.
+// still be filled: active, not orphaned, unexpired, and the seller still holds
+// at least `l.amount` units. The `n.units > 0` check would falsely pass for
+// ERC-1155 listings whose seller transferred most of their balance away but
+// still has 1 token left, only to revert on-chain when the buyer tries to take
+// the full amount.
 func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller string) (*Preflight, error) {
 	p := &Preflight{Seller: seller}
 	err := q.pool.QueryRow(ctx,
 		`SELECT (l.active AND NOT l.orphaned AND l.expires_at > now()), l.orphaned, l.price_wei::text,
 		        EXISTS(SELECT 1 FROM nft_ownership n
 		               WHERE n.collection=l.collection AND n.token_id=l.token_id
-		                 AND lower(n.owner)=lower(l.seller) AND n.units > 0)
+		                 AND lower(n.owner)=lower(l.seller) AND n.units >= l.amount)
 		 FROM listings l
 		 WHERE lower(l.collection)=lower($1) AND l.token_id=$2 AND lower(l.seller)=lower($3)`,
 		collection, tokenID, seller).Scan(&p.Listed, &p.Orphaned, &p.PriceWei, &p.SellerOwns)
@@ -317,7 +321,9 @@ func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller st
 }
 
 // ListActiveListingsMissingOwnership returns active listings whose seller has
-// no row in nft_ownership — a stale DB state that blocks buy preflight.
+// no matching row in nft_ownership, including listings where a partial-balance
+// ERC-1155 seller transferred most of their tokens away. A stale DB state on
+// either count blocks buy preflight.
 func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) ([]struct {
 	Collection, TokenID, Seller, Standard string
 	Amount                                 int64
@@ -332,7 +338,7 @@ func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) (
 		   AND NOT EXISTS (
 		     SELECT 1 FROM nft_ownership n
 		     WHERE n.collection=l.collection AND n.token_id=l.token_id
-		       AND lower(n.owner)=lower(l.seller) AND n.units > 0)
+		       AND lower(n.owner)=lower(l.seller) AND n.units >= l.amount)
 		 LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

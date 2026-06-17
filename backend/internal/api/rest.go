@@ -109,10 +109,24 @@ func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	}
 }
 
+// clientIP returns the real client IP for rate limiting. Fly.io's load
+// balancer (and any compliant RFC 7239 reverse proxy) *appends* the
+// originating client address to any existing X-Forwarded-For header, so the
+// real IP is the rightmost entry. Trusting parts[0] would let any caller
+// spoof their IP by sending `X-Forwarded-For: 1.2.3.4` before the head
+// balancer gets the request. An empty / whitespace-only XFF falls through
+// to `c.IP()` so the rate-limit bucket key can never be blank.
 func clientIP(c *fiber.Ctx) string {
-	if xff := c.Get("X-Forwarded-For"); xff != "" {
-		parts := strings.SplitN(xff, ",", 2)
-		return strings.TrimSpace(parts[0])
+	xff := strings.TrimSpace(c.Get("X-Forwarded-For"))
+	if xff != "" {
+		if i := strings.LastIndex(xff, ","); i >= 0 {
+			xff = strings.TrimSpace(xff[i+1:])
+		} else {
+			xff = strings.TrimSpace(xff)
+		}
+		if xff != "" {
+			return xff
+		}
 	}
 	return c.IP()
 }

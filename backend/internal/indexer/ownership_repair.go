@@ -2,12 +2,15 @@ package indexer
 
 import (
 	"context"
+	"math/big"
 	"time"
 
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 )
+
+const maxInt64 = int64(1<<63 - 1)
 
 // runOwnershipRepairWorker fixes stale nft_ownership rows that block buy
 // preflight when the on-chain holder still matches the listing seller.
@@ -59,9 +62,23 @@ func verifyListingSeller(ctx context.Context, eth chain.Caller, collection, toke
 	bal, err1155 := chain.Balance1155(ctx, eth, collection, tokenID, seller)
 	if err1155 == nil {
 		if bal.Sign() > 0 {
-			return true, "erc1155", bal.Int64(), true, nil
+			return true, "erc1155", boundedPositiveAmount(bal), true, nil
 		}
 		return false, "erc1155", 0, true, nil
 	}
 	return false, "", 0, false, err721
+}
+
+func boundedPositiveAmount(v *big.Int) int64 {
+	if v == nil || v.Sign() <= 0 {
+		return 0
+	}
+	if !v.IsInt64() {
+		return maxInt64
+	}
+	n := v.Int64()
+	if n < 1 {
+		return 1
+	}
+	return n
 }
