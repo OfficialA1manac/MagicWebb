@@ -20,10 +20,14 @@ import (
 const maxFetchBytes = 8 << 20
 
 // IPFS gateways tried in order when resolving ipfs:// or bare CIDs.
+// cloudflare-ipfs.com is intentionally omitted: Cloudflare sunset the
+// dedicated IPFS gateway and the endpoint now returns fast 404s, which the
+// proxy bubbles as 502. Add a working gateway at the HEAD of this list (and
+// a corresponding TestIPFSGatewayPrimary_IsPublic assertion below) so the
+// first request doesn't waste fetchClient.Timeout on a dead host.
 var ipfsGateways = []string{
-	"https://cloudflare-ipfs.com/ipfs/",
-	"https://dweb.link/ipfs/",
 	"https://ipfs.io/ipfs/",
+	"https://dweb.link/ipfs/",
 	"https://gateway.pinata.cloud/ipfs/",
 }
 

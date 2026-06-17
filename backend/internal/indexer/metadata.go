@@ -52,7 +52,9 @@ func (r *Runner) runMetadataWorker(ctx context.Context) {
 			}
 			for _, t := range tokens {
 				if err := r.fetchOne(ctx, t); err != nil {
-					log.Debug().Err(err).Str("coll", t.Collection).Str("token", t.TokenID).
+					// Warn (not Debug) so a sustained gateway outage surfaces
+					// in default prod-log scraping, not just debug mode.
+					log.Warn().Err(err).Str("coll", t.Collection).Str("token", t.TokenID).
 						Msg("metadata: fetch skipped")
 				}
 			}
@@ -62,8 +64,22 @@ func (r *Runner) runMetadataWorker(ctx context.Context) {
 
 func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	uri, err := r.tokenURI(ctx, t)
-	if err != nil || uri == "" {
+	if err != nil {
 		return fmt.Errorf("tokenURI: %w", err)
+	}
+	if uri == "" {
+		// Empty tokenURI is a *valid* contract response (some testnet tokens
+		// have no off-chain metadata). Persist a sentinel row so the indexer
+		// drops the token from ListTokensMissingMetadata. We use MarkMissing
+		// (no nft_tokens mirror, ON CONFLICT DO NOTHING) instead of
+		// UpsertMetadata because UpsertMetadata would wipe any existing
+		// nft_tokens.name/image mirror written by a prior successful fetch.
+		if err := r.q.MarkMissing(ctx, t.Collection, t.TokenID); err != nil {
+			return fmt.Errorf("sentinel metadata insert: %w", err)
+		}
+		log.Debug().Str("coll", t.Collection).Str("token", t.TokenID).
+			Msg("metadata: token has no URI, marked sentinel")
+		return nil
 	}
 	resolved := media.ResolveURI(uri, t.TokenID)
 

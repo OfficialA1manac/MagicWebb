@@ -488,6 +488,11 @@ func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]Missing
 	if limit == 0 || limit > 200 {
 		limit = 100
 	}
+	// NOTE: tokens whose metadata row exists but has image_uri='' (the
+	// "fetched but image-less" case) are intentionally NOT in this list.
+	// Re-querying them every 30s produced a tight eth_call loop on tokens
+	// whose JSON genuinely has no `image` field. Once a metadata row exists
+	// at all, the drop is over.
 	rows, err := q.pool.Query(ctx,
 		`SELECT src.collection, src.token_id::text, src.standard::text
 		 FROM (
@@ -501,11 +506,6 @@ func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]Missing
 		   LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		   WHERE l.active=true AND NOT l.orphaned AND l.expires_at > now()
 		     AND m.collection IS NULL
-		   UNION
-		   SELECT n.collection, n.token_id, n.standard
-		   FROM nft_ownership n
-		   JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
-		   WHERE m.image_uri IS NULL OR m.image_uri = ''
 		 ) src
 		 GROUP BY src.collection, src.token_id, src.standard
 		 LIMIT $1`, limit)
@@ -568,6 +568,24 @@ func (q *Q) UpsertMetadata(ctx context.Context, collection, tokenID, name, desc,
 		}
 	}
 	return tx.Commit(ctx)
+}
+
+// MarkMissing writes a sentinel nft_metadata row that records "this token
+// has no off-chain metadata" without clobbering an existing real row. It
+// targets the (collection, token_id) unique constraint only — there's no
+// `nft_tokens` mirror, so previously-fetched name/image on the legacy
+// nft_tokens table is preserved.
+//
+// DO NOTHING means: if a real metadata row already exists (race or stale
+// sentinel vs. a later successful fetch), we don't wipe its populated
+// fields. The indexer simply records the attempt.
+func (q *Q) MarkMissing(ctx context.Context, collection, tokenID string) error {
+	_, err := q.pool.Exec(ctx,
+		`INSERT INTO nft_metadata(collection, token_id, name, description, image_uri, animation_uri, metadata_uri, fetched_at)
+		 VALUES($1, $2, NULL, NULL, NULL, NULL, NULL, now())
+		 ON CONFLICT(collection, token_id) DO NOTHING`,
+		collection, tokenID)
+	return err
 }
 
 // ListTraitValues returns distinct trait values for a collection, powering filters.

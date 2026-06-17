@@ -318,3 +318,89 @@ func TestListingPreflightNoRows(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// MarkMissing writes a sentinel nft_metadata row so the indexer drops the
+// token from ListTokensMissingMetadata (breaking the 30-seconds re-fetch
+// loop on tokens that contract-reply with an empty tokenURI).
+//
+// The mock regex locks in two load-bearing invariants:
+//   - a single INSERT into nft_metadata (no tx, no nft_tokens mirror)
+//   - ON CONFLICT DO NOTHING semantic via no follow-up UPDATE expectation
+func TestMarkMissingInsertsSentinel(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectExec(`INSERT INTO nft_metadata\(collection, token_id, name, description, image_uri, animation_uri, metadata_uri, fetched_at\)`).
+		WithArgs("0xcoll", "1").
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	if err := q.MarkMissing(context.Background(), "0xcoll", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// MarkMissing targets only the (collection, token_id) ON CONFLICT — it must
+// NOT touch nft_tokens, otherwise a previous successful fetch's
+// name/image on that mirror would be wiped.
+func TestMarkMissingLeavesNftTokensUntouched(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	// The only DB op MarkMissing should perform is on nft_metadata. Any
+	// nft_tokens INSERT/UPDATE is a regression.
+	mock.ExpectExec(`INSERT INTO nft_metadata`).
+		WithArgs("0xcoll", "1").
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	if err := q.MarkMissing(context.Background(), "0xcoll", "1"); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		// ExpectationsWereMet verifies that every Expect* was satisfied AND
+		// that no unexpected query was sent. If MarkMissing had silently
+		// added a nft_tokens upsert, pgxmock records it as unexpected and
+		// returns a non-nil error here — which is what we want.
+		t.Fatal(err)
+	}
+}
+
+// Regression for the infinite 30s re-fetch loop on empty-tokenURI tokens:
+// ListTokensMissingMetadata's third UNION arm
+//   (JOIN nft_metadata WHERE image_uri IS NULL OR image_uri = '')
+// was removed. The mock's regex anchors on the END of the new (2-arm) query:
+// `... AND m.collection IS NULL ) src GROUP BY ... LIMIT $1`, which exists
+// only after the third arm is removed.
+func TestListTokensMissingMetadataDropsImageEmptyThirdArm(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	rows := mock.NewRows([]string{"collection", "token_id", "standard"}).
+		AddRow("0xc", "1", "erc721").
+		AddRow("0xc", "7", "erc1155")
+	mock.ExpectQuery(`m\.collection IS NULL\s*\) src\s*GROUP BY src\.collection, src\.token_id, src\.standard\s*LIMIT \$1`).
+		WithArgs(50).
+		WillReturnRows(rows)
+
+	out, err := q.ListTokensMissingMetadata(context.Background(), 50)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(out) != 2 {
+		t.Fatalf("rows = %d, want 2", len(out))
+	}
+	if out[0].Collection != "0xc" || out[0].TokenID != "1" || out[0].Standard != "erc721" {
+		t.Fatalf("row0 = %+v", out[0])
+	}
+	if out[1].Standard != "erc1155" {
+		t.Fatalf("row1 = %+v", out[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
