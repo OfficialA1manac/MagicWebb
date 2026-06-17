@@ -2,6 +2,7 @@ package db
 
 import (
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -264,6 +265,54 @@ func TestSetRefundAttempt(t *testing.T) {
 
 	if err := q.SetRefundAttempt(context.Background(), 5); err != nil {
 		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ListingPreflight must match checksummed DB addresses when callers pass lowercase params.
+func TestListingPreflightCaseInsensitiveMatch(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	coll := "0xAbCdEf0123456789012345678901234567890AbC"
+	tokenID := "42"
+	seller := "0x1234567890123456789012345678901234567890"
+	rows := mock.NewRows([]string{"listed", "orphaned", "price_wei", "seller_owns"}).
+		AddRow(true, false, "1000000000000000000", true)
+	mock.ExpectQuery(`FROM listings l`).
+		WithArgs(strings.ToLower(coll), tokenID, strings.ToLower(seller)).
+		WillReturnRows(rows)
+
+	pf, err := q.ListingPreflight(context.Background(), strings.ToLower(coll), tokenID, strings.ToLower(seller))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !pf.Listed || pf.Orphaned || !pf.SellerOwns || pf.PriceWei != "1000000000000000000" {
+		t.Fatalf("preflight = %+v; want active listing with seller ownership", pf)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListingPreflightNoRows(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectQuery(`FROM listings l`).
+		WithArgs("0xcoll", "1", "0xseller").
+		WillReturnError(pgx.ErrNoRows)
+
+	pf, err := q.ListingPreflight(context.Background(), "0xcoll", "1", "0xseller")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if pf.Listed || pf.SellerOwns {
+		t.Fatalf("preflight = %+v; want empty result", pf)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

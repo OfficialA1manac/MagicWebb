@@ -176,10 +176,12 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 	err := q.pool.QueryRow(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,'')
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM listings l
+		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
-		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true`,
+		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true
+		   AND NOT l.orphaned AND l.expires_at > now()`,
 		collection, tokenID).
 		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI)
@@ -235,9 +237,10 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	rows, err := q.pool.Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(t.name,''), COALESCE(t.image_uri,''),
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
 		        COALESCE(c.verified,false)
 		 FROM listings l
+		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
 		 LEFT JOIN collections c ON c.address=l.collection
 		 `+where+`
@@ -276,6 +279,25 @@ type AuctionRow struct {
 	EndsAt          time.Time
 	Status          string
 	CreateTx        string
+	Name            string
+	ImageURI        string
+}
+
+const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.seller, a.standard::text,
+		        a.reserve_price_wei::text, a.highest_bid_wei::text, COALESCE(a.highest_bidder,''),
+		        a.min_increment_bps, a.starts_at, a.ends_at, a.status::text, a.create_tx,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')`
+
+const auctionFromJoin = ` FROM auctions a
+		 LEFT JOIN nft_metadata m ON m.collection=a.collection AND m.token_id=a.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=a.collection AND t.token_id=a.token_id`
+
+func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
+	var r AuctionRow
+	err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
+		&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
+		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI)
+	return r, err
 }
 
 func (q *Q) UpsertAuction(ctx context.Context, r AuctionRow) error {
@@ -319,13 +341,11 @@ func (q *Q) UpdateAuctionBid(ctx context.Context, r AuctionRow) error {
 func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error) {
 	var r AuctionRow
 	err := q.pool.QueryRow(ctx,
-		`SELECT auction_id, collection, token_id::text, seller, standard::text,
-		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
-		        min_increment_bps, starts_at, ends_at, status::text, create_tx
-		 FROM auctions WHERE auction_id=$1`, auctionID).
+		`SELECT `+auctionSelectCols+auctionFromJoin+` WHERE a.auction_id=$1`, auctionID).
 		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
-			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx)
+			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx,
+			&r.Name, &r.ImageURI)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("auction not found: %d", auctionID)
 	}
@@ -346,27 +366,22 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 	where := "WHERE 1=1"
 	if f.Collection != "" {
 		args = append(args, f.Collection)
-		where += fmt.Sprintf(" AND collection=$%d", len(args))
+		where += fmt.Sprintf(" AND a.collection=$%d", len(args))
 	}
 	if f.Status != "" {
 		args = append(args, f.Status)
-		where += fmt.Sprintf(" AND status=$%d", len(args))
+		where += fmt.Sprintf(" AND a.status=$%d", len(args))
 	}
 	rows, err := q.pool.Query(ctx,
-		`SELECT auction_id, collection, token_id::text, seller, standard::text,
-		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
-		        min_increment_bps, starts_at, ends_at, status::text, create_tx
-		 FROM auctions `+where+` ORDER BY ends_at ASC LIMIT $1`, args...)
+		`SELECT `+auctionSelectCols+auctionFromJoin+` `+where+` ORDER BY a.ends_at ASC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []AuctionRow
 	for rows.Next() {
-		var r AuctionRow
-		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
-			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
-			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+		r, err := scanAuctionRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -380,21 +395,17 @@ func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, er
 
 func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 	rows, err := q.pool.Query(ctx,
-		`SELECT auction_id, collection, token_id::text, seller, standard::text,
-		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
-		        min_increment_bps, starts_at, ends_at, status::text, create_tx
-		 FROM auctions WHERE status='active' AND ends_at < now()
-		 ORDER BY ends_at ASC LIMIT 100`)
+		`SELECT `+auctionSelectCols+auctionFromJoin+
+			` WHERE a.status='active' AND a.ends_at < now()
+		 ORDER BY a.ends_at ASC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []AuctionRow
 	for rows.Next() {
-		var r AuctionRow
-		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
-			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
-			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+		r, err := scanAuctionRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -404,24 +415,19 @@ func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) 
 
 func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 	rows, err := q.pool.Query(ctx,
-		`SELECT auction_id, collection, token_id::text, seller, standard::text,
-		        reserve_price_wei::text, highest_bid_wei::text, COALESCE(highest_bidder,''),
-		        min_increment_bps, starts_at, ends_at, status::text, create_tx
-		 FROM auctions
-		 WHERE status='active'
-		   AND highest_bidder IS NULL
-		   AND starts_at + interval '30 minutes' < now()
-		 ORDER BY starts_at ASC LIMIT 100`)
+		`SELECT `+auctionSelectCols+auctionFromJoin+
+			` WHERE a.status='active'
+		   AND a.highest_bidder IS NULL
+		   AND a.starts_at + interval '30 minutes' < now()
+		 ORDER BY a.starts_at ASC LIMIT 100`)
 	if err != nil {
 		return nil, err
 	}
 	defer rows.Close()
 	var out []AuctionRow
 	for rows.Next() {
-		var r AuctionRow
-		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
-			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
-			&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx); err != nil {
+		r, err := scanAuctionRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -703,10 +709,17 @@ func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string
 
 func (q *Q) GetTokenMeta(ctx context.Context, collection, tokenID string) (name, imageURI string, err error) {
 	err = q.pool.QueryRow(ctx,
-		`SELECT COALESCE(name,''), COALESCE(image_uri,'') FROM nft_tokens
-		 WHERE collection=$1 AND token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
+		`SELECT COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
+		 FROM nft_tokens t
+		 LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
+		 WHERE t.collection=$1 AND t.token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
 	if err == pgx.ErrNoRows {
-		return "", "", nil
+		err = q.pool.QueryRow(ctx,
+			`SELECT COALESCE(name,''), COALESCE(image_uri,'') FROM nft_metadata
+			 WHERE collection=$1 AND token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
+		if err == pgx.ErrNoRows {
+			return "", "", nil
+		}
 	}
 	return name, imageURI, err
 }
@@ -873,9 +886,10 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			SELECT 'nft'::text,
 			       t.collection::text,
 			       t.token_id::text,
-			       coalesce(t.name, '') AS name,
-			       coalesce(t.image_uri, '') AS image_uri
+			       coalesce(m.name, t.name, '') AS name,
+			       coalesce(m.image_uri, t.image_uri, '') AS image_uri
 			FROM nft_tokens t
+			LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 			WHERE t.search_vec @@ plainto_tsquery('english', $1)
 			LIMIT $2
 		)

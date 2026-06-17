@@ -30,11 +30,11 @@ var metaHTTP = &http.Client{Timeout: 8 * time.Second}
 
 // rawMeta is the standard ERC-721/1155 metadata JSON shape.
 type rawMeta struct {
-	Name         string `json:"name"`
-	Description  string `json:"description"`
-	Image        string `json:"image"`
-	ImageURL     string `json:"image_url"`
-	AnimationURL string `json:"animation_url"`
+	Name         string          `json:"name"`
+	Description  string          `json:"description"`
+	Image        json.RawMessage `json:"image"`
+	ImageURL     string          `json:"image_url"`
+	AnimationURL string          `json:"animation_url"`
 	Attributes   []struct {
 		TraitType string          `json:"trait_type"`
 		Value     json.RawMessage `json:"value"`
@@ -81,10 +81,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	if err := json.Unmarshal(body, &m); err != nil {
 		return fmt.Errorf("parse meta: %w", err)
 	}
-	image := m.Image
-	if image == "" {
-		image = m.ImageURL
-	}
+	image := imageFromMeta(m)
 
 	traits := make([]db.Trait, 0, len(m.Attributes))
 	for _, a := range m.Attributes {
@@ -95,6 +92,27 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	}
 	return r.q.UpsertMetadata(ctx, t.Collection, t.TokenID,
 		m.Name, m.Description, resolveURI(image, t.TokenID), resolveURI(m.AnimationURL, t.TokenID), uri, traits)
+}
+
+// imageFromMeta extracts a URL from flat or OpenSea-style nested image fields.
+func imageFromMeta(m rawMeta) string {
+	if s := strings.TrimSpace(m.ImageURL); s != "" {
+		return s
+	}
+	if len(m.Image) == 0 {
+		return ""
+	}
+	var s string
+	if json.Unmarshal(m.Image, &s) == nil && strings.TrimSpace(s) != "" {
+		return s
+	}
+	var obj struct {
+		URL string `json:"url"`
+	}
+	if json.Unmarshal(m.Image, &obj) == nil {
+		return strings.TrimSpace(obj.URL)
+	}
+	return ""
 }
 
 // tokenURI reads tokenURI(id) for ERC-721 or uri(id) for ERC-1155 via eth_call.

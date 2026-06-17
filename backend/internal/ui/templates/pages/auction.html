@@ -1,13 +1,21 @@
 {{template "layout.html" .}}
 {{define "content"}}
+<div data-live="auction-updated">
 {{with .Auction}}
 <div class="grid md:grid-cols-2 gap-8">
 
-  <!-- Left: NFT placeholder -->
+  <!-- Left: NFT image -->
   <div class="bg-neutral-900 rounded-2xl overflow-hidden">
+    {{if .ImageURI}}
+    <img src="{{.ImageURI}}" alt="#{{.TokenID}}" class="w-full aspect-square object-cover"
+         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
+    <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl hidden">🖼</div>
+    {{else}}
     <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl">🖼</div>
+    {{end}}
     <div class="p-4">
       <p class="text-xs text-neutral-500 font-mono truncate">{{shortAddr .Collection}} #{{.TokenID}}</p>
+      {{if .Name}}<p class="text-sm font-semibold text-white mt-1 truncate">{{.Name}}</p>{{end}}
     </div>
   </div>
 
@@ -132,4 +140,5 @@
 {{else}}
 <p class="text-neutral-500 text-center py-20">Auction not found.</p>
 {{end}}
+</div>
 {{end}}

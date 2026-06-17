@@ -1,5 +1,6 @@
 {{template "layout.html" .}}
 {{define "content"}}
+<div data-live="offer-updated listing-updated">
 <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
   <h1 class="text-2xl font-bold text-neutral-200">Offers</h1>
   <button @click="$dispatch('open-nft-picker', {action: 'offer'})"
@@ -98,5 +99,6 @@
     <p class="text-neutral-600 text-center py-16">No offers sent yet.</p>
     {{end}}
   </div>
+</div>
 </div>
 {{end}}

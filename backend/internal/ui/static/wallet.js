@@ -120,13 +120,16 @@ document.addEventListener('alpine:init', () => {
 
     // ── Connect (MetaMask | WalletConnect v2) ─────────────────────────────
 
-    async connect(kind = 'injected') {
+    // silent=true: background re-attach on page load — no toasts. Navigating
+    // between pages is not "connecting" again; only an explicit click on
+    // Connect should announce itself.
+    async connect(kind = 'injected', { silent = false } = {}) {
       try {
         let eip1193;
         if (kind === 'walletconnect') {
           eip1193 = await this._wcProvider();
         } else {
-          if (!window.ethereum) { toast('No wallet detected. Install MetaMask or use WalletConnect.', 'error'); return; }
+          if (!window.ethereum) { if (!silent) toast('No wallet detected. Install MetaMask or use WalletConnect.', 'error'); return; }
           eip1193 = window.ethereum;
         }
         const provider = new ethers.BrowserProvider(eip1193);
@@ -141,9 +144,9 @@ document.addEventListener('alpine:init', () => {
         localStorage.setItem('mw_kind', kind);
         await this._authenticate();
         await this.refreshUnread();
-        toast('Wallet connected', 'success');
+        if (!silent) toast('Wallet connected', 'success');
       } catch (e) {
-        toast(revertMessage(e), 'error');
+        if (!silent) toast(revertMessage(e), 'error');
       }
     },
 
@@ -438,11 +441,12 @@ document.addEventListener('alpine:init', () => {
     },
   });
 
-  // Auto-reconnect if previously connected.
+  // Auto-reconnect if previously connected — silent: no "Wallet connected"
+  // toast replay on every page navigation.
   const saved = localStorage.getItem('mw_addr');
   const kind  = localStorage.getItem('mw_kind') || 'injected';
   if (saved && (window.ethereum || kind === 'walletconnect')) {
-    Alpine.store('wallet').connect(kind).catch(() => {});
+    Alpine.store('wallet').connect(kind, { silent: true }).catch(() => {});
   }
 });
 

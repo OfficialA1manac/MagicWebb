@@ -137,6 +137,9 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 	if err := h.q.UpsertListing(ctx, r); err != nil {
 		return fmt.Errorf("onListed upsert: %w", err)
 	}
+	if err := h.q.EnsureListingSellerOwnership(ctx, collection, tokenID, seller, standard, amount); err != nil {
+		return fmt.Errorf("onListed ownership: %w", err)
+	}
 	h.pub("listing-updated", map[string]any{"event": "Listed", "data": r})
 	return nil
 }

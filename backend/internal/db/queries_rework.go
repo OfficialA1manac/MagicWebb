@@ -265,17 +265,40 @@ type Preflight struct {
 	PriceWei   string `json:"price_wei"`
 }
 
+// EnsureListingSellerOwnership seeds nft_ownership for a listing seller so
+// preflight and the metadata worker can find the token before Transfer logs arrive.
+func (q *Q) EnsureListingSellerOwnership(ctx context.Context, collection, tokenID, seller, standard string, amount int64) error {
+	if standard == "erc1155" {
+		_, err := q.pool.Exec(ctx,
+			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+			 VALUES($1,$2,$3,$4,'erc1155')
+			 ON CONFLICT(collection, token_id, owner)
+			 DO UPDATE SET units = GREATEST(nft_ownership.units, EXCLUDED.units), updated_at=now()`,
+			collection, tokenID, seller, amount)
+		return err
+	}
+	_, err := q.pool.Exec(ctx,
+		`DELETE FROM nft_ownership WHERE collection=$1 AND token_id=$2`, collection, tokenID)
+	if err != nil {
+		return err
+	}
+	_, err = q.pool.Exec(ctx,
+		`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+		 VALUES($1,$2,$3,1,'erc721')`, collection, tokenID, seller)
+	return err
+}
+
 // ListingPreflight reports whether a (collection, token, seller) listing can
-// still be filled: active, not orphaned, and the seller still holds the token.
+// still be filled: active, not orphaned, unexpired, and the seller still holds the token.
 func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller string) (*Preflight, error) {
 	p := &Preflight{Seller: seller}
 	err := q.pool.QueryRow(ctx,
-		`SELECT (l.active AND NOT l.orphaned), l.orphaned, l.price_wei::text,
+		`SELECT (l.active AND NOT l.orphaned AND l.expires_at > now()), l.orphaned, l.price_wei::text,
 		        EXISTS(SELECT 1 FROM nft_ownership n
 		               WHERE n.collection=l.collection AND n.token_id=l.token_id
-		                 AND n.owner=l.seller AND n.units > 0)
+		                 AND lower(n.owner)=lower(l.seller) AND n.units > 0)
 		 FROM listings l
-		 WHERE l.collection=$1 AND l.token_id=$2 AND l.seller=$3`,
+		 WHERE lower(l.collection)=lower($1) AND l.token_id=$2 AND lower(l.seller)=lower($3)`,
 		collection, tokenID, seller).Scan(&p.Listed, &p.Orphaned, &p.PriceWei, &p.SellerOwns)
 	if err == pgx.ErrNoRows {
 		return p, nil
@@ -411,11 +434,25 @@ func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]Missing
 		limit = 100
 	}
 	rows, err := q.pool.Query(ctx,
-		`SELECT n.collection, n.token_id::text, n.standard::text
-		 FROM nft_ownership n
-		 LEFT JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
-		 WHERE m.collection IS NULL
-		 GROUP BY n.collection, n.token_id, n.standard
+		`SELECT src.collection, src.token_id::text, src.standard::text
+		 FROM (
+		   SELECT n.collection, n.token_id, n.standard
+		   FROM nft_ownership n
+		   LEFT JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
+		   WHERE m.collection IS NULL
+		   UNION
+		   SELECT l.collection, l.token_id, l.standard
+		   FROM listings l
+		   LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
+		   WHERE l.active=true AND NOT l.orphaned AND l.expires_at > now()
+		     AND m.collection IS NULL
+		   UNION
+		   SELECT n.collection, n.token_id, n.standard
+		   FROM nft_ownership n
+		   JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
+		   WHERE m.image_uri IS NULL OR m.image_uri = ''
+		 ) src
+		 GROUP BY src.collection, src.token_id, src.standard
 		 LIMIT $1`, limit)
 	if err != nil {
 		return nil, err

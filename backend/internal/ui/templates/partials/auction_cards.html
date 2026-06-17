@@ -16,8 +16,17 @@
      init() { setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000); }
    }"
    class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block group">
-  <div class="aspect-square bg-neutral-800 flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
-    NFT
+  <div class="aspect-square overflow-hidden bg-neutral-800">
+    {{if .ImageURI}}
+    <img src="{{.ImageURI}}" alt="#{{.TokenID}}"
+         class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
+    <div class="w-full h-full hidden flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">NFT</div>
+    {{else}}
+    <div class="w-full h-full flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
+      NFT
+    </div>
+    {{end}}
   </div>
   <div class="p-3">
     <p class="text-xs text-neutral-500 truncate font-mono">{{shortAddr .Collection}} #{{.TokenID}}</p>

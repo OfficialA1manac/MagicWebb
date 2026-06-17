@@ -177,6 +177,7 @@ func uiToken(q *db.Q) fiber.Handler {
 		addr := c.Params("addr")
 		id := c.Params("id")
 		listing, _ := q.GetListing(c.Context(), addr, id)
+		tokenName, tokenImage, _ := q.GetTokenMeta(c.Context(), addr, id)
 		offers, _ := q.ListOffers(c.Context(), db.OffersFilter{
 			Collection: addr,
 			TokenID:    id,
@@ -184,11 +185,13 @@ func uiToken(q *db.Q) fiber.Handler {
 			Limit:      20,
 		})
 		return render(c, "pages/token.html", fiber.Map{
-			"Title":    "Token #" + id,
-			"Contract": addr,
-			"TokenID":  id,
-			"Listing":  listing,
-			"Offers":   offers,
+			"Title":         "Token #" + id,
+			"Contract":      addr,
+			"TokenID":       id,
+			"Listing":       listing,
+			"Offers":        offers,
+			"TokenName":     tokenName,
+			"TokenImageURI": tokenImage,
 		})
 	}
 }

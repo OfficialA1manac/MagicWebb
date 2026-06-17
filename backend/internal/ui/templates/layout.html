@@ -119,9 +119,25 @@
 <!-- Toast container -->
 <div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
 
-<!-- Bump the notification badge whenever an SSE event arrives -->
+<!-- SSE plumbing: bump the notification badge on every event, and live-refresh
+     any page that declares a [data-live] wrapper listing the SSE event types it
+     cares about (debounced — bursts of indexer events cause one refresh). -->
 <script>
-  document.body.addEventListener('htmx:sseMessage', () => window.dispatchEvent(new Event('mw-notification')));
+  (() => {
+    let liveTimer = null;
+    document.body.addEventListener('htmx:sseMessage', (e) => {
+      window.dispatchEvent(new Event('mw-notification'));
+      const live = document.querySelector('[data-live]');
+      if (!live || !e.detail || !e.detail.type) return;
+      if (!live.dataset.live.split(' ').includes(e.detail.type)) return;
+      clearTimeout(liveTimer);
+      liveTimer = setTimeout(() => {
+        htmx.ajax('GET', window.location.pathname + window.location.search, {
+          target: '[data-live]', select: '[data-live]', swap: 'outerHTML',
+        });
+      }, 300);
+    });
+  })();
 </script>
 
 <!-- Page content -->
