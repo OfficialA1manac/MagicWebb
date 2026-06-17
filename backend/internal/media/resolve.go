@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/base64"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"io"
 	"math/big"
@@ -60,7 +61,20 @@ type Resolver interface {
 
 // dialResolver is replaceable from tests so safeDialContext can be exercised
 // against deterministic fake DNS results without touching the real network.
+//
+// IMPORTANT: tests that touch dialResolver / dialTCP must NOT call
+// t.Parallel() — both are package-level mutable vars and concurrent stubs
+// would race.
 var dialResolver Resolver = net.DefaultResolver
+
+// dialFunc is the shape of the TCP dial step. Wrapped behind a package var so
+// tests can swap in a stub to assert happy-eyeballs fallback behavior without
+// touching the OS dialer. (Same non-parallel rule as dialResolver.)
+type dialFunc func(ctx context.Context, network, addr string) (net.Conn, error)
+
+var dialTCP dialFunc = func(ctx context.Context, network, addr string) (net.Conn, error) {
+	return (&net.Dialer{Timeout: 5 * time.Second, KeepAlive: 10 * time.Second}).DialContext(ctx, network, addr)
+}
 
 func parseIPLiteral(host string) (netip.Addr, bool) {
 	if ip, err := netip.ParseAddr(host); err == nil {
@@ -113,11 +127,22 @@ func safeDialContext(ctx context.Context, network, addr string) (net.Conn, error
 		ips = resolved
 	}
 
-	first := ips[0]
-	// 5s dial ceiling — below fetchClient's 10s timeout so the dialer
-	// cannot outlast the outer HTTP request deadline.
-	d := &net.Dialer{Timeout: 5 * time.Second, KeepAlive: 10 * time.Second}
-	return d.DialContext(ctx, network, net.JoinHostPort(first.String(), port))
+	// Iterate over every vetted A/AAAA record and dial each in turn. This
+	// recreates Happy Eyeballs manually, which is otherwise bypassed when
+	// the transport is called with a pre-resolved IP. If only one record
+	// exists, the loop runs once. SSRF posture is unchanged — every IP in
+	// `ips` has already passed publicAddrAllowed above. We join every
+	// per-IP error so operators can see *which* IPs failed when diagnose
+	// Fly.io edge routing issues from logs.
+	errs := make([]error, 0, len(ips))
+	for _, ip := range ips {
+		conn, err := dialTCP(ctx, network, net.JoinHostPort(ip.String(), port))
+		if err == nil {
+			return conn, nil
+		}
+		errs = append(errs, fmt.Errorf("dial %s: %w", ip.String(), err))
+	}
+	return nil, errors.Join(errs...)
 }
 
 func isBareIPFSCID(uri string) bool {
