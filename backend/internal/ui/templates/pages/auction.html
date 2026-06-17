@@ -7,7 +7,7 @@
   <!-- Left: NFT image -->
   <div class="bg-neutral-900 rounded-2xl overflow-hidden">
     {{if .ImageURI}}
-    <img src="{{.ImageURI}}" alt="#{{.TokenID}}" class="w-full aspect-square object-cover"
+    <img src="{{mediaURL .ImageURI}}" alt="#{{.TokenID}}" class="w-full aspect-square object-cover"
          onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
     <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl hidden">🖼</div>
     {{else}}

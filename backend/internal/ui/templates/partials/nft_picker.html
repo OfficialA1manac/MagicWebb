@@ -39,7 +39,7 @@
             <button @click="pick(n)"
                     class="text-left bg-neutral-800 hover:bg-neutral-700 rounded-xl overflow-hidden transition group">
               <div class="aspect-square bg-neutral-950 flex items-center justify-center text-3xl overflow-hidden">
-                <template x-if="n.image_uri"><img :src="n.image_uri" class="w-full h-full object-cover" loading="lazy"></template>
+                <template x-if="n.image_uri"><img :src="mediaURL(n.image_uri)" class="w-full h-full object-cover" loading="lazy"></template>
                 <template x-if="!n.image_uri"><span>🖼</span></template>
               </div>
               <div class="p-2">

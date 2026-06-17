@@ -97,7 +97,7 @@ func main() {
 	})
 
 	// Mount all REST + SSE routes
-	api.Mount(app, q, bcast, rl, &config.C)
+	api.Mount(app, q, bcast, rl, &config.C, eth)
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))

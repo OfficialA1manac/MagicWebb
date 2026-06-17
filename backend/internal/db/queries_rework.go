@@ -99,7 +99,7 @@ func (q *Q) ApplyTransfer721(ctx context.Context, collection, tokenID, to string
 	}
 	if _, err = tx.Exec(ctx,
 		`UPDATE listings SET orphaned=true, active=false
-		 WHERE collection=$1 AND token_id=$2 AND seller<>$3 AND active=true`,
+		 WHERE collection=$1 AND token_id=$2 AND lower(seller)<>lower($3) AND active=true`,
 		collection, tokenID, to); err != nil {
 		return err
 	}
@@ -288,6 +288,16 @@ func (q *Q) EnsureListingSellerOwnership(ctx context.Context, collection, tokenI
 	return err
 }
 
+// OrphanListing marks a seller's listing inactive when they no longer hold the NFT.
+func (q *Q) OrphanListing(ctx context.Context, collection, tokenID, seller string) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE listings SET orphaned=true, active=false
+		 WHERE lower(collection)=lower($1) AND token_id=$2 AND lower(seller)=lower($3)
+		   AND active=true AND NOT orphaned`,
+		collection, tokenID, seller)
+	return err
+}
+
 // ListingPreflight reports whether a (collection, token, seller) listing can
 // still be filled: active, not orphaned, unexpired, and the seller still holds the token.
 func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller string) (*Preflight, error) {
@@ -304,6 +314,45 @@ func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller st
 		return p, nil
 	}
 	return p, err
+}
+
+// ListActiveListingsMissingOwnership returns active listings whose seller has
+// no row in nft_ownership — a stale DB state that blocks buy preflight.
+func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) ([]struct {
+	Collection, TokenID, Seller, Standard string
+	Amount                                 int64
+}, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT l.collection, l.token_id::text, l.seller, l.standard::text, l.amount
+		 FROM listings l
+		 WHERE l.active=true AND NOT l.orphaned AND l.expires_at > now()
+		   AND NOT EXISTS (
+		     SELECT 1 FROM nft_ownership n
+		     WHERE n.collection=l.collection AND n.token_id=l.token_id
+		       AND lower(n.owner)=lower(l.seller) AND n.units > 0)
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []struct {
+		Collection, TokenID, Seller, Standard string
+		Amount                                 int64
+	}
+	for rows.Next() {
+		var r struct {
+			Collection, TokenID, Seller, Standard string
+			Amount                                 int64
+		}
+		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.Standard, &r.Amount); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
 }
 
 // ── Notifications ──────────────────────────────────────────────────────────

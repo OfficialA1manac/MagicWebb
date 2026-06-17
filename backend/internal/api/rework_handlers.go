@@ -54,31 +54,6 @@ func collectionTraits(q *db.Q) fiber.Handler {
 	}
 }
 
-// ── Buy preflight (stale-listing guard) ────────────────────────────────────
-
-func listingPreflight(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		coll := strings.ToLower(c.Params("collection"))
-		tokenID := c.Params("id")
-		seller := strings.ToLower(c.Query("seller"))
-		if seller == "" {
-			return writeErr(c, fiber.StatusBadRequest, "seller query param required")
-		}
-		pf, err := q.ListingPreflight(c.Context(), coll, tokenID, seller)
-		if err != nil {
-			return writeErr(c, fiber.StatusInternalServerError, "internal error")
-		}
-		pf.SellerOwns = pf.SellerOwns && pf.Listed
-		return c.JSON(fiber.Map{
-			"ok":          pf.Listed && pf.SellerOwns && !pf.Orphaned,
-			"listed":      pf.Listed,
-			"orphaned":    pf.Orphaned,
-			"seller_owns": pf.SellerOwns,
-			"price_wei":   pf.PriceWei,
-		})
-	}
-}
-
 // ── Notifications ──────────────────────────────────────────────────────────
 
 func listNotifications(q *db.Q) fiber.Handler {

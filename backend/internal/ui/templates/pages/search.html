@@ -19,7 +19,7 @@
      class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block">
     <div class="aspect-square bg-neutral-800 flex items-center justify-center text-4xl overflow-hidden">
       {{if and (eq .Kind "nft") .ImageURI}}
-      <img src="{{.ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
+      <img src="{{mediaURL .ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
            class="w-full h-full object-cover"
            onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
       <span class="hidden">🖼</span>

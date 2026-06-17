@@ -18,7 +18,7 @@
    class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block group">
   <div class="aspect-square overflow-hidden bg-neutral-800">
     {{if .ImageURI}}
-    <img src="{{.ImageURI}}" alt="#{{.TokenID}}"
+    <img src="{{mediaURL .ImageURI}}" alt="#{{.TokenID}}"
          class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
          onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
     <div class="w-full h-full hidden flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">NFT</div>

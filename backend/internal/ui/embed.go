@@ -7,6 +7,8 @@ import (
 	"io/fs"
 	"strings"
 	"time"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
 //go:embed all:templates all:static all:docs
@@ -39,6 +41,7 @@ var funcMap = template.FuncMap{
 	"unix": func(t time.Time) int64 {
 		return t.Unix()
 	},
+	"mediaURL": media.ProxyURL,
 }
 
 var partialPaths = []string{

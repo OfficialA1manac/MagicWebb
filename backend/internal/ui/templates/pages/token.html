@@ -10,7 +10,7 @@
     {{if not $img}}{{$img = .TokenImageURI}}{{end}}
     {{if not $name}}{{$name = .TokenName}}{{end}}
     {{if $img}}
-    <img src="{{$img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
+    <img src="{{mediaURL $img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
          onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
     <div class="aspect-square bg-neutral-800 flex items-center justify-center text-7xl hidden">🖼</div>
     {{else}}

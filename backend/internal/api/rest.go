@@ -12,6 +12,7 @@ import (
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -19,7 +20,7 @@ import (
 )
 
 // Mount registers all REST + SSE routes on the Fiber app.
-func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config) {
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller) {
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL),
 		AllowMethods:     "GET,POST,PUT,OPTIONS",
@@ -44,8 +45,9 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
 	api.Get("/listings", listListings(q))
-	api.Get("/listings/:collection/:id/preflight", listingPreflight(q))
+	api.Get("/listings/:collection/:id/preflight", listingPreflightWithChain(q, eth))
 	api.Get("/listings/:collection/:id", getListing(q))
+	api.Get("/media", mediaProxy())
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address/traits", collectionTraits(q))
 	api.Get("/collections/:address", getCollection(q))

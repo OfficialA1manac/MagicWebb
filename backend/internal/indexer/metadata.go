@@ -2,12 +2,9 @@ package indexer
 
 import (
 	"context"
-	"encoding/hex"
 	"encoding/json"
 	"fmt"
-	"io"
 	"math/big"
-	"net/http"
 	"strings"
 	"time"
 
@@ -17,16 +14,13 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
-
-const ipfsGateway = "https://ipfs.io/ipfs/"
 
 var (
 	tokenURISelector = crypto.Keccak256([]byte("tokenURI(uint256)"))[:4]
 	uriSelector      = crypto.Keccak256([]byte("uri(uint256)"))[:4]
 )
-
-var metaHTTP = &http.Client{Timeout: 8 * time.Second}
 
 // rawMeta is the standard ERC-721/1155 metadata JSON shape.
 type rawMeta struct {
@@ -71,9 +65,9 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	if err != nil || uri == "" {
 		return fmt.Errorf("tokenURI: %w", err)
 	}
-	resolved := resolveURI(uri, t.TokenID)
+	resolved := media.ResolveURI(uri, t.TokenID)
 
-	body, err := fetchJSON(ctx, resolved)
+	body, err := media.FetchBytes(ctx, resolved, t.TokenID)
 	if err != nil {
 		return err
 	}
@@ -91,7 +85,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 		traits = append(traits, db.Trait{Type: a.TraitType, Value: jsonScalar(a.Value)})
 	}
 	return r.q.UpsertMetadata(ctx, t.Collection, t.TokenID,
-		m.Name, m.Description, resolveURI(image, t.TokenID), resolveURI(m.AnimationURL, t.TokenID), uri, traits)
+		m.Name, m.Description, media.ResolveURI(image, t.TokenID), media.ResolveURI(m.AnimationURL, t.TokenID), uri, traits)
 }
 
 // imageFromMeta extracts a URL from flat or OpenSea-style nested image fields.
@@ -152,51 +146,6 @@ func decodeABIString(b []byte) string {
 		return ""
 	}
 	return string(b[start : start+n])
-}
-
-// resolveURI normalizes ipfs:// URIs and fills ERC-1155 {id} placeholders.
-func resolveURI(uri, tokenID string) string {
-	if uri == "" {
-		return ""
-	}
-	if strings.Contains(uri, "{id}") {
-		if id, ok := new(big.Int).SetString(tokenID, 10); ok {
-			padded := make([]byte, 32)
-			id.FillBytes(padded)
-			uri = strings.ReplaceAll(uri, "{id}", hex.EncodeToString(padded))
-		}
-	}
-	switch {
-	case strings.HasPrefix(uri, "ipfs://ipfs/"):
-		return ipfsGateway + strings.TrimPrefix(uri, "ipfs://ipfs/")
-	case strings.HasPrefix(uri, "ipfs://"):
-		return ipfsGateway + strings.TrimPrefix(uri, "ipfs://")
-	}
-	return uri
-}
-
-func fetchJSON(ctx context.Context, url string) ([]byte, error) {
-	if strings.HasPrefix(url, "data:application/json") {
-		if i := strings.Index(url, ","); i >= 0 {
-			return []byte(url[i+1:]), nil
-		}
-	}
-	if !strings.HasPrefix(url, "http") {
-		return nil, fmt.Errorf("unsupported uri scheme")
-	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, url, nil)
-	if err != nil {
-		return nil, err
-	}
-	resp, err := metaHTTP.Do(req)
-	if err != nil {
-		return nil, err
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		return nil, fmt.Errorf("metadata http %d", resp.StatusCode)
-	}
-	return io.ReadAll(io.LimitReader(resp.Body, 1<<20))
 }
 
 // jsonScalar stringifies a JSON trait value (string or number).

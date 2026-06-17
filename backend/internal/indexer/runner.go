@@ -91,6 +91,9 @@ func (r *Runner) Run(ctx context.Context) {
 	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
 
 	wg.Add(1)
+	go func() { defer wg.Done(); r.runOwnershipRepairWorker(ctx) }()
+
+	wg.Add(1)
 	go func() { defer wg.Done(); r.runWithdrawalSweeper(ctx) }()
 
 	if r.cfg.KeeperKey != "" {

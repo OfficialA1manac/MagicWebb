@@ -249,7 +249,11 @@ document.addEventListener('alpine:init', () => {
       try {
         const pf = await fetch(`/api/v1/listings/${collection}/${tokenId}/preflight?seller=${seller}`)
           .then(r => r.ok ? r.json() : null).catch(() => null);
-        if (pf && !pf.ok) {
+        if (!pf) {
+          toast('Could not verify this listing. Refresh and try again.', 'error');
+          return;
+        }
+        if (!pf.ok) {
           toast('This listing is no longer fillable (sold, cancelled, or the NFT moved).', 'error');
           return;
         }
@@ -451,6 +455,32 @@ document.addEventListener('alpine:init', () => {
 });
 
 function walletStore() { return Alpine.store('wallet'); }
+
+function isBareIPFSCID(uri) {
+  return (uri.startsWith('Qm') && uri.length >= 44) || (uri.startsWith('baf') && uri.length >= 59);
+}
+
+function resolveURI(uri) {
+  uri = (uri || '').trim();
+  if (!uri || uri.startsWith('data:')) return uri;
+  if (uri.startsWith('ipfs://ipfs/')) return 'https://cloudflare-ipfs.com/ipfs/' + uri.slice(13);
+  if (uri.startsWith('ipfs://')) return 'https://cloudflare-ipfs.com/ipfs/' + uri.slice(7);
+  if (isBareIPFSCID(uri)) return 'https://cloudflare-ipfs.com/ipfs/' + uri;
+  if (uri.startsWith('ar://')) return 'https://arweave.net/' + uri.slice(5);
+  return uri;
+}
+
+function mediaURL(uri) {
+  if (!uri || uri.startsWith('data:') || uri.startsWith('/')) return uri;
+  if (uri.startsWith('http://') || uri.startsWith('https://')) {
+    return '/api/v1/media?url=' + encodeURIComponent(uri);
+  }
+  const resolved = resolveURI(uri);
+  if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
+    return '/api/v1/media?url=' + encodeURIComponent(resolved);
+  }
+  return uri;
+}
 
 // ── Toast notifications ───────────────────────────────────────────────────────
 
