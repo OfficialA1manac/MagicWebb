@@ -71,11 +71,52 @@ var funcMap = template.FuncMap{
 		flr := new(big.Float).SetPrec(64).Quo(bf, big.NewFloat(1e18))
 		return formatFloat(flr, 4)
 	},
-	// netOf returns the seller-pays net of a wei string: full price minus the
-	// immutable 1.5% platform fee, in wei (decimal string). Kept in template
-	// helpers so the price→rendered fee math lives in one place (the math
-	// itself is also encoded in the contract — they MUST stay equal).
-	"netOf": func(priceWei string) string {
+// mulf multiplies a numeric value (int or float64) by a float64 and renders
+// it as a decimal string with adaptive precision. Drives template-side
+// "bps → percent" conversions on auction detail (min increment %). Pure
+// arithmetic — no wei scale, no half-up rounding (Go's strconv uses the
+// shortest-round representation, good enough for a UI percentage).
+"mulf": func(v any, factor float64) string {
+	var x float64
+	switch t := v.(type) {
+	case int:
+		x = float64(t)
+	case int64:
+		x = float64(t)
+	case float64:
+		x = t
+	case string:
+		if f, err := strconv.ParseFloat(t, 64); err == nil {
+			x = f
+		}
+	default:
+		x = 0
+	}
+	r := x * factor
+	// Drop trailing zeros for a clean display: 5.00 → "5", 5.10 → "5.1".
+	s := strconv.FormatFloat(r, 'f', -1, 64)
+	return s
+},
+// subf returns (wei_a − wei_b) as a decimal-string wei value. The two
+// arguments are wei decimal strings (PriceWei − NetOf(PriceWei) → the 1.5%
+// fee line). BigFloat arithmetic so we never lose precision at the wei
+// scale. Go-template funcMap cannot introspect nested arg types, so we
+// accept strings here — caller-side just passes `{{subf .PriceWei (netOf
+// .PriceWei)}}`.
+"subf": func(aWei, bWei string) string {
+	ai, okA := new(big.Int).SetString(aWei, 10)
+	bi, okB := new(big.Int).SetString(bWei, 10)
+	if !okA || !okB {
+		return "0"
+	}
+	r := new(big.Int).Sub(ai, bi)
+	return r.String()
+},
+// netOf returns the seller-pays net of a wei string: full price minus the
+// immutable 1.5% platform fee, in wei (decimal string). Kept in template
+// helpers so the price→rendered fee math lives in one place (the math
+// itself is also encoded in the contract — they MUST stay equal).
+"netOf": func(priceWei string) string {
 		if priceWei == "" || priceWei == "0" {
 			return "0"
 		}

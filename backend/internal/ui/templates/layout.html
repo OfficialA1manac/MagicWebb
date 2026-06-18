@@ -3,6 +3,7 @@
 <head>
   <meta charset="UTF-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="theme-color" content="#7dd3fc">
   <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
@@ -55,12 +56,15 @@
           crossorigin="anonymous" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
+    // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
     window.MW_MARKETPLACE   = '{{.MarketplaceAddr}}';
     window.MW_AUCTION       = '{{.AuctionAddr}}';
     window.MW_OFFERBOOK     = '{{.OfferBookAddr}}';
     window.MW_WC_PROJECT_ID = '{{.WCProjectID}}';
     window.MW_NETWORK_NAME  = 'Flare Coston2';
+    window.MW_NETWORK_ID    = 114;
     window.MW_RPC_URL       = 'https://coston2-api.flare.network/ext/C/rpc';
+    window.MW_EXPLORER      = 'https://coston2-explorer.flare.network';
   </script>
   <!-- wallet.js MUST load before Alpine: it registers the $store.wallet on
        alpine:init, which fires the moment Alpine executes. Deferred scripts
@@ -76,71 +80,96 @@
     /* Subtle skeleton shimmer for image placeholders while we fetch. */
     .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
     @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-    /* Palette-aware utility classes — one class per palette token, easing
-       template authoring without re-stating Tailwind string every time. */
-    .glass-dark  { background: rgba(10,10,13,0.78); backdrop-filter: blur(14px); -webkit-backdrop-filter: blur(14px); }
+    /* Palette-aware utility classes — easing template authoring. */
+    .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
     .glass-soft  { background: rgba(15,15,20,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
-    .glow-sky    { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
-    .glow-gold   { box-shadow: 0 0 22px -6px rgba(251,191,36,0.50); }
-    .glow-violet { box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
-    /* Wallet button states (sky → gold on hover → violet on active). */
-    .btn-sky { background: var(--tw-bg-sky-btn, linear-gradient(135deg,#38bdf8,#0ea5e9)); }
-    .ring-focus:focus-visible { outline: 2px solid #38bdf8; outline-offset: 2px; }
+    .glow-sky     { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
+    .glow-gold    { box-shadow: 0 0 22px -6px rgba(251,191,36,0.50); }
+    .glow-violet  { box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
+    .glow-white   { box-shadow: 0 0 18px -4px rgba(255,255,255,0.55); }
+    /* Button backgrounds (one class per palette token). The exact gradient
+       comes from tailwind.config backgroundImage — these classes exist so
+       templates don't need a long string every time. */
+    .btn-sky     { background-image: linear-gradient(135deg,#7dd3fc,#0ea5e9); }
+    .btn-gold    { background-image: linear-gradient(135deg,#fcd34d,#f59e0b); }
+    .btn-violet  { background-image: linear-gradient(135deg,#a78bfa,#7c3aed); }
+    .btn-white   { background: #ffffff; color: #0a0a0d; }
+    .ring-focus:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+    /* Animated brand gradient for headings + hero brand name. */
+    .brand-text { background-image: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd, #7dd3fc); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gradient 5s ease infinite; }
+    @keyframes gradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+    /* Step pulse for the action-modal progress indicator. The dot grows
+       then settles — gives an alive-but-calm progress beat. */
+    .step-current { animation: step-pulse 1.6s ease-in-out infinite; }
+    @keyframes step-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(125,211,252,0.6); } 50% { box-shadow: 0 0 0 8px rgba(125,211,252,0.0); } }
+    /* Tooltip on the WC pill. */
+    .pill-pulse-pulse::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; background: rgba(125,211,252,0.35); z-index: -1; animation: pill-pulse 1.5s ease-out infinite; }
+    @keyframes pill-pulse { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
   </style>
 </head>
 <body hx-ext="sse" sse-connect="/events" x-data>
 
 <!-- Nav -->
-<nav x-data="{ open: false, wcOpen: false }" class="sticky top-0 z-50 glass-dark border-b border-ink-700/70">
+<nav x-data="{ open: false, wcOpen: false, helpersOpen: false }" class="sticky top-0 z-50 glass-dark border-b border-white/10 shadow-topbar">
   <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
 
-    <a href="/" class="text-xl font-extrabold tracking-tight text-white flex-shrink-0 flex items-center gap-2">
-      <span class="w-8 h-8 rounded-xl bg-sky-btn flex items-center justify-center text-ink-950 text-lg shadow-sky-glow">✦</span>
-      <span>Magic<span class="bg-gradient-to-r from-sky-300 via-violet-300 to-gold-300 bg-clip-text text-transparent">Webb</span></span>
+    <a href="/" class="text-xl font-extrabold tracking-tight flex-shrink-0 flex items-center gap-2.5 group">
+      <span class="w-9 h-9 rounded-xl btn-sky flex items-center justify-center text-ink-950 text-lg glow-sky transition group-hover:scale-105">✦</span>
+      <span class="text-white">Magic<span class="brand-text">Webb</span></span>
     </a>
 
     <!-- Desktop links -->
-    <div class="hidden md:flex items-center gap-6 text-sm text-ink-700">
-      <a href="/"             class="hover:text-white transition">Home</a>
-      <a href="/listings"     class="hover:text-white transition">Listings</a>
-      <a href="/auctions"     class="hover:text-white transition">Auctions</a>
-      <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="hover:text-white transition">Offers</a>
-      <a href="/search"       class="hover:text-white transition">Search</a>
-      <a href="/metrics"      class="hover:text-white transition">Metrics</a>
-      <a href="/docs"         class="hover:text-white transition">Docs</a>
+    <div class="hidden md:flex items-center gap-1 text-sm font-semibold">
+      <a href="/"             class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Home</a>
+      <a href="/listings"     class="px-3 py-1.5 rounded-lg text-sky-200 hover:text-white hover:bg-sky-500/15 transition">Listings</a>
+      <a href="/auctions"     class="px-3 py-1.5 rounded-lg text-violet-200 hover:text-white hover:bg-violet-500/15 transition">Auctions</a>
+      <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="px-3 py-1.5 rounded-lg text-gold-200 hover:text-white hover:bg-gold-500/15 transition">Offers</a>
+      <a href="/search"       class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Search</a>
+      <a href="/metrics"      class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Metrics</a>
+      <a href="/docs"         class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Docs</a>
     </div>
 
     <!-- Right: wallet + bell + hamburger -->
-    <div class="flex items-center gap-3">
-      <!-- Connect: split into MetaMask + WalletConnect v2 -->
+    <div class="flex items-center gap-2">
+      <!-- Connect: split into Browser Wallet + WalletConnect v2 -->
       <template x-if="!$store.wallet.connected">
         <div class="relative" @click.outside="wcOpen = false">
-          <div class="flex gap-2">
-            <button @click="wcOpen = !wcOpen"
-                    class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-bold text-sm transition shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center gap-2 ring-focus">
-              <span class="text-base leading-none">＋</span> Connect Wallet
-              <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
-            </button>
-          </div>
-          <!-- Method picker: appears on click -->
-          <div x-show="wcOpen" x-cloak x-transition.opacity
-               class="absolute right-0 mt-2 w-72 bg-ink-900/95 border border-ink-700 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus">
+          <button @click="wcOpen = !wcOpen"
+                  class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
+            <span class="text-base leading-none">＋</span> Connect Wallet
+            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <!-- Method picker: appears on click. WC connects via QR (mobile)
+               or deep-link (desktop) — both routed through the same EIP-1193
+               bridge we use for MetaMask. -->
+          <div x-show="wcOpen" x-cloak x-transition.opacity.duration.150ms
+               class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus">
+            <div class="px-3 pt-2 pb-1.5 flex items-center justify-between">
+              <p class="text-[10px] uppercase tracking-wider text-white/60 font-extrabold">Choose wallet</p>
+              <button @click="wcOpen = false" class="text-white/40 hover:text-white text-base leading-none">×</button>
+            </div>
             <button @click="wcOpen=false; $store.wallet.connect('injected')"
                     class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3">
-              <span class="w-9 h-9 rounded-xl bg-sky-500/20 border border-sky-500/30 flex items-center justify-center text-sky-300 text-base font-bold flex-shrink-0">M</span>
-              <div>
+              <span class="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-200 text-base font-bold flex-shrink-0 glow-sky">M</span>
+              <div class="flex-1">
                 <p class="text-sm font-bold text-white">Browser Wallet</p>
-                <p class="text-[11px] text-ink-700 mt-0.5">MetaMask, Rabby, any EIP-1193 wallet</p>
+                <p class="text-[11px] text-white/60 mt-0.5">MetaMask, Rabby, or any EIP-1193 wallet</p>
               </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/80 font-bold uppercase tracking-wider">Quick</span>
             </button>
             <button @click="wcOpen=false; $store.wallet.connect('walletconnect')"
-                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 mt-1">
-              <span class="w-9 h-9 rounded-xl bg-violet-500/20 border border-violet-500/30 flex items-center justify-center text-violet-300 text-base flex-shrink-0">⌬</span>
-              <div>
+                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 mt-1"
+                    {{if not .WCProjectID}}disabled{{end}}>
+              <span class="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/40 flex items-center justify-center text-violet-200 text-base flex-shrink-0 glow-violet">⌬</span>
+              <div class="flex-1">
                 <p class="text-sm font-bold text-white">WalletConnect</p>
-                <p class="text-[11px] text-ink-700 mt-0.5">Scan a QR from a mobile or hardware wallet</p>
+                <p class="text-[11px] text-white/60 mt-0.5">Scan a QR from any mobile or hardware wallet</p>
               </div>
+              <span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-200 font-bold uppercase tracking-wider">QR</span>
             </button>
+            <div class="px-3 pt-2.5 pb-2 text-[10px] text-white/40 leading-relaxed border-t border-white/5 mt-1">
+              Connection is non-custodial — your keys never leave your wallet. We verify ownership via a signed SIWE challenge (no transaction, no gas).
+            </div>
           </div>
         </div>
       </template>
@@ -158,22 +187,22 @@
                 $store.wallet.markNotificationsRead();
               } }">
           <button @click="openBell = !openBell; if (openBell) load()"
-                  class="relative p-2 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition ring-focus" aria-label="Notifications">
+                  class="relative p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition ring-focus" aria-label="Notifications">
             <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
             <span x-show="$store.wallet.unread > 0" x-cloak
-                  class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full bg-gold-400 text-ink-950 text-[10px] font-extrabold flex items-center justify-center"
+                  class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full btn-gold text-ink-950 text-[10px] font-extrabold flex items-center justify-center glow-gold"
                   x-text="$store.wallet.unread > 99 ? '99+' : $store.wallet.unread"></span>
           </button>
           <div x-show="openBell" x-cloak @click.outside="openBell = false"
-               class="absolute right-0 mt-2 w-80 max-w-[90vw] bg-ink-900/95 border border-ink-700 rounded-2xl shadow-2xl overflow-hidden z-50 backdrop-blur">
-            <div class="px-4 py-2 border-b border-ink-700 text-xs font-bold text-ink-500 uppercase tracking-wider">Notifications</div>
-            <div class="max-h-96 overflow-y-auto divide-y divide-ink-700">
-              <template x-if="loading"><div class="px-4 py-6 text-center text-xs text-ink-700 shimmer">Loading…</div></template>
-              <template x-if="!loading && items.length === 0"><div class="px-4 py-6 text-center text-xs text-ink-700">No notifications yet.</div></template>
+               class="absolute right-0 mt-2 w-80 max-w-[90vw] bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 backdrop-blur">
+            <div class="px-4 py-2 border-b border-white/10 text-xs font-bold text-white/60 uppercase tracking-wider">Notifications</div>
+            <div class="max-h-96 overflow-y-auto divide-y divide-white/5">
+              <template x-if="loading"><div class="px-4 py-6 text-center text-xs text-white/40 shimmer">Loading…</div></template>
+              <template x-if="!loading && items.length === 0"><div class="px-4 py-6 text-center text-xs text-white/40">No notifications yet.</div></template>
               <template x-for="n in items" :key="n.id">
-                <a :href="n.link || '#'" class="block px-4 py-3 hover:bg-ink-800 transition">
+                <a :href="n.link || '#'" class="block px-4 py-3 hover:bg-white/5 transition">
                   <p class="text-sm text-white" x-text="n.title"></p>
-                  <p class="text-xs text-ink-500 mt-0.5" x-text="n.body"></p>
+                  <p class="text-xs text-white/60 mt-0.5" x-text="n.body"></p>
                 </a>
               </template>
             </div>
@@ -181,21 +210,22 @@
         </div>
       </template>
 
-      <!-- Connected pill: address + WC indicator + disconnect -->
+      <!-- Connected pill: identity + WC badge + disconnect -->
       <template x-if="$store.wallet.connected">
-        <div class="flex items-center gap-2 px-2 py-1 rounded-xl bg-ink-800/80 hover:bg-ink-700 transition ring-focus">
-          <div class="relative">
-            <span class="block w-2 h-2 rounded-full bg-sky-300 animate-pulse"></span>
-          </div>
-          <a :href="'/profile/' + $store.wallet.address" class="text-xs text-white hover:text-gold-300 font-mono"
+        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition ring-focus border border-white/10">
+          <div class="relative w-2 h-2 rounded-full bg-sky-300 pill-pulse-pulse"></div>
+          <template x-if="$store.wallet.isWalletConnect">
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30" title="Connected via WalletConnect">WC</span>
+          </template>
+          <a :href="'/profile/' + $store.wallet.address" class="text-xs text-white hover:text-gold-200 font-mono font-bold"
              x-text="$store.wallet.shortAddr"></a>
           <button @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
                   title="Disconnect"
-                  class="text-ink-600 hover:text-gold-400 text-xs leading-none">×</button>
+                  class="text-white/40 hover:text-gold-300 text-base leading-none transition">×</button>
         </div>
       </template>
 
-      <button @click="open = !open" class="md:hidden p-2 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition ring-focus" aria-label="Menu">
+      <button @click="open = !open" class="md:hidden p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition ring-focus" aria-label="Menu">
         <svg x-show="!open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         <svg x-show="open" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
       </button>
@@ -203,21 +233,22 @@
   </div>
 
   <!-- Mobile menu -->
-  <div x-show="open" x-cloak class="md:hidden border-t border-ink-700 px-4 py-3 space-y-1 text-sm">
-    <a href="/"          class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Home</a>
-    <a href="/listings"  class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Listings</a>
-    <a href="/auctions"  class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Auctions</a>
-    <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Offers</a>
-    <a href="/search"    class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Search</a>
-    <a href="/metrics"   class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Metrics</a>
-    <a href="/docs"      class="block py-2 px-3 rounded-lg text-ink-100 hover:text-white hover:bg-ink-800 transition">Docs</a>
+  <div x-show="open" x-cloak class="md:hidden border-t border-white/10 px-4 py-3 space-y-1 text-sm">
+    <a href="/"          class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Home</a>
+    <a href="/listings"  class="block py-2 px-3 rounded-lg text-sky-200 hover:bg-sky-500/15 transition">Listings</a>
+    <a href="/auctions"  class="block py-2 px-3 rounded-lg text-violet-200 hover:bg-violet-500/15 transition">Auctions</a>
+    <a :href="$store.wallet.address ? '/offers?addr=' + $store.wallet.address : '/offers'" class="block py-2 px-3 rounded-lg text-gold-200 hover:bg-gold-500/15 transition">Offers</a>
+    <a href="/search"    class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Search</a>
+    <a href="/metrics"   class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Metrics</a>
+    <a href="/docs"      class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Docs</a>
   </div>
 </nav>
 
 {{template "partials/nft_picker.html" .}}
+{{template "partials/action_modal.html" .}}
 
-<!-- Toast container -->
-<div id="toasts" class="fixed bottom-4 right-4 z-50 flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
+<!-- Toast container (right-bottom). Live announcements ("tx confirmed!", "outbid", etc). -->
+<div id="toasts" class="fixed bottom-4 right-4 z-[55] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
 
 <!-- SSE plumbing: bump the notification badge on every event, and live-refresh
      any page that declares a [data-live] wrapper listing the SSE event types it
@@ -240,18 +271,19 @@
   })();
 </script>
 
-<!-- Page content -->
+<!-- Page content. The fixed mesh-radar radial sits behind cards for instant
+     sky/gold/purple watercolor glow on every page. -->
 <main class="max-w-7xl mx-auto px-4 py-8 relative">
-  <div class="fixed inset-0 -z-10 bg-sky-radial pointer-events-none"></div>
+  <div class="fixed inset-0 -z-10 bg-mesh-hero pointer-events-none"></div>
   {{block "content" .}}{{end}}
 </main>
 
-<footer class="border-t border-ink-700 mt-16 py-8 text-center text-ink-600 text-sm">
-  <span class="bg-gradient-to-r from-sky-300 via-violet-300 to-gold-300 bg-clip-text text-transparent font-extrabold">MagicWebb</span>
+<footer class="border-t border-white/10 mt-16 py-8 text-center text-white/60 text-sm">
+  <span class="brand-text font-extrabold">MagicWebb</span>
   · Non-custodial NFT marketplace on
-  <a href="https://flare.network" class="hover:text-sky-300 transition">Flare Network</a>
-  · <a href="https://github.com/OfficialA1manac/MagicWebb" class="hover:text-violet-300 transition">GitHub</a>
-  · <a href="/docs" class="hover:text-gold-300 transition">Docs</a>
+  <a href="https://flare.network" class="hover:text-sky-200 transition">Flare Network</a>
+  · <a href="https://github.com/OfficialA1manac/MagicWebb" class="hover:text-violet-200 transition">GitHub</a>
+  · <a href="/docs" class="hover:text-gold-200 transition">Docs</a>
 </footer>
 
 </body>

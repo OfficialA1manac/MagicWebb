@@ -1,51 +1,69 @@
 {{define "partials/nft_picker.html"}}
 <!-- Global wallet NFT picker modal. Open via: $dispatch('open-nft-picker', {action:'list'}) -->
 <div x-data="{
-       open: false, action: 'list', loading: false, nfts: [],
+       open: false, action: 'list', loading: false, nfts: [], needConnect: false,
        async show(detail) {
          this.action = (detail && detail.action) || 'list';
-         this.open = true; this.loading = true; this.nfts = [];
-         if (!$store.wallet.address) { await $store.wallet.connect(); }
-         if (!$store.wallet.address) { this.open = false; return; }
+         this.open = true; this.loading = true; this.nfts = []; this.needConnect = false;
+         if (!$store.wallet.address) { this.needConnect = true; this.loading = false; return; }
          try {
            const res = await fetch('/api/v1/wallet/' + $store.wallet.address + '/nfts');
            if (res.ok) this.nfts = await res.json();
          } catch {}
          this.loading = false;
        },
-       pick(n) {
-         this.open = false;
-         window.location.href = '/token/' + n.collection + '/' + n.token_id + '?action=' + this.action;
-       }
+       pick(n) { this.open = false; window.location.href = '/token/' + n.collection + '/' + n.token_id + '?action=' + this.action; },
+       connectInjected() { this.open = false; $store.wallet.connect('injected'); },
+       connectWC()       { this.open = false; $store.wallet.connect('walletconnect'); }
      }"
      x-on:open-nft-picker.window="show($event.detail)">
   <div x-show="open" x-cloak class="fixed inset-0 z-[60] flex items-center justify-center p-4"
        x-transition.opacity>
-    <div class="absolute inset-0 bg-black/70" @click="open = false"></div>
-    <div class="relative bg-neutral-900 border border-neutral-800 rounded-2xl w-full max-w-2xl max-h-[80vh] flex flex-col overflow-hidden">
-      <div class="flex items-center justify-between px-5 py-4 border-b border-neutral-800">
-        <h3 class="text-sm font-semibold text-white">
-          Pick an NFT to <span x-text="action"></span>
+    <div class="absolute inset-0 bg-ink-950/85 backdrop-blur-sm" @click="open = false"></div>
+    <div class="relative bg-ink-900 border border-ink-700 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
+      <div class="flex items-center justify-between px-5 py-4 border-b border-ink-700 bg-ink-900/85">
+        <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-sky-btn flex items-center justify-center text-ink-950 text-xs">✦</span>
+          Pick an NFT to <span class="text-sky-300" x-text="action"></span>
         </h3>
-        <button @click="open = false" class="text-neutral-500 hover:text-white text-xl leading-none">&times;</button>
+        <button @click="open = false" class="text-ink-500 hover:text-white text-2xl leading-none transition">×</button>
       </div>
+
       <div class="p-5 overflow-y-auto">
-        <template x-if="loading"><p class="text-center text-neutral-600 text-sm py-10">Loading your NFTs…</p></template>
-        <template x-if="!loading && nfts.length === 0">
-          <p class="text-center text-neutral-600 text-sm py-10">No NFTs found in your wallet for tracked collections.</p>
+
+        <!-- Connect gate: picker requires connected wallet. -->
+        <template x-if="needConnect">
+          <div class="text-center py-10 space-y-4">
+            <p class="text-ink-100 text-sm">Connect a wallet to load your NFTs.</p>
+            <div class="flex gap-3 justify-center">
+              <button @click="connectInjected()"
+                      class="px-5 py-2.5 rounded-xl btn-sky text-ink-950 font-bold text-sm transition shadow-sky-glow active:scale-[0.97]">
+                Browser Wallet
+              </button>
+              <button @click="connectWC()"
+                      class="px-5 py-2.5 rounded-xl bg-violet-btn text-white font-bold text-sm transition shadow-violet-glow active:scale-[0.97]">
+                WalletConnect
+              </button>
+            </div>
+          </div>
         </template>
-        <div x-show="!loading && nfts.length > 0" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
+
+        <template x-if="loading && !needConnect"><p class="text-center text-ink-600 text-sm py-10 shimmer">Loading your NFTs…</p></template>
+        <template x-if="!loading && !needConnect && nfts.length === 0">
+          <p class="text-center text-ink-600 text-sm py-10">No NFTs found in your wallet for tracked collections.</p>
+        </template>
+        <div x-show="!loading && !needConnect && nfts.length > 0" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <template x-for="n in nfts" :key="n.collection + '-' + n.token_id">
             <button @click="pick(n)"
-                    class="text-left bg-neutral-800 hover:bg-neutral-700 rounded-xl overflow-hidden transition group">
-              <div class="aspect-square bg-neutral-950 flex items-center justify-center text-3xl overflow-hidden">
-                <template x-if="n.image_uri"><img :src="mediaURL(n.image_uri)" class="w-full h-full object-cover" loading="lazy"></template>
-                <template x-if="!n.image_uri"><span>🖼</span></template>
+                    class="text-left bg-ink-800 hover:bg-ink-700 rounded-xl overflow-hidden transition group border border-ink-700/70 hover:border-sky-300/40 hover:shadow-sky-glow">
+              <div class="aspect-square bg-ink-950 flex items-center justify-center text-3xl overflow-hidden">
+                <template x-if="n.image_uri"><img :src="mediaURL(n.image_uri)" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy"></template>
+                <template x-if="!n.image_uri"><span class="shimmer">🖼</span></template>
               </div>
               <div class="p-2">
-                <p class="text-xs font-medium text-neutral-200 truncate" x-text="n.name || ('#' + n.token_id)"></p>
-                <p class="text-[10px] text-neutral-500 font-mono truncate" x-text="n.collection"></p>
-                <p class="text-[10px] text-neutral-600" x-show="n.standard === 'erc1155'" x-text="'x' + n.units"></p>
+                <p class="text-xs font-semibold text-white truncate" x-text="n.name || ('#' + n.token_id)"></p>
+                <p class="text-[10px] text-ink-500 font-mono truncate" x-text="n.collection"></p>
+                <p class="text-[10px] text-violet-300 font-bold mt-1" x-show="n.standard === 'erc1155'" x-text="'×' + n.units"></p>
               </div>
             </button>
           </template>

@@ -1,12 +1,21 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div class="mb-6 flex items-center justify-between gap-4">
-  <h1 class="text-2xl font-bold text-neutral-200">Live Auctions</h1>
-  <div class="flex items-center gap-3">
-    <span class="text-sm text-neutral-500">{{len .Auctions}} active</span>
+<div class="mb-6 flex flex-wrap items-center justify-between gap-4">
+  <div>
+    <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
+      <span class="w-11 h-11 rounded-2xl btn-violet flex items-center justify-center text-white glow-violet">♕</span>
+      Live Auctions
+      <span class="relative w-2.5 h-2.5 rounded-full bg-violet-300 animate-pulse ml-1 step-current"></span>
+    </h1>
+    <p class="text-sm text-white/40 mt-1">English auctions with anti-snipe extension (+3:00 on any last-minute bid).</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="px-3 py-1 rounded-lg bg-violet-500/10 border border-violet-300/40 text-violet-200 text-xs font-bold uppercase tracking-wider">
+      {{shortNumber .Count}} active
+    </span>
     <button @click="$dispatch('open-nft-picker', {action: 'auction'})"
-            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
-      <span class="text-base leading-none">+</span> Auction an NFT
+            class="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl btn-violet hover:opacity-95 text-white text-sm font-extrabold transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97]">
+      <span class="text-base leading-none">＋</span> Auction an NFT
     </button>
   </div>
 </div>

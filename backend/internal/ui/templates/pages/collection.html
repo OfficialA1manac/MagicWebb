@@ -1,23 +1,43 @@
 {{template "layout.html" .}}
 {{define "content"}}
 {{with .Collection}}
-<div class="mb-8">
-  <div class="flex items-center gap-4 mb-2">
-    <div class="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-2xl">🗂</div>
-    <div>
-      <h1 class="text-2xl font-bold text-white flex items-center gap-2">
-        {{if .Name}}{{.Name}}{{else}}{{shortAddr .Address}}{{end}}
-        {{if .Verified}}<span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold" title="Verified collection">✓ Verified</span>{{end}}
-      </h1>
-      <p class="text-sm text-neutral-500 font-mono">{{.Address}} · {{.Standard}}</p>
-    </div>
+<div class="mb-8 flex items-center gap-4">
+  <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500/30 via-violet-500/30 to-gold-500/30 flex items-center justify-center text-3xl border border-ink-700 shadow-sky-glow">🗂</div>
+  <div class="flex-1">
+    <h1 class="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
+      {{if .Name}}{{.Name}}{{else}}{{shortAddr .Address}}{{end}}
+      {{if .Verified}}
+      <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 text-xs font-extrabold border border-violet-500/30" title="Verified collection">
+        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+        Verified
+      </span>
+      {{end}}
+    </h1>
+    <p class="text-xs text-ink-500 font-mono mt-1">{{.Address}} · {{.Standard}}</p>
   </div>
 </div>
 {{end}}
 
-<div class="mb-4 flex items-center justify-between">
-  <h2 class="text-lg font-semibold text-neutral-300">Listings</h2>
-  <span class="text-sm text-neutral-500">{{len .Listings}} items</span>
+{{if .Stats}}
+<div class="grid grid-cols-3 gap-3 mb-8">
+  <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
+    <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">Floor</p>
+    <p class="text-2xl font-black bg-gradient-to-r from-gold-200 to-gold-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.FloorPriceWei}} FLR</p>
+  </div>
+  <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
+    <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">24h Volume</p>
+    <p class="text-2xl font-black bg-gradient-to-r from-sky-200 to-sky-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.Volume24hWei}} FLR</p>
+  </div>
+  <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
+    <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">Listed</p>
+    <p class="text-2xl font-black text-white mt-1">{{shortNumber .Stats.ListedCount}}</p>
+  </div>
+</div>
+{{end}}
+
+<div class="mb-5 flex items-center justify-between">
+  <h2 class="text-lg font-extrabold text-white">Listings</h2>
+  <span class="text-sm text-ink-500">{{shortNumber .Count}} items</span>
 </div>
 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
   {{template "partials/listing_cards.html" .}}

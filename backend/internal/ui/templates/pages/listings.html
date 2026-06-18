@@ -1,12 +1,20 @@
 {{template "layout.html" .}}
 {{define "content"}}
 <div class="mb-6 flex flex-wrap items-center justify-between gap-4">
-  <h1 class="text-2xl font-bold text-neutral-200">Active Listings</h1>
-  <div class="flex items-center gap-3">
-    <span class="text-sm text-neutral-500">{{len .Listings}} items</span>
+  <div>
+    <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
+      <span class="w-11 h-11 rounded-2xl btn-sky flex items-center justify-center text-ink-950 glow-sky">✦</span>
+      Current Listings
+    </h1>
+    <p class="text-sm text-white/40 mt-1">Fixed-price sales across every tracked collection.</p>
+  </div>
+  <div class="flex items-center gap-2">
+    <span class="px-3 py-1 rounded-lg bg-gold-500/10 border border-gold-300/40 text-gold-200 text-xs font-bold">
+      {{shortNumber .Count}} active
+    </span>
     <button @click="$dispatch('open-nft-picker', {action: 'list'})"
-            class="inline-flex items-center gap-1 px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
-      <span class="text-base leading-none">+</span> List an NFT
+            class="inline-flex items-center gap-1.5 px-5 py-2.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-sm font-extrabold transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97]">
+      <span class="text-base leading-none">＋</span> List an NFT
     </button>
   </div>
 </div>
@@ -27,19 +35,20 @@
          for (const [k, v] of Object.entries(this.sel)) { if (v) p.set('trait_' + k, v); }
          location.search = p.toString();
        } }" class="mb-6">
-  <button @click="load()" class="text-xs text-neutral-400 hover:text-white transition">⚙ Trait filters</button>
-  <div x-show="open" x-cloak class="mt-3 flex flex-wrap gap-3 items-end bg-neutral-900 rounded-xl p-4">
-    <template x-if="Object.keys(traits).length === 0"><p class="text-xs text-neutral-600">No traits indexed for this collection yet.</p></template>
+  <button @click="load()" class="text-xs text-violet-200 hover:text-violet-100 transition font-bold uppercase tracking-wider">⚙ Trait filters</button>
+  <div x-show="open" x-cloak class="mt-3 flex flex-wrap gap-3 items-end bg-ink-900/80 backdrop-blur rounded-2xl p-4 border border-white/10">
+    <template x-if="Object.keys(traits).length === 0"><p class="text-xs text-white/40">No traits indexed for this collection yet.</p></template>
     <template x-for="(values, type) in traits" :key="type">
       <div>
-        <label class="block text-xs text-neutral-500 mb-1" x-text="type"></label>
-        <select x-model="sel[type]" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
+        <label class="block text-xs text-white/40 mb-1 font-bold uppercase tracking-wider" x-text="type"></label>
+        <select x-model="sel[type]" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2 text-sm text-white focus:outline-none focus:border-violet-300/50">
           <option value="">Any</option>
           <template x-for="v in values" :key="v"><option :value="v" x-text="v"></option></template>
         </select>
       </div>
     </template>
-    <button x-show="Object.keys(traits).length > 0" @click="apply()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Apply</button>
+    <button x-show="Object.keys(traits).length > 0" @click="apply()"
+            class="px-4 py-2 rounded-xl btn-violet hover:opacity-95 text-white text-sm font-extrabold transition glow-violet shadow-md shadow-violet-500/30">Apply</button>
   </div>
 </div>
 
@@ -51,23 +60,23 @@
       hx-trigger="change, submit"
       hx-push-url="false">
   <div class="flex-1 min-w-48">
-    <label class="block text-xs text-neutral-500 mb-1">Collection</label>
+    <label class="block text-xs text-white/40 mb-1 font-bold uppercase tracking-wider">Collection</label>
     <input type="text" name="collection" value="{{.Collection}}"
-           placeholder="0x… or name"
-           class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+           placeholder="0x… or slug"
+           class="w-full bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition">
   </div>
   <div>
-    <label class="block text-xs text-neutral-500 mb-1">Sort</label>
-    <select name="sort"
-            class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-neutral-300 focus:outline-none focus:border-emerald-500">
-      <option value="recent" {{if eq .Sort "recent"}}selected{{end}}>Newest first</option>
-      <option value="price_asc" {{if eq .Sort "price_asc"}}selected{{end}}>Price: Low to High</option>
+    <label class="block text-xs text-white/40 mb-1 font-bold uppercase tracking-wider">Sort</label>
+    <select name="sort" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white focus:outline-none focus:border-sky-300/50">
+      <option value="recent"     {{if eq .Sort "recent"}}selected{{end}}>Newest first</option>
+      <option value="price_asc"  {{if eq .Sort "price_asc"}}selected{{end}}>Price: Low to High</option>
       <option value="price_desc" {{if eq .Sort "price_desc"}}selected{{end}}>Price: High to Low</option>
     </select>
   </div>
   <button type="submit"
-          class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">
-    Filter
+          class="px-5 py-2.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-sm font-extrabold transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center gap-1.5">
+    <span>Filter</span>
+    <span>→</span>
   </button>
 </form>
 

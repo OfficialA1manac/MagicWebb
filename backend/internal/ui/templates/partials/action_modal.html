@@ -1,0 +1,155 @@
+{{define "partials/action_modal.html"}}
+<!-- Global action confirmation modal.
+     Driven by Alpine.store('modals') which wallet.js populates before each
+     buy/offer/list/auction/bid/accept/reject call. The modal renders a
+     standardised 5-step progress (Confirm details → Approve → Sign in wallet
+     → Awaiting tx → Done) shared by every action so users learn the flow
+     once and reuse it everywhere. Available to every page because it's
+     included from layout.html, not page-by-page. -->
+<div x-data="{ }"
+     x-on:open-action.window="Alpine.store('modals').open($event.detail)"
+     class="contents">
+  <template x-if="true">
+    <div x-show="$store.modals.open" x-cloak
+         class="fixed inset-0 z-[70] flex items-center justify-center p-4"
+         x-transition.opacity.duration.200ms>
+      <!-- Backdrop: deep black w/ 80% opacity + subtle blur, kills click-through. -->
+      <div class="absolute inset-0 bg-ink-1000/85 backdrop-blur-md"
+           @click="$store.modals.dismiss()"></div>
+
+      <!-- Card: max-w-lg + glass-soft + white border for the 5-color palette feel. -->
+      <div class="relative bg-ink-900/95 border border-white/10 rounded-3xl w-full max-w-lg overflow-hidden shadow-2xl glow-white"
+           x-transition.duration.200ms
+           x-transition:enter="ease-out" x-transition:enter-start="opacity-0 scale-95"
+           x-transition:enter-end="opacity-100 scale-100">
+
+        <!-- Header: action icon + title + close button. The icon is a coloured
+             circle driven from the modals.actionKind token — buy → sky,
+             offer → gold, list → sky, auction → violet, etc. -->
+        <div class="flex items-start justify-between gap-4 px-6 pt-6">
+          <div class="flex items-center gap-3">
+            <div class="w-12 h-12 rounded-2xl flex items-center justify-center text-xl font-extrabold flex-shrink-0"
+                 :class="{
+                   'bg-sky-btn glow-sky text-ink-950':     $store.modals.actionKind === 'buy',
+                   'bg-gold-btn glow-gold text-ink-950':   $store.modals.actionKind === 'offer'  || $store.modals.actionKind === 'accept',
+                   'bg-violet-btn glow-violet text-white': $store.modals.actionKind === 'auction' || $store.modals.actionKind === 'bid' || $store.modals.actionKind === 'settle',
+                   'btn-sky glow-sky text-ink-950':        $store.modals.actionKind === 'list',
+                   'bg-white/10 border border-red-400/30 text-red-300': $store.modals.actionKind === 'cancel' || $store.modals.actionKind === 'reject',
+                 }"
+                 x-text="$store.modals.icon"></div>
+            <div class="min-w-0">
+              <p class="text-base font-extrabold text-white leading-tight" x-text="$store.modals.title || 'Confirm action'"></p>
+              <p class="text-xs text-white/60 mt-1" x-text="$store.modals.subtitle || ''"></p>
+            </div>
+          </div>
+          <button @click="$store.modals.dismiss()" :disabled="$store.modals.step >= 3"
+                  class="text-white/40 hover:text-white text-2xl leading-none transition disabled:opacity-30 disabled:cursor-not-allowed">×</button>
+        </div>
+
+        <!-- Body: 3 sections, only one visible at a time. -->
+
+        <!-- (A) Summary — visible while step < 1. Lists price breakdown so the
+             user sees what they're about to send (sky), what the seller
+             receives net of fee (gold), and the 1.5% fee line (white). -->
+        <div x-show="$store.modals.step < 3" class="px-6 pt-5 pb-2">
+          <div class="bg-white/[0.04] border border-white/10 rounded-2xl p-4 space-y-2.5">
+            <template x-for="r in $store.modals.summary" :key="r.label">
+              <div class="flex items-center justify-between text-sm">
+                <span class="text-white/50" x-text="r.label"></span>
+                <span class="font-extrabold"
+                      :class="r.tone === 'gold' ? 'text-gold-200' : r.tone === 'sky' ? 'text-sky-200' : r.tone === 'violet' ? 'text-violet-200' : 'text-white'"
+                      x-text="r.value"></span>
+              </div>
+            </template>
+          </div>
+          <!-- Inline disclaimer (different per action kind, all centered muted). -->
+          <p class="text-[11px] text-white/40 leading-relaxed mt-3 text-center" x-text="$store.modals.disclaimer"></p>
+        </div>
+
+        <!-- (B) Step progress — 5 numbered pills on a horizontal track. The
+             active step pulses; completed steps check green; future steps are
+             pale white. The whole row disappears once step >= 3 (Done / Error). -->
+        <div x-show="$store.modals.step >= 1 && $store.modals.step < 3" class="px-6 pt-5 pb-3">
+          <div class="flex items-center justify-between">
+            <template x-for="s in [1,2,3]" :key="s">
+              <div class="flex-1 flex items-center">
+                <div class="w-8 h-8 rounded-full flex items-center justify-center text-xs font-extrabold flex-shrink-0 transition"
+                     :class="{
+                       'bg-sky-btn text-ink-950 glow-sky step-current': $store.modals.step === s,
+                       'bg-emerald-500/20 border border-emerald-400/40 text-emerald-200': $store.modals.step > s,
+                       'bg-white/5 border border-white/10 text-white/40': $store.modals.step < s,
+                     }">
+                  <span x-show="$store.modals.step < s" x-text="s"></span>
+                  <svg x-show="$store.modals.step === s" class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="40 60"/></svg>
+                  <svg x-show="$store.modals.step > s" class="w-4 h-4" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+                </div>
+                <div x-show="s < 3"
+                     class="flex-1 h-0.5 mx-1.5 rounded-full transition"
+                     :class="$store.modals.step > s ? 'bg-emerald-400/40' : 'bg-white/10'"></div>
+              </div>
+            </template>
+          </div>
+          <p class="text-[11px] text-white/60 text-center mt-2 font-semibold" x-text="$store.modals.stepLabel"></p>
+        </div>
+
+        <!-- (C) Done / Error — visible when step >= 3. Big coloured check or X icon,
+             tx hash + explorer link, dismiss button. -->
+        <div x-show="$store.modals.step >= 3" class="px-6 pt-5 pb-4 space-y-3">
+          <div class="flex flex-col items-center text-center">
+            <div class="w-16 h-16 rounded-2xl flex items-center justify-center mb-3"
+                 :class="$store.modals.success ? 'bg-emerald-500/15 border border-emerald-400/40 glow-sky' : 'bg-red-500/15 border border-red-400/40'">
+              <svg x-show="$store.modals.success" class="w-9 h-9 text-emerald-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M5 13l4 4L19 7"/></svg>
+              <svg x-show="!$store.modals.success" class="w-9 h-9 text-red-300" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M6 18L18 6M6 6l12 12"/></svg>
+            </div>
+            <p class="text-lg font-extrabold"
+               :class="$store.modals.success ? 'text-emerald-200' : 'text-red-200'"
+               x-text="$store.modals.success ? $store.modals.successTitle : $store.modals.errorTitle"></p>
+            <p class="text-sm text-white/60 mt-1.5" x-text="$store.modals.success ? $store.modals.successBody : $store.modals.errorBody"></p>
+          </div>
+
+          <template x-if="$store.modals.txHash">
+            <a :href="(window.MW_EXPLORER || 'https://coston2-explorer.flare.network') + '/tx/' + $store.modals.txHash"
+               target="_blank" rel="noopener"
+               class="flex items-center justify-between gap-2 text-[11px] text-sky-200 hover:text-sky-100 bg-sky-500/10 hover:bg-sky-500/15 border border-sky-400/30 rounded-xl px-3 py-2 transition">
+              <span class="font-mono truncate" x-text="$store.modals.txHash"></span>
+              <span class="text-sky-200/80 flex-shrink-0">View on explorer ↗</span>
+            </a>
+          </template>
+        </div>
+
+        <!-- Footer: action buttons. The "placeholder" card (Confirm + Cancel)
+             appears while step < 1; "Done" button replaces them on success. -->
+        <div class="px-6 py-4 bg-white/[0.02] border-t border-white/10 flex gap-3">
+          <button x-show="$store.modals.step < 1"
+                  @click="$store.modals.dismiss()"
+                  class="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition">
+            Cancel
+          </button>
+          <button x-show="$store.modals.step < 1"
+                  @click="$store.modals.confirm()"
+                  class="flex-1 py-3 rounded-xl font-extrabold text-sm transition active:scale-[0.98] glow-sky"
+                  :class="$store.modals.actionKind === 'offer' ? 'btn-gold glow-gold' : ($store.modals.actionKind === 'auction' || $store.modals.actionKind === 'bid' || $store.modals.actionKind === 'settle' ? 'btn-violet glow-violet' : 'btn-sky glow-sky')"
+                  x-text="'Confirm — ' + ($store.modals.ctaLabel || 'Continue')"></button>
+
+          <!-- Awaiting state can't be cancelled server-side; we only let the
+               user reject from inside their wallet (the tx itself). The
+               button just sits inert with a spinner-themed label. -->
+          <button x-show="$store.modals.step >= 1 && $store.modals.step < 3"
+                  disabled
+                  class="flex-1 py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm flex items-center justify-center gap-2 cursor-wait">
+            <svg class="w-4 h-4 animate-spin" viewBox="0 0 24 24" fill="none"><circle cx="12" cy="12" r="10" stroke="currentColor" stroke-width="3" stroke-dasharray="40 60"/></svg>
+            <span x-text="$store.modals.stepLabel"></span>
+          </button>
+
+          <button x-show="$store.modals.step >= 3"
+                  @click="$store.modals.dismiss()"
+                  class="flex-1 py-3 rounded-xl text-ink-950 font-extrabold text-sm transition active:scale-[0.98]
+                         btn-sky glow-sky">
+            Done
+          </button>
+        </div>
+      </div>
+    </div>
+  </template>
+</div>
+{{end}}

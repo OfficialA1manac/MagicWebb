@@ -39,6 +39,14 @@ func render(c *fiber.Ctx, name string, data any) error {
 		if _, present := m["WCProjectID"]; !present {
 			m["WCProjectID"] = config.C.WCProjectID
 		}
+		if _, present := m["ExplorerPrefix"]; !present {
+			// Explorer base URL for "View on explorer" links. Hardcoded
+			// per network (Coston2 today; switch off ChainID for future
+			// multi-chain). Injected here so templates can render `<a
+			// href="{{$.ExplorerPrefix}}/tx/{{.TxHash}}">` without needing
+			// a hardcoded URL in every page.
+			m["ExplorerPrefix"] = "https://coston2-explorer.flare.network"
+		}
 	}
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	execName := filepath.Base(name)

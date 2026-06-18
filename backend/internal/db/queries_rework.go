@@ -591,6 +591,55 @@ func (q *Q) MarkMissing(ctx context.Context, collection, tokenID string) error {
 	return err
 }
 
+// ── Image retry candidates ─────────────────────────────────────────────────────
+
+// ImageRetryToken is a token whose metadata was fetched but whose image self-
+// hosting failed (image_uri is still an http(s) URL instead of a local blob
+// path). The slow-path retry worker picks these up on a longer cadence.
+type ImageRetryToken struct {
+	Collection   string
+	TokenID      string
+	ImageURI     string // the upstream http(s) URL to retry
+	RetryCount   int    // how many times we've already tried
+}
+
+// maxImageRetries is the ceiling after which the worker stops re-attempting
+// self-hosting for a token. At a 60-min cadence with exponential backoff this
+// covers ~53 hours of wall-clock retries (1+2+4+8+16+24 = 55h).
+const maxImageRetries = 6
+
+// ListTokensWithUpstreamImages returns tokens whose image_uri is an http(s)
+// URL (i.e., self-hosting failed during ingest and the fallback upstream URI
+// is stored), filtered to those whose backoff has expired. Limited to `limit`
+// rows, next eligible first.
+func (q *Q) ListTokensWithUpstreamImages(ctx context.Context, limit int) ([]ImageRetryToken, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx,
+		`SELECT collection, token_id::text, image_uri, image_retry_count
+		 FROM nft_metadata
+		 WHERE image_uri IS NOT NULL
+		   AND (image_uri LIKE 'http://%%' OR image_uri LIKE 'https://%%')
+		   AND image_retry_count < $2
+		   AND (next_image_retry_at IS NULL OR next_image_retry_at <= now())
+		 ORDER BY next_image_retry_at NULLS FIRST, fetched_at ASC
+		 LIMIT $1`, limit, maxImageRetries)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ImageRetryToken
+	for rows.Next() {
+		var t ImageRetryToken
+		if err := rows.Scan(&t.Collection, &t.TokenID, &t.ImageURI, &t.RetryCount); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
+}
+
 // ── Self-hosted image/blob store ───────────────────────────────────────────────
 //
 // nft_image_blobs: SHA-256 keyed, BYTEA-backed content-addressed store. Every
@@ -650,6 +699,43 @@ func (q *Q) HasImage(ctx context.Context, sha256hex string) (bool, error) {
 		return false, nil
 	}
 	return n == 1, err
+}
+
+// UpdateImageURI replaces the image_uri in both nft_metadata and nft_tokens
+// with a self-hosted blob path and resets retry tracking. Used by the
+// slow-path image retry worker after a successful imagestore.Put.
+func (q *Q) UpdateImageURI(ctx context.Context, collection, tokenID, imageURI string) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx,
+		`UPDATE nft_metadata SET image_uri=$3, fetched_at=now(),
+		        image_retry_count=0, next_image_retry_at=NULL
+		 WHERE collection=$1 AND token_id=$2`, collection, tokenID, imageURI); err != nil {
+		return err
+	}
+	if _, err = tx.Exec(ctx,
+		`UPDATE nft_tokens SET image_uri=$3
+		 WHERE collection=$1 AND token_id=$2`, collection, tokenID, imageURI); err != nil {
+		return err
+	}
+	return tx.Commit(ctx)
+}
+
+// BumpImageRetry increments the retry count and schedules the next attempt
+// using exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h (capped). Once count
+// reaches maxImageRetries the token is permanently skipped by the retry query.
+func (q *Q) BumpImageRetry(ctx context.Context, collection, tokenID string, count int) error {
+	_, err := q.pool.Exec(ctx,
+		`UPDATE nft_metadata
+		 SET image_retry_count = $3,
+		     next_image_retry_at = now() + LEAST(2 ^ GREATEST($3 - 1, 0), 24) * interval '1 hour'
+		 WHERE collection=$1 AND token_id=$2`,
+		collection, tokenID, count+1)
+	return err
 }
 
 // ── Trait filters ────────────────────────────────────────────────────────────────
