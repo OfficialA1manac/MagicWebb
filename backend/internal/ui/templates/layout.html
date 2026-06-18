@@ -7,53 +7,33 @@
   <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://cdn.jsdelivr.net">
+  <link rel="preconnect" href="https://esm.sh" crossorigin>
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Self-hosted Tailwind CSS replaces the prior JIT-compiler runtime
        (https://cdn.tailwindcss.com?plugins=typography). The JIT was a
        multi-MB runtime loader evaluating CSS rules in every browser AND
        an XSS surface if cdn.tailwindcss.com were ever compromised. The
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
-       the template content glob; tree-shaken so only used rules ship.
-       The prior runtime tailwind.config object is gone — its theme
-       tokens are baked into the compiled CSS at build time. -->
+       the template content glob; tree-shaken so only used rules ship. -->
   <link rel="stylesheet" href="/static/tailwind.css">
 
-  <!-- ── Pinned CDN scripts with Subresource Integrity (SRI) checks ──────────
-       Each <script> below enforces a SHA-384 integrity check against the
-       exact bytes the upstream CDN ships. A CDN-side compromise between
-       patches is detected by the browser (script load is REJECTED) instead
-       of executing attacker-controlled JS in every connected wallet.
-
-       The integrity values below are deliberately-failing PLACEHOLDER strings
-       (sha384-AAA…64As). Browsers parse them as valid base64, compute the
-       real SHA-384 of the CDN response, compare, and refuse to load — fail-
-       closed at the browser. Real values are produced by:
-
-         go run ./cmd/pinsha
-
-       which fetches each CDN URL once and prints the matching
-       `name: sha384-<base64>` line. Operator action: paste each line into
-       the integrity="…" attribute for the matching script (the struct­ural
-       test in cmd/pinsha/pinsha_test.go enforces this wiring).
-
-       `crossorigin="anonymous"` is REQUIRED on cross-origin <script> tags
-       for browsers to perform the integrity check; without it, browsers
-       silently skip the check and the SRI guarantee is lost. The four
-       values are pinned to specific versions — float-version pins like
-       `@3.x.x` would silently change CDN bytes and (because of SRI)
-       silently break production. -->
-
-  <script src="https://unpkg.com/htmx.org@2.0.4/dist/htmx.min.js"
-          integrity="sha384-AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
-          crossorigin="anonymous" defer></script>
-  <script src="https://unpkg.com/htmx-ext-sse@2.2.2/sse.js"
-          integrity="sha384-BBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBBB"
-          crossorigin="anonymous" defer></script>
-  <script src="https://cdnjs.cloudflare.com/ajax/libs/ethers/6.13.4/ethers.umd.min.js"
-          integrity="sha384-CCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCCC"
-          crossorigin="anonymous" defer></script>
+  <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
+       Previously these were loaded from public CDNs with SHA-384 SRI
+       integrity pinning. The pinned hashes were operator-maintained by
+       `cmd/pinsha`, but any time the operator forgot to refresh them the
+       browser would fail-closed and reject the script — which rendered
+       the entire UI inert (no Alpine reactivity, no ethers contract
+       calls, no SSE). Self-hosting eliminates the operational hazard:
+       the bytes are committed to the repo, same-origin CSP allows them,
+       and a CDN-side compromise can no longer affect us. WalletConnect's
+       ethereum-provider remains ESM-imported on demand from esm.sh, gated
+       by the user's explicit click on the WalletConnect method in the
+       picker — see wallet.js's `_wcProvider()` for the dynamic import. -->
+  <script src="/static/htmx.min.js" defer></script>
+  <script src="/static/sse.js" defer></script>
+  <script src="/static/ethers.umd.min.js" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -71,14 +51,20 @@
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
   <script src="/static/wallet.js" defer></script>
-  <script src="https://cdn.jsdelivr.net/npm/alpinejs@3.14.1/dist/cdn.min.js"
-          integrity="sha384-DDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDDD"
-          crossorigin="anonymous" defer></script>
+  <script src="/static/cdn.min.js" defer></script>
   <style>
-    [x-cloak]{display:none}
-    body { font-family: 'Inter', system-ui, sans-serif; }
+    [x-cloak]{display:none !important;}
+    body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
+    code, .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+    /* ── Scrollbar style: matches the 5-color palette (sky thumb on ink track) ── */
+    ::-webkit-scrollbar { width: 10px; height: 10px; }
+    ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+    ::-webkit-scrollbar-thumb { background: linear-gradient(135deg,#7dd3fc,#a78bfa); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+    ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg,#0ea5e9,#7c3aed); background-clip: padding-box; }
+    * { scrollbar-width: thin; scrollbar-color: #7dd3fc rgba(255,255,255,0.05); }
+
     /* Subtle skeleton shimmer for image placeholders while we fetch. */
-    .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(255,255,255,0.04) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
+    .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
     @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
     /* Palette-aware utility classes — easing template authoring. */
     .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
@@ -87,6 +73,8 @@
     .glow-gold    { box-shadow: 0 0 22px -6px rgba(251,191,36,0.50); }
     .glow-violet  { box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
     .glow-white   { box-shadow: 0 0 18px -4px rgba(255,255,255,0.55); }
+    .glow-sky-strong  { box-shadow: 0 0 30px -4px rgba(56,189,248,0.65), 0 0 8px -1px rgba(56,189,248,0.85); }
+    .glow-gold-strong { box-shadow: 0 0 30px -4px rgba(252,211,77,0.65), 0 0 8px -1px rgba(252,211,77,0.85); }
     /* Button backgrounds (one class per palette token). The exact gradient
        comes from tailwind.config backgroundImage — these classes exist so
        templates don't need a long string every time. */
@@ -94,17 +82,39 @@
     .btn-gold    { background-image: linear-gradient(135deg,#fcd34d,#f59e0b); }
     .btn-violet  { background-image: linear-gradient(135deg,#a78bfa,#7c3aed); }
     .btn-white   { background: #ffffff; color: #0a0a0d; }
+    .btn-disabled { background-image: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25)) !important; cursor: not-allowed; }
     .ring-focus:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
     /* Animated brand gradient for headings + hero brand name. */
     .brand-text { background-image: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd, #7dd3fc); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gradient 5s ease infinite; }
     @keyframes gradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-    /* Step pulse for the action-modal progress indicator. The dot grows
-       then settles — gives an alive-but-calm progress beat. */
+    /* Step pulse for the action-modal progress indicator. */
     .step-current { animation: step-pulse 1.6s ease-in-out infinite; }
     @keyframes step-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(125,211,252,0.6); } 50% { box-shadow: 0 0 0 8px rgba(125,211,252,0.0); } }
+    .step-current-gold { animation: step-pulse-gold 1.6s ease-in-out infinite; }
+    @keyframes step-pulse-gold { 0%,100% { box-shadow: 0 0 0 0 rgba(252,211,77,0.6); } 50% { box-shadow: 0 0 0 8px rgba(252,211,77,0.0); } }
+    .step-current-violet { animation: step-pulse-violet 1.6s ease-in-out infinite; }
+    @keyframes step-pulse-violet { 0%,100% { box-shadow: 0 0 0 0 rgba(167,139,250,0.6); } 50% { box-shadow: 0 0 0 8px rgba(167,139,250,0.0); } }
     /* Tooltip on the WC pill. */
     .pill-pulse-pulse::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; background: rgba(125,211,252,0.35); z-index: -1; animation: pill-pulse 1.5s ease-out infinite; }
     @keyframes pill-pulse { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
+    /* Stripe gradient: drives the "showcase" section card on the home page
+       — multi-color horizontal sweep across all five palette tokens. */
+    .stripe-gradient { background: linear-gradient(90deg, #7dd3fc 0%, #fcd34d 40%, #c4b5fd 80%, #ffffff 100%); }
+    /* Confetti seed: highlight stripe on auction countdown last-minute. */
+    .anti-snipe-flash { animation: anti-snipe 0.6s ease-in-out infinite alternate; }
+    @keyframes anti-snipe { from { box-shadow: 0 0 0 0 rgba(56,189,248,0.0); } to { box-shadow: 0 0 16px -4px rgba(56,189,248,0.6); } }
+    /* Floating buy CTA — gentle hover-lift accent applied via .lift-cta on
+       primary call-to-action elements. */
+    .lift-cta { transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease; }
+    .lift-cta:hover { transform: translateY(-2px) scale(1.01); }
+    /* Place the spinner svg in modal "step" pills. */
+    .spin-svg { animation: spin-svg 1s linear infinite; }
+    @keyframes spin-svg { to { transform: rotate(360deg); } }
+    /* Image fade-in (no layout shift). Classes applied to <img> on cards. */
+    .fade-in { animation: fade-in 0.4s ease both; }
+    @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
+    /* Sliding bar at top of action modal — listens to step. */
+    .progress-bar { height: 3px; border-radius: 999px; transition: width 280ms ease, background-color 280ms ease; background: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd); }
   </style>
 </head>
 <body hx-ext="sse" sse-connect="/events" x-data>

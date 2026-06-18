@@ -30,16 +30,19 @@ import (
 // where image handlers already set it.
 const (
 	cspHeader = "default-src 'self'; " +
-		// Why esm.sh is in script-src: wallet.js dynamically imports
-		// @walletconnect/ethereum-provider from esm.sh at button-click time.
-		// api.reown.com is the Reown AppKit metadata/relay counterpart for
-		// WalletConnect pairings. Block on either = WC unusable.
-		"script-src 'self' https://unpkg.com https://cdn.jsdelivr.net https://cdnjs.cloudflare.com https://esm.sh; " +
+		// Self-hosted JS bundles (htmx/ethers/alpinejs) live under /static,
+		// served same-origin. Only esm.sh remains external — wallet.js
+		// dynamically imports @walletconnect/ethereum-provider from there
+		// at button-click time (gated by the user's explicit WalletConnect
+		// picker selection — never on page boot). api.reown.com + WC relay
+		// wss:// channels are required for the QR pairing / multi-wallet
+		// relay — block any of them and WalletConnect silently fails.
+		"script-src 'self' https://esm.sh; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
-		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
-		"frame-src 'self' https://*.walletconnect.com; " +
+		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
+		"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
