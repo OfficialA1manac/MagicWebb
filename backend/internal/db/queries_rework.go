@@ -2,10 +2,13 @@ package db
 
 import (
 	"context"
+	"fmt"
 	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 )
 
 const zeroAddr = "0x0000000000000000000000000000000000000000"
@@ -587,6 +590,69 @@ func (q *Q) MarkMissing(ctx context.Context, collection, tokenID string) error {
 		collection, tokenID)
 	return err
 }
+
+// ── Self-hosted image/blob store ───────────────────────────────────────────────
+//
+// nft_image_blobs: SHA-256 keyed, BYTEA-backed content-addressed store. Every
+// row is dedup-by-hash so identical image bytes from different contracts share
+// one entry + a refcount, capped at imagestore.MaxBlobBytes per row. The body
+// is what the frontend serves from /api/v1/img/<sha256> — IPFS / Cloudflare /
+// Pinata are not in the render path after ingest.
+//
+// Compile-time assertion pinning *Q as an imagestore.Store so future signature
+// drift breaks the build immediately rather than at the first ingest request
+// in production. Lives HERE (where the type is defined) rather than in the
+// api package — signals drift at the source.
+var _ imagestore.Store = (*Q)(nil)
+
+// PutImage upserts body keyed by sha256. Existing rows bump refcount + last_seen
+// and silently correct any mime drift (impossible by construction: identical SHA
+// → identical bytes → identical mime, but if the indexer vs. handler mistypes,
+// the first writer wins so we never serve a row with a mismatched header).
+func (q *Q) PutImage(ctx context.Context, sha256hex, mime, sourceURI string, body []byte) error {
+	tx, err := q.pool.Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body)
+		 VALUES($1,$2,$3,$4,$5)
+		 ON CONFLICT(sha256) DO UPDATE
+		   SET refcount     = nft_image_blobs.refcount + 1,
+		       last_seen_at = now()`,
+		sha256hex, mime, len(body), sourceURI, body); err != nil {
+		return fmt.Errorf("put image: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
+// GetImage returns the blob row for a hash as an imagestore.Blob. Returns
+// pgx.ErrNoRows if unknown. Imports imagestore so the persistent bytea
+// payload stays type-safe at the package boundary (the imagestore package
+// owns the Blob shape; db just fills it).
+func (q *Q) GetImage(ctx context.Context, sha256hex string) (imagestore.Blob, error) {
+	var b imagestore.Blob
+	err := q.pool.QueryRow(ctx,
+		`SELECT body, mime, source_uri FROM nft_image_blobs WHERE sha256=$1`, sha256hex).
+		Scan(&b.Body, &b.Mime, &b.SourceURI)
+	return b, err
+}
+
+// HasImage reports whether a hash exists. Used by mediaProxy to choose local-
+// first vs. upstream fetch without pulling the bytea row just to throw it away.
+func (q *Q) HasImage(ctx context.Context, sha256hex string) (bool, error) {
+	var n int
+	err := q.pool.QueryRow(ctx,
+		`SELECT 1 FROM nft_image_blobs WHERE sha256=$1`, sha256hex).Scan(&n)
+	if err == pgx.ErrNoRows {
+		return false, nil
+	}
+	return n == 1, err
+}
+
+// ── Trait filters ────────────────────────────────────────────────────────────────
 
 // ListTraitValues returns distinct trait values for a collection, powering filters.
 func (q *Q) ListTraitValues(ctx context.Context, collection string) (map[string][]string, error) {

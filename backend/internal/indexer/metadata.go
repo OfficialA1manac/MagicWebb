@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
@@ -87,11 +88,61 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	if err != nil {
 		return err
 	}
+
+	// Self-host the metadata JSON: store its bytes keyed by SHA-256 so the
+	// frontend never has to reach the IPFS gateway again for this token.
+	// FALL BACK to the upstream resolved URI when self-hosting fails (body
+	// rejected by the JSON sniffer is the main case — a contract whose
+	// tokenURI returns non-JSON); the indexer MUST NOT loop forever on a
+	// single token whose bytes we can't store (UpsertMetadata below still
+	// pulls the token out of ListTokensMissingMetadata so we won't retry it
+	// on the next tick regardless).
+	metaURI := resolved
+	if metaSt, merr := imagestore.Put(ctx, r.q, sniffJSON, resolved, body); merr == nil && metaSt.Hash != "" {
+		metaURI = imagestore.PublicPath(metaSt.Hash)
+	} else if merr != nil {
+		log.Warn().Err(merr).Str("coll", t.Collection).Str("token", t.TokenID).Str("src", resolved).
+			Msg("metadata: self-host meta body rejected; using upstream URI")
+	}
+
 	var m rawMeta
 	if err := json.Unmarshal(body, &m); err != nil {
 		return fmt.Errorf("parse meta: %w", err)
 	}
-	image := imageFromMeta(m)
+
+	// Self-host the image (if any). When the fetch / store fails we keep
+	// the ORIGINAL upstream URI as a fallback so mediaProxy still serves it
+	// best-effort until a future retry succeeds locally. The token's
+	// metadata is never blocked on image storage.
+	imageURI := ""
+	if img := strings.TrimSpace(imageFromMeta(m)); img != "" {
+		imgResolved := media.ResolveURI(img, t.TokenID)
+		if imgBody, ferr := media.FetchBytes(ctx, imgResolved, t.TokenID); ferr == nil {
+			if imgSt, perr := imagestore.Put(ctx, r.q, media.SniffImage, imgResolved, imgBody); perr == nil && imgSt.Hash != "" {
+				imageURI = imagestore.PublicPath(imgSt.Hash)
+			}
+		}
+		if imageURI == "" {
+			imageURI = imgResolved
+			log.Warn().Str("coll", t.Collection).Str("token", t.TokenID).Str("src", imgResolved).
+				Msg("metadata: image not self-hosted at ingest; using upstream URI")
+			// SECURITY-FIXME: this keeps a render-time IPFS dependency for any
+			// token ingested during an IPFS outage (the user's "no IPFS"
+			// invariant is broken until the worker below lands). The render
+			// layer still hits mediaProxy → FetchBytes → upstream on every
+			// page load. Wire a slow-path retry worker (e.g. 60-minute
+			// cadence) that re-attempts imagestore.Put for tokens whose
+			// image_uri is still an http(s) URL, then writes the local path.
+			// Without it the "no IPFS" goal is best-effort, not structural.
+		}
+	}
+
+	animationURI := ""
+	if m.AnimationURL != "" {
+		if r := media.ResolveURI(m.AnimationURL, t.TokenID); r != "" {
+			animationURI = r
+		}
+	}
 
 	traits := make([]db.Trait, 0, len(m.Attributes))
 	for _, a := range m.Attributes {
@@ -101,7 +152,26 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 		traits = append(traits, db.Trait{Type: a.TraitType, Value: jsonScalar(a.Value)})
 	}
 	return r.q.UpsertMetadata(ctx, t.Collection, t.TokenID,
-		m.Name, m.Description, media.ResolveURI(image, t.TokenID), media.ResolveURI(m.AnimationURL, t.TokenID), uri, traits)
+		m.Name, m.Description, imageURI, animationURI, metaURI, traits)
+}
+
+// sniffJSON is the dedicated MIME sniffer for ERC-721/1155 metadata JSON.
+// The body MUST begin with a `{` after optional leading whitespace; anything
+// else is rejected so we never store opaque junk under a JSON Content-Type
+// (the frontend caches the response, so mis-labelling would poison cards).
+func sniffJSON(body []byte) (string, bool) {
+	for len(body) > 0 {
+		switch body[0] {
+		case ' ', '\t', '\n', '\r':
+			body = body[1:]
+		default:
+			if body[0] == '{' {
+				return "application/json", true
+			}
+			return "", false
+		}
+	}
+	return "", false
 }
 
 // imageFromMeta extracts a URL from flat or OpenSea-style nested image fields.

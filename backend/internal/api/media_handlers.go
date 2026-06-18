@@ -10,6 +10,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
@@ -97,17 +98,28 @@ func boundedPositiveAmount(v *big.Int) int64 {
 }
 
 // mediaProxy serves external NFT images through same-origin with SSRF guards.
-func mediaProxy() fiber.Handler {
+// When the URL points at a self-hosted blob (`/api/v1/img/<sha>`) it short-
+// circuits into the same /api/v1/img handler so legacy clients re-encoding
+// blob URLs (e.g. via the old /api/v1/media?url= helper) never touch the
+// upstream path. http/https/ipfs URLs continue to proxy through
+// media.FetchBytes with full SSRF guards.
+func mediaProxy(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		raw := c.Query("url")
-		if raw == "" || !media.ProxyAllowed(raw) {
+		if raw == "" {
+			return c.Status(fiber.StatusBadRequest).SendString("invalid url")
+		}
+		if h := imagestore.ExtractHash(raw); h != "" {
+			return imageByHash(q)(c)
+		}
+		if !media.ProxyAllowed(raw) {
 			return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 		}
 		body, err := media.FetchBytes(c.Context(), raw, "")
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 		}
-		ct, ok := safeImageContentType(body)
+		ct, ok := media.SniffImage(body)
 		if !ok {
 			return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
 		}
@@ -117,21 +129,49 @@ func mediaProxy() fiber.Handler {
 	}
 }
 
-func safeImageContentType(body []byte) (string, bool) {
-	switch {
-	case len(body) >= 8 &&
-		body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' &&
-		body[4] == '\r' && body[5] == '\n' && body[6] == 0x1a && body[7] == '\n':
-		return "image/png", true
-	case len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff:
-		return "image/jpeg", true
-	case len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a"):
-		return "image/gif", true
-	case len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP":
-		return "image/webp", true
-	case len(body) >= 12 && string(body[4:8]) == "ftyp" &&
-		(strings.HasPrefix(string(body[8:12]), "avif") || strings.HasPrefix(string(body[8:12]), "avis")):
-		return "image/avif", true
+// imageByHash serves one blob by its SHA-256 hash from the self-hosted
+// nft_image_blobs table. This is the primary read path for the frontend —
+// gateway outages cannot affect tokens whose bytes are already stored.
+//
+// The handler validates the hash syntax, queries the row, and sends the
+// stored bytes back with the same Content-Type the ingest worker recorded.
+// It adds a long cache header because identical hashes mean identical bytes:
+// the response is byte-for-byte safe to cache forever (refcount bookkeeping
+// doesn't change content).
+func imageByHash(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		sha := c.Params("sha256")
+		if !imagestore.ValidateHash(sha) {
+			return writeErr(c, fiber.StatusBadRequest, "invalid sha256")
+		}
+		blob, err := q.GetImage(c.Context(), sha)
+		if err != nil {
+			if imagestore.IsNoRows(err) {
+				return writeErr(c, fiber.StatusNotFound, "blob not found")
+			}
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		// STRICT re-sniff: never trust a stored Content-Type without verifying
+		// the bytes still match. A future migration / admin fix could record
+		// a wrong mime; the cache header below is 1 year so a stale mime
+		// would poison every card. The middleware sniff runs ONCE on the
+		// live bytes — image/* returns the sniffed mime verbatim, a JSON
+		// metadata blob is served as application/json (verified against the
+		// first byte), anything else is 415.
+		if imgMime, isImg := media.SniffImage(blob.Body); isImg {
+			c.Set("Content-Type", imgMime)
+		} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
+			c.Set("Content-Type", "application/json")
+		} else {
+			return writeErr(c, fiber.StatusUnsupportedMediaType, "blob unfit for serve")
+		}
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-Imagestore-Sha256", sha)
+		// TODO(scale): for > 8 MiB blobs under heavy traffic, switch to
+		// c.SendStream(...) with an io.Reader backed by pgx's row reader so
+		// concurrent requests don't multiply buffered RAM. Acceptable for
+		// current traffic; flagged for the next loadtest-driven round.
+		return c.Send(blob.Body)
 	}
-	return "", false
 }

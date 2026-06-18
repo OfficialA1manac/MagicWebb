@@ -363,10 +363,45 @@ func publicAddrAllowed(addr netip.Addr) bool {
 		!addr.IsUnspecified()
 }
 
-// ProxyURL returns a same-origin proxy path for external media, or the original URI for data:/relative.
+// SniffImage validates that body begins with a recognised image magic signature
+// and returns the corresponding Content-Type header value. It returns ok=false
+// for anything that is not image/png, image/jpeg, image/gif, image/webp, or
+// image/avif. Both the ingest path (indexer writes must be valid images) and
+// the serve path (mediaProxy must send a safe Content-Type) share this rule
+// so we never advertise a non-image MIME for an image/served endpoint.
+//
+// Kept in the media package so the indexer worker can call it without
+// importing api (which would be a dependency-direction violation).
+func SniffImage(body []byte) (mime string, ok bool) {
+	switch {
+	case len(body) >= 8 &&
+		body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' &&
+		body[4] == '\r' && body[5] == '\n' && body[6] == 0x1a && body[7] == '\n':
+		return "image/png", true
+	case len(body) >= 3 && body[0] == 0xff && body[1] == 0xd8 && body[2] == 0xff:
+		return "image/jpeg", true
+	case len(body) >= 6 && (string(body[:6]) == "GIF87a" || string(body[:6]) == "GIF89a"):
+		return "image/gif", true
+	case len(body) >= 12 && string(body[:4]) == "RIFF" && string(body[8:12]) == "WEBP":
+		return "image/webp", true
+	case len(body) >= 12 && string(body[4:8]) == "ftyp" &&
+		(strings.HasPrefix(string(body[8:12]), "avif") || strings.HasPrefix(string(body[8:12]), "avis")):
+		return "image/avif", true
+	}
+	return "", false
+}
+
+// ProxyURL returns a same-origin proxy path for external media, or the original
+// URI for data:/relative. Inputs that already name a self-hosted blob
+// (`/api/v1/img/<sha>`) pass through verbatim so the frontend never round-
+// trips through `/api/v1/media?url=...` with a long encoded query string.
 func ProxyURL(uri string) string {
 	uri = strings.TrimSpace(uri)
 	if uri == "" || strings.HasPrefix(uri, "data:") || strings.HasPrefix(uri, "/") {
+		return uri
+	}
+	if strings.HasPrefix(uri, "/api/v1/img/") {
+		// Already a self-hosted blob path — return as-is.
 		return uri
 	}
 	if strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://") {
