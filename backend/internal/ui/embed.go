@@ -186,11 +186,17 @@ var funcMap = template.FuncMap{
 	},
 }
 
+// partialPaths lists every partial HTML fragment that's loaded into BOTH
+// the full-page templates AND standalone for HTMX partial swaps. Adding a
+// new page-level partial here is the only step required to make it
+// available on every page (it's included from layout.html via
+// {{template "partials/<name>.html" .}}).
 var partialPaths = []string{
 	"partials/listing_cards.html",
 	"partials/auction_cards.html",
 	"partials/activity_feed.html",
 	"partials/nft_picker.html",
+	"partials/wc_qr_overlay.html",
 }
 
 var pagePaths = []string{
