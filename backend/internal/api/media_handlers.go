@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -174,4 +175,108 @@ func imageByHash(q *db.Q) fiber.Handler {
 		// current traffic; flagged for the next loadtest-driven round.
 		return c.Send(blob.Body)
 	}
+}
+
+// imageRetryFetcher is the signature of media.FetchBytes. Wrapped through
+// the handler factory so tests can stub the upstream fetch without spinning
+// up an HTTP server.
+type imageRetryFetcher func(ctx context.Context, uri, tokenID string) ([]byte, error)
+
+// imageRetryNow forces immediate self-host of a token whose image_uri is
+// still an upstream http(s)/(ipfs) URL. Wired under /api/v1/img/retry.
+// The slow-path retry worker (indexer.runImageRetryWorker) does the same
+// work on a 60-min cadence for every pending token; this endpoint lets the
+// page surface run the same pipeline synchronously when the user is staring
+// at a placeholder card.
+//
+// Intentionally NOT jwt-protected: anyone hitting it can trigger one
+// upstream fetch + a content-addressed Put + a 2-row UPDATE; the per-IP
+// rate limiter (60 req/min already applied by the api group) caps abuse.
+// The user-triggered path does NOT bump image_retry_count — only the slow
+// worker does — so a single click cannot push the worker's backoff
+// forward and make the worker skip the token for up to 24h.
+//
+//   200 OK              {status:"ok",            image_uri:"/api/v1/img/<sha>"} — did the work
+//   200 OK              {status:"already_local", image_uri:"/api/v1/img/<sha>"} — no work needed
+//   400 Bad Request     {error:"<reason>"}        — missing coll/id or unsupported scheme
+//   404 Not Found       {error:"<reason>"}        — metadata row missing / image_uri empty
+//   502 Bad Gateway     {error:"<reason>"}        — fetch or sniff/store failed (gateway down)
+//   500 Internal        {error:"<reason>"}        — db error during UpdateImageURI
+func imageRetryNow(q *db.Q, fetch imageRetryFetcher) fiber.Handler {
+	if fetch == nil {
+		// Defensive: a nil fetcher would NPE on the first request and crash
+		// the server. Production never hits this — Mount() passes
+		// media.FetchBytes — but a test that forgets to inject one shouldn't
+		// be able to bring down the process.
+		fetch = media.FetchBytes
+	}
+	return func(c *fiber.Ctx) error {
+		coll := strings.ToLower(strings.TrimSpace(c.Query("coll")))
+		tokenID := strings.TrimSpace(c.Query("id"))
+		if coll == "" || tokenID == "" {
+			return writeErr(c, fiber.StatusBadRequest, "coll and id query params required")
+		}
+
+		// Pull whatever image_uri nft_tokens / nft_metadata JOIN currently
+		// reports. Both tables are kept in sync by UpdateImageURI, so the
+		// value is fresh as of the last successful ingest / retry.
+		_, imageURI, err := q.GetTokenMeta(c.Context(), coll, tokenID)
+		if err != nil {
+			if imagestore.IsNoRows(err) || isNotFound(err) {
+				return writeErr(c, fiber.StatusNotFound, "token metadata not found")
+			}
+			log.Warn().Err(err).Str("coll", coll).Str("token", tokenID).Msg("image-retry: db read failed")
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		imageURI = strings.TrimSpace(imageURI)
+		if imageURI == "" {
+			return writeErr(c, fiber.StatusNotFound, "no image_uri on file")
+		}
+		// Already self-hosted — the slow path has already done this work
+		// since the page loaded. Don't burn a fetch on a no-op.
+		if strings.HasPrefix(imageURI, imagestore.PathPrefix+"/") {
+			return c.JSON(fiber.Map{
+				"status":    "already_local",
+				"image_uri": imageURI,
+			})
+		}
+		if !isRetriableUpstream(imageURI) {
+			return writeErr(c, fiber.StatusBadRequest, "image_uri is not an upstream URL")
+		}
+
+		body, ferr := fetch(c.Context(), imageURI, tokenID)
+		if ferr != nil {
+			log.Warn().Err(ferr).Str("coll", coll).Str("token", tokenID).Str("src", imageURI).
+				Msg("image-retry: upstream fetch failed")
+			return writeErr(c, fiber.StatusBadGateway, "upstream unavailable")
+		}
+		st, perr := imagestore.Put(c.Context(), q, media.SniffImage, imageURI, body)
+		if perr != nil {
+			log.Warn().Err(perr).Str("coll", coll).Str("token", tokenID).
+				Msg("image-retry: imagestore put failed")
+			return writeErr(c, fiber.StatusBadGateway, "self-host failed")
+		}
+		localPath := imagestore.PublicPath(st.Hash)
+		if uerr := q.UpdateImageURI(c.Context(), coll, tokenID, localPath); uerr != nil {
+			log.Warn().Err(uerr).Str("coll", coll).Str("token", tokenID).
+				Msg("image-retry: db update failed")
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		log.Info().Str("coll", coll).Str("token", tokenID).Str("hash", st.Hash).Str("prev", imageURI).
+			Msg("image-retry: self-hosted via user-triggered endpoint")
+		return c.JSON(fiber.Map{
+			"status":    "ok",
+			"image_uri": localPath,
+		})
+	}
+}
+
+// isRetriableUpstream gates which URI schemes the retry endpoint will fetch.
+// Symmetric with what the indexer worker's retryOneImage accepts (FetchBytes
+// itself handles ipfs→http translation), so a work-driven retry and a
+// click-driven retry make the same bring-into-cache decision.
+func isRetriableUpstream(uri string) bool {
+	return strings.HasPrefix(uri, "http://") ||
+		strings.HasPrefix(uri, "https://") ||
+		strings.HasPrefix(uri, "ipfs://")
 }

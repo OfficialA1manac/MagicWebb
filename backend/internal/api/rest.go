@@ -16,6 +16,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -93,6 +94,14 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/listings/:collection/:id/preflight", listingPreflightWithChain(q, eth))
 	api.Get("/listings/:collection/:id", getListing(q))
 	api.Get("/media", mediaProxy(q))
+	// User-triggered immediate self-host of an upstream image. The slow-path
+	// retry worker (indexer.runImageRetryWorker) does the same work on a
+	// 60-min cadence; this endpoint just runs it synchronously on click.
+	// POST is the right verb because the call writes to nft_metadata and
+	// nft_tokens; idempotent (repeat clicks land on the same /api/v1/img/
+	// path). Auth not required — the per-IP rate limiter in api group caps
+	// abuse.
+	api.Post("/img/retry", imageRetryNow(q, media.FetchBytes))
 	app.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address/traits", collectionTraits(q))

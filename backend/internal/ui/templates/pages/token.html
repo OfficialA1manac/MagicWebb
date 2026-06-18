@@ -14,12 +14,49 @@
         <img src="{{mediaURL $img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
              onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');this.nextElementSibling.nextElementSibling.classList.remove('hidden')">
         <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden shimmer">🖼</div>
-        <div class="absolute inset-x-0 bottom-0 hidden p-4">
-          <div class="bg-ink-950/85 backdrop-blur rounded-xl px-3 py-2 text-[11px] text-ink-100 border border-sky-300/30">
-            ⏳ Image still hosted upstream — retry worker caches it within the hour.
-            <button onclick="location.reload()" class="ml-2 underline text-sky-300 hover:text-sky-200">refresh</button>
+        {{if isUpstream $img}}
+        {{/* image_uri is an http(s)/(ipfs) URL — show the user-triggerable retry
+            banner. The click handler calls POST /api/v1/img/retry which performs
+            the same fetch+store+update pipeline as the slow-path worker. When
+            the click returns ok, the page reloads and the local blob is served
+            from /api/v1/img/<sha> (no further upstream calls). */}}
+        <div class="absolute inset-x-0 bottom-0 p-4" x-data="{
+          busy: false,
+          async tryCacheNow() {
+            if (this.busy) return;
+            this.busy = true;
+            try {
+              const r = await fetch('/api/v1/img/retry?coll={{.Contract}}&id={{.TokenID}}', { method: 'POST' });
+              const j = await r.json().catch(() => ({}));
+              if (r.ok && j.status === 'ok') {
+                this._msg('Image cached — reloading.', 'success');
+                setTimeout(() => location.reload(), 600);
+              } else if (r.ok && j.status === 'already_local') {
+                this._msg('Image is already cached.', 'info');
+                setTimeout(() => location.reload(), 400);
+              } else {
+                const msg = (j && j.error) ? j.error : ('HTTP ' + r.status);
+                this._msg('Retry failed: ' + msg, 'error');
+              }
+            } catch (e) {
+              this._msg('Network error', 'error');
+            } finally {
+              this.busy = false;
+            }
+          },
+          _msg: (m, t) => (typeof toast === 'function' ? toast(m, t) : console.info(m, t)),
+        }">
+          <div class="bg-ink-950/85 backdrop-blur rounded-xl px-3.5 py-2.5 text-[11px] text-ink-100 border border-sky-300/30 flex items-center justify-between gap-3">
+            <span><span class="text-sky-300">⏳</span> Image still hosted upstream — cache it now?</span>
+            <button @click="tryCacheNow()"
+                    :disabled="busy"
+                    class="shrink-0 px-3 py-1 rounded-lg btn-sky hover:opacity-90 text-ink-950 text-[11px] font-extrabold transition active:scale-[0.97] disabled:opacity-60 disabled:cursor-wait">
+              <span x-show="!busy">⚡ Try cache now</span>
+              <span x-show="busy" x-cloak class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-ink-950 animate-pulse"></span>retrying…</span>
+            </button>
           </div>
         </div>
+        {{end}}
         <div class="absolute inset-0 bg-gradient-to-t from-ink-950/60 to-transparent opacity-0 group-hover:opacity-100 transition duration-300 pointer-events-none"></div>
       </div>
       {{else}}

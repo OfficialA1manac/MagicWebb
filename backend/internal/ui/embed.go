@@ -133,6 +133,16 @@ var funcMap = template.FuncMap{
 		return t.Unix()
 	},
 	"mediaURL": media.ProxyURL,
+	// isUpstream reports whether a stored image_uri is an http(s)/(ipfs)
+	// URL we still need to self-host — drives the user-triggerable retry
+	// banner. Empty / local /api/v1/img/<sha> values are NOT upstream (the
+	// slow-path worker has already cached them or the token never had a
+	// usable image).
+	"isUpstream": func(uri string) bool {
+		return strings.HasPrefix(uri, "http://") ||
+			strings.HasPrefix(uri, "https://") ||
+			strings.HasPrefix(uri, "ipfs://")
+	},
 }
 
 var partialPaths = []string{
