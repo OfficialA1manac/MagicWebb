@@ -1156,6 +1156,94 @@ func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidd
 	return tx.Commit(ctx)
 }
 
+// UpsertListingAndOwnership atomically writes a listing row and seeds the
+// seller's nft_ownership row in one pgx transaction. Replaces the non-
+// transactional UpsertListing + EnsureListingSellerOwnership pair in the
+// onListed event handler so a crash between the two writes can never leave a
+// live listing with no preflight-buildable seller row (which would cause a
+// buy preflight race: the listing is visible but seller ownership appears
+// missing until the next transfer log lands). The erc1155 branch uses
+// GREATEST(...) so a higher balance beats a transient low one; the erc721
+// branch DELETEs all ownership rows for (coll,token) then INSERTs one row for
+// the lister, mirroring the contract's single-owner invariant.
+func (q *Q) UpsertListingAndOwnership(ctx context.Context, r ListingRow) error {
+	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO listings(collection, token_id, seller, price_wei, amount, standard, expires_at, listed_at, tx_hash, active, orphaned)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true,false)
+		 ON CONFLICT(collection, token_id, seller) DO UPDATE
+		 SET price_wei=EXCLUDED.price_wei, amount=EXCLUDED.amount,
+		     standard=EXCLUDED.standard, expires_at=EXCLUDED.expires_at, listed_at=EXCLUDED.listed_at,
+		     tx_hash=EXCLUDED.tx_hash, active=true, orphaned=false`,
+		r.Collection, r.TokenID, r.Seller, r.PriceWei, r.Amount, r.Standard, r.ExpiresAt, r.ListedAt, r.TxHash); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("upsert listing: %w", err)
+	}
+	if r.Standard == "erc1155" {
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+			 VALUES($1,$2,$3,$4,'erc1155')
+			 ON CONFLICT(collection, token_id, owner)
+			 DO UPDATE SET units = GREATEST(nft_ownership.units, EXCLUDED.units), updated_at=now()`,
+			r.Collection, r.TokenID, r.Seller, r.Amount); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("seed 1155 ownership: %w", err)
+		}
+	} else {
+		if _, err := tx.Exec(ctx,
+			`DELETE FROM nft_ownership WHERE collection=$1 AND token_id=$2`,
+			r.Collection, r.TokenID); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("clear 721 ownership: %w", err)
+		}
+		if _, err := tx.Exec(ctx,
+			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
+			 VALUES($1,$2,$3,1,'erc721')`,
+			r.Collection, r.TokenID, r.Seller); err != nil {
+			_ = tx.Rollback(ctx)
+			return fmt.Errorf("seed 721 ownership: %w", err)
+		}
+	}
+	return tx.Commit(ctx)
+}
+
+// AcceptOfferAndRecordSale atomically flips a pending offer's status to
+// 'accepted' and records the resulting sale row in one pgx transaction.
+// Replaces the non-transactional SetOfferStatus + InsertSale pair in the
+// onOfferAccepted event handler so a crash between the two writes can never
+// leave the offer frozen on 'pending' (bidder can't re-bid, their escrow is
+// still locked on-chain) or leave a sale row referencing an offer that was
+// never flipped. The WHERE status='pending' gate is preserved so a duplicate
+// event from a re-org doesn't silently overwrite an outcome.
+func (q *Q) AcceptOfferAndRecordSale(ctx context.Context,
+	collection, tokenID, seller, bidder string,
+	priceWei, feeWei, royaltyWei, txHash string,
+	blockNumber uint64, occurredAt time.Time,
+) error {
+	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	if err != nil {
+		return err
+	}
+	if _, err := tx.Exec(ctx,
+		`UPDATE offers SET status='accepted'
+		 WHERE collection=$1 AND token_id=$2 AND bidder=$3 AND status='pending'`,
+		collection, tokenID, bidder); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("accept offer: %w", err)
+	}
+	if _, err := tx.Exec(ctx,
+		`INSERT INTO sales(collection,token_id,seller,buyer,price_wei,fee_wei,royalty_wei,tx_hash,block_number,occurred_at)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10) ON CONFLICT(tx_hash) DO NOTHING`,
+		collection, tokenID, seller, bidder, priceWei, feeWei, royaltyWei, txHash, blockNumber, occurredAt); err != nil {
+		_ = tx.Rollback(ctx)
+		return fmt.Errorf("record sale: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
 // ── Metrics ───────────────────────────────────────────────────────────────
 
 // MarketMetrics holds aggregate stats for the /api/v1/metrics endpoint.
