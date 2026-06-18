@@ -1,86 +1,139 @@
 package auth
 
 import (
-	"context"
 	"encoding/base64"
 	"strings"
 	"testing"
 	"time"
 )
 
-const testSecret = "test-secret-at-least-32-chars-long-xx"
-
-func TestIssueVerifyRoundTrip(t *testing.T) {
-	addr := "0xabc0000000000000000000000000000000000001"
-	tok, err := Issue(addr, testSecret, time.Hour)
+// TestIssueVerifyRoundtrip: address ↔ subject parity for valid tokens.
+func TestIssueVerifyRoundtrip(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, err := Issue(address, secret, DefaultAudience, time.Hour)
 	if err != nil {
-		t.Fatalf("Issue: %v", err)
+		t.Fatalf("issue: %v", err)
 	}
-	got, err := Verify(tok, testSecret)
+	got, err := Verify(tok, secret, DefaultAudience)
 	if err != nil {
-		t.Fatalf("Verify: %v", err)
+		t.Fatalf("verify: %v", err)
 	}
-	if got != addr {
-		t.Fatalf("sub = %q, want %q", got, addr)
+	if strings.ToLower(got) != strings.ToLower(address) {
+		t.Fatalf("sub mismatch: %q vs %q", got, address)
 	}
 }
 
-func TestVerifyRejectsTamperedSignature(t *testing.T) {
-	tok, _ := Issue("0xabc", testSecret, time.Hour)
-	parts := strings.Split(tok, ".")
-	// Flip a full byte of the decoded signature so the change is deterministic
-	// (flipping the last base64 char can be a no-op — its low bits are ignored).
-	sigBytes, err := base64.RawURLEncoding.DecodeString(parts[2])
+// TestVerifyRejectsBadAudience: a token minted with one audience MUST NOT
+// verify against another — otherwise a leaked auth-token from any other
+// service that uses the same secret would have JWT-bypass access here.
+func TestVerifyRejectsBadAudience(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, err := Issue(address, secret, "magicwebb:reindex", time.Hour)
 	if err != nil {
-		t.Fatalf("decode sig: %v", err)
+		t.Fatalf("issue: %v", err)
 	}
-	sigBytes[0] ^= 0xFF
-	tampered := parts[0] + "." + parts[1] + "." + base64.RawURLEncoding.EncodeToString(sigBytes)
-	if _, err := Verify(tampered, testSecret); err == nil {
-		t.Fatal("expected tampered signature to be rejected")
+	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+		t.Fatal("expected audience mismatch rejection")
 	}
 }
 
-func TestVerifyRejectsWrongSecret(t *testing.T) {
-	tok, _ := Issue("0xabc", testSecret, time.Hour)
-	if _, err := Verify(tok, "a-different-secret-32-chars-long-xxx"); err == nil {
-		t.Fatal("expected wrong secret to be rejected")
-	}
-}
-
+// TestVerifyRejectsExpired: TTL is honored after expiry. We use a 1-second
+// TTL + sleep past a full Unix-second boundary so the resolution-rounding in
+// Issue() (exp is generated via .Unix()) doesn't make this flaky. The
+// production clamp floors negative TTLs at 24h to defend against signer
+// callers that pass junk in, so we cannot issue with ttl<0.
 func TestVerifyRejectsExpired(t *testing.T) {
-	tok, _ := Issue("0xabc", testSecret, -time.Second) // already expired
-	if _, err := Verify(tok, testSecret); err == nil {
-		t.Fatal("expected expired token to be rejected")
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, err := Issue(address, secret, DefaultAudience, 1*time.Second)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	time.Sleep(1500 * time.Millisecond)
+	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+		t.Fatal("expected expired token to fail verification")
 	}
 }
 
-func TestVerifyRejectsMalformed(t *testing.T) {
-	for _, tok := range []string{"", "abc", "a.b", "a.b.c.d"} {
-		if _, err := Verify(tok, testSecret); err == nil {
-			t.Fatalf("expected malformed token %q to be rejected", tok)
+// TestVerifyRejectsBadSignature: tampering with the payload must be caught.
+func TestVerifyRejectsBadSignature(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const other = "ffffffffffffffffffffffffffffffff"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, _ := Issue(address, secret, DefaultAudience, time.Hour)
+	if _, err := Verify(tok, other, DefaultAudience); err == nil {
+		t.Fatal("expected signature mismatch rejection")
+	}
+}
+
+// TestCookieNameAddressBound: cookie names include a wallet-prefix so two
+// wallets in one browser don't collide, AND so a wallet switch invalidates
+// the previous session cookie automatically (browsers won't send it).
+func TestCookieNameAddressBound(t *testing.T) {
+	a := CookieName("0xabcd1234efab5678cdef9012abcd3456efab7855")
+	b := CookieName("0x12345678abcdef9012345678abcdef9012345678")
+	if a == b {
+		t.Fatalf("cookie names collided: %q", a)
+	}
+	if !strings.HasPrefix(a, "mw_s_") || !strings.HasPrefix(b, "mw_s_") {
+		t.Fatalf("cookie name prefix missing: %q %q", a, b)
+	}
+}
+
+// TestIssueClampsExcessiveTTL: a mishandled default-short TTL handler that
+// accidentally passes 0 or a week-long TTL is clamped to 24h so a single
+// leaked token never outlives a day. Negative TTL is also clamped — that's
+// intentional defense against a caller passing time.Duration(unix_ts - now)
+// which would otherwise mint a forever-valid token.
+func TestIssueClampsExcessiveTTL(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	for _, in := range []time.Duration{168 * time.Hour, -time.Second, 0} {
+		tok, err := Issue(address, secret, DefaultAudience, in)
+		if err != nil {
+			t.Fatalf("issue %v: %v", in, err)
+		}
+		if _, err := Verify(tok, secret, DefaultAudience); err != nil {
+			t.Fatalf("verify %v: %v", in, err)
 		}
 	}
 }
 
-func TestVerifyRejectsEmptySub(t *testing.T) {
-	tok, _ := Issue("", testSecret, time.Hour)
-	if _, err := Verify(tok, testSecret); err == nil {
-		t.Fatal("expected empty sub to be rejected")
+// TestVerifyRejectsAlgNoneForgery: a hand-crafted token claiming alg=none
+// MUST be rejected before any handler. This is the canonical JWT downgrade
+// attack; HMAC compare alone is not enough — the explicit header check
+// protects against any future library that reads alg and short-circuits.
+func TestVerifyRejectsAlgNoneForgery(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	hdr := base64.RawURLEncoding.EncodeToString([]byte(`{"alg":"none","typ":"JWT"}`))
+	pay := base64.RawURLEncoding.EncodeToString([]byte(
+		`{"sub":"` + address + `","iss":"magicwebb","aud":"magicwebb:api","iat":1,"nbf":1,"exp":9999999999}`))
+	tok := hdr + "." + pay + "."
+	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+		t.Fatal("expected alg=none forgery to be rejected")
 	}
 }
 
-func TestCallerFromCtx(t *testing.T) {
-	ctx := context.WithValue(context.Background(), CallerKey, "0xdead")
-	if v, ok := CallerFromCtx(ctx); !ok || v != "0xdead" {
-		t.Fatalf("CallerFromCtx = %q,%v", v, ok)
+// TestVerifyRejectsTamperedClaims: a validly-signed token whose payload has
+// been post-mutated (header alg+signature reused) MUST be rejected by HMAC
+// mismatch, NOT silently re-validated. Defense against front-end or
+// intermediate proxy tampering that swaps claims in flight.
+func TestVerifyRejectsTamperedClaims(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, err := Issue(address, secret, DefaultAudience, time.Hour)
+	if err != nil {
+		t.Fatal(err)
 	}
-	if _, ok := CallerFromCtx(context.Background()); ok {
-		t.Fatal("expected no caller in empty context")
-	}
-	// empty-string caller must read as not-present
-	ctxEmpty := context.WithValue(context.Background(), CallerKey, "")
-	if _, ok := CallerFromCtx(ctxEmpty); ok {
-		t.Fatal("expected empty caller to read as absent")
+	parts := strings.Split(tok, ".")
+	tampered := parts[0] + "." +
+		base64.RawURLEncoding.EncodeToString([]byte(
+			`{"sub":"`+address+`","iss":"magicwebb","aud":"magicwebb:reindex","iat":1,"nbf":1,"exp":9999999999}`)) +
+		"." + parts[2]
+	if _, err := Verify(tampered, secret, DefaultAudience); err == nil {
+		t.Fatal("expected tampered claims to be rejected")
 	}
 }

@@ -12,6 +12,7 @@ import (
 // Store is a single-use, TTL'd nonce store keyed by address.
 type Store interface {
 	Set(address, nonce string, ttl time.Duration)
+	SetIfFree(address, nonce string, ttl time.Duration) bool
 	GetDel(address string) (string, bool)
 }
 
@@ -38,6 +39,18 @@ func (s *MemStore) Set(address, nonce string, ttl time.Duration) {
 	s.mu.Lock()
 	s.entries[address] = record{value: nonce, expiresAt: time.Now().Add(ttl)}
 	s.mu.Unlock()
+}
+
+// SetIfFree stores nonce only when no live nonce already exists. Returns
+// true on insert, false when a live nonce is in place (caller should 429).
+func (s *MemStore) SetIfFree(address, nonce string, ttl time.Duration) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	if ex, ok := s.entries[address]; ok && time.Now().Before(ex.expiresAt) {
+		return false
+	}
+	s.entries[address] = record{value: nonce, expiresAt: time.Now().Add(ttl)}
+	return true
 }
 
 // GetDel atomically retrieves and deletes the nonce (single-use).
