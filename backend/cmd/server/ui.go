@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -51,14 +52,48 @@ func render(c *fiber.Ctx, name string, data any) error {
 
 func uiHome(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		listings, _ := q.ListActiveListings(c.Context(), db.ListingsFilter{Limit: 12})
-		trending, _ := q.GetTrendingCollections(c.Context(), "24h", 8)
-		activity, _ := q.GetRecentTransactions(c.Context(), 10)
+		ctx := c.Context()
+		// Aggregates populate the live counter pills (Listings / Auctions /
+		// Collections / 24h Volume). Each call fall-tolerates a DB hiccup —
+		// the page still renders with `0` counts rather than a 500, but we
+		// log a Warn so an outage surfaces in centralized logging.
+		listingCount, err := q.CountActiveListings(ctx)
+		if err != nil {
+			log.Warn().Err(err).Str("where", "uiHome.CountActiveListings").Msg("uiHome: counter query failed")
+		}
+		auctionCount, err := q.CountActiveAuctions(ctx)
+		if err != nil {
+			log.Warn().Err(err).Str("where", "uiHome.CountActiveAuctions").Msg("uiHome: counter query failed")
+		}
+		collectionCount, err := q.CountCollections(ctx)
+		if err != nil {
+			log.Warn().Err(err).Str("where", "uiHome.CountCollections").Msg("uiHome: counter query failed")
+		}
+		volume24h, err := q.TotalVolume24hWei(ctx)
+		if err != nil {
+			log.Warn().Err(err).Str("where", "uiHome.TotalVolume24hWei").Msg("uiHome: aggregator query failed")
+		}
+		listings, err := q.ListActiveListings(ctx, db.ListingsFilter{Limit: 12})
+		if err != nil {
+			log.Warn().Err(err).Msg("uiHome: ListActiveListings")
+		}
+		trending, err := q.GetTrendingCollections(ctx, "24h", 8)
+		if err != nil {
+			log.Warn().Err(err).Msg("uiHome: GetTrendingCollections")
+		}
+		activity, err := q.GetRecentTransactions(ctx, 10)
+		if err != nil {
+			log.Warn().Err(err).Msg("uiHome: GetRecentTransactions")
+		}
 		return render(c, "pages/home.html", fiber.Map{
-			"Title":    "Home",
-			"Listings": listings,
-			"Trending": trending,
-			"Activity": activity,
+			"Title":           "Home",
+			"Listings":        listings,
+			"Trending":        trending,
+			"Activity":        activity,
+			"ListingCount":    listingCount,
+			"AuctionCount":    auctionCount,
+			"CollectionCount": collectionCount,
+			"Volume24hWei":    volume24h,
 		})
 	}
 }
@@ -157,9 +192,23 @@ func uiProfile(q *db.Q) fiber.Handler {
 
 func uiCollection(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		ctx := c.Context()
 		addr := c.Params("addr")
-		col, _ := q.GetCollection(c.Context(), addr)
-		listings, _ := q.ListActiveListings(c.Context(), db.ListingsFilter{Collection: addr, Limit: 48})
+		col, err := q.GetCollection(ctx, addr)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Msg("uiCollection: GetCollection")
+		}
+		// Stats are computed against the collection address; failures fall
+		// through to zeros so the page header still renders the collection
+		// name + the listing grid below.
+		stats, err := q.GetCollectionStats(ctx, addr)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Msg("uiCollection: GetCollectionStats")
+		}
+		listings, err := q.ListActiveListings(ctx, db.ListingsFilter{Collection: addr, Limit: 48})
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Msg("uiCollection: ListActiveListings")
+		}
 		title := addr
 		if col != nil && col.Name != "" {
 			title = col.Name
@@ -167,31 +216,74 @@ func uiCollection(q *db.Q) fiber.Handler {
 		return render(c, "pages/collection.html", fiber.Map{
 			"Title":      title,
 			"Collection": col,
+			"Stats":      stats,
 			"Listings":   listings,
+			"Count":      int64(len(listings)),
 		})
 	}
 }
 
 func uiToken(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		ctx := c.Context()
 		addr := c.Params("addr")
 		id := c.Params("id")
-		listing, _ := q.GetListing(c.Context(), addr, id)
-		tokenName, tokenImage, _ := q.GetTokenMeta(c.Context(), addr, id)
-		offers, _ := q.ListOffers(c.Context(), db.OffersFilter{
+		listing, err := q.GetListing(ctx, addr, id)
+		if err != nil {
+			// Not-found is expected for unlisted tokens; only log warnings
+			// for actual DB failures.
+			if !strings.Contains(err.Error(), "not found") {
+				log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetListing")
+			}
+		}
+		col, err := q.GetCollection(ctx, addr)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Msg("uiToken: GetCollection")
+		}
+		var standard string
+		var collectionVerified bool
+		if col != nil {
+			standard = col.Standard
+			collectionVerified = col.Verified
+		}
+		owner, err := q.GetTokenOwner(ctx, addr, id)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenOwner")
+		}
+		tokenName, tokenImage, err := q.GetTokenMeta(ctx, addr, id)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenMeta")
+		}
+		offers, err := q.ListOffers(ctx, db.OffersFilter{
 			Collection: addr,
 			TokenID:    id,
 			Status:     "pending",
 			Limit:      20,
 		})
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: ListOffers")
+		}
+		traits, err := q.GetTokenAttributes(ctx, addr, id)
+		if err != nil {
+			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenAttributes")
+		}
 		return render(c, "pages/token.html", fiber.Map{
-			"Title":         "Token #" + id,
-			"Contract":      addr,
-			"TokenID":       id,
-			"Listing":       listing,
-			"Offers":        offers,
-			"TokenName":     tokenName,
-			"TokenImageURI": tokenImage,
+			"Title":              "Token #" + id,
+			"Contract":           addr,
+			"TokenID":            id,
+			"Listing":            listing,
+			"Offers":             offers,
+			"Owner":              owner,
+			"Standard":           standard,
+			"CollectionVerified": collectionVerified,
+			"TokenName":          tokenName,
+			"TokenImageURI":      tokenImage,
+			"Traits":             traits,
+			// Description placeholder: when an upgraded indexer stores a
+			// description column, surface it here. Today the field is empty
+			// so the about-card is hidden — keeping the wiring in place
+			// means a future migration needs no template change.
+			"Description": "",
 		})
 	}
 }

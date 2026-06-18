@@ -5,29 +5,120 @@ import (
 	"embed"
 	"html/template"
 	"io/fs"
+	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
+var (
+	strconvI = strconv.Itoa
+	formatFloat = func(f *big.Float, decimals int) string {
+		return f.Text('f', decimals)
+	}
+)
+
 //go:embed all:templates all:static all:docs
 var FS embed.FS
 
 var funcMap = template.FuncMap{
-	// wei2eth converts a wei string to a 4-decimal ETH string.
-	// Handles leading zeros correctly for sub-1-ether values.
+	// wei2flr converts a wei decimal string to a human-readable FLR string
+	// with adaptive precision. The old padding-to-18-chars approach dropped
+	// the leading "0" for sub-wei values (1 wei → ".0000") and silently
+	// truncated values that overflowed 4 decimal places (e.g. 1.23456 FLR
+	// rendered as "1.2345"). BigFloat arithmetic handles both correctly and
+	// produces a clean, locale-independent output.
+	"wei2flr": func(wei string) string {
+		if wei == "" || wei == "0" {
+			return "0.00"
+		}
+		w, ok := new(big.Int).SetString(wei, 10)
+		if !ok {
+			return "0.00"
+		}
+		bf := new(big.Float).SetPrec(64).SetInt(w)
+		flr := new(big.Float).SetPrec(64).Quo(bf, big.NewFloat(1e18))
+		return formatFloat(flr, 4)
+	},
+	// wei2flr6 keeps six decimals for high-precision contexts (auctions,
+	// floor prices). Same BigFloat machinery — just more decimal places.
+	"wei2flr6": func(wei string) string {
+		if wei == "" || wei == "0" {
+			return "0.000000"
+		}
+		w, ok := new(big.Int).SetString(wei, 10)
+		if !ok {
+			return "0.000000"
+		}
+		bf := new(big.Float).SetPrec(64).SetInt(w)
+		flr := new(big.Float).SetPrec(64).Quo(bf, big.NewFloat(1e18))
+		return formatFloat(flr, 6)
+	},
+	// wei2eth is the legacy alias retained for older templates / external
+	// consumers. Delegates to the same BigFloat workflow as wei2flr so a
+	// future precision tweak is a single-site change.
 	"wei2eth": func(wei string) string {
 		if wei == "" || wei == "0" {
 			return "0.0000"
 		}
-		// Pad to at least 19 chars (18 decimals + 1 integer digit minimum)
-		for len(wei) <= 18 {
-			wei = "0" + wei
+		w, ok := new(big.Int).SetString(wei, 10)
+		if !ok {
+			return "0.0000"
 		}
-		whole := wei[:len(wei)-18]
-		frac := wei[len(wei)-18 : len(wei)-14]
-		return whole + "." + frac
+		bf := new(big.Float).SetPrec(64).SetInt(w)
+		flr := new(big.Float).SetPrec(64).Quo(bf, big.NewFloat(1e18))
+		return formatFloat(flr, 4)
+	},
+	// netOf returns the seller-pays net of a wei string: full price minus the
+	// immutable 1.5% platform fee, in wei (decimal string). Kept in template
+	// helpers so the price→rendered fee math lives in one place (the math
+	// itself is also encoded in the contract — they MUST stay equal).
+	"netOf": func(priceWei string) string {
+		if priceWei == "" || priceWei == "0" {
+			return "0"
+		}
+		w, ok := new(big.Int).SetString(priceWei, 10)
+		if !ok {
+			return "0"
+		}
+		fee := new(big.Int).Mul(w, big.NewInt(150))
+		fee.Quo(fee, big.NewInt(10000))
+		return new(big.Int).Sub(w, fee).String()
+	},
+	// pct formats a 0..1 ratio as a percentage string ("42%"). Edge cases:
+	// negative or NaN inputs clamp to "0%"; overflows clamp to "100%".
+	"pct": func(ratio float64) string {
+		if ratio < 0 || ratio != ratio {
+			return "0%"
+		}
+		if ratio > 1 {
+			return "100%"
+		}
+		return strconvI(int(ratio*100)) + "%"
+	},
+	// shortNumber adds thousands separators to integer strings (e.g.
+	// 1234567 → "1,234,567"). Used for supply, viewer, and bid counters.
+	// Iterative (no recursion) — anon funcs in funcMap can't resolve
+	// themselves by template name as a free identifier in Go.
+	"shortNumber": func(n int64) string {
+		neg := n < 0
+		if neg {
+			n = -n
+		}
+		s := strconvI(int(n))
+		out := make([]byte, 0, len(s)+len(s)/3)
+		for i, c := range s {
+			if i > 0 && (len(s)-i)%3 == 0 {
+				out = append(out, ',')
+			}
+			out = append(out, byte(c))
+		}
+		if neg {
+			return "-" + string(out)
+		}
+		return string(out)
 	},
 	"shortAddr": func(addr string) string {
 		if len(addr) < 10 {

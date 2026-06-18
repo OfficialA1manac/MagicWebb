@@ -132,6 +132,80 @@ func (q *Q) GetListedCount(ctx context.Context, collection string) (int, error) 
 	return count, err
 }
 
+// CountActiveListings returns the total number of active, non-orphaned,
+// non-expired listings across every collection. Drives the home-page
+// counter. Note: SELECT COUNT(*) always returns exactly one row, so the
+// pgx.ErrNoRows branch is unreachable; we propagate any actual error and
+// let the handler decide whether to fail-soft or fail-hard.
+func (q *Q) CountActiveListings(ctx context.Context) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM listings WHERE active=true AND NOT orphaned AND expires_at > now()`,
+	).Scan(&n)
+	return n, err
+}
+
+// CountActiveAuctions returns active auction count, excludes settled and
+// cancelled. Drives the home-page counter.
+func (q *Q) CountActiveAuctions(ctx context.Context) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM auctions WHERE status='active' AND ends_at > now()`,
+	).Scan(&n)
+	return n, err
+}
+
+// CountCollections returns the number of tracked collections. The "tracked"
+// filter excludes one-off contract rows that never completed ingest.
+func (q *Q) CountCollections(ctx context.Context) (int64, error) {
+	var n int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COUNT(*) FROM collections WHERE tracked=true`,
+	).Scan(&n)
+	return n, err
+}
+
+// TotalVolume24hWei returns the sum of sale price_wei in the last 24 hours
+// across every collection. Returned as a decimal-string wei value so the
+// template's wei2flr helper handles scale; COALESCE returns "0" on empty
+// result so the page still renders "0.00 FLR" rather than an empty string.
+func (q *Q) TotalVolume24hWei(ctx context.Context) (string, error) {
+	var v string
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
+		 WHERE occurred_at > now()-interval '24 hours'`,
+	).Scan(&v)
+	return v, err
+}
+
+// CollectionStats is the surface the /collection/:addr page renders.
+type CollectionStats struct {
+	FloorPriceWei string // lowest active listing price (wei); "0" when empty
+	Volume24hWei  string // sums of sales price_wei in last 24h (wei); "0" empty
+	ListedCount   int64  // count of active listings
+}
+
+// GetCollectionStats fills all three counters in a single round-trip-ish via
+// three small queries that share the connection. Each could be a CTE merged
+// into one statement; splitting keeps the SQL legible and the index pool is
+// cheap (3 round-trips ~= 10ms under typical Coston load).
+func (q *Q) GetCollectionStats(ctx context.Context, collection string) (CollectionStats, error) {
+	var s CollectionStats
+	floor, ferr := q.GetFloorPrice(ctx, collection)
+	if ferr == nil && floor != nil {
+		s.FloorPriceWei = floor.String()
+	}
+	vol, verr := q.Get24hVolume(ctx, collection)
+	if verr == nil && vol != nil {
+		s.Volume24hWei = vol.String()
+	}
+	listed, lerr := q.GetListedCount(ctx, collection)
+	if lerr == nil {
+		s.ListedCount = int64(listed)
+	}
+	return s, nil
+}
+
 // ── Listings ──────────────────────────────────────────────────────────────
 
 type ListingRow struct {
@@ -145,8 +219,9 @@ type ListingRow struct {
 	ListedAt   time.Time
 	TxHash     string
 	// Denormalised from nft_tokens (may be empty)
-	Name     string
-	ImageURI string
+	Name        string
+	ImageURI    string
+	TotalSupply int64 // collection-level total supply (0 when unindexed)
 	// Denormalised from collections
 	CollectionVerified bool
 }
@@ -238,7 +313,8 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false)
+		        COALESCE(c.verified,false),
+		        COALESCE(t.total_supply, 0)
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
@@ -255,7 +331,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
-			&r.CollectionVerified); err != nil {
+			&r.CollectionVerified, &r.TotalSupply); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -729,6 +805,30 @@ func (q *Q) IncrementTokenViews(ctx context.Context, collection, tokenID string)
 		`UPDATE nft_tokens SET views=views+1 WHERE collection=$1 AND token_id=$2`,
 		collection, tokenID)
 	return err
+}
+
+// GetTokenAttributes returns the on-chain traits for one token. Drives the
+// Attributes grid on /token/:addr/:id. Order matches storage (by trait_type
+// then value) so the layout is stable across reloads.
+func (q *Q) GetTokenAttributes(ctx context.Context, collection, tokenID string) ([]Trait, error) {
+	rows, err := q.pool.Query(ctx,
+		`SELECT trait_type, value FROM nft_attributes
+		 WHERE collection=$1 AND token_id=$2
+		 ORDER BY trait_type ASC, value ASC`,
+		collection, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []Trait
+	for rows.Next() {
+		var t Trait
+		if err := rows.Scan(&t.Type, &t.Value); err != nil {
+			return nil, err
+		}
+		out = append(out, t)
+	}
+	return out, rows.Err()
 }
 
 // ── Offers ────────────────────────────────────────────────────────────────
