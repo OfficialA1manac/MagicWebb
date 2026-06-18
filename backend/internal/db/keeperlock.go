@@ -17,12 +17,9 @@ const keeperLockKey int64 = 0x4D61676963576562
 // WaitKeeperLock blocks until this instance wins the keeper advisory lock or
 // ctx is cancelled.
 //
-// The lock is held on a DEDICATED session connection dialed via SessionDSN —
-// never through the shared pgxpool. Session advisory locks are meaningless
-// through Supabase's transaction-mode pooler (:6543): the lock would attach to
-// an arbitrary pooled server connection and leak there, permanently blocking
-// every instance. SessionDSN re-points :6543 → :5432 exactly as the SSE bridge
-// does.
+// The lock is held on a DEDICATED session connection — never through the
+// shared pgxpool — so advisory lock lifetime is tied to the connection, not a
+// pooled transaction.
 //
 // On success it returns a context derived from ctx that is cancelled the
 // moment lock ownership can no longer be proven (a periodic ping on the lock
@@ -33,10 +30,9 @@ const keeperLockKey int64 = 0x4D61676963576562
 func WaitKeeperLock(ctx context.Context, dsn string) (lockCtx context.Context, release func(), err error) {
 	const retry = 15 * time.Second
 	const pingEvery = 10 * time.Second
-	sessionDSN := SessionDSN(dsn)
 
 	for {
-		conn, derr := pgx.Connect(ctx, sessionDSN)
+		conn, derr := pgx.Connect(ctx, dsn)
 		if derr != nil {
 			if ctx.Err() != nil {
 				return nil, nil, ctx.Err()

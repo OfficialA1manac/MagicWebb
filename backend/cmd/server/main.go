@@ -51,10 +51,9 @@ func main() {
 	defer pool.Close()
 	q := db.New(pool)
 
-	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY
-	// (session DSN: the transaction pooler can't LISTEN). Degrades to local-only
-	// delivery if the session conn is unavailable.
-	bcast := sse.NewBridged(ctx, pool, db.SessionDSN(config.C.PostgresURL))
+	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY.
+	// Degrades to local-only delivery if the listen conn is unavailable.
+	bcast := sse.NewBridged(ctx, pool, config.C.PostgresURL)
 
 	// Shared (Postgres) rate limiter + nonce store, so limits and single-use
 	// SIWE nonces hold across instances.
@@ -73,9 +72,9 @@ func main() {
 	var serverTimeMs int64
 
 	// Start indexer in background. Keepers gate on a Postgres advisory lock
-	// (dedicated session connection — the transaction pooler cannot hold
-	// session locks) so only one instance broadcasts settle/refund txs; the
-	// returned lockCtx stops them the moment ownership is lost.
+	// (dedicated connection — not through the shared pool) so only one instance
+	// broadcasts settle/refund txs; the returned lockCtx stops them the moment
+	// ownership is lost.
 	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
 		WithKeeperGate(func(c context.Context) (context.Context, func(), error) {
 			return db.WaitKeeperLock(c, config.C.PostgresURL)

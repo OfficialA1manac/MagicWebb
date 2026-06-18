@@ -49,7 +49,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/listings/:collection/:id/preflight", listingPreflightWithChain(q, eth))
 	api.Get("/listings/:collection/:id", getListing(q))
 	api.Get("/media", mediaProxy(q))
-	api.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
+	app.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address/traits", collectionTraits(q))
 	api.Get("/collections/:address", getCollection(q))

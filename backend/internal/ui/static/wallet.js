@@ -463,15 +463,18 @@ function isBareIPFSCID(uri) {
 function resolveURI(uri) {
   uri = (uri || '').trim();
   if (!uri || uri.startsWith('data:')) return uri;
-  if (uri.startsWith('ipfs://ipfs/')) return 'https://cloudflare-ipfs.com/ipfs/' + uri.slice(13);
-  if (uri.startsWith('ipfs://')) return 'https://cloudflare-ipfs.com/ipfs/' + uri.slice(7);
-  if (isBareIPFSCID(uri)) return 'https://cloudflare-ipfs.com/ipfs/' + uri;
+  // Cloudflare sunset their IPFS gateway — use ipfs.io (same as backend).
+  if (uri.startsWith('ipfs://ipfs/')) return 'https://ipfs.io/ipfs/' + uri.slice(13);
+  if (uri.startsWith('ipfs://')) return 'https://ipfs.io/ipfs/' + uri.slice(7);
+  if (isBareIPFSCID(uri)) return 'https://ipfs.io/ipfs/' + uri;
   if (uri.startsWith('ar://')) return 'https://arweave.net/' + uri.slice(5);
   return uri;
 }
 
 function mediaURL(uri) {
-  if (!uri || uri.startsWith('data:') || uri.startsWith('/')) return uri;
+  if (!uri) return uri;
+  // Self-hosted blob path — serve directly from /api/v1/img/<hash>.
+  if (uri.startsWith('/api/v1/img/') || uri.startsWith('data:') || uri.startsWith('/')) return uri;
   if (uri.startsWith('http://') || uri.startsWith('https://')) {
     return '/api/v1/media?url=' + encodeURIComponent(uri);
   }

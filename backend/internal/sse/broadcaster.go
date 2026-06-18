@@ -55,15 +55,15 @@ func New() *Broadcaster {
 }
 
 // NewBridged creates a Broadcaster that also fans events across instances via
-// Postgres LISTEN/NOTIFY. NOTIFY uses the (transaction-mode) pool; LISTEN needs
-// a session connection, so pass a session DSN (db.SessionDSN). If sessionDSN is
-// empty or the listen conn drops, this instance degrades gracefully to local
-// delivery (its own clients still get every event it publishes).
-func NewBridged(ctx context.Context, pool *pgxpool.Pool, sessionDSN string) *Broadcaster {
+// Postgres LISTEN/NOTIFY. NOTIFY uses the pool; LISTEN needs a dedicated
+// session connection, so pass the Postgres DSN. If dsn is empty or the listen
+// conn drops, this instance degrades gracefully to local delivery (its own
+// clients still get every event it publishes).
+func NewBridged(ctx context.Context, pool *pgxpool.Pool, dsn string) *Broadcaster {
 	b := New()
 	b.pool = pool
-	if sessionDSN != "" {
-		go b.listen(ctx, sessionDSN)
+	if dsn != "" {
+		go b.listen(ctx, dsn)
 	}
 	return b
 }
