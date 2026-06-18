@@ -1,1 +1,19 @@
-/* Tailwind CSS placeholder - run: npx tailwindcss or use CDN build */
+/* PLACEHOLDER — operator must run `go run ./cmd/buildtailwindcss` once
+ * before first deploy (and any time a template's class list changes)
+ * to populate this file with the project's compiled Tailwind bundle.
+ * Until populated, the page renders unstyled but is structurally
+ * correct; no XSS surface from cdn.tailwindcss.com — that JIT script
+ * has been removed from layout.html and replaced with this self-hosted
+ * <link rel=stylesheet href=/static/tailwind.css>.
+ *
+ * What this file becomes once compiled:
+ *   - Tailwind's `base` layer (CSS reset + variables + dark-mode gates)
+ *   - The 5-color palette declared in internal/ui/tailwind.config.cjs
+ *     (sky / gold / violet / ink + brand-named bg-* gradients)
+ *   - The font families (Inter / JetBrains Mono)
+ *   - Every utility class actually used by the templates under
+ *     internal/ui/templates (tree-shaken — only used rules ship)
+ *   - The optional `@tailwindcss/typography` plugin (referenced in
+ *     tailwind.config.cjs), keeping the prior `prose`-flavor styling
+ *     the partials once relied on when Tailwind JIT was the runtime.
+ */
