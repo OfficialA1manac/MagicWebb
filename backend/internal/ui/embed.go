@@ -196,6 +196,7 @@ var partialPaths = []string{
 	"partials/auction_cards.html",
 	"partials/activity_feed.html",
 	"partials/nft_picker.html",
+	"partials/action_modal.html",
 	"partials/wc_qr_overlay.html",
 }
 
@@ -225,17 +226,25 @@ func init() {
 	Templates = make(map[string]*template.Template)
 
 	// Per-page sets: layout + page + all partials
+	// Option("missingkey=zero") makes missing template variables render
+	// as zero-valued strings/numbers/booleans rather than `<no value>`,
+	// which keeps the static render smoke (`internal/ui/render_smoke_test.go`)
+	// from tripping on sparse dummy data while still surfacing real
+	// parse-time errors (EOF in an unclosed directive, references to
+	// undefined template names). Parse and execute use different code
+	// paths in html/template, so this does NOT mask EOF panics — those
+	// still fire at parse time before any rendering.
 	for _, page := range pagePaths {
 		files := make([]string, 0, 2+len(partialPaths))
 		files = append(files, "layout.html", page)
 		files = append(files, partialPaths...)
-		t := template.Must(template.New("layout.html").Funcs(funcMap).ParseFS(sub, files...))
+		t := template.Must(template.New("layout.html").Funcs(funcMap).Option("missingkey=zero").ParseFS(sub, files...))
 		Templates[page] = t
 	}
 
 	// Standalone partial sets (for HTMX partial swaps)
 	for _, partial := range partialPaths {
-		t := template.Must(template.New("").Funcs(funcMap).ParseFS(sub, partial))
+		t := template.Must(template.New("").Funcs(funcMap).Option("missingkey=zero").ParseFS(sub, partial))
 		Templates[partial] = t
 	}
 }

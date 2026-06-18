@@ -135,4 +135,16 @@
 
     {{if $.Ended}}
     <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-gold-400/30 p-5 mb-4 glow-gold">
-      <p 
+      <p class="text-sm font-extrabold text-white mb-3 flex items-center gap-2"><span class="text-gold-200">♛</span> Settle auction</p>
+      <p class="text-xs text-white/60 leading-relaxed mb-3">The auction has ended. Anyone can finalize the on-chain settlement; the high bidder receives the NFT and the seller receives 98.5% of the top bid.</p>
+      <button @click="$store.wallet.settle({{.AuctionID}})"
+              class="px-5 py-3 rounded-xl btn-gold hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-gold shadow-lg shadow-gold-500/30 active:scale-[0.97]">
+        Settle now
+      </button>
+    </div>
+    {{end}}
+  </div>
+  </div>
+  {{end}}
+</div>
+{{end}}
