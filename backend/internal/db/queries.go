@@ -314,7 +314,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
 		        COALESCE(c.verified,false),
-		        COALESCE(t.total_supply, 0)
+		        0 AS total_supply
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
