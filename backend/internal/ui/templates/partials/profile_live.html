@@ -1,0 +1,38 @@
+{{define "partials/profile_live.html"}}
+<!-- Live listings + activity region — pane contents only. Alpine x-data
+     on the parent page owns `tab`, and we re-init it after swap via the
+     page-level hx-on hook so x-show continues to gate the active pane. -->
+<div x-show="tab==='listings'" x-cloak>
+  {{if .Listings}}
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    {{template "partials/listing_cards.html" .}}
+  </div>
+  {{else}}
+  <p class="text-neutral-600 text-center py-16">No active listings.</p>
+  {{end}}
+</div>
+
+<div x-show="tab==='activity'" x-cloak>
+  {{if .Activity}}
+  <div class="space-y-2">
+    {{range .Activity}}
+    <div class="bg-neutral-900 rounded-xl px-4 py-3 flex items-center justify-between text-sm">
+      <div class="flex items-center gap-3">
+        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-neutral-800
+          {{if eq .Type "Listed"}}text-blue-400
+          {{else if eq .Type "Sold"}}text-emerald-400
+          {{else if eq .Type "BidPlaced"}}text-yellow-400
+          {{else}}text-neutral-400{{end}}">
+          {{.Type}}
+        </span>
+        <span class="font-mono text-neutral-400 text-xs">{{shortAddr .Collection}} #{{.TokenID}}</span>
+      </div>
+      <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <p class="text-neutral-600 text-center py-16">No recent activity.</p>
+  {{end}}
+</div>
+{{end}}

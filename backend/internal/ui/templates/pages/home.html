@@ -58,10 +58,10 @@
   </div>
 </section>
 
-<!-- Live activity ticker (SSE-driven) -->
+<!-- Live activity ticker: SSE event OR every 1s while tab visible. -->
 <div id="activity-ticker" class="mb-12"
      hx-get="/partials/activity"
-     hx-trigger="load, sse:listing-updated, sse:auction-updated, sse:offer-updated"
+     hx-trigger="load, sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
      hx-swap="innerHTML">
   <div class="text-white/40 text-sm text-center shimmer py-3 rounded-xl bg-ink-900/60 border border-white/10">Loading recent activity…</div>
 </div>
@@ -106,7 +106,7 @@
   <div id="listings-grid"
        class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
        hx-get="/partials/listings"
-       hx-trigger="sse:listing-updated"
+       hx-trigger="sse:listing-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML">
     {{template "partials/listing_cards.html" .}}
   </div>

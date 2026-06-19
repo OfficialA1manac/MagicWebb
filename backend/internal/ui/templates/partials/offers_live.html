@@ -1,0 +1,63 @@
+{{define "partials/offers_live.html"}}
+<!-- Live offers rows. x-show gates the right tab pane; the parent
+     <div x-data="{tab: 'received'}"> lives outside the swap so the
+     active tab is preserved across swaps, and Alpine.initTree (called
+     by the page-level hx-on handler) re-applies x-show on the new
+     swapped children so the gating still matches the active tab. -->
+<div x-show="tab==='received'" x-cloak>
+  {{if .Received}}
+  <div class="space-y-3">
+    {{range .Received}}
+    <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-sky-300/40 transition">
+      <div class="min-w-0 flex-1">
+        <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-sky-200 transition truncate block">
+          {{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}
+        </a>
+        <p class="text-xs text-white/40 mt-1">From <span class="font-mono text-white/80">{{shortAddr .Bidder}}</span> · Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+      </div>
+      <div class="flex items-center gap-3 flex-shrink-0">
+        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">FLR</span></span>
+        {{if eq .Status "pending"}}
+        <button class="px-3 py-1.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
+                @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
+        {{end}}
+      </div>
+    </div>
+    {{end}}
+    {{if not .Received}}
+    <div class="bg-ink-900/40 rounded-2xl px-6 py-12 text-center border border-dashed border-white/10">
+      <p class="text-white/40">No offers received yet.</p>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-12 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No offers received yet — share your wallet address on listings to start receiving bids.</p>
+  </div>
+  {{end}}
+</div>
+
+<div x-show="tab==='sent'" x-cloak>
+  {{if .Sent}}
+  <div class="space-y-3">
+    {{range .Sent}}
+    <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-gold-300/40 transition">
+      <div class="min-w-0 flex-1">
+        <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-gold-200 transition truncate block">
+          {{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}
+        </a>
+        <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+      </div>
+      <div class="flex items-center gap-2 flex-shrink-0">
+        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">FLR</span></span>
+      </div>
+    </div>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-12 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No offers sent yet — open an NFT page and click "Offer" to start.</p>
+  </div>
+  {{end}}
+</div>
+{{end}}

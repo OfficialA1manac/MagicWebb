@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
 	"net/http"
@@ -151,56 +152,27 @@ func uiAuctions(q *db.Q) fiber.Handler {
 func uiAuctionDetail(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		id, _ := atoi64(c.Params("id"))
-		auction, err := q.GetAuction(c.Context(), id)
-		if err != nil {
-			return c.Status(fiber.StatusNotFound).SendString("auction not found")
-		}
-		bids, _ := q.GetBidsForAuction(c.Context(), id)
-		// Cumulative model: per-bidder effective totals (sum of all their bids),
-		// highest first — row 0 is the current winner-elect.
-		effective, _ := q.GetEffectiveBids(c.Context(), id)
-		now := time.Now()
-		return render(c, "pages/auction.html", fiber.Map{
-			"Title":         fmt.Sprintf("Auction #%d", auction.AuctionID),
-			"Auction":       auction,
-			"Bids":          bids,
-			"EffectiveBids": effective,
-			"Now":           now.Unix(),
-			"Ended":         auction.EndsAt.Before(now),
-			"EndsAtUnix":    auction.EndsAt.Unix(),
-		})
+		m := auctionPageData(c.Context(), q, id)
+		m["Title"] = fmt.Sprintf("Auction #%d", id)
+		return render(c, "pages/auction.html", m)
 	}
 }
 
 func uiOffers(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		addr := strings.ToLower(c.Query("addr"))
-		sent, _ := q.ListOffers(c.Context(), db.OffersFilter{Bidder: addr, Limit: 50})
-		received, _ := q.ListOffers(c.Context(), db.OffersFilter{Owner: addr, Limit: 50})
-		return render(c, "pages/offers.html", fiber.Map{
-			"Title":    "Offers",
-			"Sent":     sent,
-			"Received": received,
-			"Addr":     addr,
-		})
+		m := offersPageData(c.Context(), q, addr)
+		m["Title"] = "Offers"
+		return render(c, "pages/offers.html", m)
 	}
 }
 
 func uiProfile(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		addr := strings.ToLower(c.Params("addr"))
-		listings, _ := q.ListActiveListings(c.Context(), db.ListingsFilter{Seller: addr, Limit: 24})
-		activity, _ := q.GetRecentTransactions(c.Context(), 20)
-		// "Withdraw required": sweeper-verified pendingReturns balance — the
-		// rare case where the contract's automatic refund push failed.
-		pendingWei, _ := q.GetVerifiedPendingWithdrawal(c.Context(), addr)
-		return render(c, "pages/profile.html", fiber.Map{
-			"Title":      "Profile",
-			"Addr":       addr,
-			"Listings":   listings,
-			"Activity":   activity,
-			"PendingWei": pendingWei,
-		})
+		m := profilePageData(c.Context(), q, addr)
+		m["Title"] = "Profile"
+		return render(c, "pages/profile.html", m)
 	}
 }
 
@@ -239,66 +211,11 @@ func uiCollection(q *db.Q) fiber.Handler {
 
 func uiToken(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ctx := c.Context()
 		addr := c.Params("addr")
 		id := c.Params("id")
-		listing, err := q.GetListing(ctx, addr, id)
-		if err != nil {
-			// Not-found is expected for unlisted tokens; only log warnings
-			// for actual DB failures.
-			if !strings.Contains(err.Error(), "not found") {
-				log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetListing")
-			}
-		}
-		col, err := q.GetCollection(ctx, addr)
-		if err != nil {
-			log.Warn().Err(err).Str("collection", addr).Msg("uiToken: GetCollection")
-		}
-		var standard string
-		var collectionVerified bool
-		if col != nil {
-			standard = col.Standard
-			collectionVerified = col.Verified
-		}
-		owner, err := q.GetTokenOwner(ctx, addr, id)
-		if err != nil {
-			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenOwner")
-		}
-		tokenName, tokenImage, err := q.GetTokenMeta(ctx, addr, id)
-		if err != nil {
-			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenMeta")
-		}
-		offers, err := q.ListOffers(ctx, db.OffersFilter{
-			Collection: addr,
-			TokenID:    id,
-			Status:     "pending",
-			Limit:      20,
-		})
-		if err != nil {
-			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: ListOffers")
-		}
-		traits, err := q.GetTokenAttributes(ctx, addr, id)
-		if err != nil {
-			log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("uiToken: GetTokenAttributes")
-		}
-		return render(c, "pages/token.html", fiber.Map{
-			"Title":              "Token #" + id,
-			"Contract":           addr,
-			"TokenID":            id,
-			"Listing":            listing,
-			"Offers":             offers,
-			"Owner":              owner,
-			"Standard":           standard,
-			"CollectionVerified": collectionVerified,
-			"TokenName":          tokenName,
-			"TokenImageURI":      tokenImage,
-			"Traits":             traits,
-			// Description placeholder: when an upgraded indexer stores a
-			// description column, surface it here. Today the field is empty
-			// so the about-card is hidden — keeping the wiring in place
-			// means a future migration needs no template change.
-			"Description": "",
-		})
+		m := tokenPageData(c.Context(), q, addr, id)
+		m["Title"] = "Token #" + id
+		return render(c, "pages/token.html", m)
 	}
 }
 
@@ -356,6 +273,156 @@ func partialActivity(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		rows, _ := q.GetRecentTransactions(c.Context(), 15)
 		return render(c, "partials/activity_feed.html", fiber.Map{"Activity": rows})
+	}
+}
+
+// partialToken re-renders the live region of /token/:addr/:id by
+// rendering `partials/token_live.html` (data-only, no Alpine x-data)
+// with the same data shape uiToken assembles for `pages/token.html`.
+// Sharing the data helper guarantees the live partial stays consistent
+// with the full page if a new field is added (e.g. RoyaltyInfo).
+func partialToken(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		addr := c.Params("addr")
+		id := c.Params("id")
+		return render(c, "partials/token_live.html", tokenPageData(c.Context(), q, addr, id))
+	}
+}
+
+// tokenPageData is the single source of truth for everything the
+// token page needs. uiToken renders pages/token.html with this map;
+// partialToken renders partials/token_live.html with the same map.
+// The page-level template wraps the body in an Alpine x-data so the
+// user's action-tab / form-input state persists across 1s htmx swaps
+// of the live region inside.
+func tokenPageData(ctx context.Context, q *db.Q, addr, id string) fiber.Map {
+	listing, err := q.GetListing(ctx, addr, id)
+	if err != nil && !strings.Contains(err.Error(), "not found") {
+		log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("tokenPageData: GetListing")
+	}
+	col, err := q.GetCollection(ctx, addr)
+	if err != nil {
+		log.Warn().Err(err).Str("collection", addr).Msg("tokenPageData: GetCollection")
+	}
+	var standard string
+	var collectionVerified bool
+	if col != nil {
+		standard = col.Standard
+		collectionVerified = col.Verified
+	}
+	owner, _ := q.GetTokenOwner(ctx, addr, id)
+	tokenName, tokenImage, err := q.GetTokenMeta(ctx, addr, id)
+	if err != nil {
+		log.Warn().Err(err).Str("collection", addr).Str("token", id).Msg("tokenPageData: GetTokenMeta")
+	}
+	offers, _ := q.ListOffers(ctx, db.OffersFilter{
+		Collection: addr,
+		TokenID:    id,
+		Status:     "pending",
+		Limit:      20,
+	})
+	traits, _ := q.GetTokenAttributes(ctx, addr, id)
+	return fiber.Map{
+		"Listing":            listing,
+		"Offers":             offers,
+		"Owner":              owner,
+		"Standard":           standard,
+		"CollectionVerified": collectionVerified,
+		"TokenName":          tokenName,
+		"TokenImageURI":      tokenImage,
+		"Traits":             traits,
+		"Contract":           addr,
+		"TokenID":            id,
+		// Description placeholder: when an upgraded indexer stores a
+		// description column, surface it here. Today the field is empty
+		// so the about-card is hidden — keeping the wiring in place
+		// means a future migration needs no template change.
+		"Description": "",
+	}
+}
+
+// partialAuctionDetail re-renders the live region of /auction/:id with
+// the same data shape uiAuctionDetail assembles. Bid form + countdown
+// + settle button are NOT in the partial — they live on the page-level
+// template whose Alpine x-data wraps the grid, so they survive the
+// 1s htmx swap of the live region inside.
+func partialAuctionDetail(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		id, _ := atoi64(c.Params("id"))
+		return render(c, "partials/auction_live.html", auctionPageData(c.Context(), q, id))
+	}
+}
+
+// auctionPageData assembles everything the auction page + the auction
+// live partial need. See tokenPageData — same single-source-of-truth
+// pattern.
+func auctionPageData(ctx context.Context, q *db.Q, id int64) fiber.Map {
+	auction, err := q.GetAuction(ctx, id)
+	var bids any
+	var effective any
+	if err == nil {
+		bids, _ = q.GetBidsForAuction(ctx, id)
+		effective, _ = q.GetEffectiveBids(ctx, id)
+	}
+	now := time.Now()
+	m := fiber.Map{
+		"Auction":       auction,
+		"Bids":          bids,
+		"EffectiveBids": effective,
+		"Now":           now.Unix(),
+		"Ended":         auction != nil && auction.EndsAt.Before(now),
+	}
+	if auction != nil {
+		m["EndsAtUnix"] = auction.EndsAt.Unix()
+		m["Title"] = fmt.Sprintf("Auction #%d", auction.AuctionID)
+	}
+	return m
+}
+
+// partialOffers re-renders the live region of /offers. Tab state on the
+// page-level template owns the active-tab gating; the partial just
+// re-renders the offer rows so accepted/rejected/expired updates appear
+// within 1s.
+func partialOffers(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		addr := strings.ToLower(c.Query("addr"))
+		return render(c, "partials/offers_live.html", offersPageData(c.Context(), q, addr))
+	}
+}
+
+// offersPageData: see tokenPageData.
+func offersPageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
+	sent, _ := q.ListOffers(ctx, db.OffersFilter{Bidder: addr, Limit: 50})
+	received, _ := q.ListOffers(ctx, db.OffersFilter{Owner: addr, Limit: 50})
+	return fiber.Map{
+		"Sent":     sent,
+		"Received": received,
+		"Addr":     addr,
+	}
+}
+
+// partialProfile re-renders the live region of /profile/:addr (listings
+// grid + activity rows). The profile avatar / edit panel is Alpine on
+// the page-level template and survives the swap.
+func partialProfile(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		addr := strings.ToLower(c.Params("addr"))
+		return render(c, "partials/profile_live.html", profilePageData(c.Context(), q, addr))
+	}
+}
+
+// profilePageData: see tokenPageData.
+func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
+	listings, _ := q.ListActiveListings(ctx, db.ListingsFilter{Seller: addr, Limit: 24})
+	activity, _ := q.GetRecentTransactions(ctx, 20)
+	// "Withdraw required": sweeper-verified pendingReturns balance — the
+	// rare case where the contract's automatic refund push failed.
+	pendingWei, _ := q.GetVerifiedPendingWithdrawal(ctx, addr)
+	return fiber.Map{
+		"Addr":       addr,
+		"Listings":   listings,
+		"Activity":   activity,
+		"PendingWei": pendingWei,
 	}
 }
 

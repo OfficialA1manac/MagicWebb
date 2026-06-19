@@ -1,166 +1,38 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<div data-live="listing-updated auction-updated offer-updated">
-{{$img := ""}}{{$name := ""}}{{$desc := ""}}
-{{with .Listing}}{{$img = .ImageURI}}{{$name = .Name}}{{end}}
-{{if not $img}}{{$img = .TokenImageURI}}{{end}}
-{{if not $name}}{{$name = .TokenName}}{{end}}
-<div class="grid lg:grid-cols-5 gap-8">
+<!-- Outer x-data is on the page template, NOT inside the swapped
+     region, so Alpine survives the 1s htmx-swap of the live data. The
+     action tab bar, form inputs, and @click handlers stay interactive
+     across refreshes. -->
+<div x-data="{
+    sellerAddr: '{{with .Listing}}{{lower .Seller}}{{end}}',
+    ownerAddr:   '{{lower .Owner}}',
+    action:      (new URLSearchParams(location.search).get('action')) || '{{if .Listing}}buy{{else}}offer{{end}}',
+    listPrice:   '', listDays: '30',
+    offerAmt:    '', offerDays: '3',
+    auctionReserve: '', auctionDays: '3', auctionMinInc: '',
+    get isSeller() { return this.sellerAddr && this.sellerAddr !== '' && $store.wallet.address === this.sellerAddr; },
+    get isOwner()  { return this.ownerAddr  && this.ownerAddr  !== '' && $store.wallet.address === this.ownerAddr;  },
+  }" class="grid lg:grid-cols-5 gap-8">
 
-  <!-- ── Left column: image + attributes + details ─────────────────────────── -->
-  <div class="lg:col-span-3 space-y-6">
-    <!-- Image card -->
-    <div class="bg-ink-900 rounded-2xl overflow-hidden border border-white/10 glow-sky">
-      {{if $img}}
-      <div class="relative group">
-        <img src="{{mediaURL $img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
-             onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');this.nextElementSibling.nextElementSibling.classList.remove('hidden')">
-        <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden shimmer">🖼</div>
-        {{if isUpstream $img}}
-        <div class="absolute inset-x-0 bottom-0 p-4" x-data="{
-          busy: false,
-          async tryCacheNow() {
-            if (this.busy) return;
-            this.busy = true;
-            try {
-              const r = await fetch('/api/v1/img/retry?coll={{.Contract}}&id={{.TokenID}}', { method: 'POST' });
-              const j = await r.json().catch(() => ({}));
-              if (r.ok && j.status === 'ok') {
-                toast('Image cached — reloading.', 'success');
-                setTimeout(() => location.reload(), 600);
-              } else if (r.ok && j.status === 'already_local') {
-                toast('Image is already cached.', 'info');
-                setTimeout(() => location.reload(), 400);
-              } else {
-                const msg = (j && j.error) ? j.error : ('HTTP ' + r.status);
-                toast('Retry failed: ' + msg, 'error');
-              }
-            } catch (e) {
-              toast('Network error', 'error');
-            } finally {
-              this.busy = false;
-            }
-          }
-        }">
-          <div class="bg-ink-1000/90 backdrop-blur rounded-xl px-3.5 py-2.5 text-[11px] text-white border border-sky-300/40 flex items-center justify-between gap-3">
-            <span><span class="text-sky-200">⏳</span> Image still hosted upstream — cache it now?</span>
-            <button @click="tryCacheNow()"
-                    :disabled="busy"
-                    class="shrink-0 px-3 py-1 rounded-lg btn-sky hover:opacity-90 text-ink-950 text-[11px] font-extrabold transition active:scale-[0.97] disabled:opacity-60 disabled:cursor-wait glow-sky">
-              <span x-show="!busy">⚡ Try cache now</span>
-              <span x-show="busy" x-cloak class="flex items-center gap-1.5"><span class="w-2 h-2 rounded-full bg-ink-950 animate-pulse"></span>retrying…</span>
-            </button>
-          </div>
-        </div>
-        {{end}}
-        <div class="absolute inset-0 bg-gradient-to-t from-ink-1000/60 to-transparent opacity-0 group-hover:opacity-100 transition duration-300 pointer-events-none"></div>
-        <!-- Top-left badges -->
-        <div class="absolute top-4 left-4 flex flex-col gap-1.5">
-          {{if .Standard}}
-          <span class="px-2 py-1 rounded-md bg-ink-1000/80 backdrop-blur border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
-          {{end}}
-          {{if .CollectionVerified}}
-          <span class="px-2 py-1 rounded-md bg-violet-500/20 backdrop-blur border border-violet-300/40 text-[10px] font-extrabold uppercase tracking-wider text-violet-200 flex items-center gap-1 glow-violet">
-            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-            Verified
-          </span>
-          {{end}}
-        </div>
-      </div>
-      {{else}}
-      <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>
-      {{end}}
-    </div>
-
-    <!-- Description -->
-    {{if $desc}}
-    <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
-      <h2 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2">
-        <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">¶</span>
-        About
-      </h2>
-      <p class="text-sm text-white/80 leading-relaxed whitespace-pre-line">{{$desc}}</p>
-    </div>
-    {{end}}
-
-    <!-- Traits & attributes — purple chips. Standard format used across
-         OpenSea / Blur / MagicEden: trait_type (uppercase) + value +
-         optional rarity %. -->
-    {{if .Traits}}
-    <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
-      <h2 class="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
-        <span class="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-200">♢</span>
-        Attributes
-        <span class="text-xs text-white/40 font-normal">({{len .Traits}})</span>
-      </h2>
-      <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
-        {{range .Traits}}
-        <div class="bg-gradient-to-br from-violet-500/10 to-white/[0.02] rounded-xl p-3 border border-violet-400/20 hover:border-violet-300/40 transition">
-          <p class="text-[10px] uppercase tracking-wider font-extrabold text-violet-200">{{.Type}}</p>
-          <p class="text-sm text-white font-extrabold mt-1 truncate">{{.Value}}</p>
-        </div>
-        {{end}}
-      </div>
-    </div>
-    {{end}}
-
-    <!-- Metadata / on-chain details -->
-    <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
-      <h2 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2">
-        <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">⌘</span>
-        Details
-      </h2>
-      <div class="divide-y divide-white/5">
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Collection</span>
-          <a href="/collection/{{.Contract}}" class="text-sm font-mono text-sky-200 hover:text-sky-100 transition flex items-center gap-1.5">
-            {{shortAddr .Contract}}
-            <span class="text-[10px] text-white/40">→</span>
-          </a>
-        </div>
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Token ID</span>
-          <span class="text-sm font-mono text-white">#{{.TokenID}}</span>
-        </div>
-        {{if .Standard}}
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Standard</span>
-          <span class="text-xs px-2.5 py-1 rounded-md bg-violet-500/15 border border-violet-400/30 text-violet-200 font-extrabold uppercase tracking-wider glow-violet">{{.Standard}}</span>
-        </div>
-        {{end}}
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Network</span>
-          <span class="text-xs text-white/80">Flare Coston2 (Chain 114)</span>
-        </div>
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Contract</span>
-          <span class="text-[10px] font-mono text-white/40 truncate max-w-[16rem]">{{.Contract}}</span>
-        </div>
-        {{if .Owner}}
-        <div class="flex items-center justify-between py-2.5">
-          <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Owner</span>
-          <span class="text-sm font-mono text-white">{{shortAddr .Owner}}</span>
-        </div>
-        {{end}}
-      </div>
-    </div>
+  <!-- ── Left column: live data region. Image + traits + details + offers.
+       All Alpine directives on elements INSIDE this region are re-init'd
+       on every swap via hx-on:htmx:after-swap → Alpine.initTree. ── -->
+  <div class="lg:col-span-3 space-y-6"
+       hx-get="/partials/token/{{.Contract}}/{{.TokenID}}"
+       hx-trigger="sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
+       hx-swap="innerHTML"
+       hx-on:htmx:after-swap="Alpine.initTree($event.detail.target)">
+  {{template "partials/token_live.html" .}}
   </div>
 
-  <!-- ── Right column: action panel ───────────────────────────────────────── -->
-  <div class="lg:col-span-2" x-data="{
-    sellerAddr: '{{with .Listing}}{{lower .Seller}}{{end}}',
-    ownerAddr: '{{lower .Owner}}',
-    action: (new URLSearchParams(location.search).get('action')) || '{{if .Listing}}buy{{else}}offer{{end}}',
-    listPrice: '', listDays: '30',
-    auctionReserve: '', auctionDays: '3', auctionMinInc: '',
-    offerAmt: '', offerDays: '3',
-    get isSeller() { return this.sellerAddr && $store.wallet.address === this.sellerAddr; },
-    get isOwner()  { return this.ownerAddr  && $store.wallet.address === this.ownerAddr;  },
-  }">
-
-    <!-- Title block -->
+  <!-- ── Right column: static action panel. NEVER swapped. Alpine x-data
+       on the parent + action-state here persists across refreshes. ── -->
+  <div class="lg:col-span-2">
     <div class="mb-5">
-      <h1 class="text-3xl md:text-4xl font-extrabold text-white tracking-tight">{{if $name}}{{$name}}{{else}}Token #{{.TokenID}}{{end}}</h1>
+      <h1 class="text-3xl md:text-4xl font-extrabold text-white tracking-tight">
+        {{if .TokenName}}{{.TokenName}}{{else}}Token #{{.TokenID}}{{end}}
+      </h1>
       <div class="flex items-center gap-2 mt-2 flex-wrap">
         <a href="/collection/{{.Contract}}" class="text-sm text-sky-200 hover:text-sky-100 transition font-bold">{{shortAddr .Contract}}</a>
         <span class="text-white/40">·</span>
@@ -171,136 +43,73 @@
       </div>
     </div>
 
-    <!-- Current listing / price card -->
-    {{with .Listing}}
-    <div class="bg-gradient-to-br from-ink-900 to-ink-900/80 border border-gold-400/30 rounded-2xl p-5 mb-5 glow-gold backdrop-blur">
-      <div class="flex items-center justify-between">
-        <div>
-          <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Current Price</p>
-          <p class="text-4xl font-black text-gold-200 mt-1">{{wei2flr .PriceWei}} <span class="text-lg">FLR</span></p>
-        </div>
-        <div class="w-12 h-12 rounded-xl bg-gold-500/15 flex items-center justify-center border border-gold-400/30">
-          <span class="text-gold-200 text-2xl">⚐</span>
-        </div>
-      </div>
-      <div class="flex items-center gap-3 mt-3 text-xs text-white/40 flex-wrap">
-        <span>Seller <span class="font-mono text-white/80">{{shortAddr .Seller}}</span></span>
-        <span class="text-white/20">·</span>
-        <span>Expires <span class="text-white/80">{{.ExpiresAt.Format "Jan 2, 2006"}}</span></span>
-      </div>
-      <div class="mt-3 pt-3 border-t border-white/10">
-        <p class="text-[11px] text-white/60">Network fee: 1.5% <span class="text-sky-200">(you pay ${wei2flr .PriceWei} FLR)</span>; seller receives <span class="text-gold-200 font-bold">{{wei2flr (netOf .PriceWei)}} FLR (98.5%)</span> after the platform fee.</p>
-      </div>
-    </div>
-    {{end}}
-
-    <!-- Action tab bar — palette: sky=Buy, gold=Offer, sky=List, violet=Auction -->
+    <!-- Tab bar — palette: sky=Buy, gold=Offer, sky=List, violet=Auction -->
     <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 overflow-hidden glow-sky">
       <div class="flex border-b border-white/10 bg-white/[0.02]">
         {{with .Listing}}
         <button @click="action='buy'"
                 :class="action==='buy' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
-                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
-          Buy
-        </button>
+                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Buy</button>
         {{end}}
         <button @click="action='offer'"
                 :class="action==='offer' ? 'text-gold-200 border-gold-300 bg-gold-500/10' : 'text-white/40 border-transparent hover:text-white'"
-                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
-          Offer
-        </button>
+                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Offer</button>
         <button @click="action='list'"
                 :class="action==='list' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
-                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
-          List
-        </button>
+                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">List</button>
         <button @click="action='auction'"
                 :class="action==='auction' ? 'text-violet-200 border-violet-300 bg-violet-500/10' : 'text-white/40 border-transparent hover:text-white'"
-                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
-          Auction
-        </button>
+                class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Auction</button>
       </div>
 
       <div class="p-5">
-        <!-- BUY: large sky CTA + cancel-listing for seller -->
-        {{with .Listing}}
-        <div x-show="action==='buy'" x-cloak x-transition class="space-y-3">
+        <div x-show="action==='buy'" x-cloak class="space-y-3">
+          {{with .Listing}}
           <button class="w-full py-4 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-base transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
                   @click="$store.wallet.buy('{{.Collection}}', '{{.TokenID}}', '{{lower .Seller}}', '{{.PriceWei}}')">
-            <span>Buy Now</span>
-            <span class="text-base">→</span>
-            <span>{{wei2flr .PriceWei}} FLR</span>
+            <span>Buy Now</span><span class="text-base">→</span><span>{{wei2flr .PriceWei}} FLR</span>
           </button>
           <template x-if="isSeller">
             <button class="w-full py-2.5 rounded-xl border border-gold-400/30 hover:bg-gold-500/10 text-gold-200 text-sm font-bold transition"
-                    @click="$store.wallet.cancel('{{.Collection}}', '{{.TokenID}}')">
-              Cancel Listing
-            </button>
+                    @click="$store.wallet.cancel('{{.Collection}}', '{{.TokenID}}')">Cancel Listing</button>
           </template>
-          <div class="bg-sky-500/5 border border-sky-400/20 rounded-xl px-4 py-3">
-            <div class="flex justify-between text-xs mb-1.5">
-              <span class="text-white/40">You pay</span>
-              <span class="text-sky-200 font-extrabold">{{wei2flr .PriceWei}} FLR</span>
-            </div>
-            <div class="flex justify-between text-xs mb-1.5">
-              <span class="text-white/40">Seller net</span>
-              <span class="text-gold-200 font-extrabold">{{wei2flr (netOf .PriceWei)}} FLR (98.5%)</span>
-            </div>
-            <div class="flex justify-between text-xs">
-              <span class="text-white/40">Platform fee</span>
-              <span class="text-white/80 font-extrabold">{{wei2flr (subf .PriceWei (netOf .PriceWei))}} FLR (1.5%)</span>
-            </div>
-          </div>
-          <p class="text-[11px] text-white/40 text-center">Coston2 only — listing cancels are gas-free; settlement needs approval.</p>
+          {{end}}
         </div>
-        {{end}}
 
-        <!-- OFFER: gold CTA → escrow explanation -->
-        <div x-show="action==='offer'" x-cloak x-transition class="space-y-3">
-          <p class="text-xs text-white/60 leading-relaxed">Offers are free — your funds only move when an offer is accepted. Fully refundable until accepted, rejected, or expired (auto-refund).</p>
+        <div x-show="action==='offer'" x-cloak class="space-y-3">
+          <p class="text-xs text-white/60 leading-relaxed">Offers are free — fully refundable until accepted, rejected, or expired (auto-refund).</p>
           <div class="relative">
             <input x-model="offerAmt" type="number" step="0.001" min="0.01" placeholder="0.00"
                    class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-gold-300/50 focus:ring-1 focus:ring-gold-300/20 transition">
             <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
           </div>
           <select x-model="offerDays" class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-gold-300/50">
-            <option value="1">Expires in 1 day</option>
-            <option value="3" selected>Expires in 3 days</option>
-            <option value="7">Expires in 7 days</option>
-            <option value="14">Expires in 14 days (max)</option>
+            <option value="1">Expires in 1 day</option><option value="3">Expires in 3 days</option><option value="7">Expires in 7 days</option><option value="14">Expires in 14 days (max)</option>
           </select>
-          <div x-show="parseFloat(offerAmt) > 0" class="bg-gold-500/5 border border-gold-400/20 rounded-xl px-4 py-2.5">
-            <p class="text-xs text-gold-200">Escrow: <span class="font-extrabold" x-text="parseFloat(offerAmt).toFixed(4) + ' FLR'"></span></p>
-          </div>
           <button class="w-full py-3.5 rounded-xl btn-gold hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-gold shadow-lg shadow-gold-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.makeOffer('{{.Contract}}', '{{.TokenID}}', (parseFloat(offerAmt)*1e18).toString(), Date.now()/1000 + parseInt(offerDays)*86400)">
+                  @click="$store.wallet.makeOffer('{{.Contract}}', '{{.TokenID}}', (parseFloat(offerAmt||0)*1e18).toString(), Date.now()/1000 + parseInt(offerDays||3)*86400)">
             <span class="text-base">⚐</span> Submit Offer
           </button>
         </div>
 
-        <!-- LIST: large sky CTA -->
-        <div x-show="action==='list'" x-cloak x-transition class="space-y-3">
-          <p class="text-xs text-white/60 leading-relaxed">List for free. The platform fee (1.5%) is only taken when a sale settles — you receive <span class="text-gold-200 font-extrabold">98.5%</span> of the sale price.</p>
+        <div x-show="action==='list'" x-cloak class="space-y-3">
+          <p class="text-xs text-white/60 leading-relaxed">List for free. You receive <span class="text-gold-200 font-extrabold">98.5%</span> of the sale price after the 1.5% platform fee.</p>
           <div class="relative">
             <input x-model="listPrice" type="number" step="0.001" min="0.01" placeholder="0.00"
                    class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/20 transition">
             <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
           </div>
           <select x-model="listDays" class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-sky-300/50">
-            <option value="7">7 days</option>
-            <option value="30" selected>30 days</option>
-            <option value="90">90 days (max)</option>
+            <option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.list('{{.Contract}}', '{{.TokenID}}', (parseFloat(listPrice)*1e18).toString(), Date.now()/1000 + parseInt(listDays)*86400)">
-            <span>List for Sale</span>
-            <span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
+                  @click="$store.wallet.list('{{.Contract}}', '{{.TokenID}}', (parseFloat(listPrice||0)*1e18).toString(), Date.now()/1000 + parseInt(listDays||30)*86400)">
+            <span>List for Sale</span><span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
           </button>
         </div>
 
-        <!-- AUCTION: violet CTA + reserve + min increment -->
-        <div x-show="action==='auction'" x-cloak x-transition class="space-y-3">
-          <p class="text-xs text-white/60 leading-relaxed">English auction, max 7 days. Anti-snipe extends by <span class="text-sky-200 font-extrabold">3 minutes</span> on any last-minute bid. Bidding is free; 1.5% fee deducted from seller at settlement.</p>
+        <div x-show="action==='auction'" x-cloak class="space-y-3">
+          <p class="text-xs text-white/60 leading-relaxed">English auction, max 7 days. Anti-snipe <span class="text-sky-200 font-extrabold">+3:00</span>. 1.5% fee from seller at settlement.</p>
           <div class="relative">
             <input x-model="auctionReserve" type="number" step="0.001" min="0.01" placeholder="Reserve price (min 0.01)"
                    class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-300/50 focus:ring-1 focus:ring-violet-300/20 transition">
@@ -312,15 +121,11 @@
             <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
           </div>
           <select x-model="auctionDays" class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white focus:outline-none focus:border-violet-300/50">
-            <option value="1">1 day</option>
-            <option value="3" selected>3 days</option>
-            <option value="7">7 days (max)</option>
+            <option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold text-sm transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0', Date.now()/1000 + parseInt(auctionDays)*86400, 500, auctionMinInc ? (parseFloat(auctionMinInc)*1e18).toString() : '0')">
-            <span>♕</span>
-            <span>Create Auction</span>
-            <span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
+                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0', Date.now()/1000 + parseInt(auctionDays||3)*86400, 500, auctionMinInc ? (parseFloat(auctionMinInc)*1e18).toString() : '0')">
+            <span>♕</span><span>Create Auction</span><span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
           </button>
         </div>
       </div>
@@ -332,35 +137,5 @@
               title="Report this item">⚑ Report</button>
     </div>
   </div>
-</div>
-
-<!-- Offer positions (owner can accept/reject) -->
-{{if .Offers}}
-<div class="mt-10" x-data>
-  <h2 class="text-lg font-extrabold text-white mb-4 flex items-center gap-2">
-    <span class="w-7 h-7 rounded-lg bg-gold-500/15 border border-gold-400/30 flex items-center justify-center text-gold-200">⚐</span>
-    Offers
-    <span class="text-xs text-white/40 font-normal">({{len .Offers}})</span>
-  </h2>
-  <div class="space-y-2.5">
-    {{range .Offers}}
-    <div class="bg-ink-900/80 backdrop-blur border border-white/10 rounded-xl px-5 py-4 flex items-center justify-between gap-4 hover:border-gold-300/40 transition">
-      <div class="min-w-0">
-        <p class="font-mono text-white text-sm font-bold">{{shortAddr .Bidder}}</p>
-        <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2, 15:04"}}</p>
-      </div>
-      <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">FLR</span></span>
-      <div class="flex gap-2 shrink-0">
-        <button class="px-4 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
-                @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
-        <button class="px-4 py-2 rounded-xl border border-white/10 hover:bg-white/5 text-white text-xs font-bold transition"
-                @click="$store.wallet.rejectOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Reject</button>
-      </div>
-    </div>
-    {{end}}
-  </div>
-  <p class="text-xs text-white/40 mt-3">Accepting pays you 98.5% of the offer (1.5% platform fee). Rejecting refunds the bidder's full principal.</p>
-</div>
-{{end}}
 </div>
 {{end}}

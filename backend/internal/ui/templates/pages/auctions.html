@@ -20,10 +20,11 @@
   </div>
 </div>
 
+<!-- Live grid: SSE event OR every 1s while tab visible. -->
 <div id="auctions-grid"
      class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
      hx-get="/partials/auctions"
-     hx-trigger="sse:auction-updated"
+     hx-trigger="sse:auction-updated, every 1s [!document.hidden]"
      hx-swap="innerHTML">
   {{template "partials/auction_cards.html" .}}
 </div>

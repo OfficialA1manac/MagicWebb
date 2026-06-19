@@ -38,7 +38,14 @@
         // Caches the URI, hides the spinner, opens the overlay if not
         // already open, queues renderQr() for the next DOM tick so the
         // target div is actually mounted when we paint the matrix.
+        //
+        // Defense-in-depth gate: refuse to open unless the user has
+        // actually clicked the WalletConnect flow. Wallet.js gates this
+        // path too, but the overlay itself checks the flag so a regression
+        // in wallet.js (or a future caller that dispatches mw-wc-uri
+        // directly) can't pop the QR unprompted.
         this._uriListener = (e) => {
+          if (!window.MW_WC_USER_INITIATED) return;
           const v = (e && e.detail) || '';
           if (typeof v === 'string' && v.startsWith('wc:')) {
             this.uri     = v;
@@ -50,7 +57,9 @@
         // ── mw-wc-connecting ──────────────────────────────────────────────
         // Fires the moment the user clicks 'WalletConnect' in the picker.
         // Shows the spinner (and the modal) so there's never a blank box.
+        // Same gate: only open on user-initiated flows.
         this._connectingListener = () => {
+          if (!window.MW_WC_USER_INITIATED) return;
           this.loading = true;
           this.open    = true;
         };

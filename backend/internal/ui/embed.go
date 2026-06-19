@@ -191,6 +191,11 @@ var funcMap = template.FuncMap{
 // new page-level partial here is the only step required to make it
 // available on every page (it's included from layout.html via
 // {{template "partials/<name>.html" .}}).
+//
+// 5-color layout breaks into logical slices — grid fragments (cards) are
+// reusable across pages; live-region wrappers (token_live / etc.) are
+// page-mirror partials so a per-page detail panel can re-render on SSE
+// OR every-1s polling via htmx without the layout roundtrip.
 var partialPaths = []string{
 	"partials/listing_cards.html",
 	"partials/auction_cards.html",
@@ -198,6 +203,13 @@ var partialPaths = []string{
 	"partials/nft_picker.html",
 	"partials/action_modal.html",
 	"partials/wc_qr_overlay.html",
+	// Live-region partials — each mirrors the (re-rendered) inner content of
+	// a detail page so htmx can swap *only* the dynamic region every 1s
+	// without re-rendering navbar / footer / wallet picker / WC overlay.
+	"partials/token_live.html",
+	"partials/auction_live.html",
+	"partials/offers_live.html",
+	"partials/profile_live.html",
 }
 
 var pagePaths = []string{

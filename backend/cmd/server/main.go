@@ -283,10 +283,17 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/docs", uiDocsIndex())
 	app.Get("/docs/:slug", uiDoc())
 
-	// HTMX partials (return HTML fragments for hx-get)
+	// HTMX partials (return HTML fragments for hx-get). New per-page live
+	// partials render the same data shape as their page handler so htmx
+	// can swap them into `[data-live]` outerHTML every 1s OR on the SSE
+	// event types each page subscribes to.
 	app.Get("/partials/listings", partialListings(q))
 	app.Get("/partials/auctions", partialAuctions(q))
 	app.Get("/partials/activity", partialActivity(q))
+	app.Get("/partials/token/:addr/:id", partialToken(q))
+	app.Get("/partials/auction/:id", partialAuctionDetail(q))
+	app.Get("/partials/offers", partialOffers(q))
+	app.Get("/partials/profile/:addr", partialProfile(q))
 
 	// Server-time (used by auction countdown)
 	app.Get("/api/v1/server-time", func(c *fiber.Ctx) error {

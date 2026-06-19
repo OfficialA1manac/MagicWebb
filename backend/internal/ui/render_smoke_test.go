@@ -60,22 +60,24 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-		// Self-hosted assets — needles relaxed from `...<file>" defer` to
-		// the bare filename because every /static/* URL is now served
-		// with a `?v=N` cache-buster query string (forces browsers to
-		// re-fetch on shell-bump deploys, defeating the 1-hour
-		// cache-control: max-age=3600 that was holding users on a stale
-		// pre-fix wallet.js — see backend/cmd/server/ui.go MaxAge).
-		{"tailwind-static-link", "tailwind.css"},
-		{"wallet-js-defer",      "wallet.js"},
-		{"qrcode-min-js-defer",  "qrcode.min.js"},
-		{"ethers-umd-defer",     "ethers.umd.min.js"},
-		// Cache-buster guard: every static asset must carry `?v=`,
-		// otherwise a deploy that ships new wallet.js bytes but forgets
-		// to bump the version leaves returning users on the stale
-		// 1-hour browser cache and the WC overlay auto-open bug
-		// regresses silently.
-		{"static-asset-cache-buster", "?v="},
+		// Self-hosted assets served with `?v=4` cache-buster — bumping
+		// from v3 forces returning browsers to re-fetch wallet.js so the
+		// MW_WC_USER_INITIATED silent-overlay gate lands on users that
+		// loaded the previous shell. Mounted under /static/* with a
+		// 60-second Cache-Control: max-age=60 (see mountStatic) so the
+		// baseline freshness policy isn't solely reliant on the bump.
+		{"tailwind-static-link", "tailwind.css?v=4"},
+		{"wallet-js-defer",      "wallet.js?v=4"},
+		{"qrcode-min-js-defer",  "qrcode.min.js?v=4"},
+		{"ethers-umd-defer",     "ethers.umd.min.js?v=4"},
+		// 1s polling guard: every live grid AND the activity ticker
+		// must carry `every 1s [!document.hidden]` so the listing /
+		// auction / home surfaces refresh at most once per second AND
+		// stop polling when the tab is hidden (otherwise a long-lived
+		// background tab hammers the DB).
+		{"home-activity-1s-poll",   "activity-ticker"},
+		{"home-listings-grid-poll", "id=\"listings-grid\""},
+		{"every-1s-condition",      "every 1s [!document.hidden]"},
 		// WC v2 wiring: partial body, picker connect call, persistent navbar reopen chip
 		{"wc-qr-overlay-renders", "Scan to pair"},
 		{"WC-connect-call",       "store.wallet.connect('walletconnect')"},

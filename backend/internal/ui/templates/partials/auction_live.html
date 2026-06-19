@@ -1,0 +1,80 @@
+{{define "partials/auction_live.html"}}
+<!-- Pure data region for /auction/:id. NO x-data — auction page owns
+     the countdown + bid amount x-data, so they persist across the
+     innerHTML htmx swap. -->
+{{with .Auction}}
+
+<!-- Image -->
+<div class="bg-ink-900 rounded-2xl overflow-hidden border border-white/10 glow-violet">
+  {{if .ImageURI}}
+  <div class="relative group">
+    <img src="{{mediaURL .ImageURI}}" alt="#{{.TokenID}}" class="w-full aspect-square object-cover"
+         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
+    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden shimmer">🖼</div>
+    <div class="absolute top-4 left-4 flex flex-col gap-1.5">
+      <div class="px-2.5 py-1 rounded-xl bg-ink-1000/85 backdrop-blur border border-violet-300/40 glow-violet flex items-center gap-1.5">
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-300 animate-pulse"></span>
+        <span class="text-[10px] font-extrabold text-violet-200 uppercase tracking-wider">Live Auction</span>
+      </div>
+      {{if .Standard}}
+      <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white backdrop-blur">{{.Standard}}</span>
+      {{end}}
+    </div>
+  </div>
+  {{else}}
+  <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>
+  {{end}}
+</div>
+
+<!-- Top Bidders (cumulative) -->
+{{if $.EffectiveBids}}
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 mt-6 border border-white/10">
+  <h2 class="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
+    <span class="w-7 h-7 rounded-lg bg-violet-500/15 border border-violet-500/30 flex items-center justify-center text-violet-200">♕</span>
+    Top Bidders <span class="text-xs text-white/40 ml-1 font-normal">(cumulative)</span>
+  </h2>
+  <div class="space-y-2 max-h-72 overflow-y-auto">
+    {{range $i, $b := $.EffectiveBids}}
+    <div class="flex justify-between items-center text-xs py-2 px-3 rounded-xl {{if eq $i 0}}bg-gold-500/10 border border-gold-400/30 glow-gold{{else}}bg-white/[0.02] border border-white/5{{end}}">
+      <span class="font-mono {{if eq $i 0}}text-gold-200 font-bold{{else}}text-white/60{{end}}">
+        {{shortAddr $b.Bidder}}{{if eq $i 0}} 👑{{end}}
+      </span>
+      <span class="text-white/40">{{$b.BidCount}} bid{{if ne $b.BidCount 1}}s{{end}}</span>
+      <span class="{{if eq $i 0}}text-gold-200 font-extrabold{{else}}text-white/80{{end}}">
+        {{wei2flr $b.EffectiveWei}} <span class="text-[9px] text-white/40 font-bold uppercase tracking-wider">FLR</span>
+      </span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<!-- Bid History (individual) -->
+{{if $.Bids}}
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 mt-6 border border-white/10">
+  <h2 class="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
+    <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">♟</span>
+    Bid History <span class="text-xs text-white/40 ml-1 font-normal">(individual)</span>
+  </h2>
+  <div class="space-y-2 max-h-48 overflow-y-auto">
+    {{range $.Bids}}
+    <div class="flex justify-between text-xs py-2 px-3 rounded-lg bg-white/[0.02] border border-white/5">
+      <span class="font-mono text-white/60">{{shortAddr .Bidder}}</span>
+      <span class="text-gold-200 font-extrabold">{{wei2flr .AmountWei}} <span class="text-[9px] text-gold-300/60 uppercase tracking-wider">FLR</span></span>
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<!-- Live summary card (just the read-only bits) -->
+<div class="bg-gradient-to-br from-ink-900 to-ink-900/80 border border-violet-400/30 rounded-2xl p-5 mt-6 glow-violet">
+  <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold">Top bid</p>
+  <p class="text-3xl font-black text-gold-200 mt-1">{{wei2flr .HighestBidWei}} <span class="text-base">FLR</span></p>
+  <div class="space-y-2 mt-3">
+    <div class="flex justify-between text-sm"><span class="text-white/40">Reserve</span><span class="text-white/80">{{wei2flr .ReservePriceWei}} FLR</span></div>
+    {{if .HighestBidder}}<div class="flex justify-between text-sm"><span class="text-white/40">Leading</span><span class="text-white/80 font-mono">{{shortAddr .HighestBidder}}</span></div>{{end}}
+  </div>
+</div>
+{{end}}
+{{end}}
