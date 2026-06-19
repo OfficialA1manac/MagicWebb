@@ -22,17 +22,15 @@
       return h > 0 ? h+'h '+m+'m '+s+'s' : m+'m '+s+'s';
     },
     // The +1 wei floor: bid must clear max(prev top bid, reserve if no
-    // leader yet, highest active offer) by exactly 1 wei. Until the
-    // v8 AuctionHouse is deployed the on-chain rule still requires a
-    // 5% increment over the current leader (or reserve if no leader);
-    // we ALSO enforce the 5% rule here so the user's wallet isn't
-    // prompted for a doomed tx on Coston2 mainnet until the contract
-    // is redeployed. Once the new AuctionHouse is live the `strict`
-    // flag flips and only +1 wei is required.
+    // leader yet, highest active offer) by exactly 1 wei. The percent
+    // floor (and +1 on top) is read from the auction's server-side
+    // MinIncrementBps so the UI rule matches the on-chain contract rule
+    // for THIS auction: legacy auctions (MinIncrementBps == 500) enforce
+    // 5% + 1 wei; post-v8 AuctionHouse auctions with MinIncrementBps == 0
+    // enforce ONLY the +1 wei law. This flips automatically the moment
+    // the user redeploys the contracts and starts creating new auctions.
     get minIncPctBps() {
-      // 500 bps = 5%. v8 AuctionHouse will let the seller opt out of
-      // percent increments; until then 5% is the floor on-chain.
-      return 500n;
+      return BigInt({{.MinIncrementBps}} || 0);
     },
     get leaderOrReserveWei() {
       const prev = BigInt(this.prevBidWei || '0');
@@ -43,21 +41,42 @@
       return base + 1n;
     },
     get minBidWei() {
-      const lou = this.leaderOrReserveWei;
       const prev = BigInt(this.prevBidWei || '0');
-      if (prev === 0n) return lou;        // no leader: just clear reserve/offer+1
-      // Strict 5% floor: 5% * leaderTotal (with a 1 wei floor to defeat
-      // the no-leader branch clamping). The +1 law kicks in once the v8
-      // AuctionHouse is redeployed; until then this is the on-chain rule.
-      const pct = (prev * this.minIncPctBps + 9999n) / 10000n;
+      const reserve = BigInt(this.reserveWei || '0');
+      const offer = BigInt(this.highestOfferWei || '0');
+      const hasLeader = prev > 0n;
+      const base = hasLeader ? (prev > offer ? prev : offer) : (reserve > offer ? reserve : offer);
+      const lou = base + 1n;
+      if (!hasLeader) return lou;        // no leader: just clear reserve/offer+1
+      // percent floor with ceiling rounding (Solidity rounds DOWN on the
+      // contract side so we MUST round UP here — `+ 9999n` is the cheap
+      // trick for a 4-decimal BigInt ceil without importing math).
+      const bps = this.minIncPctBps;
+      if (bps === 0n) return lou;        // v8 AuctionHouse path: +1 wei only
+      const pct = (prev * bps + 9999n) / 10000n;
       const pctFloor = pct < 1n ? 1n : pct;
       return lou > (prev + pctFloor) ? lou : prev + pctFloor;
     },
+    // parseBidWei converts the human input string ("1.234") to a BigInt
+    // wei value WITHOUT losing precision through JS Number. Splits on
+    // '.', pads the fractional part to 18 digits, and sums the two
+    // halves in BigInt arithmetic — avoids the `0.3*1e18 ==
+    // 299999999999999980` rounding that produces off-by-a-few-wei bids.
+    parseBidWei(s) {
+      if (!s) return 0n;
+      const str = String(s).trim();
+      if (!str || !/^[0-9]*\.?[0-9]*$/.test(str)) return 0n;
+      const [whole = '0', frac = '0'] = str.split('.');
+      const wholeBi = BigInt(whole === '' ? '0' : whole);
+      const fracPadded = (frac + '0'.repeat(18)).slice(0, 18);
+      const fracBi = BigInt(fracPadded === '' ? '0' : fracPadded);
+      return wholeBi * 1000000000000000000n + fracBi;
+    },
     get canBid() {
       if (!this.bidAmt) return false;
-      const v = (parseFloat(this.bidAmt) * 1e18);
-      if (!Number.isFinite(v) || v <= 0) return false;
-      return BigInt(Math.floor(v)) >= this.minBidWei;
+      const v = this.parseBidWei(this.bidAmt);
+      if (v <= 0n) return false;
+      return v >= this.minBidWei;
     },
     sellerAddr: '{{lower .Seller}}',
     get isSeller() { return this.sellerAddr && this.sellerAddr !== '' && $store.wallet.address === this.sellerAddr; },
@@ -77,7 +96,7 @@
         const rows = await res.json();
         const max = (rows || []).reduce((m, r) => {
           try {
-            const v = BigInt(r.amount_wei || r.principal_wei || '0');
+            const v = BigInt(r.amount_wei || '0');
             return v > m ? v : m;
           } catch (_) { return m; }
         }, 0n);
@@ -97,11 +116,14 @@
     },
     async placeBid() {
       if (!this.canBid) {
-        toast('Bid must be at least ' + this.fmtWei(this.minBidWei) + ' FLR (current floor: 5% over the leader, or reserve if no leader, whichever is higher).', 'error');
+        const isLegacy5pct = BigInt({{.MinIncrementBps}} || 0) > 0n;
+        const why = isLegacy5pct
+          ? ('current floor: 5% over the leader + 1 wei, or reserve if no leader, whichever is higher')
+          : ('current floor: +1 wei over the leader, or reserve if no leader');
+        toast('Bid must be at least ' + this.fmtWei(this.minBidWei) + ' FLR (' + why + ').', 'error');
         return;
       }
-      const wei = (parseFloat(this.bidAmt) * 1e18).toString();
-      $store.wallet.bid({{.AuctionID}}, wei, {{.EndsAt.Unix}});
+      $store.wallet.bid({{.AuctionID}}, this.parseBidWei(this.bidAmt).toString(), {{.EndsAt.Unix}});
     },
     init() {
       setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000);
@@ -116,14 +138,18 @@
         this.refreshHighestOffer();
         this.refreshPrevBid();
       }, 3000);
-      // SSE: refresh on every auction-updated event too. Belt vs. the
-      // 3s poll for users clicking fast.
+      // SSE: refresh on BOTH auction-updated (bid/extend events) AND
+      // offer-updated (new offer on the same NFT). The OfferBook contract
+      // emits offer-updated, not auction-updated, so without this the
+      // offer floor would lag by up to 3s on a new bid landing.
       try {
         const es = new EventSource('/events');
-        es.addEventListener('auction-updated', () => {
-          this.refreshHighestOffer();
-          this.refreshPrevBid();
-        });
+        ['auction-updated','offer-updated'].forEach((evt) =>
+          es.addEventListener(evt, () => {
+            this.refreshHighestOffer();
+            this.refreshPrevBid();
+          })
+        );
       } catch (_) { /* SSE optional; polls above still run */ }
     }
   }" class="grid lg:grid-cols-5 gap-8">
@@ -173,7 +199,7 @@
                 class="px-5 py-3 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold text-sm transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97]">Bid</button>
       </div>
       <p class="text-xs text-white/40 mt-2.5 leading-relaxed">
-        Minimum bid is the higher of the previous top bid (with a <span class="text-violet-200 font-extrabold">5% increment</span> floor on Coston2 until the v8 AuctionHouse redeploy), the seller's reserve, or the highest active offer. <span class="text-violet-200 font-extrabold">+1 wei</span> only kicks in after the contract is redeployed. Single input, single button.
+        Minimum bid is the higher of the previous top bid (with a <span class="text-violet-200 font-extrabold">{{if eq .MinIncrementBps 0}}+1 wei{{else}}{{printf "%.2f" (mulf .MinIncrementBps 0.01)}}% + 1 wei{{end}}</span> floor), the seller's reserve, or the highest active offer. Single input, single button.
       </p>
       <p class="text-[11px] text-white/60 mt-1.5 leading-relaxed">
         Current floor: <span class="text-violet-200 font-mono font-bold" x-text="fmtWei(minBidWei) + ' FLR'"></span>
