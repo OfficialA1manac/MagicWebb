@@ -60,11 +60,22 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-		// Self-hosted assets
-		{"tailwind-static-link", "href=\"/static/tailwind.css\""},
-		{"wallet-js-defer",      "src=\"/static/wallet.js\" defer"},
-		{"qrcode-min-js-defer",  "src=\"/static/qrcode.min.js\" defer"},
-		{"ethers-umd-defer",     "src=\"/static/ethers.umd.min.js\" defer"},
+		// Self-hosted assets — needles relaxed from `...<file>" defer` to
+		// the bare filename because every /static/* URL is now served
+		// with a `?v=N` cache-buster query string (forces browsers to
+		// re-fetch on shell-bump deploys, defeating the 1-hour
+		// cache-control: max-age=3600 that was holding users on a stale
+		// pre-fix wallet.js — see backend/cmd/server/ui.go MaxAge).
+		{"tailwind-static-link", "tailwind.css"},
+		{"wallet-js-defer",      "wallet.js"},
+		{"qrcode-min-js-defer",  "qrcode.min.js"},
+		{"ethers-umd-defer",     "ethers.umd.min.js"},
+		// Cache-buster guard: every static asset must carry `?v=`,
+		// otherwise a deploy that ships new wallet.js bytes but forgets
+		// to bump the version leaves returning users on the stale
+		// 1-hour browser cache and the WC overlay auto-open bug
+		// regresses silently.
+		{"static-asset-cache-buster", "?v="},
 		// WC v2 wiring: partial body, picker connect call, persistent navbar reopen chip
 		{"wc-qr-overlay-renders", "Scan to pair"},
 		{"WC-connect-call",       "store.wallet.connect('walletconnect')"},
