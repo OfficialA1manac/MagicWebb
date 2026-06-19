@@ -134,11 +134,12 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 		ListedAt:   time.Unix(int64(blockTime), 0),
 		TxHash:     l.TxHash.Hex(),
 	}
-	if err := h.q.UpsertListing(ctx, r); err != nil {
-		return fmt.Errorf("onListed upsert: %w", err)
-	}
-	if err := h.q.EnsureListingSellerOwnership(ctx, collection, tokenID, seller, standard, amount); err != nil {
-		return fmt.Errorf("onListed ownership: %w", err)
+	// Single-transaction write: listings row + seller ownership row must be
+	// both live or both rolled back — a crash between them would leave a
+	// listing visible to the front-end whose preflight cannot find the
+	// seller, producing a 'mystery 500' on the next /token/:addr/:id hit.
+	if err := h.q.UpsertListingAndOwnership(ctx, r); err != nil {
+		return fmt.Errorf("onListed: %w", err)
 	}
 	h.pub("listing-updated", map[string]any{"event": "Listed", "data": r})
 	return nil
@@ -429,13 +430,14 @@ func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime u
 	feeWei := bigStr(chunk(l.Data, 2)) // 1.5% deducted from the seller on acceptance
 	occurredAt := time.Unix(int64(blockTime), 0)
 
-	if err := h.q.SetOfferStatus(ctx, collection, tokenID, bidder, "accepted"); err != nil {
-		return fmt.Errorf("onOfferAccepted status: %w", err)
-	}
-	// Sale fee is charged at acceptance, deducted from the seller's proceeds.
-	if err := h.q.InsertSale(ctx, collection, tokenID, seller, bidder,
+	// Single-transaction write: the offer's status flip MUST land in the
+	// same tx as the sale row — a crash between them would either pin the
+	// bidder's escrow on a 'pending' offer they can never satisfy again, or
+	// record a sale against an offer that never left the pending state.
+	if err := h.q.AcceptOfferAndRecordSale(ctx,
+		collection, tokenID, seller, bidder,
 		principal, feeWei, "0", l.TxHash.Hex(), l.BlockNumber, occurredAt); err != nil {
-		return fmt.Errorf("onOfferAccepted sale: %w", err)
+		return fmt.Errorf("onOfferAccepted: %w", err)
 	}
 	h.notify(ctx, bidder, "offer_accepted", "Your offer was accepted",
 		principal+" wei", "/token/"+collection+"/"+tokenID)

@@ -1,6 +1,12 @@
 {{define "partials/auction_cards.html"}}
 {{$now := .Now}}
 {{range .Auctions}}
+<!-- Single auction card. 5-color palette:
+       image -> black bg / white text fallback
+       top bid -> GOLD gradient
+       live / pulse -> SKY BLUE for live, white-on-glass for time chip
+       anti-snipe warning -> SKY with explicit +3:00 label
+       leading bidder -> mono font, white -->
 <a href="/auction/{{.AuctionID}}"
    x-data="{
      endsAt: {{.EndsAt.Unix}},
@@ -8,33 +14,80 @@
      get remaining() {
        const diff = this.endsAt - this.now;
        if (diff <= 0) return 'Ended';
-       const h = Math.floor(diff/3600);
+       const d = Math.floor(diff/86400);
+       const h = Math.floor((diff%86400)/3600);
        const m = Math.floor((diff%3600)/60);
        const s = diff%60;
+       if (d > 0) return d+'d '+h+'h '+m+'m';
        return h > 0 ? h+'h '+m+'m '+s+'s' : m+'m '+s+'s';
      },
+     get inAntiSnipe() { return this.endsAt - this.now < 180 && this.endsAt - this.now > 0; },
      init() { setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000); }
    }"
-   class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition block group">
-  <div class="aspect-square overflow-hidden bg-neutral-800">
+   class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10
+          hover:border-violet-300/50 hover:shadow-violet-glow transition-all duration-300 hover:-translate-y-1 will-change-transform">
+  <div class="relative aspect-square overflow-hidden bg-ink-800">
     {{if .ImageURI}}
     <img src="{{mediaURL .ImageURI}}" alt="#{{.TokenID}}"
-         class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
+         loading="lazy"
+         class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
          onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
-    <div class="w-full h-full hidden flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">NFT</div>
+    <div class="hidden absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
     {{else}}
-    <div class="w-full h-full flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
-      NFT
-    </div>
+    <div class="absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
     {{end}}
+
+    <!-- Top-left: live badge (violet pulse when live) + standard chip -->
+    <div class="absolute top-3 left-3 flex flex-col gap-1.5">
+      <div class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border border-violet-300/40 glow-violet"
+           x-show="remaining !== 'Ended'">
+        <span class="w-1.5 h-1.5 rounded-full bg-violet-300 animate-pulse step-current"></span>
+        <span class="text-[10px] font-extrabold text-violet-200 uppercase tracking-wider">Live</span>
+      </div>
+      <div x-show="remaining === 'Ended'"
+           class="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border border-white/20">
+        <span class="text-[10px] font-extrabold text-white uppercase tracking-wider">Ended</span>
+      </div>
+      {{if .Standard}}
+      <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white backdrop-blur" title="Token standard">{{.Standard}}</span>
+      {{end}}
+    </div>
+
+    <!-- Top-right: anti-snipe warning flashes only in the last 3 minutes -->
+    <div class="absolute top-3 right-3 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border border-sky-300/40 glow-sky"
+         x-show="inAntiSnipe">
+      <span class="text-[10px] font-extrabold text-sky-200">⚡ +3:00</span>
+    </div>
+
+    <!-- Bottom-left: countdown -->
+    <div class="absolute bottom-3 left-3 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border"
+         :class="remaining === 'Ended' ? 'border-gold-300/40' : 'border-sky-300/40'">
+      <span class="text-[10px] font-extrabold"
+            :class="remaining === 'Ended' ? 'text-gold-200' : 'text-sky-200'"
+            x-text="remaining"></span>
+    </div>
+
+    <!-- Bottom-right: top bid (gold gradient — money, loudest element) -->
+    <div class="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border border-gold-300/40 glow-gold">
+      <span class="text-[10px] font-extrabold text-gold-200/80 uppercase tracking-wider">Bid</span>
+      <span class="text-xs font-black text-gold-200 ml-1.5">{{wei2flr .HighestBidWei}}</span>
+      <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">FLR</span>
+    </div>
   </div>
-  <div class="p-3">
-    <p class="text-xs text-neutral-500 truncate font-mono">{{shortAddr .Collection}} #{{.TokenID}}</p>
-    <p class="text-emerald-400 font-bold text-sm mt-1">{{wei2eth .HighestBidWei}} FLR</p>
-    <p class="text-xs text-neutral-500 mt-0.5">Reserve: {{wei2eth .ReservePriceWei}} FLR</p>
-    <p class="text-xs font-semibold mt-1"
-       :class="remaining === 'Ended' ? 'text-red-400' : 'text-yellow-400'"
-       x-text="remaining"></p>
+
+  <!-- Body: title + meta -->
+  <div class="p-4 border-t border-white/5 bg-ink-900">
+    <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}} #{{.TokenID}}</p>
+    {{if .Name}}<p class="text-sm font-extrabold text-white mt-1 truncate">{{.Name}}</p>{{end}}
+    <div class="flex items-center justify-between mt-2.5">
+      <div class="flex items-center gap-1.5">
+        <span class="text-[10px] text-white/40 uppercase tracking-wider font-bold">Auction</span>
+        <span class="text-[10px] font-mono text-white/80">#{{.AuctionID}}</span>
+      </div>
+      {{if .HighestBidder}}
+      <span class="text-[10px] font-mono font-bold text-violet-200 px-1.5 py-0.5 rounded bg-violet-500/10 border border-violet-400/20">{{shortAddr .HighestBidder}}</span>
+      {{end}}
+    </div>
   </div>
 </a>
 {{end}}

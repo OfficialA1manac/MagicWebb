@@ -26,8 +26,36 @@ func NewPg(pool *pgxpool.Pool) *PgStore {
 	return s
 }
 
+// SetIfFree stores nonce for address ONLY when no live (unexpired) nonce is
+// already in place. Returns true on insert, false when a live nonce for
+// this address already exists. This replaces the previous upsert that let
+// any caller overwrite a real user's pending SIWE nonce — which was a
+// trivial login DoS.
+func (s *PgStore) SetIfFree(address, nonce string, ttl time.Duration) (ok bool) {
+	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)
+	defer cancel()
+	err := s.pool.QueryRow(ctx,
+		`INSERT INTO siwe_nonces(address, nonce, expires_at) VALUES($1,$2,$3)
+		 ON CONFLICT(address) DO NOTHING
+		 RETURNING true`,
+		address, nonce, time.Now().Add(ttl),
+	).Scan(new(bool))
+	if err != nil {
+		if !errors.Is(err, pgx.ErrNoRows) {
+			log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free failed")
+		}
+		return false
+	}
+	return true
+}
+
 // Set upserts the nonce for an address (latest issued nonce wins, per the
 // in-memory store's overwrite semantics).
+//
+// Deprecated: callers that need SIWE issue should use SetIfFree, which
+// prevents an attacker from clobbering a real user's pending nonce. Set is
+// retained for the in-memory store shim and for tests that explicitly
+// exercise the overwrite path.
 func (s *PgStore) Set(address, nonce string, ttl time.Duration) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)
 	defer cancel()

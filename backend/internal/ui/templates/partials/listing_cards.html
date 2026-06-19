@@ -1,30 +1,74 @@
 {{define "partials/listing_cards.html"}}
 {{range .Listings}}
+<!-- Single listing card. 5-color palette allocation per element:
+       image -> black bg / white text fallback
+       price badge -> GOLD gradient (money)
+       verified badge -> PURPLE/VIOLET
+       live indicator -> SKY BLUE
+       standard pill -> muted white-on-glass (informational)
+       traits peek -> PURPLE chip (categorical metadata) -->
 <a href="/token/{{.Collection}}/{{.TokenID}}"
-   class="bg-neutral-900 rounded-xl overflow-hidden hover:bg-neutral-800 transition group block" x-data>
-  <div class="aspect-square overflow-hidden bg-neutral-800">
+   class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10
+          hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300 hover:-translate-y-1 will-change-transform">
+  <div class="relative aspect-square overflow-hidden bg-ink-800">
     {{if .ImageURI}}
-    <img src="{{mediaURL .ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
-         class="w-full h-full object-cover group-hover:scale-105 transition duration-300"
-         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
-    <div class="w-full h-full hidden flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">NFT</div>
+    <img src="{{mediaURL .ImageURI}}"
+         alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
+         loading="lazy"
+         class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
+         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');this.nextElementSibling.nextElementSibling.classList.remove('hidden')">
+    <div class="hidden absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
+    <div class="hidden absolute inset-0 flex items-end p-3">
+      <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
+        ⏳ Image retrying — proxied in the meantime.
+        <button onclick="event.preventDefault();event.stopPropagation();location.reload()" class="ml-2 underline text-sky-200 hover:text-white">refresh</button>
+      </div>
+    </div>
     {{else}}
-    <div class="w-full h-full flex items-center justify-center text-neutral-600 text-xs group-hover:bg-neutral-700 transition">
-      NFT
+    <div class="absolute inset-0 flex flex-col items-center justify-center text-white/40">
+      <div class="text-5xl shimmer">🖼</div>
+      <div class="text-[11px] mt-2 text-white/40">loading image…</div>
     </div>
     {{end}}
+
+    <!-- Top-left badges: verified (violet/purple) + standard (white-on-glass) -->
+    <div class="absolute top-3 left-3 flex flex-col gap-1.5">
+      {{if .CollectionVerified}}
+      <div class="w-7 h-7 rounded-full bg-violet-500/20 border border-violet-300/40 flex items-center justify-center backdrop-blur glow-violet" title="Verified collection">
+        <svg class="w-3.5 h-3.5 text-violet-200" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+      </div>
+      {{end}}
+      {{if .Standard}}
+      <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white backdrop-blur" title="Token standard">{{.Standard}}</span>
+      {{end}}
+    </div>
+
+    <!-- Top-right: price (gold gradient) — the loudest element on the card. -->
+    <div class="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-ink-1000/70 backdrop-blur border border-gold-300/40 glow-gold">
+      <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>
+      <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">FLR</span>
+    </div>
+
+    <!-- Bottom-right (live countdown for auctions only — listings have no expiry countdown but we'll surface short freshness) -->
+    <div class="absolute bottom-3 right-3 px-2 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-sky-300/30 text-[9px] font-bold text-sky-200 uppercase tracking-wider">
+      Listed
+    </div>
   </div>
-  <div class="p-3">
-    <p class="text-xs text-neutral-500 truncate font-mono">
-      {{shortAddr .Collection}}{{if .CollectionVerified}} <span class="text-emerald-400" title="Verified collection">✓</span>{{end}}
-    </p>
-    <p class="text-sm font-medium text-white mt-0.5">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
-    <p class="text-emerald-400 font-bold text-sm mt-1">{{wei2eth .PriceWei}} FLR</p>
-    <button
-      class="mt-2 w-full py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-xs font-bold transition"
-      @click.prevent="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{.Seller}}', price: '{{.PriceWei}}'})">
-      Buy Now
-    </button>
+
+  <!-- Card body: title + meta row -->
+  <div class="p-4 border-t border-white/5 bg-ink-900">
+    <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
+    <p class="text-sm font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
+    <div class="flex flex-wrap gap-1 mt-2 min-h-[14px]">
+    </div>
+    <div class="flex items-center justify-between mt-3">
+      <span class="text-[10px] text-white/40 font-mono font-bold">{{if .TotalSupply}}{{shortNumber .TotalSupply}} minted{{else}}&nbsp;{{end}}</span>
+      <button
+        class="px-4 py-1.5 rounded-lg btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.96]"
+        @click.prevent.stop="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{.Seller}}', price: '{{.PriceWei}}'})">
+        Buy
+      </button>
+    </div>
   </div>
 </a>
 {{end}}

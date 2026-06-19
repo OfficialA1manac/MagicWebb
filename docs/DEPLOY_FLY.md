@@ -27,7 +27,7 @@ addresses, RPC, `INDEX_FROM_BLOCK`). Set the rest:
 
 ```bash
 fly secrets set \
-  POSTGRES_URL='<Supabase pooler DSN (port 6543, sslmode=require)>' \
+  POSTGRES_URL='<Supabase direct DSN (port 5432, sslmode=require)>' \
   JWT_SECRET="$(openssl rand -hex 32)" \
   KEEPER_KEY='<keeper private key from backend/.env.keeper>'
 # optional:

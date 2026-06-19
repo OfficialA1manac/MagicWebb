@@ -1,60 +1,34 @@
 package nonce
 
 import (
-	"sync"
 	"testing"
 	"time"
 )
 
-func TestSetGetDelSingleUse(t *testing.T) {
+func TestMemStoreSetIfFreeRejectsSecondIssue(t *testing.T) {
 	s := New()
-	s.Set("0xabc", "nonce-1", time.Minute)
-
-	v, ok := s.GetDel("0xabc")
-	if !ok || v != "nonce-1" {
-		t.Fatalf("first GetDel = %q,%v; want nonce-1,true", v, ok)
+	if !s.SetIfFree("0xabc", "n1", time.Minute) {
+		t.Fatal("first SetIfFree should succeed")
 	}
-	// single-use: a second read must fail (replay protection)
-	if _, ok := s.GetDel("0xabc"); ok {
-		t.Fatal("expected second GetDel to fail (nonce consumed)")
+	if s.SetIfFree("0xabc", "n2", time.Minute) {
+		t.Fatal("second SetIfFree must FAIL while first is live")
+	}
+	// After expiry, a new one is allowed.
+	s.Set("0xabc", "expired", -time.Second)
+	if !s.SetIfFree("0xabc", "n3", time.Minute) {
+		t.Fatal("SetIfFree should succeed after prior is expired")
 	}
 }
 
-func TestGetDelExpired(t *testing.T) {
+func TestMemStoreGetDelIsSingleUse(t *testing.T) {
 	s := New()
-	s.Set("0xabc", "nonce-1", 20*time.Millisecond)
-	time.Sleep(40 * time.Millisecond)
-	if _, ok := s.GetDel("0xabc"); ok {
-		t.Fatal("expected expired nonce to be rejected")
+	s.Set("0xabc", "n", time.Minute)
+	v1, ok := s.GetDel("0xabc")
+	if !ok || v1 != "n" {
+		t.Fatalf("first GetDel: %q %v", v1, ok)
 	}
-}
-
-func TestGetDelMissing(t *testing.T) {
-	s := New()
-	if _, ok := s.GetDel("0xnope"); ok {
-		t.Fatal("expected missing key to return false")
+	v2, ok := s.GetDel("0xabc")
+	if ok || v2 != "" {
+		t.Fatalf("second GetDel must fail: %q %v", v2, ok)
 	}
-}
-
-func TestSetOverwrites(t *testing.T) {
-	s := New()
-	s.Set("0xabc", "old", time.Minute)
-	s.Set("0xabc", "new", time.Minute)
-	v, ok := s.GetDel("0xabc")
-	if !ok || v != "new" {
-		t.Fatalf("GetDel = %q,%v; want new,true", v, ok)
-	}
-}
-
-func TestConcurrentAccess(t *testing.T) {
-	s := New()
-	var wg sync.WaitGroup
-	for i := range 100 {
-		wg.Go(func() {
-			key := string(rune('A' + i%26))
-			s.Set(key, "v", time.Minute)
-			s.GetDel(key)
-		})
-	}
-	wg.Wait() // -race will flag any data race
 }

@@ -125,15 +125,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 		if imageURI == "" {
 			imageURI = imgResolved
 			log.Warn().Str("coll", t.Collection).Str("token", t.TokenID).Str("src", imgResolved).
-				Msg("metadata: image not self-hosted at ingest; using upstream URI")
-			// SECURITY-FIXME: this keeps a render-time IPFS dependency for any
-			// token ingested during an IPFS outage (the user's "no IPFS"
-			// invariant is broken until the worker below lands). The render
-			// layer still hits mediaProxy → FetchBytes → upstream on every
-			// page load. Wire a slow-path retry worker (e.g. 60-minute
-			// cadence) that re-attempts imagestore.Put for tokens whose
-			// image_uri is still an http(s) URL, then writes the local path.
-			// Without it the "no IPFS" goal is best-effort, not structural.
+				Msg("metadata: image not self-hosted at ingest; will retry via slow-path worker")
 		}
 	}
 
@@ -193,6 +185,76 @@ func imageFromMeta(m rawMeta) string {
 		return strings.TrimSpace(obj.URL)
 	}
 	return ""
+}
+
+// ── Slow-path image retry worker ───────────────────────────────────────────────
+
+// runImageRetryWorker periodically re-attempts self-hosting images for tokens
+// whose image_uri is still an upstream http(s) URL (self-hosting failed during
+// ingest). Runs on a 60-minute cadence — these are not time-critical and a
+// failed gateway will be retried indefinitely until it succeeds.
+func (r *Runner) runImageRetryWorker(ctx context.Context) {
+	ticker := time.NewTicker(60 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			r.retryPendingImages(ctx)
+		}
+	}
+}
+
+func (r *Runner) retryPendingImages(ctx context.Context) {
+	tokens, err := r.q.ListTokensWithUpstreamImages(ctx, 50)
+	if err != nil {
+		log.Warn().Err(err).Msg("image-retry: list candidates")
+		return
+	}
+	if len(tokens) == 0 {
+		return
+	}
+	log.Info().Int("count", len(tokens)).Msg("image-retry: attempting self-host for upstream image URIs")
+	for _, t := range tokens {
+		if err := r.retryOneImage(ctx, t); err != nil {
+			log.Debug().Err(err).Str("coll", t.Collection).Str("token", t.TokenID).Int("attempts", t.RetryCount+1).
+				Msg("image-retry: still failed, will retry next cycle")
+		}
+	}
+}
+
+func (r *Runner) retryOneImage(ctx context.Context, t db.ImageRetryToken) (retErr error) {
+	// On any failure, bump the retry count for exponential backoff.
+	defer func() {
+		if retErr != nil {
+			if berr := r.q.BumpImageRetry(ctx, t.Collection, t.TokenID, t.RetryCount); berr != nil {
+				log.Warn().Err(berr).Str("coll", t.Collection).Str("token", t.TokenID).
+					Msg("image-retry: failed to bump retry count")
+			}
+		}
+	}()
+
+	imgBody, err := media.FetchBytes(ctx, t.ImageURI, t.TokenID)
+	if err != nil {
+		return fmt.Errorf("fetch image: %w", err)
+	}
+	st, err := imagestore.Put(ctx, r.q, media.SniffImage, t.ImageURI, imgBody)
+	if err != nil {
+		return fmt.Errorf("imagestore put: %w", err)
+	}
+	if st.Hash == "" {
+		return fmt.Errorf("imagestore returned empty hash")
+	}
+	localPath := imagestore.PublicPath(st.Hash)
+
+	// Update both nft_metadata and nft_tokens atomically (resets retry tracking).
+	if err := r.q.UpdateImageURI(ctx, t.Collection, t.TokenID, localPath); err != nil {
+		return fmt.Errorf("update image_uri: %w", err)
+	}
+	log.Info().Str("coll", t.Collection).Str("token", t.TokenID).Str("hash", st.Hash).
+		Msg("image-retry: self-hosted successfully")
+	return nil
 }
 
 // tokenURI reads tokenURI(id) for ERC-721 or uri(id) for ERC-1155 via eth_call.

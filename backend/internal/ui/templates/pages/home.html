@@ -1,44 +1,107 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<!-- Hero -->
-<section class="text-center py-20">
-  <h1 class="text-5xl font-bold mb-4">Trade NFTs on <span class="text-emerald-400">Flare</span></h1>
-  <p class="text-neutral-400 text-lg mb-8 max-w-xl mx-auto">Non-custodial marketplace. Fixed-price listings, English auctions, and signed offers. Your keys, your NFTs.</p>
-  <div class="flex gap-4 justify-center">
-    <a href="/listings" class="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">Browse Listings</a>
-    <a href="/auctions" class="px-6 py-3 rounded-xl bg-neutral-800 hover:bg-neutral-700 text-white font-bold transition">Live Auctions</a>
+
+<!-- Hero: full-bleed mesh gradient + brand colors. The headline uses the
+     `brand-text` animated gradient (sky → gold → violet → sky) which
+     echoes the 5-palette brand identity without dominating the page. -->
+<section class="text-center py-16 md:py-20 relative overflow-hidden rounded-3xl border border-white/10 bg-ink-900/60 mb-12">
+  <div class="absolute inset-0 bg-mesh-hero pointer-events-none"></div>
+  <div class="relative px-4 md:px-0">
+    <div class="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-sky-500/15 border border-sky-300/40 text-sky-100 text-[10px] font-extrabold uppercase tracking-wider mb-5 glow-sky">
+      <span class="w-1.5 h-1.5 rounded-full bg-sky-200 animate-pulse"></span>
+      ✦ Flare Coston2 Testnet
+    </div>
+    <h1 class="text-5xl md:text-7xl font-black mb-5 tracking-tighter leading-[0.95]">
+      <span class="text-white">Trade NFTs on</span>
+      <span class="brand-text"> Flare</span>
+    </h1>
+    <p class="text-white/70 text-lg mb-8 max-w-2xl mx-auto leading-relaxed">
+      Non-custodial marketplace.
+      <span class="text-sky-200 font-bold">Fixed-price listings</span>,
+      <span class="text-violet-200 font-bold">English auctions</span>,
+      <span class="text-gold-200 font-bold">signed offers</span>.
+      Your keys, your NFTs, your control.
+    </p>
+    <div class="flex gap-3 justify-center flex-wrap">
+      <a href="/listings" class="px-7 py-3.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center gap-2">
+        Browse Listings
+        <span class="text-base">→</span>
+      </a>
+      <a href="/auctions" class="px-7 py-3.5 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97] flex items-center gap-2">
+        Live Auctions
+        <span class="text-base">♕</span>
+      </a>
+      <a href="/metrics" class="px-7 py-3.5 rounded-xl bg-white/10 hover:bg-white/15 text-white font-extrabold transition border border-white/20 active:scale-[0.97] flex items-center gap-2">
+        <span class="text-gold-200">▦</span>
+        Metrics
+      </a>
+    </div>
+    <!-- Live counter pills: 4 marketplace totals in the 5-color palette. -->
+    <div class="flex justify-center gap-3 mt-12 flex-wrap">
+      <div class="px-5 py-3 rounded-2xl bg-ink-900/80 border border-white/10 backdrop-blur">
+        <p class="text-2xl font-black text-white leading-none">{{shortNumber .ListingCount}}</p>
+        <p class="text-[10px] text-white/40 uppercase tracking-wider mt-1.5 font-bold">Listings</p>
+      </div>
+      <div class="px-5 py-3 rounded-2xl bg-ink-900/80 border border-violet-400/30 backdrop-blur">
+        <p class="text-2xl font-black text-violet-200 leading-none">{{shortNumber .AuctionCount}}</p>
+        <p class="text-[10px] text-white/40 uppercase tracking-wider mt-1.5 font-bold">Auctions</p>
+      </div>
+      <div class="px-5 py-3 rounded-2xl bg-ink-900/80 border border-white/20 backdrop-blur">
+        <p class="text-2xl font-black text-white leading-none">{{shortNumber .CollectionCount}}</p>
+        <p class="text-[10px] text-white/40 uppercase tracking-wider mt-1.5 font-bold">Collections</p>
+      </div>
+      <div class="px-5 py-3 rounded-2xl bg-ink-900/80 border border-gold-400/30 backdrop-blur">
+        <p class="text-2xl font-black text-gold-200 leading-none">{{wei2flr .Volume24hWei}} <span class="text-sm">FLR</span></p>
+        <p class="text-[10px] text-white/40 uppercase tracking-wider mt-1.5 font-bold">24h Volume</p>
+      </div>
+    </div>
   </div>
 </section>
 
 <!-- Live activity ticker (SSE-driven) -->
-<div id="activity-ticker" class="mb-10"
+<div id="activity-ticker" class="mb-12"
      hx-get="/partials/activity"
-     hx-trigger="load, sse:listing-updated, sse:auction-updated"
+     hx-trigger="load, sse:listing-updated, sse:auction-updated, sse:offer-updated"
      hx-swap="innerHTML">
-  <div class="text-neutral-600 text-sm text-center">Loading activity...</div>
+  <div class="text-white/40 text-sm text-center shimmer py-3 rounded-xl bg-ink-900/60 border border-white/10">Loading recent activity…</div>
 </div>
 
 <!-- Trending -->
 {{if .Trending}}
 <section class="mb-12">
-  <h2 class="text-xl font-bold mb-4 text-neutral-200">Trending Collections</h2>
+  <div class="flex items-center justify-between mb-5">
+    <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+      <span class="w-9 h-9 rounded-xl btn-gold flex items-center justify-center text-ink-950 glow-gold">↗</span>
+      Trending Collections
+    </h2>
+    <a href="/metrics" class="text-sm text-sky-200 hover:text-sky-100 font-bold transition">All metrics →</a>
+  </div>
   <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
     {{range .Trending}}
-    <a href="/collection/{{.Collection}}" class="bg-neutral-900 rounded-xl p-4 hover:bg-neutral-800 transition group">
-      <div class="w-full aspect-square rounded-lg bg-neutral-800 mb-3 group-hover:scale-105 transition"></div>
-      <p class="text-sm font-medium truncate text-neutral-200">{{shortAddr .Collection}}</p>
-      <p class="text-xs text-neutral-500 mt-1">Score {{printf "%.1f" .Score}}</p>
+    <a href="/collection/{{.Collection}}" class="block bg-ink-900 rounded-2xl overflow-hidden border border-white/10 hover:border-gold-300/40 hover:shadow-gold-glow transition group">
+      <div class="aspect-square bg-gradient-to-br from-sky-500/15 via-violet-500/15 to-gold-500/15 flex items-center justify-center text-4xl text-white/40 shimmer group-hover:scale-[1.02] transition duration-300">🗂</div>
+      <div class="p-4">
+        <p class="text-sm font-bold text-white truncate">{{shortAddr .Collection}}</p>
+        <div class="flex items-center justify-between mt-1.5">
+          <p class="text-xs text-white/40">Score {{printf "%.1f" .Score}}</p>
+          <span class="text-sm text-sky-200 group-hover:translate-x-1 transition">→</span>
+        </div>
+      </div>
     </a>
     {{end}}
   </div>
 </section>
 {{end}}
 
-<!-- Recent Listings -->
+<!-- Current Listings — the labelled "what's on sale right now" section. -->
 <section>
-  <div class="flex items-center justify-between mb-4">
-    <h2 class="text-xl font-bold text-neutral-200">Recent Listings</h2>
-    <a href="/listings" class="text-sm text-emerald-400 hover:text-emerald-300">View all →</a>
+  <div class="flex items-center justify-between mb-5">
+    <h2 class="text-xl font-extrabold text-white flex items-center gap-2">
+      <span class="w-9 h-9 rounded-xl btn-sky flex items-center justify-center text-ink-950 glow-sky">✦</span>
+      Current Listings
+      <span class="text-xs text-white/40 font-mono font-bold ml-2 px-2 py-0.5 rounded bg-white/5 border border-white/10">{{shortNumber .ListingCount}}</span>
+    </h2>
+    <a href="/listings" class="text-sm text-sky-200 hover:text-sky-100 font-bold transition">View all →</a>
   </div>
   <div id="listings-grid"
        class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"

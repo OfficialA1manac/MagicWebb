@@ -1,14 +1,13 @@
 {{define "partials/activity_feed.html"}}
-<div class="flex gap-3 overflow-x-auto pb-2 text-xs text-neutral-500">
+<div class="flex gap-3 overflow-x-auto pb-2 text-xs">
   {{range .Activity}}
-  <div class="flex-shrink-0 bg-neutral-900 rounded-lg px-3 py-2 border border-neutral-800">
-    <span class="text-emerald-400 font-medium">{{.Type}}</span>
-    <span class="ml-2 font-mono">{{shortAddr .Collection}}</span>
-    <span class="ml-2 text-neutral-400">{{wei2eth .AmountWei}} FLR</span>
+  <div class="flex-shrink-0 bg-ink-900 rounded-xl px-3.5 py-2 border border-ink-700/70
+              hover:border-sky-300/40 hover:shadow-sky-glow transition">
+    <span class="font-bold bg-gradient-to-r from-sky-300 via-violet-300 to-gold-300 bg-clip-text text-transparent">{{.Type}}</span>
+    <span class="ml-2 font-mono text-ink-100">{{shortAddr .Collection}}</span>
+    <span class="ml-2 text-gold-300 font-bold">{{wei2flr .AmountWei}} FLR</span>
   </div>
   {{end}}
-  {{if not .Activity}}
-  <span class="text-neutral-700">No recent activity</span>
-  {{end}}
+  {{if not .Activity}}<span class="text-ink-700">No recent activity</span>{{end}}
 </div>
 {{end}}

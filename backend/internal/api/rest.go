@@ -16,14 +16,62 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
+// Strict-transport / content-security baseline. CSP locks scripts to self +
+// the explicitly allow-listed CDNs (or self-hosted) so a compromised CDN
+// can't inject behavior. frame-ancestors 'none' plus X-Frame-Options DENY
+// blocks clickjacking; Referrer-Policy keeps URLs out of cross-origin
+// Referer headers (so wallet addresses?action=foo don't leak). X-Content-
+// Type-Options=nosniff across all responses prevents MIME sniffing even
+// where image handlers already set it.
+const (
+	cspHeader = "default-src 'self'; " +
+		// Self-hosted JS bundles (htmx/ethers/alpinejs) live under /static,
+		// served same-origin. Only esm.sh remains external — wallet.js
+		// dynamically imports @walletconnect/ethereum-provider from there
+		// at button-click time (gated by the user's explicit WalletConnect
+		// picker selection — never on page boot). api.reown.com + WC relay
+		// wss:// channels are required for the QR pairing / multi-wallet
+		// relay — block any of them and WalletConnect silently fails.
+		"script-src 'self' https://esm.sh; " +
+		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
+		"font-src 'self' https://fonts.gstatic.com; " +
+		"img-src 'self' data: blob: https: ipfs:; " +
+		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
+		"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
+		"frame-ancestors 'none'; " +
+		"base-uri 'self'; " +
+		"form-action 'self'"
+	hstsHeader          = "max-age=63072000; includeSubDomains; preload"
+	permissionsPolicy   = "geolocation=(), microphone=(), camera=(), payment=(self \"https://magicwebb.xyz\"), usb=()"
+	referrerPolicy      = "strict-origin-when-cross-origin"
+)
+
+// securityHeaders installs the response headers above on every response.
+// Tighten the CSP if your deployment uses self-hosted bundles exclusively;
+// the connect-src list is the only path that touches third-party origins.
+func securityHeaders() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		c.Set("Content-Security-Policy", cspHeader)
+		c.Set("Strict-Transport-Security", hstsHeader)
+		c.Set("X-Frame-Options", "DENY")
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("Referrer-Policy", referrerPolicy)
+		c.Set("Permissions-Policy", permissionsPolicy)
+		c.Set("Cross-Origin-Opener-Policy", "same-origin")
+		return c.Next()
+	}
+}
+
 // Mount registers all REST + SSE routes on the Fiber app.
 func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller) {
+	app.Use(securityHeaders())
 	app.Use(cors.New(cors.Config{
-		AllowOrigins:     buildOrigins(cfg.FrontendURL),
+		AllowOrigins:     buildOrigins(cfg.FrontendURL, cfg.Env),
 		AllowMethods:     "GET,POST,PUT,OPTIONS",
 		AllowHeaders:     "Content-Type,Authorization",
 		AllowCredentials: true,
@@ -49,7 +97,15 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/listings/:collection/:id/preflight", listingPreflightWithChain(q, eth))
 	api.Get("/listings/:collection/:id", getListing(q))
 	api.Get("/media", mediaProxy(q))
-	api.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
+	// User-triggered immediate self-host of an upstream image. The slow-path
+	// retry worker (indexer.runImageRetryWorker) does the same work on a
+	// 60-min cadence; this endpoint just runs it synchronously on click.
+	// POST is the right verb because the call writes to nft_metadata and
+	// nft_tokens; idempotent (repeat clicks land on the same /api/v1/img/
+	// path). Auth not required — the per-IP rate limiter in api group caps
+	// abuse.
+	api.Post("/img/retry", imageRetryNow(q, media.FetchBytes))
+	app.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
 	api.Get("/collections", listCollections(q))
 	api.Get("/collections/:address/traits", collectionTraits(q))
 	api.Get("/collections/:address", getCollection(q))
@@ -87,19 +143,73 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 // ── Middleware ────────────────────────────────────────────────────────────────
 
+// jwtMiddleware authenticates either via an Authorization: Bearer token OR
+// an address-bound HttpOnly session cookie (the cookie is set by the SIWE
+// verify handler). The cookie path is what makes JWTs uninteresting to
+// XSS — even a successful script injection can't read HttpOnly storage.
+//
+// Multiple `mw_s_<addr-prefix>` cookies can be present after a wallet
+// switch (old cookie was set, new one issued). The middleware tries every
+// match and accepts the first one that verifies; tokens for other wallets
+// are simply ignored.
 func jwtMiddleware(cfg *config.Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		hdr := c.Get("Authorization")
-		if !strings.HasPrefix(hdr, "Bearer ") {
-			return writeErr(c, fiber.StatusUnauthorized, "missing token")
+		verify := func(token string) string {
+			a, err := auth.Verify(token, cfg.JWTSecret, auth.DefaultAudience)
+			if err != nil {
+				return ""
+			}
+			return a
 		}
-		addr, err := auth.Verify(strings.TrimPrefix(hdr, "Bearer "), cfg.JWTSecret)
-		if err != nil {
-			return writeErr(c, fiber.StatusUnauthorized, "invalid token")
+		var addr string
+		if hdr := c.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
+			addr = verify(strings.TrimPrefix(hdr, "Bearer "))
+		}
+		if addr == "" {
+			for _, name := range sessionCookieNames(c) {
+				if v := c.Cookies(name); v != "" {
+					if a := verify(v); a != "" {
+						addr = a
+						break
+					}
+				}
+			}
+		}
+		if addr == "" {
+			return writeErr(c, fiber.StatusUnauthorized, "missing token")
 		}
 		c.Locals(string(auth.CallerKey), addr)
 		return c.Next()
 	}
+}
+
+// sessionCookieNames scans cookie headers for any mw_s_<addr-prefix> name.
+// Multiple entries are commonly present (one per previously-connected wallet);
+// the middleware validates each in turn. Returns nil when no candidate.
+func sessionCookieNames(c *fiber.Ctx) []string {
+	hdr := c.Get("Cookie")
+	if hdr == "" {
+		return nil
+	}
+	seen := make(map[string]struct{})
+	var out []string
+	for _, part := range strings.Split(hdr, ";") {
+		p := strings.TrimSpace(part)
+		if !strings.HasPrefix(p, "mw_s_") {
+			continue
+		}
+		eq := strings.IndexByte(p, '=')
+		if eq <= 0 {
+			continue
+		}
+		name := p[:eq]
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		out = append(out, name)
+	}
+	return out
 }
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
@@ -133,7 +243,15 @@ func clientIP(c *fiber.Ctx) string {
 	return c.IP()
 }
 
-func buildOrigins(frontendURL string) string {
+// buildOrigins returns the comma-separated CORS AllowOrigins list. In
+// production we ONLY allow the configured FrontendURL — no localhost
+// fallbacks, so a compromised dev-machine port on the user's network can't
+// pull credentials. In development we additionally permit loopback origins
+// so the SPA can run from any of the canonical Vite/Go ports.
+func buildOrigins(frontendURL, env string) string {
+	if env == "production" {
+		return frontendURL
+	}
 	origins := frontendURL
 	if !strings.Contains(origins, "localhost") {
 		origins += ",http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"

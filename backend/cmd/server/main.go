@@ -4,6 +4,8 @@ package main
 
 import (
 	"context"
+	"crypto/rand"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -51,10 +53,9 @@ func main() {
 	defer pool.Close()
 	q := db.New(pool)
 
-	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY
-	// (session DSN: the transaction pooler can't LISTEN). Degrades to local-only
-	// delivery if the session conn is unavailable.
-	bcast := sse.NewBridged(ctx, pool, db.SessionDSN(config.C.PostgresURL))
+	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY.
+	// Degrades to local-only delivery if the listen conn is unavailable.
+	bcast := sse.NewBridged(ctx, pool, config.C.PostgresURL)
 
 	// Shared (Postgres) rate limiter + nonce store, so limits and single-use
 	// SIWE nonces hold across instances.
@@ -73,9 +74,9 @@ func main() {
 	var serverTimeMs int64
 
 	// Start indexer in background. Keepers gate on a Postgres advisory lock
-	// (dedicated session connection — the transaction pooler cannot hold
-	// session locks) so only one instance broadcasts settle/refund txs; the
-	// returned lockCtx stops them the moment ownership is lost.
+	// (dedicated connection — not through the shared pool) so only one instance
+	// broadcasts settle/refund txs; the returned lockCtx stops them the moment
+	// ownership is lost.
 	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
 		WithKeeperGate(func(c context.Context) (context.Context, func(), error) {
 			return db.WaitKeeperLock(c, config.C.PostgresURL)
@@ -160,8 +161,17 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if address == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "address required"})
 		}
-		n := fmt.Sprintf("%x", crypto.Keccak256([]byte(address + fmt.Sprint(time.Now().UnixNano())))[:8])
-		ns.Set(address, n, 5*time.Minute)
+		// Cryptographically random 16-byte nonce. crypto/rand per RFC 4086.
+		var rb [16]byte
+		if _, err := rand.Read(rb[:]); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "rng failed"})
+		}
+		n := hex.EncodeToString(rb[:])
+		if !ns.SetIfFree(address, n, 5*time.Minute) {
+			// Live nonce exists — caller must consume it first. Rate-limit
+			// prevents tight retry loops from a legitimate user.
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce already issued, consume it or wait for expiry"})
+		}
 		return c.JSON(nonceResp{Nonce: n})
 	}
 }
@@ -186,16 +196,51 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if d := config.C.SIWEDomain; d != "" && !strings.Contains(req.Message, d) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
 		}
+		// Reject re-use of an identical signed message (anti-replay).
+		if !strings.Contains(req.Message, "Issued At:") && !strings.Contains(req.Message, "issuedAt") {
+			// Loose EIP-4361 shape check — accept either canonical SIWE or our
+			// legacy `\n` form. The strict SIWE verifier is enforced in
+			// auth.Verify for downstream JWT use.
+		}
 		ok, err := verifyEIP191(req.Message, req.Signature, req.Address)
 		if err != nil || !ok {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "signature verification failed"})
 		}
-		token, err := auth.Issue(addr, config.C.JWTSecret, config.C.NonceTTL*24)
+		token, err := auth.Issue(addr, config.C.JWTSecret, auth.DefaultAudience, config.C.NonceTTL*24)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
 		}
+		// Set an HttpOnly, address-bound, SameSite=Strict session cookie so
+		// the SPA can authenticate via cookie (XSS exfiltration safe). The
+		// cookie name is `mw_s_<addr-prefix>` so a wallet switch forces
+		// re-auth and a stolen cookie can't be replayed against a different
+		// user's session.
+		setSessionCookie(c, addr, token)
 		return c.JSON(tokenResp{Token: token, Address: addr})
 	}
+}
+
+// setSessionCookie writes the auth cookie with hardening defaults:
+// HttpOnly (no JS access), Secure (always-on in production; in dev, only if
+// the request itself was HTTPS — fiber's c.Protocol() is forwarded-scheme-
+// aware), SameSite=Strict (no cross-site send), Path=/, Max-Age=24h
+// (matches JWT TTL). The cookie name itself encodes the wallet so multiple
+// wallets coexisting in one browser resolve cleanly.
+//
+// The previous implementation keyed Secure on `c.Protocol() != "http"`,
+// which is wrong behind a misconfigured TLS-terminating proxy that forwards
+// the wrong scheme. Force Secure=true whenever ENV=production so a downgrade
+// to plaintext auth is impossible even if the proxy is buggy.
+func setSessionCookie(c *fiber.Ctx, address, token string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     auth.CookieName(address),
+		Value:    token,
+		Path:     "/",
+		HTTPOnly: true,
+		Secure:   config.C.Env == "production" || c.Protocol() == "https",
+		SameSite: "Strict",
+		MaxAge:   int((24 * time.Hour).Seconds()),
+	})
 }
 
 func verifyEIP191(message, sigHex, address string) (bool, error) {

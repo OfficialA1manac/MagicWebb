@@ -2,6 +2,7 @@
 package media
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
 	"encoding/hex"
@@ -265,7 +266,15 @@ func decodeDataURI(raw string) ([]byte, error) {
 	if strings.Contains(meta, ";base64") {
 		return base64.StdEncoding.DecodeString(payload)
 	}
-	return []byte(payload), nil
+	// Many contracts emit percent-encoded data: URIs (e.g.
+	// data:image/svg+xml,%3Csvg%20...). url.PathUnescape handles both
+	// %HH escapes and + → space (the latter is technically query-string
+	// encoding, but is harmless for SVG/XML payloads).
+	decoded, err := url.PathUnescape(payload)
+	if err != nil {
+		return nil, fmt.Errorf("data uri unescape: %w", err)
+	}
+	return []byte(decoded), nil
 }
 
 func httpGet(ctx context.Context, u string) ([]byte, error) {
@@ -365,10 +374,11 @@ func publicAddrAllowed(addr netip.Addr) bool {
 
 // SniffImage validates that body begins with a recognised image magic signature
 // and returns the corresponding Content-Type header value. It returns ok=false
-// for anything that is not image/png, image/jpeg, image/gif, image/webp, or
-// image/avif. Both the ingest path (indexer writes must be valid images) and
-// the serve path (mediaProxy must send a safe Content-Type) share this rule
-// so we never advertise a non-image MIME for an image/served endpoint.
+// for anything that is not image/png, image/jpeg, image/gif, image/webp,
+// image/avif, or image/svg+xml. Both the ingest path (indexer writes must be
+// valid images) and the serve path (mediaProxy must send a safe Content-Type)
+// share this rule so we never advertise a non-image MIME for an image/served
+// endpoint.
 //
 // Kept in the media package so the indexer worker can call it without
 // importing api (which would be a dependency-direction violation).
@@ -387,8 +397,48 @@ func SniffImage(body []byte) (mime string, ok bool) {
 	case len(body) >= 12 && string(body[4:8]) == "ftyp" &&
 		(strings.HasPrefix(string(body[8:12]), "avif") || strings.HasPrefix(string(body[8:12]), "avis")):
 		return "image/avif", true
+	case isSVG(body):
+		return "image/svg+xml", true
 	}
 	return "", false
+}
+
+// isSVG detects SVG documents by looking for the <svg opening tag after
+// optional BOM, XML declaration, and/or whitespace. Many on-chain generative
+// NFT collections render as SVG, so this is critical for marketplace display.
+func isSVG(body []byte) bool {
+	s := skipXMLPreamble(body)
+	if len(s) < 5 || !strings.EqualFold(string(s[:4]), "<svg") {
+		return false
+	}
+	// Fifth byte must be whitespace, >, or / to reject spurious prefix matches
+	// like "<svgTHISISNOTVALID".
+	switch s[4] {
+	case ' ', '\t', '\n', '\r', '>', '/', '?':
+		return true
+	}
+	return false
+}
+
+// skipXMLPreamble advances past an optional UTF-8 BOM (EF BB BF), an optional
+// XML declaration (<?xml ... ?>), and leading whitespace so that a bare <svg>
+// or <SVG> tag is detected regardless of preamble.
+func skipXMLPreamble(body []byte) []byte {
+	// Skip UTF-8 BOM
+	if len(body) >= 3 && body[0] == 0xEF && body[1] == 0xBB && body[2] == 0xBF {
+		body = body[3:]
+	}
+	// Skip optional <?xml ... ?> declaration
+	if len(body) >= 2 && body[0] == '<' && body[1] == '?' {
+		if end := bytes.Index(body, []byte("?>")); end >= 0 {
+			body = body[end+2:]
+		}
+	}
+	// Skip leading whitespace
+	for len(body) > 0 && (body[0] == ' ' || body[0] == '\t' || body[0] == '\n' || body[0] == '\r') {
+		body = body[1:]
+	}
+	return body
 }
 
 // ProxyURL returns a same-origin proxy path for external media, or the original
@@ -397,11 +447,15 @@ func SniffImage(body []byte) (mime string, ok bool) {
 // trips through `/api/v1/media?url=...` with a long encoded query string.
 func ProxyURL(uri string) string {
 	uri = strings.TrimSpace(uri)
-	if uri == "" || strings.HasPrefix(uri, "data:") || strings.HasPrefix(uri, "/") {
+	if uri == "" || strings.HasPrefix(uri, "data:") {
 		return uri
 	}
+	// Self-hosted blob path — serve directly, never round-trip through proxy.
 	if strings.HasPrefix(uri, "/api/v1/img/") {
-		// Already a self-hosted blob path — return as-is.
+		return uri
+	}
+	// Other absolute paths (relative to origin) pass through as-is.
+	if strings.HasPrefix(uri, "/") {
 		return uri
 	}
 	if strings.HasPrefix(uri, "http://") || strings.HasPrefix(uri, "https://") {

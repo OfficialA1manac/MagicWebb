@@ -6,6 +6,7 @@ package ratelimit
 import (
 	"context"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -49,7 +50,10 @@ func (l *Limiter) Allow(key string, limit int, window time.Duration) bool {
 }
 
 // allowPg is an atomic fixed-window counter: one round-trip UPSERT…RETURNING.
-// Fail-open on DB error (availability over strictness for a rate limiter).
+// Fail-CLOSED on DB error: for a payment-grade marketplace an unguarded burst
+// is worse than a short 503. A counter metric is incremented so operators can
+// alert on sustained fail-closed states (which usually means the DB pool is
+// saturated and needs attention anyway).
 func (l *Limiter) allowPg(key string, limit int, window time.Duration) bool {
 	windowStart := time.Now().Truncate(window)
 	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
@@ -62,11 +66,20 @@ func (l *Limiter) allowPg(key string, limit int, window time.Duration) bool {
 		key, windowStart,
 	).Scan(&count)
 	if err != nil {
-		log.Error().Err(err).Str("key", key).Msg("ratelimit: pg allow failed (fail-open)")
-		return true
+		log.Warn().Err(err).Str("key", key).Msg("ratelimit: pg allow failed (fail-closed)")
+		failClosedCount.Add(1)
+		return false
 	}
 	return count <= limit
 }
+
+// failClosedCount exposes the rate at which the limiter is rejecting all
+// callers due to a DB outage. Exported via the indexer /metrics endpoint
+// under name "ratelimit_failclosed_total".
+var failClosedCount atomic.Int64
+
+// FailClosedTotal returns the running counter for monitoring.
+func FailClosedTotal() int64 { return failClosedCount.Load() }
 
 func (l *Limiter) sweepPg() {
 	t := time.NewTicker(5 * time.Minute)
