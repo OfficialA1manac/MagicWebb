@@ -1,32 +1,176 @@
 {{define "partials/nft_picker.html"}}
-<!-- Global wallet NFT picker modal. Open via: $dispatch('open-nft-picker', {action:'list'}) -->
-<div x-data="{
-       open: false, action: 'list', loading: false, nfts: [], needConnect: false,
-       async show(detail) {
-         this.action = (detail && detail.action) || 'list';
-         this.open = true; this.loading = true; this.nfts = []; this.needConnect = false;
-         if (!$store.wallet.address) { this.needConnect = true; this.loading = false; return; }
-         try {
-           const res = await fetch('/api/v1/wallet/' + $store.wallet.address + '/nfts');
-           if (res.ok) this.nfts = await res.json();
-         } catch {}
-         this.loading = false;
-       },
-       pick(n) { this.open = false; window.location.href = '/token/' + n.collection + '/' + n.token_id + '?action=' + this.action; },
-       connectInjected() { this.open = false; $store.wallet.connect('injected'); },
-       connectWC()       { this.open = false; $store.wallet.connect('walletconnect'); }
-     }"
-     x-on:open-nft-picker.window="show($event.detail)">
-  <div x-show="open" x-cloak class="fixed inset-0 z-[60] flex items-center justify-center p-4"
-       x-transition.opacity>
-    <div class="absolute inset-0 bg-ink-950/85 backdrop-blur-sm" @click="open = false"></div>
+<!-- ── Global wallet NFT picker modal ──────────────────────────────────────
+     Opens ONLY via the `mw-nft-picker-show` window event. Three page
+     buttons (listings/auctions/offers) dispatch this with action:
+       list | auction | offer
+     This matches the WalletConnect overlay's positive-command protocol:
+     a single explicit open command, never auto-fired.
+
+     Hardening (v7 — same patterns as wc_qr_overlay.html):
+       • Inline `style="display: none"` on the modal-root div so the
+         browser's FIRST PAINT is hidden even before Alpine evaluates
+         x-show. Belt vs. any race between script load order and Init.
+       • close() runs THREE things to guarantee the UI hides:
+         (1) reactive flag flip — drives x-show transition
+         (2) inline `display:none` on the modal-root DOM node
+         (3) clears nfts / loading / needConnect so the next open
+             starts clean (no stale addresses, no half-fetched lists)
+       • Escape keypress window-level, scoped to `if (this.open)`.
+       • Pick / connect buttons funnel through close() — never leave
+         open:true and stale props behind.
+
+     Why we keep the listener on the window event: this is the same
+     pattern as wc_qr_overlay.html's mw-wc-show / mw-wc-hide — explicit
+     open command, no flag-gated state. Any future caller (e.g. a
+     "Create listing" button on the token page) only needs to dispatch
+     `mw-nft-picker-show { action: 'list' }` from anywhere.
+     ────────────────────────────────────────────────────────────────────── -->
+
+<script>
+  // Public factory: window.MW_NFT_PICKER_STATE() returns the Alpine
+  // x-data object idempotently. Hoisted to a separate <script> tag so
+  // Go's html/template parser doesn't have to scan big object literals
+  // inside an x-data attribute (any literal double-quote in that
+  // attribute would break parsing).
+  window.MW_NFT_PICKER_STATE = function () {
+    return {
+      open:        false,
+      action:      'list',
+      loading:     false,
+      nfts:        [],
+      needConnect: false,
+      _showListener: null,
+      _escHandler:   null,
+
+      init() {
+        // ── mw-nft-picker-show (POSITIVE OPEN) ─────────────────────────
+        // Fired ONLY by user-initiated buttons on listings/auctions/
+        // offers pages. Receipt sets the modal open with the requested
+        // action; show() then loads the NFT list or shows the connect
+        // gate depending on wallet state.
+        this._showListener = (e) => {
+          const d = (e && e.detail) || {};
+          this.action      = (d.action) || 'list';
+          this.open        = true;
+          this.loading     = true;
+          this.nfts        = [];
+          this.needConnect = false;
+          this._forceUnhide();        // belt vs. Alpine reactivity lag
+          this._loadNfts();
+        };
+        // ── Escape key dismiss ─────────────────────────────────────────
+        // Window-level so it works whether focus is on the modal or
+        // anywhere on the page. Active ONLY when this picker is open,
+        // so it doesn't swallow Esc for any other modal/handler.
+        // e.stopPropagation keeps the WC overlay's ESC (which fires
+        // only when WC overlay is open) and any future ESC handlers
+        // from stepping on each other.
+        this._escHandler = (e) => {
+          if (this.open && (e.key === 'Escape' || e.keyCode === 27)) {
+            e.stopPropagation();
+            this.close();
+          }
+        };
+
+        window.addEventListener('mw-nft-picker-show', this._showListener);
+        window.addEventListener('keydown',           this._escHandler);
+      },
+
+      destroy() {
+        if (this._showListener) window.removeEventListener('mw-nft-picker-show', this._showListener);
+        if (this._escHandler)   window.removeEventListener('keydown',           this._escHandler);
+      },
+
+      // Pulls the user's NFT list once auth+provider are good. The
+      // connect gate (Browser Wallet / WalletConnect) is shown when
+      // the wallet store hasn't recorded an address yet — i.e. the
+      // user clicked "List an NFT" without first connecting.
+      async _loadNfts() {
+        const w = (typeof Alpine !== 'undefined') ? Alpine.store('wallet') : null;
+        const addr = w && w.address;
+        if (!addr) {
+          this.needConnect = true;
+          this.loading     = false;
+          return;
+        }
+        try {
+          const res = await fetch('/api/v1/wallet/' + addr + '/nfts');
+          if (res.ok) this.nfts = await res.json();
+        } catch (_) {}
+        this.loading = false;
+      },
+
+      // Routes to the connect path of the wallet store, then closes
+      // the picker so the WC overlay (or wallet popover) takes over.
+      connectInjected() {
+        this.close();
+        try { Alpine.store('wallet').connect('injected'); } catch (_) {}
+      },
+      connectWC() {
+        this.close();
+        try { Alpine.store('wallet').connect('walletconnect'); } catch (_) {}
+      },
+
+      // Routes the chosen NFT to /token/<collection>/<token_id>?action=…
+      // Full page navigation so the listing form and approval flow
+      // render fresh on /token. Closing before navigation guarantees
+      // the picker state does not leak across pages.
+      pick(n) {
+        this.close();
+        window.location.href = '/token/' + n.collection + '/' + n.token_id + '?action=' + this.action;
+      },
+
+      // Got it / Esc / X / backdrop click / pick / connectInjected /
+      // connectWC all funnel here. THREE-layers-always hide to defeat:
+      //   (1) Alpine x-show reactivity lag
+      //   (2) forced DOM display:none on the modal-root wrapper
+      //   (3) cleared modal state so the next open starts clean
+      close() {
+        this.open        = false;
+        this.loading     = false;
+        this.needConnect = false;
+        this.nfts        = [];
+        try {
+          const root = document.getElementById('nft-picker-modal-root');
+          if (root) root.style.display = 'none';
+        } catch (_) {}
+        try {
+          window.dispatchEvent(new CustomEvent('mw-nft-picker-hide'));
+        } catch (_) {}
+      },
+
+      _forceUnhide() {
+        try {
+          const root = document.getElementById('nft-picker-modal-root');
+          if (root) root.style.display = '';
+        } catch (_) {}
+      },
+    };
+  };
+</script>
+
+<div x-data="window.MW_NFT_PICKER_STATE()"
+     id="nft-picker-overlay"
+     class="contents">
+
+  <div id="nft-picker-modal-root"
+       x-show="open" x-cloak
+       class="fixed inset-0 z-[60] flex items-center justify-center p-4"
+       x-transition.opacity
+       style="display: none;"> <!-- ensure first paint is hidden -->
+
+    <!-- Backdrop: click-outside dismisses (UX consistency with WC
+         and the action modal). -->
+    <div class="absolute inset-0 bg-ink-950/85 backdrop-blur-sm" @click="close()"></div>
+
     <div class="relative bg-ink-900 border border-ink-700 rounded-2xl w-full max-w-2xl max-h-[82vh] flex flex-col overflow-hidden shadow-2xl">
       <div class="flex items-center justify-between px-5 py-4 border-b border-ink-700 bg-ink-900/85">
         <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
           <span class="w-7 h-7 rounded-lg bg-sky-btn flex items-center justify-center text-ink-950 text-xs">✦</span>
           Pick an NFT to <span class="text-sky-300" x-text="action"></span>
         </h3>
-        <button @click="open = false" class="text-ink-500 hover:text-white text-2xl leading-none transition">×</button>
+        <button @click="close()" type="button" aria-label="Close"
+                class="text-ink-500 hover:text-white text-2xl leading-none transition">&times;</button>
       </div>
 
       <div class="p-5 overflow-y-auto">
@@ -36,11 +180,11 @@
           <div class="text-center py-10 space-y-4">
             <p class="text-ink-100 text-sm">Connect a wallet to load your NFTs.</p>
             <div class="flex gap-3 justify-center">
-              <button @click="connectInjected()"
+              <button @click="connectInjected()" type="button"
                       class="px-5 py-2.5 rounded-xl btn-sky text-ink-950 font-bold text-sm transition shadow-sky-glow active:scale-[0.97]">
                 Browser Wallet
               </button>
-              <button @click="connectWC()"
+              <button @click="connectWC()" type="button"
                       class="px-5 py-2.5 rounded-xl bg-violet-btn text-white font-bold text-sm transition shadow-violet-glow active:scale-[0.97]">
                 WalletConnect
               </button>
@@ -54,7 +198,7 @@
         </template>
         <div x-show="!loading && !needConnect && nfts.length > 0" class="grid grid-cols-2 sm:grid-cols-3 gap-3">
           <template x-for="n in nfts" :key="n.collection + '-' + n.token_id">
-            <button @click="pick(n)"
+            <button @click="pick(n)" type="button"
                     class="text-left bg-ink-800 hover:bg-ink-700 rounded-xl overflow-hidden transition group border border-ink-700/70 hover:border-sky-300/40 hover:shadow-sky-glow">
               <div class="aspect-square bg-ink-950 flex items-center justify-center text-3xl overflow-hidden">
                 <template x-if="n.image_uri"><img :src="mediaURL(n.image_uri)" class="w-full h-full object-cover group-hover:scale-105 transition duration-300" loading="lazy"></template>
@@ -72,4 +216,25 @@
     </div>
   </div>
 </div>
+
+<script>
+  // Bridge the legacy `open-nft-picker` CustomEvent (still dispatched
+  // by the listings/auctions/offers page buttons) to the new positive-
+  // command protocol `mw-nft-picker-show`. We rename in-place rather
+  // than rip the dispatch sites so the public façade of the picker
+  // (`open-nft-picker`) stays stable. Also enables any third-party
+  // embed or future debugger panel that greps for the original event
+  // name to keep working.
+  (function () {
+    if (window.__MW_NFT_PICKER_BRIDGE__) return;
+    window.__MW_NFT_PICKER_BRIDGE__ = true;
+    window.addEventListener('open-nft-picker', function (e) {
+      try {
+        window.dispatchEvent(new CustomEvent('mw-nft-picker-show', {
+          detail: (e && e.detail) || {},
+        }));
+      } catch (_) {}
+    });
+  })();
+</script>
 {{end}}

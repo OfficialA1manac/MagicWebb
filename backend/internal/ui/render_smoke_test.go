@@ -60,19 +60,19 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-		// Self-hosted assets served with `?v=6` cache-buster — bumping
-		// from v4 / v5 forces returning browsers to re-fetch wallet.js so
-		// the v6 positive-command overlay protocol (mw-wc-show /
-		// mw-wc-hide) lands on users that loaded the previous shell.
-		// Mounted under /static/* with a 60-second Cache-Control:
-		// max-age=60 (see mountStatic) so the baseline freshness policy
-		// isn't solely reliant on the bump.
-		{"tailwind-static-link", "tailwind.css?v=6"},
-		{"wallet-js-defer",      "wallet.js?v=6"},
-		{"qrcode-min-js-defer",  "qrcode.min.js?v=6"},
-		{"ethers-umd-defer",     "ethers.umd.min.js?v=6"},
-		{"cdn-min-js-defer",     "cdn.min.js?v=6"},
-		{"htmx-min-js-defer",    "htmx.min.js?v=6"},
+		// Self-hosted assets served with `?v=7` cache-buster — bumping
+		// from v6 forces returning browsers to re-fetch wallet.js so the
+		// v7 picker hardening (force-DOM close + ESC dismiss + reset
+		// state) lands on users that loaded the previous shell. Mounted
+		// under /static/* with a 60-second Cache-Control: max-age=60
+		// (see mountStatic) so the baseline freshness policy isn't solely
+		// reliant on the bump.
+		{"tailwind-static-link", "tailwind.css?v=7"},
+		{"wallet-js-defer",      "wallet.js?v=7"},
+		{"qrcode-min-js-defer",  "qrcode.min.js?v=7"},
+		{"ethers-umd-defer",     "ethers.umd.min.js?v=7"},
+		{"cdn-min-js-defer",     "cdn.min.js?v=7"},
+		{"htmx-min-js-defer",    "htmx.min.js?v=7"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -83,6 +83,18 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"wc-esc-handler-present", "Escape"},
 		// The Got-it and × buttons must still funnel through close().
 		{"wc-gotit-button-clicks-close", "Got it"},
+		// NFT picker v7 hardening — same close-pattern as the WC
+		// overlay: positive-command event, force-DOM close, ESC dismiss,
+		// reset state on close, modal-root ID for force-hide target.
+		// Pick handler issues page navigation AFTER close() so state
+		// never leaks across pages. Legacy `open-nft-picker` event is
+		// bridged to the new `mw-nft-picker-show` so the existing page
+		// buttons keep working without a public-API break.
+		{"nft-picker-show-event-listener", "mw-nft-picker-show"},
+		{"nft-picker-hide-event-listener", "mw-nft-picker-hide"},
+		{"nft-picker-modal-root-id",       "nft-picker-modal-root"},
+		{"nft-picker-overlay-id",          "nft-picker-overlay"},
+		{"nft-picker-legacy-bridge",       "open-nft-picker"},
 		// 1s polling guard: every live grid AND the activity ticker
 		// must carry `every 1s [!document.hidden]` so the listing /
 		// auction / home surfaces refresh at most once per second AND
