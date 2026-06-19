@@ -60,20 +60,20 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-		// Self-hosted assets served with `?v=8` cache-buster — bumping
-		// from v7 forces returning browsers to re-fetch wallet.js so the
-		// v8 fixes (mobile-drawer wallet controls, +1 wei bid floor,
-		// staticCall preflight on buy, removed flat-increment input on
-		// createAuction) land on users that loaded the previous shell.
+		// Self-hosted assets served with `?v=9` cache-buster — bumping
+		// from v8 forces returning browsers to re-fetch wallet.js so the
+		// v9 fixes (deadlock-escape on connect, provider-rebuild after
+		// chain switch, soft-staticCall on buy, "Wallet" label on the
+		// connected pill) land on users that loaded the previous shell.
 		// Mounted under /static/* with a 60-second Cache-Control: max-age=60
 		// (see mountStatic) so the baseline freshness policy isn't solely
 		// reliant on the bump.
-		{"tailwind-static-link", "tailwind.css?v=8"},
-		{"wallet-js-defer",      "wallet.js?v=8"},
-		{"qrcode-min-js-defer",  "qrcode.min.js?v=8"},
-		{"ethers-umd-defer",     "ethers.umd.min.js?v=8"},
-		{"cdn-min-js-defer",     "cdn.min.js?v=8"},
-		{"htmx-min-js-defer",    "htmx.min.js?v=8"},
+		{"tailwind-static-link", "tailwind.css?v=9"},
+		{"wallet-js-defer",      "wallet.js?v=9"},
+		{"qrcode-min-js-defer",  "qrcode.min.js?v=9"},
+		{"ethers-umd-defer",     "ethers.umd.min.js?v=9"},
+		{"cdn-min-js-defer",     "cdn.min.js?v=9"},
+		{"htmx-min-js-defer",    "htmx.min.js?v=9"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.

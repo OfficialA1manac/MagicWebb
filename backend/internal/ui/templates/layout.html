@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=8">
+  <link rel="stylesheet" href="/static/tailwind.css?v=9">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=8" defer></script>
-  <script src="/static/sse.js?v=8" defer></script>
-  <script src="/static/ethers.umd.min.js?v=8" defer></script>
+  <script src="/static/htmx.min.js?v=9" defer></script>
+  <script src="/static/sse.js?v=9" defer></script>
+  <script src="/static/ethers.umd.min.js?v=9" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=8" defer></script>
+  <script src="/static/wallet.js?v=9" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=8" defer></script>
-  <script src="/static/cdn.min.js?v=8" defer></script>
+  <script src="/static/qrcode.min.js?v=9" defer></script>
+  <script src="/static/cdn.min.js?v=9" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -209,17 +209,27 @@
         </div>
       </template>
 
-      <!-- Connected pill: identity + WC badge + disconnect -->
+      <!-- Connected pill: identity + WC badge + disconnect. The explicit
+           "Wallet" label + title tooltip makes this unmistakable as
+           the wallet control — even if the user landed via auto-reconnect
+           on page boot, the pill now reads as "Wallet 0x1234…abcd" rather
+           than just a tiny address + × they might not recognize. -->
       <template x-if="$store.wallet.connected">
-        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition ring-focus border border-white/10">
+        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-white/5 hover:bg-white/10 transition ring-focus border border-white/10"
+             title="Your connected wallet">
           <div class="relative w-2 h-2 rounded-full bg-sky-300 pill-pulse-pulse"></div>
+          <!-- md+: visible above the hamburger-hidden breakpoint so
+               the right-side cluster (pill + bell + WC chip) has slack.
+               Below md, the hamburger drawer exposes the wallet control
+               with full width instead. -->
+          <span class="text-[10px] uppercase tracking-wider text-white/40 font-extrabold hidden md:inline">Wallet</span>
           <template x-if="$store.wallet.isWalletConnect">
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30" title="Connected via WalletConnect">WC</span>
           </template>
           <a :href="'/profile/' + $store.wallet.address" class="text-xs text-white hover:text-gold-200 font-mono font-bold"
              x-text="$store.wallet.shortAddr"></a>
           <button @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
-                  title="Disconnect"
+                  title="Disconnect wallet"
                   class="text-white/40 hover:text-gold-300 text-base leading-none transition">×</button>
         </div>
       </template>
@@ -294,8 +304,10 @@
       <template x-if="$store.wallet.connected">
         <div class="space-y-2">
           <a :href="'/profile/' + $store.wallet.address"
-             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10">
+             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10"
+             title="Your connected wallet">
             <span class="w-2 h-2 rounded-full bg-sky-300 pill-pulse-pulse"></span>
+            <span class="text-[10px] uppercase tracking-wider text-white/40 font-extrabold">Wallet</span>
             <span class="text-xs text-white font-mono font-bold flex-1 truncate"
                   x-text="$store.wallet.shortAddr"></span>
             <template x-if="$store.wallet.isWalletConnect">

@@ -425,7 +425,29 @@ window.addEventListener('alpine:init', () => {
     // ── Connect (injected wallet OR WalletConnect v2 via QR) ──
 
     async connect(kind = 'injected', { silent = false } = {}) {
-      if (this.state === 'connecting') return;
+      // Belt-and-braces: silent reconnect (page-boot auto-reconnect for
+      // returning users with a cached address in localStorage) may still
+      // be in-flight when the user explicitly clicks the navbar/picker
+      // "Connect Wallet" button. The old behaviour was an unconditional
+      // `return` on `state === 'connecting'` — so a clicking user could
+      // be ignored while the silent MetaMask pop-up was still showing.
+      // Now: only short-circuit SILENT reconnects; always honor user
+      // intent (regardless of current state) so they cannot get stranded.
+      if (this.state === 'connecting' && silent) return;
+      // Rapid double-click debounce. With the connecting-escape fix
+      // above, two fast clicks now both call `connect('injected',
+      // {silent: false})` while one is mid-flight; `eth_requestAccounts`
+      // dedupes in MetaMask, but `_authenticate` and `refreshUnread`
+      // race on `this.address`. 1.5s window — short enough that a real
+      // retry after a rejected MetaMask prompt is unaffected, long
+      // enough to absorb a jittery double-tap.
+      if (!silent) {
+        const now = Date.now();
+        if (now - (this._connectStartedAt || 0) < 1500) {
+          return;
+        }
+        this._connectStartedAt = now;
+      }
       const wasError = this.state === 'error';
       this.setState('connecting');
       try {
@@ -441,12 +463,39 @@ window.addEventListener('alpine:init', () => {
           }
           eip1193 = window.ethereum;
         }
-        const provider = new ethers.BrowserProvider(eip1193);
+        let provider = new ethers.BrowserProvider(eip1193);
         const accounts = await provider.send('eth_requestAccounts', []);
         if (!accounts?.length) throw new Error('No account authorized.');
-        const network = await provider.getNetwork();
+        let network = await provider.getNetwork();
         if (kind === 'injected' && Number(network.chainId) !== CHAIN_ID) {
-          try { await this._switchChain(); } catch (_) {}
+          try {
+            await this._switchChain();
+            // CRITICAL: ethers.BrowserProvider caches network state at
+            // construction. After wallet_switchEthereumChain succeeded,
+            // `network.chainId` and every subsequent provider call still
+            // see the OLD chain (until the provider is reset). Re-build
+            // from the same eip1193 so staticCall, getNetwork, and the
+            // real tx calls all target the post-switch chain. Without
+            // this, staticCall on Coston2 contract addresses runs against
+            // the OLD chain (Ethereum Mainnet) which has no contracts
+            // there → instant revert → user sees "Listing not fillable"
+            // before the real transaction ever prompts MetaMask.
+            provider = new ethers.BrowserProvider(eip1193);
+            // MetaMask confirms chain switches asynchronously; the first
+            // provider.getNetwork() call after the switch can still
+            // return the OLD chainId if the wallet is mid-confirm. Retry
+            // up to 3× with a 200 ms gap before giving up — covers user
+            // wallets that take ~600-1000 ms to visually confirm the new
+            // chain in the UI before the JSON-RPC provider reflects it.
+            for (let i = 0; i < 3; i++) {
+              network = await provider.getNetwork();
+              if (Number(network.chainId) === CHAIN_ID) break;
+              await new Promise(r => setTimeout(r, 200));
+            }
+            if (Number(network.chainId) !== CHAIN_ID) {
+              this._toast('Wallet chain did not switch — please retry or change the active network in your wallet to Coston2 (chainId 114).', 'error');
+            }
+          } catch (_) {}
         }
         // Always store ROOT ethers objects unwrapped. Setters nested-call
         // R() so double-wrap is impossible.
@@ -477,6 +526,11 @@ window.addEventListener('alpine:init', () => {
           : 'Wallet connected', 'success');
       } catch (e) {
         this.setState('error', { error: e });
+        // Clear the double-click debounce so a real retry after a
+        // user-clicked "reject" in MetaMask is unblocked. Without this
+        // the user would have to wait 1.5s for the debounce window to
+        // expire before they could even try clicking again.
+        this._connectStartedAt = 0;
         if (wasError || !silent) toast(revertMessage(e), 'error');
       }
     },
@@ -798,19 +852,33 @@ window.addEventListener('alpine:init', () => {
           fail({ title: 'Wallet lost', body: 'Reconnect and try again.' });
           return;
         }
-        // v8 — `staticCall` is a read-only eth_call that runs the function
-        // against current chain state and reverts with the EXACT on-chain
-        // reason if anything is wrong (seller revoked marketplace
-        // approval, listing expired, seller transferred NFT out, msg.value
-        // mismatch, manager paused, etc.). Reading the revert string here
-        // surfaces it before the user signs a doomed metamask prompt.
+        // Soft preflight: `staticCall` runs the buy as a free eth_call
+        // and reverts with the EXACT on-chain reason if anything is wrong
+        // (revoked approval, expired listing, msg.value mismatch, manager
+        // paused, seller transferred NFT out, etc.). It is NOT authoritative
+        // — some Coston2 RPCs route eth_call for payable functions through
+        // the same relay that fails intermittently, which would falsely
+        // block valid transactions. We log the soft result, surfaced as
+        // a non-blocking toast for the user so they understand the
+        // upcoming real-tx prompt may fail, and ALWAYS proceed to the
+        // real transaction: a real on-chain revert will surface in
+        // MetaMask with the same custom-error reason the staticCall would
+        // have surfaced (NotApproved / WrongPrice / Expired / NotOwner).
         setStep(1, 'Checking purchase is fillable…');
         const writeContract = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, R(signer));
         try {
           await writeContract.buy.staticCall(collection, tokenId, seller, { value: BigInt(priceWei) });
         } catch (staticErr) {
-          fail({ title: 'Listing not fillable', body: revertMessage(staticErr) });
-          return;
+          try {
+            console.warn('soft preflight failed (proceeding):', revertMessage(staticErr), staticErr);
+            // Belt-and-braces: a real revert (NotApproved / WrongPrice /
+            // Expired / NotOwner) is likely to surface AGAIN in MetaMask
+            // with the same reason. Tell the user now so they have
+            // context before signing, but do NOT block: a flaky RPC
+            // should not silently kill their flow on a perfectly valid
+            // listing. The toast is INFORMAITONAL only, not a fail().
+            this._toast('Preflight flagged: ' + revertMessage(staticErr) + ' \u2014 your wallet will surface the same error if it is a real revert, so you can sign safely.', 'info');
+          } catch (_) {}
         }
         const tx = await writeContract.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
         setStep(2, 'Waiting for confirmation…');
