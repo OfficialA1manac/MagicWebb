@@ -37,6 +37,38 @@ const CHAIN_ID  = Number(window.MW_NETWORK_ID || 114);
 const RPC_URL   = window.MW_RPC_URL  || 'https://coston2-api.flare.network/ext/C/rpc';
 const EXPLORER  = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
 
+/*
+ * ── WalletConnect overlay guard ─────────────────────────────────────────────
+ * Defense-in-depth against the "QR overlay pops up on page boot" bug.
+ *
+ * Two independent guards must BOTH allow an event before the overlay opens:
+ *
+ *   1. `silent` argument: connect() was called from a USER ACTION
+ *      (picker button click), not from the auto-reconnect block at the
+ *      bottom of this file. The auto-reconnect path ALWAYS passes
+ *      {silent:true}; only user clicks pass {silent:false} (the default).
+ *
+ *   2. `window.MW_WC_USER_INITIATED` global — set inside `connect('walletconnect', {silent:false})`
+ *      and cleared after a successful pairing OR after the user closes
+ *      the overlay. The overlay ignores every `mw-wc-uri` /
+ *      `mw-wc-connecting` dispatch unless this flag is truthy. This
+ *      decouples "user did connect" from "user is in a connecting flow
+ *      right now" so a stale session can't sneak past.
+ *
+ * Belt-and-braces with the silent flag: if a future regression nulls
+ * out `silent` on the auto-reconnect path (e.g. someone calls
+ * `connect('walletconnect')` without options), the global still blocks
+ * the overlay. Conversely, a future returner can keep the global but
+ * forget to thread `silent` through a new caller and the existing
+ * per-caller check still keeps it closed.
+ *
+ * The flag also bounds the lifetime: even on a stuck/expired session,
+ * once the user clicks Connect Wallet → WalletConnect, the overlay can
+ * open; otherwise it stays closed even if the SDK spuriously emits
+ * `display_uri` repeatedly between page load and the user's first click.
+ */
+window.MW_WC_USER_INITIATED = false;
+
 /* ── Contract addresses: server-injected from .env. NEVER hardcode. ── */
 const MARKETPLACE = window.MW_MARKETPLACE || '';
 const AUCTION     = window.MW_AUCTION     || '';
@@ -396,6 +428,16 @@ window.addEventListener('alpine:init', () => {
     async connect(kind = 'injected', { silent = false } = {}) {
       if (this.state === 'connecting') return;
       const wasError = this.state === 'error';
+      // Mark the wallet-connect flow as user-initiated the moment a user
+      // calls connect() WITHOUT the silent flag. The auto-reconnect path
+      // at the bottom of this file always passes silent:true; this gate
+      // therefore can never be flipped open on page boot. Even if the
+      // silent flag regression-restores itself, the gate below the
+      // `mw-wc-uri` / `mw-wc-connecting` listeners queries this global
+      // and refuses to open the overlay in either case.
+      if (kind === 'walletconnect' && !silent) {
+        window.MW_WC_USER_INITIATED = true;
+      }
       this.setState('connecting');
       try {
         let eip1193;
@@ -500,6 +542,21 @@ window.addEventListener('alpine:init', () => {
       this._raw.wc = R(wc);
 
       wc.on('display_uri', (uri) => {
+        // User-driven connect emits display_uri → open the overlay so
+        // the user can scan. Silent auto-reconnect (page boot for a
+        // returning user) MUST NOT fire this — if the previous WC
+        // session has expired the SDK re-emits display_uri on the
+        // next connect() call, which would otherwise pop open the QR
+        // overlay unprompted (the original "popup-on-boot" bug).
+        // Silent path: drop the URI, fall back to state='error' if
+        // connect() ultimately fails, and let the user re-click the
+        // chip or the picker button to start a fresh pairing.
+        //
+        // Defense in depth: ALWAYS require the user-initiated gate.
+        // Two independent checks (silent AND global) so a regression
+        // in either alone still keeps the overlay closed on boot.
+        if (silent) return;
+        if (!window.MW_WC_USER_INITIATED) return;
         window.MW_WC_URI = uri;
         try {
           window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
@@ -1207,6 +1264,9 @@ window.mediaURL = mediaURL;
 // _wcConnect() drives the actual handshake.
 function MW_WC_OPEN_OVERLAY() {
   try {
+    if (!window.MW_WC_USER_INITIATED) {
+      return;
+    }
     if (window.MW_WC_URI && typeof window.MW_WC_URI === 'string'
         && window.MW_WC_URI.startsWith('wc:')) {
       window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: window.MW_WC_URI }));

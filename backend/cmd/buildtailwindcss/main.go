@@ -72,9 +72,10 @@ const tailwindVersion = "v3.4.10"
 // GitHub — which would also let a compromised release push malicious
 // template instructions into the user's templates. We document this
 // trade-off rather than dropping SHA verification entirely without
-// comment; if your threat model requires pinned-hash download, run
-// `cmd/pinsha` (or equivalent) and modify `downloadTailwindCLI` to
-// compare against a checked-in hash file.
+// comment; if your threat model requires pinned-hash download, store
+// the expected sha256 of the cached CLI in version control and modify
+// `downloadTailwindCLI` in place to compare the downloaded bytes to
+// the pinned hash before invoking the CLI.
 func assetNameFor(host, arch string) (assetName string, needsChmod bool) {
 	switch host + "/" + arch {
 	case "linux/amd64":

@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 
@@ -79,6 +80,19 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	app.Use(flog.New(flog.Config{
 		Format: "${time} ${method} ${path} ${status} ${latency}\n",
+	}))
+
+	// gzip/brotli compression on every compressible response — bandwidth
+	// is by far the largest line item in our Fly bill and the JSON HTMX
+	// partials (listings/auctions/activity/token_live/etc.) compress >10x.
+	// Fiber's compress middleware ships with a default Content-Type
+	// allow-list that excludes text/event-stream (and the SSE handler
+	// below also sets X-Accel-Buffering: no), so a LevelDefault install
+	// keeps the SSE channel uncompressed. If you switch to LevelBestSpeed
+	// or otherwise loosen the filter, audit the SSE path here — a
+	// compressed text/event-stream breaks the nginx buffering fix.
+	app.Use(compress.New(compress.Config{
+		Level: compress.LevelDefault,
 	}))
 
 	app.Get("/healthz", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
