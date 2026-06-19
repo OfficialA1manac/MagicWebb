@@ -1,14 +1,33 @@
 {{define "partials/wc_qr_overlay.html"}}
 <!-- ── In-page WalletConnect QR overlay ─────────────────────────────────────
-     wallet.js dispatches:
-       - `mw-wc-connecting`  immediately on WalletConnect click (so this
-         overlay can open with a spinner BEFORE the WC relay round-trip
-         completes — defeats the blank-flash race);
-       - `mw-wc-uri`  every time the SDK emits `display_uri` (we then
-         render a QR matrix via the self-hosted qrcode.min.js at
-         /static/qrcode.min.js — no third-party endpoint, no CSP surprises);
-       - `mw-wallet-state`  whenever the wallet store changes state; we
-         auto-close when state moves OUT of {connecting, connected}.
+     Protocol (v6 — positive-command; replaces prior flag-gated passive
+     listen pattern):
+
+       • `mw-wc-show`  POSITIVE open command. wallet.js dispatches this
+         ONLY from the user-initiated connect() path. Payload:
+           { uri?: string, loading?: bool }
+         - loading:true → spinner-only (URI not yet known)
+         - uri set      → render QR via self-hosted qrcode.min.js
+         Both visible at the same time (loading=false once uri arrives).
+
+       • `mw-wc-hide`  POSITIVE close command. wallet.js dispatches on
+         user disconnect; the overlay itself dispatches nothing on its
+         own — only this single event can re-open it.
+
+       • `mw-wallet-state`  Auto-close when wallet leaves
+         {connecting, connected}. (Pairs with the spread
+         the overlay's modal IS the wallet's pairing UX.)
+
+       • `Escape` keypress  Closes when open.
+
+     Why a positive command:
+       The previous pattern (mw-wc-uri / mw-wc-connecting plus a
+       window.MW_WC_USER_INITIATED gate) leaked state on auto-reconnect
+       where the SDK would emit display_uri after the user dismissed the
+       overlay and re-open it. The new protocol is event-symmetric: the
+       overlay is closed until wallet.js says "show", and can only be
+       closed by an explicit hide / Esc / state transition out of
+       connecting. No flag sync, no silent-threading.
 
      Why the Alpine state lives in a separate <script> tag rather than
      inline in the x-data attribute: Go's html/template parser scans
@@ -16,7 +35,7 @@
      double-quote character embedded inside the x-data attribute value
      (whether in JS code, JS comments, or JS string literals) causes a
      parse-time error. Hoisting the state object out of the attribute
-     removes that whole class of trap class.
+     removes that whole class of trap.
      ────────────────────────────────────────────────────────────────────── -->
 
 <script>
@@ -24,64 +43,77 @@
   // x-data object. Loaded once at first usage; idempotent.
   window.MW_WC_OVERLAY_STATE = function () {
     return {
-      open:        false,
-      loading:     false,
-      uri:         '',
-      copied:      false,
-      _uriListener:        null,
-      _connectingListener: null,
-      _stateListener:      null,
+      open:    false,
+      loading: false,
+      uri:     '',
+      copied:  false,
+      _showListener:  null,
+      _hideListener:  null,
+      _stateListener: null,
+      _escHandler:    null,
 
       init() {
-        // ── mw-wc-uri ──────────────────────────────────────────────────────
-        // Fires when wallet.js receives display_uri from the WC SDK.
-        // Caches the URI, hides the spinner, opens the overlay if not
-        // already open, queues renderQr() for the next DOM tick so the
-        // target div is actually mounted when we paint the matrix.
-        //
-        // Defense-in-depth gate: refuse to open unless the user has
-        // actually clicked the WalletConnect flow. Wallet.js gates this
-        // path too, but the overlay itself checks the flag so a regression
-        // in wallet.js (or a future caller that dispatches mw-wc-uri
-        // directly) can't pop the QR unprompted.
-        this._uriListener = (e) => {
-          if (!window.MW_WC_USER_INITIATED) return;
-          const v = (e && e.detail) || '';
-          if (typeof v === 'string' && v.startsWith('wc:')) {
-            this.uri     = v;
+        // ── mw-wc-show (POSITIVE OPEN) ─────────────────────────────────
+        // Fired by wallet.js _wcConnect on the user-initiated path with
+        // loading:true (spinner state) and again via display_uri with
+        // uri:'' (render the QR). The overlay unconditionally opens on
+        // this event — no flag check, no defense-in-depth gating.
+        this._showListener = (e) => {
+          const d = (e && e.detail) || {};
+          if (d.loading) {
+            this.loading = true;
+            if (d.uri) this.uri = d.uri;
+          } else if (typeof d.uri === 'string' && d.uri.startsWith('wc:')) {
+            this.uri     = d.uri;
             this.loading = false;
-            this.open    = true;
-            this.$nextTick(() => this.renderQr());
+          } else {
+            this.loading = false;
           }
+          this.open = true;
+          this._forceUnhide();          // belt vs. Alpine reactivity lag
+          if (this.uri) this.$nextTick(() => this.renderQr());
         };
-        // ── mw-wc-connecting ──────────────────────────────────────────────
-        // Fires the moment the user clicks 'WalletConnect' in the picker.
-        // Shows the spinner (and the modal) so there's never a blank box.
-        // Same gate: only open on user-initiated flows.
-        this._connectingListener = () => {
-          if (!window.MW_WC_USER_INITIATED) return;
-          this.loading = true;
-          this.open    = true;
-        };
-        // ── mw-wallet-state ───────────────────────────────────────────────
-        // Auto-close when wallet transitions OUT of {connecting, connected}.
-        // Covers: user cancelled the WC picker, wc.connect() rejected,
-        // SIWE auth failed. Does NOT yank a successfully paired user.
+        // ── mw-wc-hide (POSITIVE CLOSE) ─────────────────────────────────
+        // Fired by wallet.js on disconnect, by this overlay on Esc / X /
+        // Got it, and by the persistent wc-pairing chip's fall-back call
+        // `window.MW_WC_HIDE()`. Always closes — no gate.
+        this._hideListener = () => this.close();
+
+        // ── mw-wallet-state (auto-close on terminal transition) ──────
+        // Connect-time flow: idle → connecting → connected. Anything
+        // outside {connecting, connected} means pairing failed or the
+        // user cancelled; pull the modal down. A confirmed connected
+        // user stays connected — we do NOT yank them.
         this._stateListener = (e) => {
           const s = e && e.detail && e.detail.state;
           if (s && s !== 'connecting' && s !== 'connected') {
             if (this.open) this.close();
           }
         };
-        window.addEventListener('mw-wc-uri',         this._uriListener);
-        window.addEventListener('mw-wc-connecting',  this._connectingListener);
-        window.addEventListener('mw-wallet-state',   this._stateListener);
+
+        // ── Escape key dismiss ─────────────────────────────────────────
+        // Window-level so it works whether focus is on the modal or
+        // anywhere on the page. Active ONLY when this overlay is open,
+        // so it doesn't swallow Esc for anythign else (search modals,
+        // action_modal.cancel, etc. own their own Esc handling).
+        this._escHandler = (e) => {
+          if (this.open && (e.key === 'Escape' || e.keyCode === 27)) {
+            e.stopPropagation();
+            this.close();
+          }
+        };
+
+        window.addEventListener('mw-wc-show',      this._showListener);
+        window.addEventListener('mw-wc-hide',      this._hideListener);
+        window.addEventListener('mw-wallet-state', this._stateListener);
+        window.addEventListener('keydown',         this._escHandler);
       },
 
       destroy() {
-        if (this._uriListener)        window.removeEventListener('mw-wc-uri',         this._uriListener);
-        if (this._connectingListener) window.removeEventListener('mw-wc-connecting',  this._connectingListener);
-        if (this._stateListener)      window.removeEventListener('mw-wallet-state',   this._stateListener);
+        if (this._showListener)  window.removeEventListener('mw-wc-show',      this._showListener);
+        if (this._hideListener)  window.removeEventListener('mw-wc-hide',      this._hideListener);
+        if (this._stateListener) window.removeEventListener('mw-wallet-state', this._stateListener);
+        if (this._escHandler)    window.removeEventListener('keydown',         this._escHandler);
       },
 
       // Renders the QR via the self-hosted qrcode-generator library
@@ -135,29 +167,56 @@
         }
       },
 
-      // Got-it / dismiss: HIDE the modal but KEEP this.uri cached so the
-      // layout WC pairing chip can reopen the same QR. The wallet.js
-      // wc.connect() promise is still in-flight, so pairing continues
-      // until either: the user scans a wallet, or wallet.js rejects the
-      // URI. Either way, the persistent navbar chip ensures the user is
-      // never stranded without a path back to the QR.
+      // Got it / X / Esc / backdrop click all funnel here. We do THREE
+      // things to guarantee the UI hides even if Alpine's reactivity is
+      // wedged for any reason:
+      (1) Clear the reactive `open` flag — drives the x-show transition.
+      (2) Force-hide the modal-root DOM node with inline display:none.
+      (3) Clear the QR target so the next show start clean.
+      // The cached `uri` is INTENTIONALLY preserved: wallet.js can
+      // dispatch mw-wc-show again (carrying the cached uri) to rehydrate
+      // the same QR if the persistent pairing chip is clicked.
       close() {
         this.open    = false;
         this.loading = false;
+        try {
+          const root = document.getElementById('wc-modal-root');
+          if (root) root.style.display = 'none';
+          const target = document.getElementById('wc-qr-target');
+          if (target) target.innerHTML = '';
+        } catch (_) {}
+        // Always announce the close — listeneners (the navbar chip,
+        // analytics, etc.) can update their own state.
+        try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+      },
+
+      // show() is now also exposed on the Alpine object so any DOM
+      // element with @click="open()" (rare but plausible) still works.
+      show() {
+        this.open = true;
+        this._forceUnhide();
+      },
+
+      // Belt to the braces of x-show: directly remove any inline
+      // display:none the close() set, so a subsequent dispatch of
+      // mw-wc-show lands the user with a visible modal even if Alpine
+      // needed a microtask to flush x-show.
+      _forceUnhide() {
+        try {
+          const root = document.getElementById('wc-modal-root');
+          if (root) root.style.display = '';
+        } catch (_) {}
       },
     };
   };
 </script>
 
-<div x-data="window.MW_WC_OVERLAY_STATE()"
-     role="dialog"
-     aria-modal="true"
-     aria-labelledby="wc-qr-title"
-     class="contents">
+<div x-data="window.MW_WC_OVERLAY_STATE()" id="wc-overlay-root" class="contents">
 
-  <div x-show="open" x-cloak
+  <div id="wc-modal-root" x-show="open" x-cloak
        class="fixed inset-0 z-[80] flex items-center justify-center p-4"
-       x-transition.opacity.duration.200ms>
+       x-transition.opacity.duration.200ms
+       style="display: none;"> <!-- ensure first paint is hidden -->
 
     <!-- Backdrop: deep ink-black w/ 85% opacity + heavy blur. Click
          outside the modal = dismiss (UX consistency with action_modal). -->
@@ -174,22 +233,21 @@
         <div class="flex items-center gap-3 min-w-0">
           <div class="w-11 h-11 rounded-2xl bg-violet-500/20 border border-violet-300/40 flex items-center justify-center flex-shrink-0 glow-violet"
                aria-hidden="true">
-            <span class="text-violet-200 text-lg font-black">⌬</span>
+            <span class="violet-violet text-lg font-black" style="color:#c4b5fd">⌬</span>
           </div>
           <div class="min-w-0">
             <p id="wc-qr-title" class="text-base font-extrabold text-white leading-tight">Scan to pair</p>
             <p class="text-[11px] text-white/40 mt-0.5 uppercase tracking-wider font-bold">WalletConnect · v2</p>
           </div>
         </div>
-        <button @click="close()" aria-label="Close"
+        <button @click="close()" type="button" aria-label="Close"
                 class="text-white/40 hover:text-white text-2xl leading-none transition disabled:opacity-30">&times;</button>
       </div>
 
       <!-- QR section: self-hosted SVG drawn into a target div. While
            the URI is being prepared we overlay a sky spinner so the
-           user never sees a blank box (the previous 'no QR code
-           showing' complaint). The sky-bordered container with sky
-           glow keeps the QR as the loudest action on the surface. -->
+           user never sees a blank box. The sky-bordered container with
+           sky glow keeps the QR as the loudest action on the surface. -->
       <div class="px-6 pb-2">
         <div class="rounded-2xl p-5 bg-ink-1000 border border-sky-400/40 glow-sky">
           <div class="aspect-square w-full rounded-xl overflow-hidden bg-ink-1000 flex items-center justify-center relative">
@@ -219,12 +277,12 @@
       <div class="px-6 pb-5 pt-2 space-y-3">
         <div class="bg-ink-1000 rounded-xl p-3 flex items-center justify-between gap-2 border border-white/10">
           <code class="text-[10px] font-mono text-white/60 truncate" x-text="shorten(uri)"></code>
-          <button @click="copyUri()"
+          <button @click="copyUri()" type="button"
                   class="px-3 py-1 rounded-lg btn-gold hover:opacity-95 text-ink-950 text-[10px] font-extrabold uppercase tracking-wider transition glow-gold shrink-0"
                   :class="copied ? 'pointer-events-none opacity-100' : ''"
                   x-text="copied ? '\u2713 Copied' : 'Copy URI'"></button>
         </div>
-        <button @click="close()"
+        <button @click="close()" type="button"
                 class="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition ring-focus">
           Got it
         </button>

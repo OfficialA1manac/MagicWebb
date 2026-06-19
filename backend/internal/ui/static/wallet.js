@@ -38,36 +38,35 @@ const RPC_URL   = window.MW_RPC_URL  || 'https://coston2-api.flare.network/ext/C
 const EXPLORER  = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
 
 /*
- * ── WalletConnect overlay guard ─────────────────────────────────────────────
- * Defense-in-depth against the "QR overlay pops up on page boot" bug.
+ * ── WalletConnect overlay protocol (v6 — positive command) ─────────────
+ * Replaces the prior flag-gated passive listener pattern (which leaked
+ * state across auto-reconnect — see commit history for the
+ * "popup-on-boot" bug class). New contract:
  *
- * Two independent guards must BOTH allow an event before the overlay opens:
+ *   • Auto-reconnect at the bottom of this file runs `connect(kind,
+ *     {silent:true})`. The silent path emits ZERO overlay events and
+ *     does NOT touch any open flag. If the cached pairing session
+ *     is still valid, connect() resolves directly. If it expired,
+ *     wc.connect() rejects; we surface the error and the user can
+ *     click the navbar Scan-QR chip (or Connect Wallet → WalletConnect)
+ *     to start a fresh pairing.
  *
- *   1. `silent` argument: connect() was called from a USER ACTION
- *      (picker button click), not from the auto-reconnect block at the
- *      bottom of this file. The auto-reconnect path ALWAYS passes
- *      {silent:true}; only user clicks pass {silent:false} (the default).
+ *   • User-initiated `connect('walletconnect')` (silent default false)
+ *     dispatches exactly TWO events:
+ *       - `mw-wc-show { loading: true }` — overlay opens with spinner.
+ *       - `mw-wc-show { uri }`              — first display_uri arrives;
+ *                                            overlay renders the QR.
  *
- *   2. `window.MW_WC_USER_INITIATED` global — set inside `connect('walletconnect', {silent:false})`
- *      and cleared after a successful pairing OR after the user closes
- *      the overlay. The overlay ignores every `mw-wc-uri` /
- *      `mw-wc-connecting` dispatch unless this flag is truthy. This
- *      decouples "user did connect" from "user is in a connecting flow
- *      right now" so a stale session can't sneak past.
+ *   • Either path also listens for `mw-wc-hide` (the navbar chip's
+ *     "force-close" / Esc / X / Got it funnel) so the chip can clear
+ *     a stale modal.
  *
- * Belt-and-braces with the silent flag: if a future regression nulls
- * out `silent` on the auto-reconnect path (e.g. someone calls
- * `connect('walletconnect')` without options), the global still blocks
- * the overlay. Conversely, a future returner can keep the global but
- * forget to thread `silent` through a new caller and the existing
- * per-caller check still keeps it closed.
- *
- * The flag also bounds the lifetime: even on a stuck/expired session,
- * once the user clicks Connect Wallet → WalletConnect, the overlay can
- * open; otherwise it stays closed even if the SDK spuriously emits
- * `display_uri` repeatedly between page load and the user's first click.
+ * The OLD `mw-wc-uri` and `mw-wc-connecting` events are NOT used by the
+ * overlay anymore — we keep them as no-op alias dispatches so any
+ * third-party embed or future debugger panel that greps for them
+ * doesn't go dark, but the overlay state is driven exclusively by the
+ * `mw-wc-show` / `mw-wc-hide` pair.
  */
-window.MW_WC_USER_INITIATED = false;
 
 /* ── Contract addresses: server-injected from .env. NEVER hardcode. ── */
 const MARKETPLACE = window.MW_MARKETPLACE || '';
@@ -428,22 +427,12 @@ window.addEventListener('alpine:init', () => {
     async connect(kind = 'injected', { silent = false } = {}) {
       if (this.state === 'connecting') return;
       const wasError = this.state === 'error';
-      // Mark the wallet-connect flow as user-initiated the moment a user
-      // calls connect() WITHOUT the silent flag. The auto-reconnect path
-      // at the bottom of this file always passes silent:true; this gate
-      // therefore can never be flipped open on page boot. Even if the
-      // silent flag regression-restores itself, the gate below the
-      // `mw-wc-uri` / `mw-wc-connecting` listeners queries this global
-      // and refuses to open the overlay in either case.
-      if (kind === 'walletconnect' && !silent) {
-        window.MW_WC_USER_INITIATED = true;
-      }
       this.setState('connecting');
       try {
         let eip1193;
         if (kind === 'walletconnect') {
-          if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
-          eip1193 = await this._wcConnect({ silent });
+            if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
+            eip1193 = await this._wcConnect({ silent });
         } else {
           if (!window.ethereum) {
             this.setState('idle');
@@ -497,29 +486,37 @@ window.addEventListener('alpine:init', () => {
     // via the self-hosted qrcode.min.js encoder). The SDK's built-in
     // modal was disabled because:
     //   (a) it pops up INSTANTLY on init — was the source of the
-    //       popup-instantly-show-up complaint;
+    //       popup-instantly-show-up complaint (now fixed by the
+    //       positive-command protocol below);
     //   (b) it fetches assets from walletconnect.com which is blocked
     //       on some networks / policies, leaving a blank box where the
     //       QR should be — was the no-QR-showing complaint;
     //   (c) its Got it affordance is not tuned to our 5-color palette.
     //
-    // Sequencing: dispatch mw-wc-connecting BEFORE await init so the
-    // overlay can show a spinner — defeats the blank-flash race. Attach
-    // the display_uri listener IMMEDIATELY after init resolves and
-    // BEFORE wc.connect() so the SDK's buffered re-emission of
-    // display_uri on late subscriber attach reaches us.
+    // Sequencing (v6 positive-command protocol):
+    //   1. If !silent, immediately dispatch `mw-wc-show { loading: true }`
+    //      so the overlay opens with the spinner BEFORE the WC relay
+    //      round-trip completes — defeats the blank-flash race.
+    //   2. After init, attach `display_uri` listener and call wc.connect().
+    //   3. The SDK emits `display_uri` → our handler caches the URI and
+    //      dispatches `mw-wc-show { uri }` so the overlay paints the QR.
+    //   4. wc.connect() resolves when the user scans the wallet.
+    //
+    // Silent path (auto-reconnect on page boot): emits ZERO overlay
+    // events. Even if the SDK's display_uri listener fires for a stale
+    // session, our handler early-returns on `silent`. The overlay stays
+    // closed on page boot for returning users.
     async _wcConnect({ silent = false } = {}) {
-      // Only announce we are connecting when the caller is a USER ACTION
-      // (Connect Wallet → WalletConnect). The auto-reconnect path at the
-      // bottom of this file passes { silent: true } so the QR overlay
-      // stays closed on page boot for returning users — the chip in the
-      // navbar stays visible while the WC session re-establishes in the
-      // background; the overlay only opens when the user clicks the chip
-      // or re-selects WalletConnect in the picker. Without this gate, a
-      // verified user who happened to choose WalletConnect last sees the
-      // pairing modal pop up unprompted on every page load.
+      // (1) User-initiated only: open with spinner BEFORE init awaits.
       if (!silent) {
-        try { window.dispatchEvent(new CustomEvent('mw-wc-connecting')); } catch (_) {}
+        try {
+          window.dispatchEvent(new CustomEvent('mw-wc-show', {
+            detail: { loading: true },
+          }));
+          // No-op alias for any debug-only listener still watching the
+          // legacy event name.
+          window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
+        } catch (_) {}
       }
       let wc;
       try {
@@ -542,23 +539,15 @@ window.addEventListener('alpine:init', () => {
       this._raw.wc = R(wc);
 
       wc.on('display_uri', (uri) => {
-        // User-driven connect emits display_uri → open the overlay so
-        // the user can scan. Silent auto-reconnect (page boot for a
-        // returning user) MUST NOT fire this — if the previous WC
-        // session has expired the SDK re-emits display_uri on the
-        // next connect() call, which would otherwise pop open the QR
-        // overlay unprompted (the original "popup-on-boot" bug).
-        // Silent path: drop the URI, fall back to state='error' if
-        // connect() ultimately fails, and let the user re-click the
-        // chip or the picker button to start a fresh pairing.
-        //
-        // Defense in depth: ALWAYS require the user-initiated gate.
-        // Two independent checks (silent AND global) so a regression
-        // in either alone still keeps the overlay closed on boot.
+        // Positive-command protocol: silent path emits ZERO overlay
+        // events; user-initiated path emits `mw-wc-show { uri }` so
+        // the overlay can paint the QR.
         if (silent) return;
-        if (!window.MW_WC_USER_INITIATED) return;
+        if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
         try {
+          window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { uri } }));
+          // Legacy alias for any downstream listener still keyed on it.
           window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
         } catch (_) {}
       });
@@ -567,6 +556,11 @@ window.addEventListener('alpine:init', () => {
         await wc.connect();
       } catch (e) {
         try { wc.disconnect(); } catch (_) {}
+        // Tell the overlay to dismiss so the user isn't stranded on a
+        // frozen spinner after a cancelled / failed pairing.
+        if (!silent) {
+          try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+        }
         throw e;
       }
       return wc;
@@ -582,6 +576,11 @@ window.addEventListener('alpine:init', () => {
       localStorage.removeItem('mw_addr');
       localStorage.removeItem('mw_jwt');
       localStorage.removeItem('mw_kind');
+      // Always tell the overlay to release if it had been open. The
+      // overlay's mw-wallet-state listener will ALSO auto-close when
+      // state leaves {connecting, connected} but a programmatic dispatch
+      // is the belt vs. any future state-event timing regression.
+      try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
     },
 
     async _switchChain() {
@@ -1255,25 +1254,36 @@ window.fmtFLR  = fmtFLR;
 window.fmtAddr = fmtAddr;
 window.mediaURL = mediaURL;
 
-// Re-open the WalletConnect QR overlay from anywhere (notably the
-// persistent Scan-QR-on-your-phone chip in the layout navbar). Idempotent:
+// Force-open the WC pairing overlay from anywhere — used by the
+// persistent Scan-QR-on-your-phone chip in the navbar. Idempotent:
 // if window.MW_WC_URI is cached from a prior display_uri emission,
-// dispatch mw-wc-uri so the overlay rehydrates with that QR. Otherwise
-// dispatch mw-wc-connecting so the overlay shows its spinner / wait
-// state. Wallet state stays connecting throughout \u2014 wc.connect() in
-// _wcConnect() drives the actual handshake.
+// dispatch mw-wc-show carrying that URI so the overlay rehydrates the
+// same QR. Otherwise dispatch mw-wc-show { loading: true } so the
+// overlay shows the spinner (a fresh _wcConnect should be in flight).
+// Only meaningful when a WalletConnect pairing session is currently in
+// flight; dispatching it outside that context would be a no-op.
 function MW_WC_OPEN_OVERLAY() {
   try {
-    if (!window.MW_WC_USER_INITIATED) {
-      return;
-    }
     if (window.MW_WC_URI && typeof window.MW_WC_URI === 'string'
         && window.MW_WC_URI.startsWith('wc:')) {
+      window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { uri: window.MW_WC_URI } }));
+      // Legacy alias.
       window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: window.MW_WC_URI }));
     } else {
+      window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { loading: true } }));
       window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
     }
   } catch (_) {}
 }
 window.MW_WC_OPEN_OVERLAY = MW_WC_OPEN_OVERLAY;
+
+// Emergency close hook. Any code (or the user, via DevTools) can call
+// `window.MW_WC_HIDE()` to dismiss the QR overlay. Used by the chip's
+// X-button adjacent handler, the disconnect path, and any future UI
+// that wants to ensure the overlay is hidden (e.g. when switching
+// routes mid-connect).
+function MW_WC_HIDE() {
+  try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+}
+window.MW_WC_HIDE = MW_WC_HIDE;
 }());
