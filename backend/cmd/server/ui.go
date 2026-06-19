@@ -374,9 +374,16 @@ func staticFS() http.FileSystem {
 	return http.FS(sub)
 }
 
+// mountStatic serves /static/* self-hosted assets from the embedded FS.
+// MaxAge is intentionally short (60s) so a code-level deploy surfaces
+// to users within a minute — was 3600s which held returning users on
+// stale wallet.js / tailwind.css bytes for up to an hour and masked
+// regressions on every deploy. We also still bump `?v=N` on every URL
+// in layout.html (force-refetch on version-bump deploys) so this
+// short MaxAge is the *baseline* freshness policy, not the only one.
 func mountStatic(app *fiber.App) {
 	app.Use("/static", filesystem.New(filesystem.Config{
 		Root:   staticFS(),
-		MaxAge: 3600,
+		MaxAge: 60,
 	}))
 }
