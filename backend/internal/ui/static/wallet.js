@@ -450,12 +450,24 @@ window.addEventListener('alpine:init', () => {
       }
     },
 
-    // WalletConnect v2 — opens the WC modal, exposes the URI for an
-    // in-page QR fallback (when the user closes the WC modal by mistake),
-    // and returns the underlying EIP-1193. We import from esm.sh at the
-    // moment the user clicks "WalletConnect" — never on page load —
-    // because the module is large and not every user needs it.
+    // WalletConnect v2 — owns the entire pairing UX through the
+    // partials/wc_qr_overlay.html overlay (we render our own QR matrix
+    // via the self-hosted qrcode.min.js encoder). The SDK's built-in
+    // modal was disabled because:
+    //   (a) it pops up INSTANTLY on init — was the source of the
+    //       popup-instantly-show-up complaint;
+    //   (b) it fetches assets from walletconnect.com which is blocked
+    //       on some networks / policies, leaving a blank box where the
+    //       QR should be — was the no-QR-showing complaint;
+    //   (c) its Got it affordance is not tuned to our 5-color palette.
+    //
+    // Sequencing: dispatch mw-wc-connecting BEFORE await init so the
+    // overlay can show a spinner — defeats the blank-flash race. Attach
+    // the display_uri listener IMMEDIATELY after init resolves and
+    // BEFORE wc.connect() so the SDK's buffered re-emission of
+    // display_uri on late subscriber attach reaches us.
     async _wcConnect() {
+      try { window.dispatchEvent(new CustomEvent('mw-wc-connecting')); } catch (_) {}
       let wc;
       try {
         const mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle');
@@ -463,7 +475,7 @@ window.addEventListener('alpine:init', () => {
           projectId: WC_PROJECT_ID,
           chains:    [CHAIN_ID],
           rpcMap:    { [CHAIN_ID]: RPC_URL },
-          showQrModal: true,
+          showQrModal: false,
           metadata: {
             name: 'MagicWebb',
             description: 'Non-custodial NFT marketplace on Flare Network',
@@ -476,20 +488,16 @@ window.addEventListener('alpine:init', () => {
       }
       this._raw.wc = R(wc);
 
-      // Show our own QR alongside WC's built-in modal so users can scan
-      // from either screen. The QR is rendered by any template that
-      // listens for the `mw-wc-uri` event (see the optional WC QR
-      // overlay in layout.html) — uses a free public QR encoder; the URI
-      // has not yet been parried and contains no secret material.
       wc.on('display_uri', (uri) => {
         window.MW_WC_URI = uri;
-        window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
+        try {
+          window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
+        } catch (_) {}
       });
 
       try {
         await wc.connect();
       } catch (e) {
-        // User closed the picker → reset to clean state so they can retry.
         try { wc.disconnect(); } catch (_) {}
         throw e;
       }
@@ -1170,12 +1178,31 @@ function mediaURL(uri) {
 // Expose globals for inline Alpine / template JS calls. The IIFE runs
 // synchronously when this script is parsed, which is BEFORE alpinejs has
 // loaded (layout.html load order: htmx → sse → ethers → wallet.js →
-// alpine.js, all `defer`). Alpine is therefore undefined at this exact
-// moment — DO NOT touch `window.Alpine` here; Alpine's own UMD bootstrap
-// will install it. Pre-setting `window.Alpine = undefined` would race
-// against later bundles that guard with `if (!window.Alpine)` and break
-// the registration in some Alpine builds.
+// qrcode.min.js → alpine.js, all `defer`). Alpine is therefore undefined
+// at this exact moment — DO NOT touch `window.Alpine` here; Alpine's own
+// UMD bootstrap will install it. Pre-setting `window.Alpine = undefined`
+// would race against later bundles that guard with `if (!window.Alpine)`
+// and break the registration in some Alpine builds.
 window.fmtFLR  = fmtFLR;
 window.fmtAddr = fmtAddr;
 window.mediaURL = mediaURL;
+
+// Re-open the WalletConnect QR overlay from anywhere (notably the
+// persistent Scan-QR-on-your-phone chip in the layout navbar). Idempotent:
+// if window.MW_WC_URI is cached from a prior display_uri emission,
+// dispatch mw-wc-uri so the overlay rehydrates with that QR. Otherwise
+// dispatch mw-wc-connecting so the overlay shows its spinner / wait
+// state. Wallet state stays connecting throughout \u2014 wc.connect() in
+// _wcConnect() drives the actual handshake.
+function MW_WC_OPEN_OVERLAY() {
+  try {
+    if (window.MW_WC_URI && typeof window.MW_WC_URI === 'string'
+        && window.MW_WC_URI.startsWith('wc:')) {
+      window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: window.MW_WC_URI }));
+    } else {
+      window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
+    }
+  } catch (_) {}
+}
+window.MW_WC_OPEN_OVERLAY = MW_WC_OPEN_OVERLAY;
 }());
