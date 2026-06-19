@@ -798,8 +798,21 @@ window.addEventListener('alpine:init', () => {
           fail({ title: 'Wallet lost', body: 'Reconnect and try again.' });
           return;
         }
-        const contract = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, R(signer));
-        const tx = await contract.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
+        // v8 — `staticCall` is a read-only eth_call that runs the function
+        // against current chain state and reverts with the EXACT on-chain
+        // reason if anything is wrong (seller revoked marketplace
+        // approval, listing expired, seller transferred NFT out, msg.value
+        // mismatch, manager paused, etc.). Reading the revert string here
+        // surfaces it before the user signs a doomed metamask prompt.
+        setStep(1, 'Checking purchase is fillable…');
+        const writeContract = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, R(signer));
+        try {
+          await writeContract.buy.staticCall(collection, tokenId, seller, { value: BigInt(priceWei) });
+        } catch (staticErr) {
+          fail({ title: 'Listing not fillable', body: revertMessage(staticErr) });
+          return;
+        }
+        const tx = await writeContract.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
         setStep(2, 'Waiting for confirmation…');
         await tx.wait();
         done({

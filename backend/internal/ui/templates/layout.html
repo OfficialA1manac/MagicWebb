@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=7">
+  <link rel="stylesheet" href="/static/tailwind.css?v=8">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=7" defer></script>
-  <script src="/static/sse.js?v=7" defer></script>
-  <script src="/static/ethers.umd.min.js?v=7" defer></script>
+  <script src="/static/htmx.min.js?v=8" defer></script>
+  <script src="/static/sse.js?v=8" defer></script>
+  <script src="/static/ethers.umd.min.js?v=8" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=7" defer></script>
+  <script src="/static/wallet.js?v=8" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=7" defer></script>
-  <script src="/static/cdn.min.js?v=7" defer></script>
+  <script src="/static/qrcode.min.js?v=8" defer></script>
+  <script src="/static/cdn.min.js?v=8" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -247,8 +247,15 @@
     </div>
   </div>
 
-  <!-- Mobile menu -->
-  <div x-show="open" x-cloak class="md:hidden border-t border-white/10 px-4 py-3 space-y-1 text-sm">
+  <!-- Mobile menu.
+       Includes a wallet control surface INSIDE the drawer so on small
+       viewports the user has a wide, uncluttered Connect Wallet button
+       that opens the Browser Wallet / WalletConnect picker without the
+       cramped 80-wide dropdown clipping at the edge of the desktop
+       navbar (the previous "wallet button not visible" complaint).
+       Controls mirror the desktop navbar behaviour via $store.wallet
+       so state stays consistent regardless of entry point. -->
+  <div x-show="open" x-cloak class="md:hidden border-t border-white/10 px-4 py-3 space-y-1.5 text-sm">
     <a href="/"          class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Home</a>
     <a href="/listings"  class="block py-2 px-3 rounded-lg text-sky-200 hover:bg-sky-500/15 transition">Listings</a>
     <a href="/auctions"  class="block py-2 px-3 rounded-lg text-violet-200 hover:bg-violet-500/15 transition">Auctions</a>
@@ -256,6 +263,52 @@
     <a href="/search"    class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Search</a>
     <a href="/metrics"   class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Metrics</a>
     <a href="/docs"      class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Docs</a>
+
+    <!-- Mobile wallet section: always present in the drawer; the inner
+         controls are conditional on the same $store.wallet that drives
+         the desktop navbar so reconnects/disconnects stay in sync. -->
+    <div class="pt-3 mt-2 border-t border-white/10 space-y-2">
+      <p class="px-3 text-[10px] uppercase tracking-wider text-white/40 font-extrabold">Wallet</p>
+      <template x-if="!$store.wallet.connected">
+        <div class="space-y-2">
+          <button @click="open=false; $store.wallet.connect('injected')"
+                  class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97]">
+            <span class="w-9 h-9 rounded-lg bg-ink-950/20 flex items-center justify-center text-base font-extrabold">M</span>
+            <span class="flex-1">
+              <span class="block text-sm font-extrabold">Browser Wallet</span>
+              <span class="block text-[10px] font-bold opacity-80">MetaMask, Rabby, any EIP-1193</span>
+            </span>
+          </button>
+          <button @click="open=false; $store.wallet.connect('walletconnect')"
+                  class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97]"
+                  {{if not .WCProjectID}}disabled{{end}}>
+            <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>
+            <span class="flex-1">
+              <span class="block text-sm font-extrabold">WalletConnect</span>
+              <span class="block text-[10px] font-bold opacity-80">Scan QR from mobile / hardware</span>
+            </span>
+            <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/15 font-bold uppercase tracking-wider">QR</span>
+          </button>
+        </div>
+      </template>
+      <template x-if="$store.wallet.connected">
+        <div class="space-y-2">
+          <a :href="'/profile/' + $store.wallet.address"
+             class="flex items-center gap-2.5 px-3 py-2.5 rounded-xl bg-white/5 border border-white/10">
+            <span class="w-2 h-2 rounded-full bg-sky-300 pill-pulse-pulse"></span>
+            <span class="text-xs text-white font-mono font-bold flex-1 truncate"
+                  x-text="$store.wallet.shortAddr"></span>
+            <template x-if="$store.wallet.isWalletConnect">
+              <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30">WC</span>
+            </template>
+          </a>
+          <button @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
+                  class="w-full text-left px-3 py-2.5 rounded-xl border border-red-400/30 text-red-200 hover:bg-red-500/10 transition font-bold text-sm">
+            Disconnect Wallet
+          </button>
+        </div>
+      </template>
+    </div>
   </div>
 </nav>
 

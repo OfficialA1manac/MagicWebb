@@ -39,19 +39,22 @@ func TestVerifyRejectsBadAudience(t *testing.T) {
 	}
 }
 
-// TestVerifyRejectsExpired: TTL is honored after expiry. We use a 1-second
-// TTL + sleep past a full Unix-second boundary so the resolution-rounding in
-// Issue() (exp is generated via .Unix()) doesn't make this flaky. The
-// production clamp floors negative TTLs at 24h to defend against signer
-// callers that pass junk in, so we cannot issue with ttl<0.
+// TestVerifyRejectsExpired: TTL is honored after expiry. Issue() sets exp
+// via `.Unix()` which rounds DOWN — so a 2s TTL issued at the very END of a
+// Unix second has effective lifetime up to 2.999s, but issued at the START
+// has only 2.001s. We pass a 2s TTL and sleep 3000ms so we land AT LEAST one
+// full second past the worst-case exp floor, leaving generous headroom for
+// Go scheduler / linker preemption observed to flake test runs at the
+// boundary. The production clamp floors negative TTLs at 24h to defend
+// against signer callers that pass junk in, so we cannot issue with ttl<0.
 func TestVerifyRejectsExpired(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, err := Issue(address, secret, DefaultAudience, 1*time.Second)
+	tok, err := Issue(address, secret, DefaultAudience, 2*time.Second)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	time.Sleep(1500 * time.Millisecond)
+	time.Sleep(3000 * time.Millisecond)
 	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
 		t.Fatal("expected expired token to fail verification")
 	}

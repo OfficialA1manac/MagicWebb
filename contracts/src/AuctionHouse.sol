@@ -152,7 +152,14 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
-        a.minIncrementBps = minIncBps == 0 ? 500 : minIncBps;
+        // v8 — STOP clamping minIncrementBps=0 to 500 bps (5%). A seller can
+        // now opt out of percent increments by passing 0; with minIncFlat=0
+        // the bid() path falls through to `if (inc == 0) inc = 1;` so the
+        // next bid must beat the previous top by exactly 1 wei (the +1 rule
+        // called out in the marketplace spec). Existing auctions are
+        // unaffected — this only governs auctions created after the
+        // redeploy.
+        a.minIncrementBps = minIncBps;
         a.standard        = standard;
         a.collection      = coll;
         a.endsAt          = endsAt;

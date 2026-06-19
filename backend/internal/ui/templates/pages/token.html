@@ -10,7 +10,7 @@
     action:      (new URLSearchParams(location.search).get('action')) || '{{if .Listing}}buy{{else}}offer{{end}}',
     listPrice:   '', listDays: '30',
     offerAmt:    '', offerDays: '3',
-    auctionReserve: '', auctionDays: '3', auctionMinInc: '',
+    auctionReserve: '', auctionDays: '3',
     get isSeller() { return this.sellerAddr && this.sellerAddr !== '' && $store.wallet.address === this.sellerAddr; },
     get isOwner()  { return this.ownerAddr  && this.ownerAddr  !== '' && $store.wallet.address === this.ownerAddr;  },
   }" class="grid lg:grid-cols-5 gap-8">
@@ -43,7 +43,16 @@
       </div>
     </div>
 
-    <!-- Tab bar — palette: sky=Buy, gold=Offer, sky=List, violet=Auction -->
+    <!-- Tab bar — palette: sky=Buy, gold=Offer, sky=List, violet=Auction.
+         "List" and "Auction" tabs are HIDDEN whenever an existing listing OR
+         live auction is already on this token. Rationale (user policy v8):
+         a buyer on someone else's posted NFT can only BUY/BID/OFFER; they
+         can't create a competing listing/auction on a token they don't own.
+         A seller wanting to relist must CANCEL first (the existing listing's
+         Cancel button stays for them) and pick a fresh auction window.
+         The "Offer" tab stays available unconditionally — offers under a
+         listing price are a legitimate buyer tactic and don't conflict with
+         an existing fixed-price sale. -->
     <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 overflow-hidden glow-sky">
       <div class="flex border-b border-white/10 bg-white/[0.02]">
         {{with .Listing}}
@@ -54,12 +63,14 @@
         <button @click="action='offer'"
                 :class="action==='offer' ? 'text-gold-200 border-gold-300 bg-gold-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Offer</button>
+        {{if and (not .Listing) (not .Auction)}}
         <button @click="action='list'"
                 :class="action==='list' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">List</button>
         <button @click="action='auction'"
                 :class="action==='auction' ? 'text-violet-200 border-violet-300 bg-violet-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Auction</button>
+        {{end}}
       </div>
 
       <div class="p-5">
@@ -109,14 +120,9 @@
         </div>
 
         <div x-show="action==='auction'" x-cloak class="space-y-3">
-          <p class="text-xs text-white/60 leading-relaxed">English auction, max 7 days. Anti-snipe <span class="text-sky-200 font-extrabold">+3:00</span>. 1.5% fee from seller at settlement.</p>
+          <p class="text-xs text-white/60 leading-relaxed">English auction, max 7 days. Anti-snipe <span class="text-sky-200 font-extrabold">+3:00</span>. 1.5% fee from seller at settlement. <span class="text-sky-300 font-extrabold">No min-increment</span> — bids need only be <span class="text-sky-300 font-extrabold">+1 wei</span> over the previous top bid (or highest active offer), and at least your reserve.</p>
           <div class="relative">
-            <input x-model="auctionReserve" type="number" step="0.001" min="0.01" placeholder="Reserve price (min 0.01)"
-                   class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-300/50 focus:ring-1 focus:ring-violet-300/20 transition">
-            <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
-          </div>
-          <div class="relative">
-            <input x-model="auctionMinInc" type="number" step="0.001" min="0" placeholder="Flat minimum increment (optional)"
+            <input x-model="auctionReserve" type="number" step="0.001" min="0.01" placeholder="Reserve price (min 0.01 FLR)"
                    class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-300/50 focus:ring-1 focus:ring-violet-300/20 transition">
             <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
           </div>
@@ -124,7 +130,7 @@
             <option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold text-sm transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0', Date.now()/1000 + parseInt(auctionDays||3)*86400, 500, auctionMinInc ? (parseFloat(auctionMinInc)*1e18).toString() : '0')">
+                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0', Date.now()/1000 + parseInt(auctionDays||3)*86400, 0, '0')">
             <span>♕</span><span>Create Auction</span><span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
           </button>
         </div>
