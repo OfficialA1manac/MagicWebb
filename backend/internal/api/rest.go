@@ -3,6 +3,7 @@ package api
 
 import (
 	"bufio"
+	"context"
 	"encoding/json"
 	"strings"
 	"time"
@@ -95,7 +96,31 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		Level: compress.LevelDefault,
 	}))
 
-	app.Get("/healthz", func(c *fiber.Ctx) error { return c.SendStatus(fiber.StatusOK) })
+	// /healthz = liveness. Must respond 200 within ~3.5s even when the
+	// process is degraded — used by Fly's `[checks.health]` (30s interval,
+	// 5s timeout) to decide whether a machine is replaceable. Probes BOTH
+	// the DB (via q.Ping) AND the RPC pool (via eth.BlockNumber on a 3s ctx
+	// deadline): a wedged RPC pool would otherwise leak past this route
+	// until the first /api/v1/listings or /api/v1/auctions call surfaces a
+	// dial-timeout to a real user.
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		pingCtx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+		if err := q.Ping(pingCtx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")
+		}
+		rpcCtx, cancelRPC := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancelRPC()
+		if _, err := eth.BlockNumber(rpcCtx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("rpc unhealthy")
+		}
+		return c.SendStatus(fiber.StatusOK)
+	})
+	// /readyz = readiness. DB-only (q.Ping verifies connectivity, NOT
+	// row-writability or migration state). Kept narrower than /healthz so
+	// an upstream RPC outage does not take /readyz down while the DB is
+	// fine — the liveness check on /healthz drives machine replacement
+	// separately.
 	app.Get("/readyz", func(c *fiber.Ctx) error {
 		if err := q.Ping(c.Context()); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")

@@ -12,9 +12,16 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 )
 
-// Caller is the subset of an Ethereum client used for read-only NFT checks.
+// Caller is the subset of an Ethereum client used for read-only NFT checks
+// plus the chain-tip probe used by the /healthz liveness route. RPC pool
+// implementations always carry BlockNumber (a JSON-RPC `eth_blockNumber` is
+// universal), so a single interface keeps the api package off concrete types
+// while letting the healthz handler reach into the same client every other
+// caller already trusts. Returning a non-nil error from BlockNumber inside a
+// 3-second deadline is the canonical "the chain is wedged" signal.
 type Caller interface {
 	CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error)
+	BlockNumber(ctx context.Context) (uint64, error)
 }
 
 var (
