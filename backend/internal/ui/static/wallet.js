@@ -401,7 +401,7 @@ window.addEventListener('alpine:init', () => {
         let eip1193;
         if (kind === 'walletconnect') {
           if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
-          eip1193 = await this._wcConnect();
+          eip1193 = await this._wcConnect({ silent });
         } else {
           if (!window.ethereum) {
             this.setState('idle');
@@ -466,8 +466,19 @@ window.addEventListener('alpine:init', () => {
     // the display_uri listener IMMEDIATELY after init resolves and
     // BEFORE wc.connect() so the SDK's buffered re-emission of
     // display_uri on late subscriber attach reaches us.
-    async _wcConnect() {
-      try { window.dispatchEvent(new CustomEvent('mw-wc-connecting')); } catch (_) {}
+    async _wcConnect({ silent = false } = {}) {
+      // Only announce we are connecting when the caller is a USER ACTION
+      // (Connect Wallet → WalletConnect). The auto-reconnect path at the
+      // bottom of this file passes { silent: true } so the QR overlay
+      // stays closed on page boot for returning users — the chip in the
+      // navbar stays visible while the WC session re-establishes in the
+      // background; the overlay only opens when the user clicks the chip
+      // or re-selects WalletConnect in the picker. Without this gate, a
+      // verified user who happened to choose WalletConnect last sees the
+      // pairing modal pop up unprompted on every page load.
+      if (!silent) {
+        try { window.dispatchEvent(new CustomEvent('mw-wc-connecting')); } catch (_) {}
+      }
       let wc;
       try {
         const mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle');
