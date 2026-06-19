@@ -30,7 +30,7 @@
        and a CDN-side compromise can no longer affect us. WalletConnect's
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
-       picker — see wallet.js's `_wcProvider()` for the dynamic import. -->
+       picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
   <script src="/static/htmx.min.js" defer></script>
   <script src="/static/sse.js" defer></script>
   <script src="/static/ethers.umd.min.js" defer></script>
@@ -51,6 +51,11 @@
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
   <script src="/static/wallet.js" defer></script>
+  <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
+       overlay renders QRs without a third-party endpoint. Loaded just
+       before Alpine so it is available by the time wallet.js dispatches
+       mw-wc-uri. -->
+  <script src="/static/qrcode.min.js" defer></script>
   <script src="/static/cdn.min.js" defer></script>
   <style>
     [x-cloak]{display:none !important;}
@@ -63,10 +68,8 @@
     ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg,#0ea5e9,#7c3aed); background-clip: padding-box; }
     * { scrollbar-width: thin; scrollbar-color: #7dd3fc rgba(255,255,255,0.05); }
 
-    /* Subtle skeleton shimmer for image placeholders while we fetch. */
     .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
     @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-    /* Palette-aware utility classes — easing template authoring. */
     .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
     .glass-soft  { background: rgba(15,15,20,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
     .glow-sky     { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
@@ -75,45 +78,35 @@
     .glow-white   { box-shadow: 0 0 18px -4px rgba(255,255,255,0.55); }
     .glow-sky-strong  { box-shadow: 0 0 30px -4px rgba(56,189,248,0.65), 0 0 8px -1px rgba(56,189,248,0.85); }
     .glow-gold-strong { box-shadow: 0 0 30px -4px rgba(252,211,77,0.65), 0 0 8px -1px rgba(252,211,77,0.85); }
-    /* Button backgrounds (one class per palette token). The exact gradient
-       comes from tailwind.config backgroundImage — these classes exist so
-       templates don't need a long string every time. */
     .btn-sky     { background-image: linear-gradient(135deg,#7dd3fc,#0ea5e9); }
     .btn-gold    { background-image: linear-gradient(135deg,#fcd34d,#f59e0b); }
     .btn-violet  { background-image: linear-gradient(135deg,#a78bfa,#7c3aed); }
     .btn-white   { background: #ffffff; color: #0a0a0d; }
     .btn-disabled { background-image: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25)) !important; cursor: not-allowed; }
     .ring-focus:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
-    /* Animated brand gradient for headings + hero brand name. */
     .brand-text { background-image: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd, #7dd3fc); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; animation: gradient 5s ease infinite; }
     @keyframes gradient { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-    /* Step pulse for the action-modal progress indicator. */
     .step-current { animation: step-pulse 1.6s ease-in-out infinite; }
     @keyframes step-pulse { 0%,100% { box-shadow: 0 0 0 0 rgba(125,211,252,0.6); } 50% { box-shadow: 0 0 0 8px rgba(125,211,252,0.0); } }
     .step-current-gold { animation: step-pulse-gold 1.6s ease-in-out infinite; }
     @keyframes step-pulse-gold { 0%,100% { box-shadow: 0 0 0 0 rgba(252,211,77,0.6); } 50% { box-shadow: 0 0 0 8px rgba(252,211,77,0.0); } }
     .step-current-violet { animation: step-pulse-violet 1.6s ease-in-out infinite; }
     @keyframes step-pulse-violet { 0%,100% { box-shadow: 0 0 0 0 rgba(167,139,250,0.6); } 50% { box-shadow: 0 0 0 8px rgba(167,139,250,0.0); } }
-    /* Tooltip on the WC pill. */
     .pill-pulse-pulse::after { content: ""; position: absolute; inset: -3px; border-radius: 9999px; background: rgba(125,211,252,0.35); z-index: -1; animation: pill-pulse 1.5s ease-out infinite; }
     @keyframes pill-pulse { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
-    /* Stripe gradient: drives the "showcase" section card on the home page
-       — multi-color horizontal sweep across all five palette tokens. */
+    /* Stripe gradient: drives the showcase section card. */
     .stripe-gradient { background: linear-gradient(90deg, #7dd3fc 0%, #fcd34d 40%, #c4b5fd 80%, #ffffff 100%); }
-    /* Confetti seed: highlight stripe on auction countdown last-minute. */
+    /* WC pairing-chip pulse — softer than the connected-state pill so they don't compete. */
+    .pulse-violet { animation: pulse-violet 1.8s ease-in-out infinite; }
+    @keyframes pulse-violet { 0%,100% { box-shadow: 0 0 0 0 rgba(167,139,250,0.0); } 50% { box-shadow: 0 0 0 6px rgba(167,139,250,0.18); } }
     .anti-snipe-flash { animation: anti-snipe 0.6s ease-in-out infinite alternate; }
     @keyframes anti-snipe { from { box-shadow: 0 0 0 0 rgba(56,189,248,0.0); } to { box-shadow: 0 0 16px -4px rgba(56,189,248,0.6); } }
-    /* Floating buy CTA — gentle hover-lift accent applied via .lift-cta on
-       primary call-to-action elements. */
     .lift-cta { transition: transform .25s cubic-bezier(.34,1.56,.64,1), box-shadow .25s ease; }
     .lift-cta:hover { transform: translateY(-2px) scale(1.01); }
-    /* Place the spinner svg in modal "step" pills. */
     .spin-svg { animation: spin-svg 1s linear infinite; }
     @keyframes spin-svg { to { transform: rotate(360deg); } }
-    /* Image fade-in (no layout shift). Classes applied to <img> on cards. */
     .fade-in { animation: fade-in 0.4s ease both; }
     @keyframes fade-in { from { opacity: 0; } to { opacity: 1; } }
-    /* Sliding bar at top of action modal — listens to step. */
     .progress-bar { height: 3px; border-radius: 999px; transition: width 280ms ease, background-color 280ms ease; background: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd); }
   </style>
 </head>
@@ -139,7 +132,7 @@
       <a href="/docs"         class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Docs</a>
     </div>
 
-    <!-- Right: wallet + bell + hamburger -->
+    <!-- Right: wallet + bell + WC pairing chip + hamburger -->
     <div class="flex items-center gap-2">
       <!-- Connect: split into Browser Wallet + WalletConnect v2 -->
       <template x-if="!$store.wallet.connected">
@@ -149,9 +142,6 @@
             <span class="text-base leading-none">＋</span> Connect Wallet
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
           </button>
-          <!-- Method picker: appears on click. WC connects via QR (mobile)
-               or deep-link (desktop) — both routed through the same EIP-1193
-               bridge we use for MetaMask. -->
           <div x-show="wcOpen" x-cloak x-transition.opacity.duration.150ms
                class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus">
             <div class="px-3 pt-2 pb-1.5 flex items-center justify-between">
@@ -235,6 +225,22 @@
         </div>
       </template>
 
+      <!-- WalletConnect pairing chip — appears while wc.connect() is
+           in-flight and the user picked WalletConnect. Clicking re-opens
+           the WC overlay (user may have dismissed and forgotten which
+           QR to scan). The overlay's close() keeps window.MW_WC_URI
+           cached, so reopening rehydrates the same matrix. -->
+      <template x-if="$store.wallet.state === 'connecting' && $store.wallet.isWalletConnect">
+        <button @click="(window.MW_WC_OPEN_OVERLAY || function(){})()"
+                class="px-3 py-2 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-300/40 text-violet-100 text-xs font-extrabold flex items-center gap-2 glow-violet pulse-violet transition ring-focus"
+                title="Tap to reopen the WalletConnect pairing QR"
+                aria-label="Reopen WalletConnect QR">
+          <span class="text-base">⌬</span>
+          <span class="hidden sm:inline">Scan QR on your phone</span>
+          <span class="sm:hidden">Scan QR</span>
+        </button>
+      </template>
+
       <button @click="open = !open" class="md:hidden p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition ring-focus" aria-label="Menu">
         <svg x-show="!open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         <svg x-show="open" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -258,12 +264,10 @@
 {{template "partials/action_modal.html" .}}
 {{template "partials/wc_qr_overlay.html" .}}
 
-<!-- Toast container (right-bottom). Live announcements ("tx confirmed!", "outbid", etc). -->
+<!-- Toast container -->
 <div id="toasts" class="fixed bottom-4 right-4 z-[55] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
 
-<!-- SSE plumbing: bump the notification badge on every event, and live-refresh
-     any page that declares a [data-live] wrapper listing the SSE event types it
-     cares about (debounced — bursts of indexer events cause one refresh). -->
+<!-- SSE bump + live-refresh wiring -->
 <script>
   (() => {
     let liveTimer = null;
@@ -282,8 +286,6 @@
   })();
 </script>
 
-<!-- Page content. The fixed mesh-radar radial sits behind cards for instant
-     sky/gold/purple watercolor glow on every page. -->
 <main class="max-w-7xl mx-auto px-4 py-8 relative">
   <div class="fixed inset-0 -z-10 bg-mesh-hero pointer-events-none"></div>
   {{block "content" .}}{{end}}

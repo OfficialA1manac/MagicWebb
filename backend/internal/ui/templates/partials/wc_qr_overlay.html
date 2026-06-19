@@ -1,94 +1,146 @@
 {{define "partials/wc_qr_overlay.html"}}
 <!-- ── In-page WalletConnect QR overlay ─────────────────────────────────────
-     wallet.js dispatches CustomEvent('mw-wc-uri', { detail: <wc-uri> })
-     every time the WC ethereum-provider has fresh pairing data. This
-     partial surfaces that pairability IN ADDITION TO WalletConnect's own
-     modal, so the user can still scan a code if they dismiss WC's UI by
-     mistake. Visual design is the brand palette: pure-black backdrop
-     with a sky-blue QR glow, violet/purple WC chip, gold ring around the
-     action button, and a hairline stripe-gradient footer showing the
-     full 5-color identity (sky · gold · purple · white).
+     wallet.js dispatches:
+       - `mw-wc-connecting`  immediately on WalletConnect click (so this
+         overlay can open with a spinner BEFORE the WC relay round-trip
+         completes — defeats the blank-flash race);
+       - `mw-wc-uri`  every time the SDK emits `display_uri` (we then
+         render a QR matrix via the self-hosted qrcode.min.js at
+         /static/qrcode.min.js — no third-party endpoint, no CSP surprises);
+       - `mw-wallet-state`  whenever the wallet store changes state; we
+         auto-close when state moves OUT of {connecting, connected}.
 
-     QR ENCODING:
-     The QR image is fetched from the free public service
-     `api.qrserver.com`. CSP `img-src 'self' data: blob: https: ipfs:`
-     permits it without an extra allow-list. If the encoder is blocked
-     by the user's network, the <img onerror> reveals the "Copy URI"
-     fallback (the user can paste the wc: URI into any QR scanner on a
-     second device and complete the pairing).
+     Why the Alpine state lives in a separate <script> tag rather than
+     inline in the x-data attribute: Go's html/template parser scans
+     attribute values strictly for a closing quote, and any literal
+     double-quote character embedded inside the x-data attribute value
+     (whether in JS code, JS comments, or JS string literals) causes a
+     parse-time error. Hoisting the state object out of the attribute
+     removes that whole class of trap class.
+     ────────────────────────────────────────────────────────────────────── -->
 
-     Accessibility:
-     - Modal is keyboard-dismissable via ×/Got it/click-outside
-     - QR <img> has alt text "WalletConnect pairing QR"
-     - Color contrast on summary text matches the rest of the app
-     - The whole modal nests inside `role="dialog"` (Alpine implicit via
-       `x-data`) — focus trap is not enforced here; WC's own modal ramps
-       first so this one is the secondary fallback surface. -->
-<div x-data="{
-       open: false,
-       uri: '',
-       copied: false,
-       _uriListener: null,
+<script>
+  // Public factory: window.MW_WC_OVERLAY_STATE() returns the Alpine
+  // x-data object. Loaded once at first usage; idempotent.
+  window.MW_WC_OVERLAY_STATE = function () {
+    return {
+      open:        false,
+      loading:     false,
+      uri:         '',
+      copied:      false,
+      _uriListener:        null,
+      _connectingListener: null,
+      _stateListener:      null,
 
-       init() {
-         // wallet.js: `_wcConnect()` registers:
-         //   wc.on('display_uri', (uri) => {
-         //     window.MW_WC_URI = uri;
-         //     window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
-         //   });
-         // We mirror that onto our local Alpine state. The listener is
-         // arrow-typed so `this` inside the handler is the Alpine state.
-         this._uriListener = (e) => {
-           const v = (e && e.detail) || '';
-           if (typeof v === 'string' && v.startsWith('wc:')) {
-             this.uri = v;
-             this.open = true;
-           }
-         };
-         window.addEventListener('mw-wc-uri', this._uriListener);
-       },
-       destroy() {
-         if (this._uriListener) window.removeEventListener('mw-wc-uri', this._uriListener);
-       },
-       qrSrc() {
-         if (!this.uri) return '';
-         const params = new URLSearchParams({
-           size:   '320x320',
-           margin: '2',
-           data:   this.uri,
-         });
-         return 'https://api.qrserver.com/v1/create-qr-code/?' + params.toString();
-       },
-       shorten(s) {
-         if (!s) return '';
-         if (s.length <= 60) return s;
-         return s.slice(0, 56) + '…';
-       },
-       async copyUri() {
-         if (!this.uri) return;
-         // Prefer the modern Clipboard API; fall back to the legacy
-         // execCommand('copy') shim for browsers / contexts where the
-         // async API is gated behind secure-context permissions.
-         try {
-           await navigator.clipboard.writeText(this.uri);
-           this.copied = true;
-           setTimeout(() => { this.copied = false; }, 1800);
-         } catch (_) {
-           try {
-             const ta = document.createElement('textarea');
-             ta.value = this.uri;
-             ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
-             document.body.appendChild(ta);
-             ta.select();
-             document.execCommand('copy');
-             ta.remove();
-             this.copied = true;
-             setTimeout(() => { this.copied = false; }, 1800);
-           } catch (_) {}
-         }
-       },
-       close() { this.open = false; this.uri = ''; this.copied = false; },
-     }"
+      init() {
+        // ── mw-wc-uri ──────────────────────────────────────────────────────
+        // Fires when wallet.js receives display_uri from the WC SDK.
+        // Caches the URI, hides the spinner, opens the overlay if not
+        // already open, queues renderQr() for the next DOM tick so the
+        // target div is actually mounted when we paint the matrix.
+        this._uriListener = (e) => {
+          const v = (e && e.detail) || '';
+          if (typeof v === 'string' && v.startsWith('wc:')) {
+            this.uri     = v;
+            this.loading = false;
+            this.open    = true;
+            this.$nextTick(() => this.renderQr());
+          }
+        };
+        // ── mw-wc-connecting ──────────────────────────────────────────────
+        // Fires the moment the user clicks 'WalletConnect' in the picker.
+        // Shows the spinner (and the modal) so there's never a blank box.
+        this._connectingListener = () => {
+          this.loading = true;
+          this.open    = true;
+        };
+        // ── mw-wallet-state ───────────────────────────────────────────────
+        // Auto-close when wallet transitions OUT of {connecting, connected}.
+        // Covers: user cancelled the WC picker, wc.connect() rejected,
+        // SIWE auth failed. Does NOT yank a successfully paired user.
+        this._stateListener = (e) => {
+          const s = e && e.detail && e.detail.state;
+          if (s && s !== 'connecting' && s !== 'connected') {
+            if (this.open) this.close();
+          }
+        };
+        window.addEventListener('mw-wc-uri',         this._uriListener);
+        window.addEventListener('mw-wc-connecting',  this._connectingListener);
+        window.addEventListener('mw-wallet-state',   this._stateListener);
+      },
+
+      destroy() {
+        if (this._uriListener)        window.removeEventListener('mw-wc-uri',         this._uriListener);
+        if (this._connectingListener) window.removeEventListener('mw-wc-connecting',  this._connectingListener);
+        if (this._stateListener)      window.removeEventListener('mw-wallet-state',   this._stateListener);
+      },
+
+      // Renders the QR via the self-hosted qrcode-generator library
+      // (vendored at /static/qrcode.min.js). API is POSITIONAL:
+      //   qr.createSvgTag(cellSize, margin)
+      // The kazuhikoarase qrcode-generator@1.4.4 package we vendored
+      // does NOT accept an options-object form (the qrcode-svg fork
+      // does); passing an object as cellSize would short-circuit to
+      // cellSize = object (truthy), then cellSize * moduleCount
+      // evaluates to NaN, producing a broken SVG with NaN-px width.
+      // cellSize 8 = 8px per QR module; margin 2 = 2-module quiet zone.
+      renderQr() {
+        if (!this.uri) return;
+        if (typeof window.qrcode !== 'function') return;
+        const target = document.getElementById('wc-qr-target');
+        if (!target) return;
+        try {
+          const qr = window.qrcode(0, 'M'); // type 0 = auto-detect; EC level M (~15%)
+          qr.addData(this.uri);
+          qr.make();
+          target.innerHTML = qr.createSvgTag(8, 2);
+        } catch (_) {}
+      },
+
+      shorten(s) {
+        if (!s) return '';
+        if (s.length <= 60) return s;
+        // ellipsis via Unicode escape (avoid putting it in a JS string literal here).
+        return s.slice(0, 56) + '\u2026';
+      },
+
+      async copyUri() {
+        if (!this.uri) return;
+        try {
+          await navigator.clipboard.writeText(this.uri);
+          this.copied = true;
+          setTimeout(() => { this.copied = false; }, 1800);
+        } catch (_) {
+          // Legacy fallback for browsers without async Clipboard API.
+          try {
+            const ta = document.createElement('textarea');
+            ta.value = this.uri;
+            ta.style.cssText = 'position:fixed;left:-9999px;opacity:0';
+            document.body.appendChild(ta);
+            ta.select();
+            document.execCommand('copy');
+            ta.remove();
+            this.copied = true;
+            setTimeout(() => { this.copied = false; }, 1800);
+          } catch (_) {}
+        }
+      },
+
+      // Got-it / dismiss: HIDE the modal but KEEP this.uri cached so the
+      // layout WC pairing chip can reopen the same QR. The wallet.js
+      // wc.connect() promise is still in-flight, so pairing continues
+      // until either: the user scans a wallet, or wallet.js rejects the
+      // URI. Either way, the persistent navbar chip ensures the user is
+      // never stranded without a path back to the QR.
+      close() {
+        this.open    = false;
+        this.loading = false;
+      },
+    };
+  };
+</script>
+
+<div x-data="window.MW_WC_OVERLAY_STATE()"
      role="dialog"
      aria-modal="true"
      aria-labelledby="wc-qr-title"
@@ -98,13 +150,11 @@
        class="fixed inset-0 z-[80] flex items-center justify-center p-4"
        x-transition.opacity.duration.200ms>
 
-    <!-- Backdrop: deep pure-black w/ 85% opacity + heavy blur. Click
-         outside the modal = dismiss (UX consistency with the action modal). -->
+    <!-- Backdrop: deep ink-black w/ 85% opacity + heavy blur. Click
+         outside the modal = dismiss (UX consistency with action_modal). -->
     <div class="absolute inset-0 bg-ink-1000/85 backdrop-blur-md" @click="close()"></div>
 
-    <!-- Modal card: gold border + glow, violet WC logo tile, rounded-3xl.
-         Sky-blue glow around the QR itself (sky-dominant since the QR is
-         the primary action surface of this overlay). -->
+    <!-- Modal card: gold border + glow, violet WC logo tile, rounded-3xl. -->
     <div class="relative bg-ink-900/95 border border-gold-400/40 rounded-3xl w-full max-w-md overflow-hidden shadow-2xl glow-gold"
          x-transition:enter="ease-out"
          x-transition:enter-start="opacity-0 scale-95"
@@ -126,25 +176,20 @@
                 class="text-white/40 hover:text-white text-2xl leading-none transition disabled:opacity-30">&times;</button>
       </div>
 
-      <!-- QR section: image w/ onerror fallback to manual-paste hint.
-           Container is sky-bordered + sky-glowing — the QR is the primary
-           action on this surface, so it gets the loudest palette token. -->
+      <!-- QR section: self-hosted SVG drawn into a target div. While
+           the URI is being prepared we overlay a sky spinner so the
+           user never sees a blank box (the previous 'no QR code
+           showing' complaint). The sky-bordered container with sky
+           glow keeps the QR as the loudest action on the surface. -->
       <div class="px-6 pb-2">
         <div class="rounded-2xl p-5 bg-ink-1000 border border-sky-400/40 glow-sky">
           <div class="aspect-square w-full rounded-xl overflow-hidden bg-ink-1000 flex items-center justify-center relative">
-            <!-- The img gets a 320×320 default from the encoder; the
-                 aspect-square CSS makes it scale. The `loading="eager"`
-                 prioritises so the QR renders before any of the page's
-                 lower-priority media (it's the only thing the user can
-                 do right now). -->
-            <img :src="qrSrc()" alt="WalletConnect pairing QR" class="w-full h-full"
-                 loading="eager"
-                 onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
-            <!-- Image-blocked fallback: tells the user to use Copy URI. -->
-            <div class="hidden absolute inset-0 flex flex-col items-center justify-center text-center px-4 bg-ink-1000/90">
-              <div class="text-3xl mb-2" aria-hidden="true">⌬</div>
-              <p class="text-xs text-white/60">QR encoder blocked.</p>
-              <p class="text-[10px] text-white/40 mt-1">Use the copy-URI button below to paste into any wallet.</p>
+            <div id="wc-qr-target" class="w-full h-full"></div>
+            <div x-show="loading" x-cloak
+                 class="absolute inset-0 flex flex-col items-center justify-center text-center px-4 bg-ink-1000/90 rounded-xl">
+              <div class="w-10 h-10 rounded-full border-2 border-sky-300/40 border-t-sky-300 spin-svg mb-3" aria-hidden="true"></div>
+              <p class="text-xs text-white/70 font-bold">Preparing your WalletConnect QR…</p>
+              <p class="text-[10px] text-white/40 mt-1">Establishing the relay channel.</p>
             </div>
           </div>
         </div>
@@ -168,7 +213,7 @@
           <button @click="copyUri()"
                   class="px-3 py-1 rounded-lg btn-gold hover:opacity-95 text-ink-950 text-[10px] font-extrabold uppercase tracking-wider transition glow-gold shrink-0"
                   :class="copied ? 'pointer-events-none opacity-100' : ''"
-                  x-text="copied ? '✓ Copied' : 'Copy URI'"></button>
+                  x-text="copied ? '\u2713 Copied' : 'Copy URI'"></button>
         </div>
         <button @click="close()"
                 class="w-full py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition ring-focus">
@@ -177,8 +222,7 @@
       </div>
 
       <!-- Decorative bottom-stripe: brand gradient (sky → gold → violet →
-           white) — appears as a 1px-tall hairline under the modal,
-           identity signature. -->
+           white) — identity signature. -->
       <div class="h-1 stripe-gradient"></div>
     </div>
   </div>

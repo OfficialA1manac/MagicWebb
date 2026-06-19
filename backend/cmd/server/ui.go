@@ -127,6 +127,9 @@ func uiListings(q *db.Q) fiber.Handler {
 			"Listings":   rows,
 			"Collection": c.Query("collection"),
 			"Sort":       sort,
+			// Count powers the "X active" badge in pages/listings.html.
+			// Renders as `{{shortNumber .Count}}` — shortNumber expects int64.
+			"Count": int64(len(rows)),
 		})
 	}
 }
@@ -138,6 +141,9 @@ func uiAuctions(q *db.Q) fiber.Handler {
 			"Title":    "Auctions",
 			"Auctions": rows,
 			"Now":      time.Now().Unix(),
+			// Count powers the "X active" badge in pages/auctions.html.
+			// Renders as `{{shortNumber .Count}}` — shortNumber expects int64.
+			"Count": int64(len(rows)),
 		})
 	}
 }
