@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=10">
+  <link rel="stylesheet" href="/static/tailwind.css?v=11">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=10" defer></script>
-  <script src="/static/sse.js?v=10" defer></script>
-  <script src="/static/ethers.umd.min.js?v=10" defer></script>
+  <script src="/static/htmx.min.js?v=11" defer></script>
+  <script src="/static/sse.js?v=11" defer></script>
+  <script src="/static/ethers.umd.min.js?v=11" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=10" defer></script>
+  <script src="/static/wallet.js?v=11" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=10" defer></script>
-  <script src="/static/cdn.min.js?v=10" defer></script>
+  <script src="/static/qrcode.min.js?v=11" defer></script>
+  <script src="/static/cdn.min.js?v=11" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -133,9 +133,14 @@
 
     <!-- Right: wallet + bell + WC pairing chip + hamburger -->
     <div class="flex items-center gap-2">
-      <!-- Connect: split into Browser Wallet + WalletConnect v2 -->
+      <!-- Connect: split into Browser Wallet + WalletConnect v2.
+           Hidden below md so on mobile viewports the wallet control
+           surfaces only inside the hamburger drawer (same controls,
+           full width, no cramped navbar dropdown clipping). On md+
+           this is the only wallet affordance in the right-navbar
+           cluster; the drawer mirrors it for symmetry. -->
       <template x-if="!$store.wallet.connected">
-        <div class="relative" @click.outside="wcOpen = false">
+        <div class="relative hidden md:block" @click.outside="wcOpen = false">
           <button @click="wcOpen = !wcOpen"
                   class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
             <span class="text-base leading-none">＋</span> Connect Wallet
@@ -222,7 +227,7 @@
                the right-side cluster (pill + bell + WC chip) has slack.
                Below md, the hamburger drawer exposes the wallet control
                with full width instead. -->
-          <span class="text-[10px] uppercase tracking-wider text-white/40 font-extrabold hidden md:inline">Wallet</span>
+          <span class="text-[10px] uppercase tracking-wider text-white/40 font-extrabold">Wallet</span>
           <template x-if="$store.wallet.isWalletConnect">
             <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30" title="Connected via WalletConnect">WC</span>
           </template>
