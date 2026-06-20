@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=11">
+  <link rel="stylesheet" href="/static/tailwind.css?v=12">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=11" defer></script>
-  <script src="/static/sse.js?v=11" defer></script>
-  <script src="/static/ethers.umd.min.js?v=11" defer></script>
+  <script src="/static/htmx.min.js?v=12" defer></script>
+  <script src="/static/sse.js?v=12" defer></script>
+  <script src="/static/ethers.umd.min.js?v=12" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=11" defer></script>
+  <script src="/static/wallet.js?v=12" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=11" defer></script>
-  <script src="/static/cdn.min.js?v=11" defer></script>
+  <script src="/static/qrcode.min.js?v=12" defer></script>
+  <script src="/static/cdn.min.js?v=12" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -138,9 +138,18 @@
            surfaces only inside the hamburger drawer (same controls,
            full width, no cramped navbar dropdown clipping). On md+
            this is the only wallet affordance in the right-navbar
-           cluster; the drawer mirrors it for symmetry. -->
+           cluster; the drawer mirrors it for symmetry.
+           Note: uses `md:flex` (which IS in the compiled Tailwind
+           output) rather than `md:block`, because the JIT-compiled
+           CSS for this build is missing the `md:block` utility
+           (tailwind.config.cjs safelist wouldn't help here — the
+           issue is that the build was last run before the v11 class
+           addition, so re-running `cmd/buildtailwindcss` is on the
+           follow-up list). The block→flex swap is a no-op for this
+           wrapper because the inner dropdown is `position:absolute`
+           and flows outside the parent regardless. -->
       <template x-if="!$store.wallet.connected">
-        <div class="relative hidden md:block" @click.outside="wcOpen = false">
+        <div class="relative hidden md:flex" @click.outside="wcOpen = false">
           <button @click="wcOpen = !wcOpen"
                   class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
             <span class="text-base leading-none">＋</span> Connect Wallet

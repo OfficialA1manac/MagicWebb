@@ -60,21 +60,27 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-	// Self-hosted assets served with `?v=11` cache-buster — bumping
-	// from v10 forces returning browsers to re-fetch layout.html so the
-	// v11 fix (desktop Navbar Connect Wallet hidden below md; Connected
-	// pill 'Wallet' label visible at every breakpoint) lands on users
-	// that loaded the previous shell and reported "the wallet button
-	// still is not displaying" because the tiny connected pill was
-	// unrecognizable on mobile. Mounted under /static/* with a
-	// 60-second Cache-Control: max-age=60 (see mountStatic) so the
-	// baseline freshness policy isn't solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=11"},
-	{"wallet-js-defer",      "wallet.js?v=11"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=11"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=11"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=11"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=11"},
+	// Self-hosted assets served with `?v=12` cache-buster — bumping
+	// from v11 forces returning browsers to re-fetch layout.html so the
+	// v12 fix (desktop Navbar Connect Wallet now uses `hidden md:flex`
+	// instead of `hidden md:block`, because the JIT-compiled Tailwind
+	// output for this build is MISSING the `.md\:block` utility — so
+	// `.hidden` was always winning, hiding the button on every
+	// viewport, not just below md) lands on users that loaded the
+	// previous shell and reported "the wallet button still is not
+	// displaying". ALSO retains the v11 visible-Connected-pill +
+	// mobile-drawer-as-only-mobile-wallet-surface intent. Mounted
+	// under /static/* with a 60-second Cache-Control: max-age=60
+	// (see mountStatic) so the baseline freshness policy isn't solely
+	// reliant on the bump. NOTE: full Tailwind rebuild (`go run
+	// ./cmd/buildtailwindcss`) is on the follow-up; once landed,
+	// the `md:block` shorthand can be reinstated.
+	{"tailwind-static-link", "tailwind.css?v=12"},
+	{"wallet-js-defer",      "wallet.js?v=12"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=12"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=12"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=12"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=12"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
