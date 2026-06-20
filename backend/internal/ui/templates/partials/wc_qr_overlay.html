@@ -69,8 +69,10 @@
           } else {
             this.loading = false;
           }
+          // x-show + x-transition drives the entry; trust the reactive
+          // flag. $nextTick around renderQr ensures the QR target
+          // exists when the self-hosted encoder paints it.
           this.open = true;
-          this._forceUnhide();          // belt vs. Alpine reactivity lag
           if (this.uri) this.$nextTick(() => this.renderQr());
         };
         // ── mw-wc-hide (POSITIVE CLOSE) ─────────────────────────────────
@@ -190,23 +192,13 @@
         try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
       },
 
-      // show() is now also exposed on the Alpine object so any DOM
-      // element with @click="open()" (rare but plausible) still works.
+      // show() is exposed on the Alpine object so any DOM element with
+      // @click="open()" or @click="show()" still works; just flips the
+      // reactive flag — Alpine's x-show + x-transition runs the entry.
       show() {
         this.open = true;
-        this._forceUnhide();
       },
 
-      // Belt to the braces of x-show: directly remove any inline
-      // display:none the close() set, so a subsequent dispatch of
-      // mw-wc-show lands the user with a visible modal even if Alpine
-      // needed a microtask to flush x-show.
-      _forceUnhide() {
-        try {
-          const root = document.getElementById('wc-modal-root');
-          if (root) root.style.display = '';
-        } catch (_) {}
-      },
     };
   };
 </script>

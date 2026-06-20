@@ -59,7 +59,23 @@ backend/tmp/
 CLAUDE.md
 TODOS.md
 dev.ps1
-Makefile
 .claude/
 docs/REVIEW_PRODUCTION_HARDENING.md
 docs/PERFORMANCE_AUDIT.md
+
+# Agent CLI sandbox (Codex hooks + hooks.json under .codex/ — never
+# tracked; force-add per-repo with `git add -f .codex/` if a project
+# actually wants to track one). `AGENTS.md` is NOT in this block on
+# purpose: it's the per-project AI rules file every teammate benefits
+# from inheriting on a fresh clone, so it IS tracked.
+.codex/
+
+# Test fixture for the NFT picker upload pipeline — replaced on every
+# integration test run, never tracked.
+backend/internal/ui/static/uploads/
+
+# Literal tilde directory at repo root (dev-sandbox leak). This does
+# NOT match the OS home directory — gitignore has no shell expansion;
+# `/~/` anchors to a TOP-LEVEL entry literally named `~` only. Per
+# project policy this is dev-only on the working machine.
+/~/

@@ -468,34 +468,53 @@ window.addEventListener('alpine:init', () => {
         if (!accounts?.length) throw new Error('No account authorized.');
         let network = await provider.getNetwork();
         if (kind === 'injected' && Number(network.chainId) !== CHAIN_ID) {
-          try {
-            await this._switchChain();
-            // CRITICAL: ethers.BrowserProvider caches network state at
-            // construction. After wallet_switchEthereumChain succeeded,
-            // `network.chainId` and every subsequent provider call still
-            // see the OLD chain (until the provider is reset). Re-build
-            // from the same eip1193 so staticCall, getNetwork, and the
-            // real tx calls all target the post-switch chain. Without
-            // this, staticCall on Coston2 contract addresses runs against
-            // the OLD chain (Ethereum Mainnet) which has no contracts
-            // there → instant revert → user sees "Listing not fillable"
-            // before the real transaction ever prompts MetaMask.
-            provider = new ethers.BrowserProvider(eip1193);
-            // MetaMask confirms chain switches asynchronously; the first
-            // provider.getNetwork() call after the switch can still
-            // return the OLD chainId if the wallet is mid-confirm. Retry
-            // up to 3× with a 200 ms gap before giving up — covers user
-            // wallets that take ~600-1000 ms to visually confirm the new
-            // chain in the UI before the JSON-RPC provider reflects it.
-            for (let i = 0; i < 3; i++) {
-              network = await provider.getNetwork();
-              if (Number(network.chainId) === CHAIN_ID) break;
-              await new Promise(r => setTimeout(r, 200));
-            }
-            if (Number(network.chainId) !== CHAIN_ID) {
-              this._toast('Wallet chain did not switch — please retry or change the active network in your wallet to Coston2 (chainId 114).', 'error');
-            }
-          } catch (_) {}
+          // No inner try/catch on purpose — both the user-rejected path
+          // (`_switchChain` throws when the wallet denies BOTH
+          // `wallet_switchEthereumChain` and the auto-fallback
+          // `wallet_addEthereumChain`) and the retry-exhaustion path
+          // (network still != CHAIN_ID after the rebuild + 3× poll)
+          // must bubble out so the outer connect() catch can flip
+          // state to 'error', release the busy mutex, clear the
+          // double-click debounce, and surface ONE actionable toast.
+          // The pre-fix `catch (_) {}` silently swallowed both paths
+          // and connect() proceeded to declare success on the wrong
+          // chain, so staticCall and every signed tx ran against the
+          // OLD chain and instant-reverted with "Listing not fillable".
+          await this._switchChain();
+          // CRITICAL: ethers.BrowserProvider caches network state at
+          // construction. After wallet_switchEthereumChain succeeded,
+          // `network.chainId` and every subsequent provider call still
+          // see the OLD chain (until the provider is reset). Re-build
+          // from the same eip1193 so staticCall, getNetwork, and the
+          // real tx calls all target the post-switch chain. Without
+          // this, staticCall on Coston2 contract addresses runs against
+          // the OLD chain (Ethereum Mainnet) which has no contracts
+          // there → instant revert → user sees "Listing not fillable"
+          // before the real transaction ever prompts MetaMask.
+          provider = new ethers.BrowserProvider(eip1193);
+          // MetaMask confirms chain switches asynchronously; the first
+          // provider.getNetwork() call after the switch can still
+          // return the OLD chainId if the wallet is mid-confirm. Retry
+          // up to 3× with a 200 ms gap before giving up — covers user
+          // wallets that take ~600-1000 ms to visually confirm the new
+          // chain in the UI before the JSON-RPC provider reflects it.
+          for (let i = 0; i < 3; i++) {
+            network = await provider.getNetwork();
+            if (Number(network.chainId) === CHAIN_ID) break;
+            await new Promise(r => setTimeout(r, 200));
+          }
+          if (Number(network.chainId) !== CHAIN_ID) {
+            // Auto-fallback `_switchChain` already covers the
+            // retry-window-equivalent of wallet_addEthereumChain, but
+            // some wallets (notably Rabby in dev modes, and Trezor
+            // bridge) silently accept the add without flipping the
+            // active JSON-RPC endpoint. After 600ms we still see the
+            // old chainId — every subsequent ethers call would target
+            // the wrong network. Throw so the outer connect() catch
+            // surfaces a single explicit failure toast instead of
+            // declaring connected and immediate-reverting every tx.
+            throw new Error('Wallet chain did not switch to Coston2 (chainId 114). Please change the active network in your wallet and try again.');
+          }
         }
         // Always store ROOT ethers objects unwrapped. Setters nested-call
         // R() so double-wrap is impossible.

@@ -60,20 +60,20 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-		// Self-hosted assets served with `?v=9` cache-buster — bumping
-		// from v8 forces returning browsers to re-fetch wallet.js so the
-		// v9 fixes (deadlock-escape on connect, provider-rebuild after
-		// chain switch, soft-staticCall on buy, "Wallet" label on the
-		// connected pill) land on users that loaded the previous shell.
+		// Self-hosted assets served with `?v=10` cache-buster — bumping
+		// from v9 forces returning browsers to re-fetch wallet.js so the
+		// v10 fixes (chain-switch re-throw in connect, _forceUnhide
+		// removal in WC overlay + NFT picker for Alpine transition
+		// correctness) land on users that loaded the previous shell.
 		// Mounted under /static/* with a 60-second Cache-Control: max-age=60
 		// (see mountStatic) so the baseline freshness policy isn't solely
 		// reliant on the bump.
-		{"tailwind-static-link", "tailwind.css?v=9"},
-		{"wallet-js-defer",      "wallet.js?v=9"},
-		{"qrcode-min-js-defer",  "qrcode.min.js?v=9"},
-		{"ethers-umd-defer",     "ethers.umd.min.js?v=9"},
-		{"cdn-min-js-defer",     "cdn.min.js?v=9"},
-		{"htmx-min-js-defer",    "htmx.min.js?v=9"},
+		{"tailwind-static-link", "tailwind.css?v=10"},
+		{"wallet-js-defer",      "wallet.js?v=10"},
+		{"qrcode-min-js-defer",  "qrcode.min.js?v=10"},
+		{"ethers-umd-defer",     "ethers.umd.min.js?v=10"},
+		{"cdn-min-js-defer",     "cdn.min.js?v=10"},
+		{"htmx-min-js-defer",    "htmx.min.js?v=10"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -145,6 +145,21 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		fail++
 	} else {
 		t.Logf("  PASS  no-external-qrserver")
+	}
+	// Negative-check: the `_forceUnhide()` Alpine DOM poke that
+	// previously raced x-show + x-transition must NOT appear in either
+	// of the two picker partials (WC QR overlay + NFT picker). Both
+	// partials are rendered into the home page as inline <script>
+	// bodies via {{template}}, so a single grep of the rendered HTML
+	// covers both. Future overlays that re-introduce this antipattern
+	// will trip the smoke test in CI before a user sees a clipped
+	// fade-in. See audit at commit 4e5899f for context.
+	if strings.Contains(body, "_forceUnhide") {
+		t.Logf("  FAIL  no-_forceUnhide-poke\n        _forceUnhide() method/callsite re-appeared — it races Alpine's x-transition and clips the modal entry animation")
+		missing = append(missing, "no-_forceUnhide-poke")
+		fail++
+	} else {
+		t.Logf("  PASS  no-_forceUnhide-poke")
 	}
 	if fail > 0 {
 		t.Fatalf("%d render-smoke checks failed: %v", fail, missing)

@@ -55,7 +55,7 @@
           this.loading     = true;
           this.nfts        = [];
           this.needConnect = false;
-          this._forceUnhide();        // belt vs. Alpine reactivity lag
+          // x-show + x-transition drives the entry; trust the reactive flag.
           this._loadNfts();
         };
         // ── Escape key dismiss ─────────────────────────────────────────
@@ -139,12 +139,6 @@
         } catch (_) {}
       },
 
-      _forceUnhide() {
-        try {
-          const root = document.getElementById('nft-picker-modal-root');
-          if (root) root.style.display = '';
-        } catch (_) {}
-      },
     };
   };
 </script>
