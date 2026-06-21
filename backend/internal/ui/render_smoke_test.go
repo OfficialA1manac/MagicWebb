@@ -20,6 +20,7 @@ package ui
 import (
 	"bytes"
 	_ "embed"
+	"regexp"
 	"strings"
 	"testing"
 )
@@ -177,11 +178,11 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"saved-wallet-forget",     "forgetSaved()"},
 		{"saved-wallet-pill-label", "Saved wallet"},
 		{"saved-wallet-shortener",  "shortSavedAddr"},
-		// v14 — Navbar uses idiomatic `hidden md:block` (replacing the
-		// v12 `md:flex` workaround). The exact class string is asserted
-		// so a future regression that flips it back to md:flex (e.g.
-		// mass-find-replace that loses the v14 intent) trips CI.
-		{"navbar-wallet-button-md-block", "relative hidden md:block"},
+	// v14 — Navbar uses idiomatic `hidden md:block` (replacing the
+	// v12 `md:flex` workaround). The exact class string is asserted
+	// so a future regression that flips it back to md:flex (e.g.
+	// mass-find-replace that loses the v14 intent) trips CI.
+	{"navbar-wallet-button-md-block", "relative hidden md:block"},
 	}
 
 	fail := 0
@@ -247,6 +248,40 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		fail++
 	} else {
 		t.Logf("  PASS  md-block-utility-present")
+	}
+	// v15 — Mutual exclusivity between the Connect Wallet button and
+	// the Saved Wallet pill. Without the `!$store.wallet.hasSavedWallet`
+	// second clause, both elements render simultaneously for a returning
+	// user (savedAddress in localStorage), and on a mid-desktop
+	// viewport the wide pill + wide button overflow the right-cluster
+	// flex, clipping the Connect Wallet button off the visible edge —
+	// the "wallet button still not displaying" symptom users reported
+	// across v9-v14. Asserted via a whitespace-tolerant regex (rather
+	// than the strings.Contains pattern used in the `checks` slice
+	// above) so future `&&` reformatting in the template does not
+	// itself become a fragility source. A subsequent regression that
+	// drops the second clause (mass find-replace or copy-paste into a
+	// new page) trips CI before users see the empty right cluster
+	// again. Anchored to whitespace around `&&` only — content of the
+	// two operands MUST be exactly the two negated getter calls.
+	//
+	// Hardening: count occurrences ≥ 2 (one per render site — desktop
+	// navbar + mobile drawer). The descriptive HTML comment I added
+	// also contains the literal expression as documentation, which
+	// would otherwise be a false-positive path: a regression that
+	// deleted both render-sites while leaving the doc comment would
+	// spuriously pass a single-match check. Requiring ≥ 2 matches
+	// means the test fails the moment one render-site drops the
+	// mutually-exclusive clause, before a user can reproduce the
+	// regression on a deployed site.
+	mutualExclusivityRE := regexp.MustCompile(`!\$store\.wallet\.connected\s*&&\s*!\$store\.wallet\.hasSavedWallet`)
+	mutualExclusivityMatches := len(mutualExclusivityRE.FindAllString(body, -1))
+	if mutualExclusivityMatches < 2 {
+		t.Logf("  FAIL  navbar-connect-mutually-exclusive-from-saved-pill\n        mutually-exclusive x-if expression found only %d time(s) in rendered HTML \u2014 expected \u2265 2 (one per render site: desktop navbar + mobile drawer). Did one of the two render sites lose the `&& !$store.wallet.hasSavedWallet` second clause?", mutualExclusivityMatches)
+		missing = append(missing, "navbar-connect-mutually-exclusive-from-saved-pill")
+		fail++
+	} else {
+		t.Logf("  PASS  navbar-connect-mutually-exclusive-from-saved-pill (%d render-sites match)", mutualExclusivityMatches)
 	}
 	if fail > 0 {
 		t.Fatalf("%d render-smoke checks failed: %v", fail, missing)

@@ -144,8 +144,22 @@
            is now present. The block→flex swap is a no-op for this
            wrapper because the inner dropdown is `position:absolute`
            and flows outside the parent regardless, so the swap is
-           purely a cosmetic restoration of idiomatic CSS. -->
-      <template x-if="!$store.wallet.connected">
+           purely a cosmetic restoration of idiomatic CSS.
+
+           v15 — mutual-exclusivity guard. The previous condition
+           was `!$store.wallet.connected` alone. For a returning user
+           with a saved wallet in localStorage the v13 "Saved wallet"
+           pill ALSO rendered (its condition `hasSavedWallet && !connected`
+           is not exclusive with `!connected`). Both elements then
+           competed for the same `flex items-center gap-2` right-cluster
+           slot — wide pill + wide button + WC chip on a fresh
+           desktop-load could overflow the navbar and clip the
+           Connect Wallet button off the visible edge of the right
+           cluster, producing the "wallet button still not displaying"
+           symptom even though the DOM element was present. v15 makes
+           the conditions mutually exclusive: saved pill wins; fresh
+           visitors get the picker button. -->
+      <template x-if="!$store.wallet.connected && !$store.wallet.hasSavedWallet">
         <div class="relative hidden md:block" @click.outside="wcOpen = false">
           <button @click="wcOpen = !wcOpen"
                   class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
@@ -338,7 +352,7 @@
                   x-text="$store.wallet.savedKind === 'walletconnect' ? 'Re-pair via QR' : 'Reconnect wallet'">Reconnect wallet</button>
         </div>
       </template>
-      <template x-if="!$store.wallet.connected">
+      <template x-if="!$store.wallet.connected && !$store.wallet.hasSavedWallet">
         <div class="space-y-2">
           <button @click="open=false; $store.wallet.connect('injected')"
                   class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97]">
