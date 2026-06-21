@@ -19,9 +19,25 @@ package ui
 
 import (
 	"bytes"
+	_ "embed"
 	"strings"
 	"testing"
 )
+
+// tailwindCSS is the COMPILED bundle produced by
+// `cmd/buildtailwindcss` from internal/ui/static/tailwind.src.css +
+// the template content glob (templates/**/*.html). v14 pins a needle
+// against this bundle so a stale-cache deploy that ships a stale
+// tailwind.css (missing `.md\:block` because the build was last run
+// before the layout file started using it) is rejected at CI before
+// a user sees an invisible desktop Navbar Connect Wallet button.
+// Without this guard, the deployment pipeline can ship a working
+// layout.html alongside a stale CSS that silently strips the
+// responsive utility — and only the live site surfaces the symptom
+// after the next deploy, when users on a clean browser cache see
+// nothing.
+//go:embed static/tailwind.css
+var tailwindCSS string
 
 func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	tmpl, ok := Templates["pages/home.html"]
@@ -60,26 +76,34 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-	// Self-hosted assets served with `?v=13` cache-buster — bumping
-	// from v12 forces returning browsers to re-fetch layout.html so the
-	// v13 fix (no auto-reconnect on page load; explicit Reconnect /
-	// Forget pill for users with a previously-saved wallet) lands on
-	// users that loaded the previous shell. The v13 fix addresses the
-	// user-facing complaint: "Tries to connect to my MetaMask wallet
-	// automatically I need that fixed". On prior deploys we silently
-	// called wallet.connect() on alpine:init when localStorage had a
-	// saved address — that auto-popped the user's MetaMask on every
-	// page load. v13 hydrates ONLY the savedAddress/savedKind
-	// reactive flags; the user must click Reconnect to actually
-	// re-establish a session. Mounted under /static/* with a 60-second
-	// Cache-Control: max-age=60 (see mountStatic) so the baseline
-	// freshness policy isn't solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=13"},
-	{"wallet-js-defer",      "wallet.js?v=13"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=13"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=13"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=13"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=13"},
+	// Self-hosted assets served with `?v=14` cache-buster — bumping
+	// from v13 forces returning browsers to re-fetch layout.html (and
+	// the compiled tailwind.css) so the v14 fix lands on users that
+	// loaded the previous shell. v14 ships two coupled changes:
+	//   1. templates/layout.html — the navbar Connect Wallet's parent
+	//      `<div class="relative">` swaps its responsive class from the
+	//      v12 workaround `hidden md:flex` back to the idiomatic
+	//      `hidden md:block`. The v12 workaround was needed because
+	//      the JIT-compiled tailwind.css for the v11/v12 deploy was
+	//      MISSING the `.md\:block` utility (Tailwind's content-scan
+	//      only compiles classes used in templates — adding a class
+	//      without rebuilding the bundle silently strips it). v14 runs
+	//      `cmd/buildtailwindcss` and the utility re-enters the bundle.
+	//   2. internal/ui/static/tailwind.css — recompiled from the
+	//      current template content glob, so it contains `.md\:block`
+	//      (and any other responsive utility added since the prior
+	//      build). The md-block-utility-present check below reads
+	//      the bundled CSS via go:embed and asserts the utility is
+	//      present, denying a stale-bundle deploy in CI.
+	// Mounted under /static/* with a 60-second Cache-Control: max-
+	// age=60 (see mountStatic) so the baseline freshness policy isn't
+	// solely reliant on the bump.
+	{"tailwind-static-link", "tailwind.css?v=14"},
+	{"wallet-js-defer",      "wallet.js?v=14"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=14"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=14"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=14"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=14"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -153,18 +177,11 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"saved-wallet-forget",     "forgetSaved()"},
 		{"saved-wallet-pill-label", "Saved wallet"},
 		{"saved-wallet-shortener",  "shortSavedAddr"},
-		// v13 — Saved-wallet pill (no auto-reconnect).
-		// The pill must appear in the rendered HTML for both desktop navbar
-		// and mobile drawer. `hasSavedWallet` is the reactive getter that
-		// gates both surfaces; `reconnectSaved` is the click handler that
-		// the user must invoke to actually re-connect. Asserting both
-		// names here makes a future regression on either path (e.g.
-		// re-introducing a silent auto-connect) trip the smoke test in CI.
-		{"saved-wallet-getter",     "hasSavedWallet"},
-		{"saved-wallet-reconnect",  "reconnectSaved()"},
-		{"saved-wallet-forget",     "forgetSaved()"},
-		{"saved-wallet-pill-label", "Saved wallet"},
-		{"saved-wallet-shortener",  "shortSavedAddr"},
+		// v14 — Navbar uses idiomatic `hidden md:block` (replacing the
+		// v12 `md:flex` workaround). The exact class string is asserted
+		// so a future regression that flips it back to md:flex (e.g.
+		// mass-find-replace that loses the v14 intent) trips CI.
+		{"navbar-wallet-button-md-block", "relative hidden md:block"},
 	}
 
 	fail := 0
@@ -214,6 +231,22 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		fail++
 	} else {
 		t.Logf("  PASS  no-_forceUnhide-poke")
+	}
+	// v14 — `md:block` must be present in the compiled bundle.
+	// Tailwind's content-scan only compiles classes used in the
+	// template glob; if the build is stale (e.g. an automation
+	// forgot to run cmd/buildtailwindcss after a layout swap) the
+	// desktop Connect Wallet button is silently hidden because
+	// `.hidden` always wins over the missing `.md\:block`. Reading
+	// the bundled CSS via go:embed at test time makes a stale-bundle
+	// deploy unable to pass CI. The escape form `.md\\:block` is
+	// what Tailwind emits in the minified CSS (the `:` needs `\:`).
+	if !strings.Contains(tailwindCSS, `.md\:block`) {
+		t.Logf("  FAIL  md-block-utility-present\n        `.md\\:block` missing from compiled tailwind.css — re-run `go run ./cmd/buildtailwindcss` from backend/ and commit the bundle before re-running CI")
+		missing = append(missing, "md-block-utility-present")
+		fail++
+	} else {
+		t.Logf("  PASS  md-block-utility-present")
 	}
 	if fail > 0 {
 		t.Fatalf("%d render-smoke checks failed: %v", fail, missing)
