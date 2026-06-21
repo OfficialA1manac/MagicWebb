@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=12">
+  <link rel="stylesheet" href="/static/tailwind.css?v=13">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=12" defer></script>
-  <script src="/static/sse.js?v=12" defer></script>
-  <script src="/static/ethers.umd.min.js?v=12" defer></script>
+  <script src="/static/htmx.min.js?v=13" defer></script>
+  <script src="/static/sse.js?v=13" defer></script>
+  <script src="/static/ethers.umd.min.js?v=13" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=12" defer></script>
+  <script src="/static/wallet.js?v=13" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=12" defer></script>
-  <script src="/static/cdn.min.js?v=12" defer></script>
+  <script src="/static/qrcode.min.js?v=13" defer></script>
+  <script src="/static/cdn.min.js?v=13" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -113,9 +113,7 @@
 
 <!-- Nav -->
 <nav x-data="{ open: false, wcOpen: false, helpersOpen: false }" class="sticky top-0 z-50 glass-dark border-b border-white/10 shadow-topbar">
-  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">
-
-    <a href="/" class="text-xl font-extrabold tracking-tight flex-shrink-0 flex items-center gap-2.5 group">
+  <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">    <a href="/" class="text-xl font-extrabold tracking-tight flex-shrink-0 flex items-center gap-2.5 group">
       <span class="w-9 h-9 rounded-xl btn-sky flex items-center justify-center text-ink-950 text-lg glow-sky transition group-hover:scale-105">✦</span>
       <span class="text-white">Magic<span class="brand-text">Webb</span></span>
     </a>
@@ -248,6 +246,35 @@
         </div>
       </template>
 
+      <!-- Saved-wallet pill (v13): surfaces a previously-connected wallet
+           in DISPLAY state with explicit Reconnect / Forget affordances.
+           Auto-reconnect on page load was removed (user-visible
+           MetaMask popup without consent → "Tries to connect to my
+           MetaMask wallet automatically" complaint). The Reconnect
+           button calls connect() with silent:false so the user sees
+           the standard MetaMask prompt; the × button forgets the saved
+           entry. The pill is visually distinct from the connected pill
+           (amber accent vs. sky accent) so the user can tell at a
+           glance whether they have a LIVE session or just a saved one. -->
+      <template x-if="$store.wallet.hasSavedWallet && !$store.wallet.connected">
+        <div class="flex items-center gap-2 px-2.5 py-1.5 rounded-xl bg-ink-900/80 border border-amber-400/30 hover:border-amber-400/60 transition ring-focus"
+             title="A wallet was previously connected on this device. Click Reconnect to sign in again.">
+          <div class="relative w-2 h-2 rounded-full bg-amber-400"></div>
+          <span class="text-[10px] uppercase tracking-wider text-amber-200 font-extrabold">Saved</span>
+          <span class="text-xs text-white font-mono font-bold" x-text="$store.wallet.shortSavedAddr"></span>
+          <template x-if="$store.wallet.savedKind === 'walletconnect'">
+            <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30">WC</span>
+          </template>
+          <button @click="$store.wallet.reconnectSaved()"
+                  class="ml-1.5 px-2 py-0.5 rounded-lg btn-sky text-ink-950 text-[10px] font-extrabold uppercase tracking-wider ring-focus active:scale-[0.97]"
+                  title="Reconnect to your previously-saved wallet"
+                  x-text="$store.wallet.savedKind === 'walletconnect' ? 'Re-pair via QR' : 'Reconnect'">Reconnect</button>
+          <button @click="$store.wallet.forgetSaved()"
+                  title="Forget saved wallet — use a different one next time"
+                  class="text-white/40 hover:text-white text-base leading-none transition ml-0.5">&times;</button>
+        </div>
+      </template>
+
       <!-- WalletConnect pairing chip — appears while wc.connect() is
            in-flight and the user picked WalletConnect. Clicking re-opens
            the WC overlay (user may have dismissed and forgotten which
@@ -290,9 +317,28 @@
 
     <!-- Mobile wallet section: always present in the drawer; the inner
          controls are conditional on the same $store.wallet that drives
-         the desktop navbar so reconnects/disconnects stay in sync. -->
+         the desktop navbar so reconnects/disconnects stay in sync.
+         v13 also exposes the saved-wallet pill here so a mobile user
+         who previously connected via WalletConnect can Re-pair with
+         a single tap from the drawer (the desktop navbar pill is
+         hidden below md to keep the navbar uncluttered). -->
     <div class="pt-3 mt-2 border-t border-white/10 space-y-2">
       <p class="px-3 text-[10px] uppercase tracking-wider text-white/40 font-extrabold">Wallet</p>
+      <template x-if="$store.wallet.hasSavedWallet && !$store.wallet.connected">
+        <div class="px-3 py-2.5 rounded-xl bg-ink-900/80 border border-amber-400/30 space-y-2">
+          <div class="flex items-center gap-2">
+            <div class="w-2 h-2 rounded-full bg-amber-400"></div>
+            <span class="text-[10px] uppercase tracking-wider text-amber-200 font-extrabold">Saved wallet</span>
+            <span class="text-xs text-white font-mono font-bold flex-1 truncate" x-text="$store.wallet.shortSavedAddr"></span>
+            <button @click="$store.wallet.forgetSaved()"
+                    class="text-white/40 hover:text-white text-base leading-none"
+                    title="Forget saved wallet">&times;</button>
+          </div>
+          <button @click="open=false; $store.wallet.reconnectSaved()"
+                  class="w-full text-left px-3 py-2.5 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky active:scale-[0.97] transition"
+                  x-text="$store.wallet.savedKind === 'walletconnect' ? 'Re-pair via QR' : 'Reconnect wallet'">Reconnect wallet</button>
+        </div>
+      </template>
       <template x-if="!$store.wallet.connected">
         <div class="space-y-2">
           <button @click="open=false; $store.wallet.connect('injected')"

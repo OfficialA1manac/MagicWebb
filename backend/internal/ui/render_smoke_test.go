@@ -60,27 +60,26 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-	// Self-hosted assets served with `?v=12` cache-buster — bumping
-	// from v11 forces returning browsers to re-fetch layout.html so the
-	// v12 fix (desktop Navbar Connect Wallet now uses `hidden md:flex`
-	// instead of `hidden md:block`, because the JIT-compiled Tailwind
-	// output for this build is MISSING the `.md\:block` utility — so
-	// `.hidden` was always winning, hiding the button on every
-	// viewport, not just below md) lands on users that loaded the
-	// previous shell and reported "the wallet button still is not
-	// displaying". ALSO retains the v11 visible-Connected-pill +
-	// mobile-drawer-as-only-mobile-wallet-surface intent. Mounted
-	// under /static/* with a 60-second Cache-Control: max-age=60
-	// (see mountStatic) so the baseline freshness policy isn't solely
-	// reliant on the bump. NOTE: full Tailwind rebuild (`go run
-	// ./cmd/buildtailwindcss`) is on the follow-up; once landed,
-	// the `md:block` shorthand can be reinstated.
-	{"tailwind-static-link", "tailwind.css?v=12"},
-	{"wallet-js-defer",      "wallet.js?v=12"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=12"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=12"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=12"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=12"},
+	// Self-hosted assets served with `?v=13` cache-buster — bumping
+	// from v12 forces returning browsers to re-fetch layout.html so the
+	// v13 fix (no auto-reconnect on page load; explicit Reconnect /
+	// Forget pill for users with a previously-saved wallet) lands on
+	// users that loaded the previous shell. The v13 fix addresses the
+	// user-facing complaint: "Tries to connect to my MetaMask wallet
+	// automatically I need that fixed". On prior deploys we silently
+	// called wallet.connect() on alpine:init when localStorage had a
+	// saved address — that auto-popped the user's MetaMask on every
+	// page load. v13 hydrates ONLY the savedAddress/savedKind
+	// reactive flags; the user must click Reconnect to actually
+	// re-establish a session. Mounted under /static/* with a 60-second
+	// Cache-Control: max-age=60 (see mountStatic) so the baseline
+	// freshness policy isn't solely reliant on the bump.
+	{"tailwind-static-link", "tailwind.css?v=13"},
+	{"wallet-js-defer",      "wallet.js?v=13"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=13"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=13"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=13"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=13"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -129,8 +128,43 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"wc-qr-overlay-renders", "Scan to pair"},
 		{"WC-connect-call",       "store.wallet.connect('walletconnect')"},
 		{"wc-pair-chip",          "Scan QR on your phone"},
+		// Negative-check (v13): the silent auto-connect code path that
+		// we just removed must NOT appear in the rendered HTML anywhere.
+		// The only remaining `silent` reference is the WalletConnect
+		// `mw-wc-show { silent: true }` gesture which is now only
+		// used by the chip-reopen path — but the wallet.connect
+		// `silent: true` call form is what we removed, so we assert
+		// that pattern is gone from the SPECIFIC hydration block. We
+		// pin the negative-check on the wallet-store auto-reconnect
+		// signature: that text MUST be absent (it's the legacy
+		// auto-reconnect block). Positive-check on the new buttons
+		// further down confirms the replacement is in place.
 		// Alpine x-data proves reactive surfaces render
 		{"alpine-x-data", "x-data"},
+		// v13 — Saved-wallet pill (no auto-reconnect).
+		// The pill must appear in the rendered HTML for both desktop navbar
+		// and mobile drawer. `hasSavedWallet` is the reactive getter that
+		// gates both surfaces; `reconnectSaved` is the click handler that
+		// the user must invoke to actually re-connect. Asserting both
+		// names here makes a future regression on either path (e.g.
+		// re-introducing a silent auto-connect) trip the smoke test in CI.
+		{"saved-wallet-getter",     "hasSavedWallet"},
+		{"saved-wallet-reconnect",  "reconnectSaved()"},
+		{"saved-wallet-forget",     "forgetSaved()"},
+		{"saved-wallet-pill-label", "Saved wallet"},
+		{"saved-wallet-shortener",  "shortSavedAddr"},
+		// v13 — Saved-wallet pill (no auto-reconnect).
+		// The pill must appear in the rendered HTML for both desktop navbar
+		// and mobile drawer. `hasSavedWallet` is the reactive getter that
+		// gates both surfaces; `reconnectSaved` is the click handler that
+		// the user must invoke to actually re-connect. Asserting both
+		// names here makes a future regression on either path (e.g.
+		// re-introducing a silent auto-connect) trip the smoke test in CI.
+		{"saved-wallet-getter",     "hasSavedWallet"},
+		{"saved-wallet-reconnect",  "reconnectSaved()"},
+		{"saved-wallet-forget",     "forgetSaved()"},
+		{"saved-wallet-pill-label", "Saved wallet"},
+		{"saved-wallet-shortener",  "shortSavedAddr"},
 	}
 
 	fail := 0
@@ -152,6 +186,19 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		fail++
 	} else {
 		t.Logf("  PASS  no-external-qrserver")
+	}
+	// Negative-check (v13): the silent auto-reconnect hydration block
+	// that produced "Tries to connect to my MetaMask wallet
+	// automatically" complaints MUST be gone from the rendered HTML.
+	// The replacement hydrates ONLY savedAddress (no connect() call),
+	// so the legacy exact-string match disappears. Any future commit
+	// that re-introduces silent auto-reconnect trips here in CI.
+	if strings.Contains(body, "connect(kind, { silent: true })") {
+		t.Logf("  FAIL  no-silent-auto-reconnect\n        `connect(kind, { silent: true })` re-appeared — auto-reconnect is the user-reported bug class, denied at the smoke-test level")
+		missing = append(missing, "no-silent-auto-reconnect")
+		fail++
+	} else {
+		t.Logf("  PASS  no-silent-auto-reconnect")
 	}
 	// Negative-check: the `_forceUnhide()` Alpine DOM poke that
 	// previously raced x-show + x-transition must NOT appear in either

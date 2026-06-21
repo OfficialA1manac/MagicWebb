@@ -401,6 +401,24 @@ window.addEventListener('alpine:init', () => {
     unread:  0,
     busy:    false,
     state:   'idle', // 'idle' | 'connecting' | 'connected' | 'awaiting' | 'error'
+    // ── "Saved wallet" hydration (v13 — REPLACES auto-reconnect) ──
+    // On prior deploys we auto-connected on every page load when a
+    // `localStorage.mw_addr` was present. That violated user consent and
+    // was the source of the recurring "Tries to connect to my MetaMask
+    // wallet automatically" complaint. The new behaviour:
+    //
+    //   • The hydration block at the bottom of this file sets
+    //     `savedAddress` / `savedKind` ONLY (no connect() call). The
+    //     UI surfaces a "Saved wallet 0x1234…abcd — [Reconnect] [×]"
+    //     pill in the navbar when `savedAddress` is set and the user
+    //     is not currently connected.
+    //   • The user clicks Reconnect to re-establish the session with
+    //     their previous wallet, or × to forget the saved entry and
+    //     start fresh.
+    //   • On successful reconnect, savedAddress is cleared (so the
+    //     pill disappears once the session is live).
+    savedAddress: null, // previously-connected wallet (from localStorage)
+    savedKind:    null, // 'injected' | 'walletconnect'
 
     get provider() { return this._raw.provider; },
     get signer()   { return this._raw.signer;   },
@@ -410,6 +428,10 @@ window.addEventListener('alpine:init', () => {
     get shortAddr() {
       return this.address ? this.address.slice(0, 6) + '…' + this.address.slice(-4) : '';
     },
+    get shortSavedAddr() {
+      return this.savedAddress ? this.savedAddress.slice(0, 6) + '…' + this.savedAddress.slice(-4) : '';
+    },
+    get hasSavedWallet() { return !!this.savedAddress; },
     get connected()      { return !!this.address && this.state === 'connected'; },
     get isWalletConnect(){ return (localStorage.getItem('mw_kind') || '') === 'walletconnect'; },
     get stateError()     { return this._stateError || null; },
@@ -420,6 +442,34 @@ window.addEventListener('alpine:init', () => {
       window.dispatchEvent(new CustomEvent('mw-wallet-state', {
         detail: { state: s, error: opts.error },
       }));
+    },
+
+    // Re-establish a session with the previously-saved wallet. Resolves
+    // the savedAddress→address boundary so the pill collapses to the
+    // connected pill on success. Error surfaced via toast + state event
+    // (the saved pill stays visible so the user can try a different
+    // wallet or retry without losing context).
+    async reconnectSaved() {
+      if (!this.savedAddress) return;
+      const kind = this.savedKind || 'injected';
+      await this.connect(kind, { silent: false });
+      if (this.connected && this.address === this.savedAddress) {
+        // Reconnect succeeded — clear the pill.
+        this.savedAddress = null;
+      }
+    },
+
+    // User dismissed the saved wallet — forget it so the pill collapses.
+    // Does not affect a live session (the connect() flow manages its own
+    // state). Preserves the JWT for any concurrent read-only API calls
+    // that may still rely on it (notifications bell, profile view).
+    forgetSaved() {
+      this.savedAddress = null;
+      this.savedKind    = null;
+      try {
+        localStorage.removeItem('mw_addr');
+        localStorage.removeItem('mw_kind');
+      } catch (_) {}
     },
 
     // ── Connect (injected wallet OR WalletConnect v2 via QR) ──
@@ -1266,12 +1316,32 @@ window.addEventListener('alpine:init', () => {
     _toast(msg, type = 'info') { return toast(msg, type); },
   });
 
-  // ── Auto-reconnect on page load — silent path. ──
-  const saved = localStorage.getItem('mw_addr');
-  const kind  = localStorage.getItem('mw_kind') || 'injected';
-  if (saved && (kind === 'walletconnect' ? WC_PROJECT_ID : !!window.ethereum)) {
-    Alpine.store('wallet').connect(kind, { silent: true }).catch(() => {});
-  }
+  // ── Hydrate the "saved wallet" hint on page load (v13 — NO auto-reconnect).
+  // Previously we auto-connected silently here, which popped MetaMask on
+  // every page load — that was the source of the recurring complaint:
+  // "Tries to connect to my MetaMask wallet automatically I need that
+  // fixed". The contract is now:
+  //   • We DO NOT call connect() here under any circumstances.
+  //   • We surface savedAddress + savedKind + jwt to the reactive store
+  //     so the navbar can render a "Saved wallet 0x1234…abcd [Reconnect] [×]"
+  //     pill in DISPLAY state. The user must click Reconnect to actually
+  //     re-establish the session.
+  //   • The pill collapses to nothing on a clean browser (no localStorage).
+  //   • The pill disappears on a successful reconnect (reconnectSaved()
+  //     clears savedAddress once the live session matches it).
+  // The JWT is read but NEVER trusts the user must still attest via sign-in
+  // for any state-changing endpoint — JWTs are TS-signed and the server
+  // validates every request. The bell + notifications can keep reading
+  // (unauth reads return 401, the badge falls back to 0 unread).
+  try {
+    const addr = localStorage.getItem('mw_addr');
+    const kind = localStorage.getItem('mw_kind') || 'injected';
+    if (addr) {
+      const w = Alpine.store('wallet');
+      w.savedAddress = addr;
+      w.savedKind    = kind;
+    }
+  } catch (_) {}
 });
 
 /* ─────────────────────────────────────────────────────────────────────────────
