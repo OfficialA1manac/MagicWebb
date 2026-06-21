@@ -77,34 +77,41 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
 		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-	// Self-hosted assets served with `?v=14` cache-buster — bumping
-	// from v13 forces returning browsers to re-fetch layout.html (and
-	// the compiled tailwind.css) so the v14 fix lands on users that
-	// loaded the previous shell. v14 ships two coupled changes:
-	//   1. templates/layout.html — the navbar Connect Wallet's parent
-	//      `<div class="relative">` swaps its responsive class from the
-	//      v12 workaround `hidden md:flex` back to the idiomatic
-	//      `hidden md:block`. The v12 workaround was needed because
-	//      the JIT-compiled tailwind.css for the v11/v12 deploy was
-	//      MISSING the `.md\:block` utility (Tailwind's content-scan
-	//      only compiles classes used in templates — adding a class
-	//      without rebuilding the bundle silently strips it). v14 runs
-	//      `cmd/buildtailwindcss` and the utility re-enters the bundle.
-	//   2. internal/ui/static/tailwind.css — recompiled from the
-	//      current template content glob, so it contains `.md\:block`
-	//      (and any other responsive utility added since the prior
-	//      build). The md-block-utility-present check below reads
-	//      the bundled CSS via go:embed and asserts the utility is
-	//      present, denying a stale-bundle deploy in CI.
+	// Self-hosted assets served with `?v=16` cache-buster — bumping
+	// from v15 forces returning browsers to re-fetch layout.html (and
+	// the rest of the bundled vendor scripts) so the v16 fix lands
+	// on users that loaded the previous shell. v15 shipped the desktop
+	// Connect Wallet dropdown treatment (@click.outside on the dropdown
+	// itself, type="button" on inner buttons, connect-then-close order,
+	// @click.stop on the X close); v16 ships the same treatment on
+	// every other wallet surface that lives inside the mobile-hamburger
+	// drawer:
+	//   templates/layout.html — mobile-drawer wallet section now
+	//     matches the v15 desktop pattern end-to-end:
+	//       1. Saved-wallet pill: Forget × button has type="button",
+	//          @click.stop, expanded visible hover target with
+	//          aria-label="Forget saved wallet"; Reconnect button
+	//          reorders `$store.wallet.reconnectSaved()` ahead of
+	//          `open = false` so the QR/silent-reconnect flow starts
+	//          before the drawer folds out from under it.
+	//       2. Connect buttons (Browser Wallet + WalletConnect):
+	//          type="button", reordered to `$store.wallet.connect(...);
+	//          open = false`. Without this, the order matched the
+	//          pre-v15 desktop bug and a fast-clicking user could
+	//          observe the drawer collapse before MetaMask's pop-up
+	//          appeared.
+	//       3. Disconnect Wallet: type="button" only — the confirm()
+	//          wrapper stays because accidental disconnect on a mobile
+	//          is much harder to recover from than on desktop.
 	// Mounted under /static/* with a 60-second Cache-Control: max-
 	// age=60 (see mountStatic) so the baseline freshness policy isn't
 	// solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=14"},
-	{"wallet-js-defer",      "wallet.js?v=14"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=14"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=14"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=14"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=14"},
+	{"tailwind-static-link", "tailwind.css?v=16"},
+	{"wallet-js-defer",      "wallet.js?v=16"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=16"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=16"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=16"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=16"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.

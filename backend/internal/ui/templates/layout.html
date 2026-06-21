@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=14">
+  <link rel="stylesheet" href="/static/tailwind.css?v=16">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=14" defer></script>
-  <script src="/static/sse.js?v=14" defer></script>
-  <script src="/static/ethers.umd.min.js?v=14" defer></script>
+  <script src="/static/htmx.min.js?v=16" defer></script>
+  <script src="/static/sse.js?v=16" defer></script>
+  <script src="/static/ethers.umd.min.js?v=16" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=14" defer></script>
+  <script src="/static/wallet.js?v=16" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=14" defer></script>
-  <script src="/static/cdn.min.js?v=14" defer></script>
+  <script src="/static/qrcode.min.js?v=16" defer></script>
+  <script src="/static/cdn.min.js?v=16" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -182,32 +182,58 @@
            `wcOpen` so it depends on Alpine — but the user-visible
            button surface is now robust to hydration failures. -->
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet"
-           class="relative hidden md:block" @click.outside="wcOpen = false">
-          <button @click="wcOpen = !wcOpen"
+           class="relative hidden md:block">
+          <button type="button"
+                  @click="wcOpen = !wcOpen"
                   class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
             <span class="text-base leading-none">＋</span> Connect Wallet
             <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
           </button>
-          <div x-show="wcOpen" x-cloak x-transition.opacity.duration.150ms
-               class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus">
+          {{/* ── Dropdown ──────────────────────────────────────────────────────────────
+              `@click.outside` lives on the dropdown <div> (not the wrapper) — this
+              matches the bell dropdown's pattern that DOES close on outside-clicks
+              and DOES fire inner @click handlers. Putting `@click.outside` on the
+              outer wrapper created a target-tracking race where the click that
+              first opened the dropdown was re-evaluated as "outside" before the
+              inner @click had finished, suppressing both the close-X and the
+              wallet-connect buttons. Multi-statement @click handlers are also
+              re-ordered so `connect()` runs first and `wcOpen=false` fires
+              afterwards — the connect promise is what the user actually cares
+              about, and the dropdown closing just needs to not block it.
+              `type="button"` is added defensively on every inner <button> so
+              the browser never falls back to type="submit" within a form-less
+              page (the previous version was a latent bug — there is no form
+              here, but Chrome occasionally flags buttons without an explicit
+              type and stops dispatching click events).
+          */}}
+          <div x-show="wcOpen"
+               x-cloak
+               x-transition.opacity.duration.150ms
+               @click.outside="wcOpen = false"
+               class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus cursor-auto">
             <div class="px-3 pt-2 pb-1.5 flex items-center justify-between">
               <p class="text-[10px] uppercase tracking-wider text-white/60 font-extrabold">Choose wallet</p>
-              <button @click="wcOpen = false" class="text-white/40 hover:text-white text-base leading-none">×</button>
+              <button type="button"
+                      @click.stop="wcOpen = false"
+                      aria-label="Close"
+                      class="text-white/40 hover:text-white text-base leading-none px-2 py-1 rounded-md hover:bg-white/10 transition cursor-pointer">&times;</button>
             </div>
-            <button @click="wcOpen=false; $store.wallet.connect('injected')"
-                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3">
+            <button type="button"
+                    @click="$store.wallet.connect('injected'); wcOpen = false"
+                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 cursor-pointer">
               <span class="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-200 text-base font-bold flex-shrink-0 glow-sky">M</span>
-              <div class="flex-1">
+              <div class="flex-1 min-w-0">
                 <p class="text-sm font-bold text-white">Browser Wallet</p>
                 <p class="text-[11px] text-white/60 mt-0.5">MetaMask, Rabby, or any EIP-1193 wallet</p>
               </div>
               <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/80 font-bold uppercase tracking-wider">Quick</span>
             </button>
-            <button @click="wcOpen=false; $store.wallet.connect('walletconnect')"
-                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 mt-1"
+            <button type="button"
+                    @click="$store.wallet.connect('walletconnect'); wcOpen = false"
+                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 mt-1 cursor-pointer"
                     {{if not .WCProjectID}}disabled{{end}}>
               <span class="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/40 flex items-center justify-center text-violet-200 text-base flex-shrink-0 glow-violet">⌬</span>
-              <div class="flex-1">
+              <div class="flex-1 min-w-0">
                 <p class="text-sm font-bold text-white">WalletConnect</p>
                 <p class="text-[11px] text-white/60 mt-0.5">Scan a QR from any mobile or hardware wallet</p>
               </div>
@@ -365,29 +391,34 @@
             <div class="w-2 h-2 rounded-full bg-amber-400"></div>
             <span class="text-[10px] uppercase tracking-wider text-amber-200 font-extrabold">Saved wallet</span>
             <span class="text-xs text-white font-mono font-bold flex-1 truncate" x-text="$store.wallet.shortSavedAddr"></span>
-            <button @click="$store.wallet.forgetSaved()"
-                    class="text-white/40 hover:text-white text-base leading-none"
+            <button type="button"
+                    @click.stop="$store.wallet.forgetSaved()"
+                    aria-label="Forget saved wallet"
+                    class="text-white/40 hover:text-white text-base leading-none px-2 py-1 rounded-md hover:bg-white/10 transition cursor-pointer"
                     title="Forget saved wallet">&times;</button>
           </div>
-          <button @click="open=false; $store.wallet.reconnectSaved()"
-                  class="w-full text-left px-3 py-2.5 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky active:scale-[0.97] transition"
+          <button type="button"
+                  @click="$store.wallet.reconnectSaved(); open = false"
+                  class="w-full text-left px-3 py-2.5 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky active:scale-[0.97] transition cursor-pointer"
                   x-text="$store.wallet.savedKind === 'walletconnect' ? 'Re-pair via QR' : 'Reconnect wallet'">Reconnect wallet</button>
         </div>
       </template>
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet" class="space-y-2">
-        <button @click="open=false; $store.wallet.connect('injected')"
-                class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97]">
+        <button type="button"
+                @click="$store.wallet.connect('injected'); open = false"
+                class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97] cursor-pointer">
           <span class="w-9 h-9 rounded-lg bg-ink-950/20 flex items-center justify-center text-base font-extrabold">M</span>
-          <span class="flex-1">
+          <span class="flex-1 min-w-0">
             <span class="block text-sm font-extrabold">Browser Wallet</span>
             <span class="block text-[10px] font-bold opacity-80">MetaMask, Rabby, any EIP-1193</span>
           </span>
         </button>
-        <button @click="open=false; $store.wallet.connect('walletconnect')"
-                class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97]"
+        <button type="button"
+                @click="$store.wallet.connect('walletconnect'); open = false"
+                class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97] cursor-pointer"
                 {{if not .WCProjectID}}disabled{{end}}>
           <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>
-          <span class="flex-1">
+          <span class="flex-1 min-w-0">
             <span class="block text-sm font-extrabold">WalletConnect</span>
             <span class="block text-[10px] font-bold opacity-80">Scan QR from mobile / hardware</span>
           </span>
@@ -407,8 +438,9 @@
               <span class="text-[9px] px-1.5 py-0.5 rounded bg-violet-500/20 text-violet-200 font-extrabold uppercase tracking-wider border border-violet-400/30">WC</span>
             </template>
           </a>
-          <button @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
-                  class="w-full text-left px-3 py-2.5 rounded-xl border border-red-400/30 text-red-200 hover:bg-red-500/10 transition font-bold text-sm">
+          <button type="button"
+                  @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
+                  class="w-full text-left px-3 py-2.5 rounded-xl border border-red-400/30 text-red-200 hover:bg-red-500/10 transition font-bold text-sm cursor-pointer">
             Disconnect Wallet
           </button>
         </div>
