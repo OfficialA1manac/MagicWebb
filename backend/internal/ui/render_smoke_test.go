@@ -286,4 +286,36 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	if fail > 0 {
 		t.Fatalf("%d render-smoke checks failed: %v", fail, missing)
 	}
+	// v16 — SyntaxError in the inline WC overlay script that broke
+	// Alpine init entirely. The inline <script> in partials/wc_qr_overlay.html
+	// MUST successfully parse and define window.MW_WC_OVERLAY_STATE for
+	// any page that loads the partial. A parser error there wedges
+	// Alpine's x-data evaluation across every page, which is what kept
+	// the desktop navbar Connect Wallet button invisible across v9-v15
+	// even when the layout markup itself was correct. Re-running the
+	// layout-level fix would not surface this regression without a
+	// run-time check; we pin the substring so go test parses it
+	// implicitly via the template engine.
+	//
+	// Negative-check: the parsed-as-JS broken pattern (lines starting
+	// with bare "(1) Clear the reactive ..." tokens — missing `//`
+	// comment slashes) MUST not appear ANYWHERE in the rendered body.
+	// The substring below is the exact heredoc-bleed that caused the
+	// Uncaught SyntaxError in production. If a future commit
+	// re-introduces a numbered-list comment block in inline JS the
+	// smoke test catches it before deploy.
+	if !strings.Contains(body, "window.MW_WC_OVERLAY_STATE") {
+		t.Logf("  FAIL  wc-overlay-state-defined\n        window.MW_WC_OVERLAY_STATE absent from rendered body — inline JS in partials/wc_qr_overlay.html failed to parse (likely a JavaScript SyntaxError) and the x-data factory never got defined; Alpine hydration is wedged.")
+		missing = append(missing, "wc-overlay-state-defined")
+		fail++
+	} else {
+		t.Logf("  PASS  wc-overlay-state-defined")
+	}
+	if strings.Contains(body, "(1) Clear the reactive") {
+		t.Logf("  FAIL  no-wc-syntax-error-leak\n        Bare \"(1) Clear the reactive ...\" tokens reappeared in rendered body without `//` comment slashes — this is the JavaScript SyntaxError that wedges Alpine init and keeps the navbar Connect Wallet button invisible. See partials/wc_qr_overlay.html closing block.")
+		missing = append(missing, "no-wc-syntax-error-leak")
+		fail++
+	} else {
+		t.Logf("  PASS  no-wc-syntax-error-leak")
+	}
 }

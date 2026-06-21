@@ -172,9 +172,9 @@
       // Got it / X / Esc / backdrop click all funnel here. We do THREE
       // things to guarantee the UI hides even if Alpine's reactivity is
       // wedged for any reason:
-      (1) Clear the reactive `open` flag — drives the x-show transition.
-      (2) Force-hide the modal-root DOM node with inline display:none.
-      (3) Clear the QR target so the next show start clean.
+      // (1) Clear the reactive `open` flag — drives the x-show transition.
+      // (2) Force-hide the modal-root DOM node with inline display:none.
+      // (3) Clear the QR target so the next show start clean.
       // The cached `uri` is INTENTIONALLY preserved: wallet.js can
       // dispatch mw-wc-show again (carrying the cached uri) to rehydrate
       // the same QR if the persistent pairing chip is clicked.

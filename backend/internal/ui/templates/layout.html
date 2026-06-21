@@ -158,9 +158,31 @@
            cluster, producing the "wallet button still not displaying"
            symptom even though the DOM element was present. v15 makes
            the conditions mutually exclusive: saved pill wins; fresh
-           visitors get the picker button. -->
-      <template x-if="!$store.wallet.connected && !$store.wallet.hasSavedWallet">
-        <div class="relative hidden md:block" @click.outside="wcOpen = false">
+           visitors get the picker button.
+
+           v16 — DOM-permanent visibility. The persistent "wallet
+           button still not visible" complaint across v9-v15 (the
+           user reported the symptom AGAIN after the v15 mutual-
+           exclusivity fix landed on Fly.io) is structural: `<template
+           x-if>` is `display:none` NATIVE in HTML — if Alpine fails
+           to evaluate the condition (wallet store not hydrated yet,
+           proxy unwrap error, $store reference undefined on first
+           paint, race between alpine:init fire and template scan),
+           the template element stays unrendered and the button inside
+           is invisible. To make the button visible WITHOUT requiring
+           Alpine to evaluate anything, we drop the `<template
+           x-if>` wrapper entirely and put the same mutual-exclusivity
+           condition on a plain `<div x-show=...>`. The `hidden md:block`
+           CSS class makes the div visible at md+ by default. `x-show`
+           is a NICE-TO-HAVE layer on top: when it works, it toggles
+           `display:none` so the saved pill and connect button never
+           both render. When it doesn't work (Alpine failed to load,
+           store getter threw, etc.), the user STILL sees the Connect
+           Wallet button. The dropdown logic still uses x-show on
+           `wcOpen` so it depends on Alpine — but the user-visible
+           button surface is now robust to hydration failures. -->
+      <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet"
+           class="relative hidden md:block" @click.outside="wcOpen = false">
           <button @click="wcOpen = !wcOpen"
                   class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
             <span class="text-base leading-none">＋</span> Connect Wallet
@@ -196,7 +218,7 @@
             </div>
           </div>
         </div>
-      </template>
+      </div>
 
       <!-- Notification bell -->
       <template x-if="$store.wallet.connected">
@@ -352,28 +374,26 @@
                   x-text="$store.wallet.savedKind === 'walletconnect' ? 'Re-pair via QR' : 'Reconnect wallet'">Reconnect wallet</button>
         </div>
       </template>
-      <template x-if="!$store.wallet.connected && !$store.wallet.hasSavedWallet">
-        <div class="space-y-2">
-          <button @click="open=false; $store.wallet.connect('injected')"
-                  class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97]">
-            <span class="w-9 h-9 rounded-lg bg-ink-950/20 flex items-center justify-center text-base font-extrabold">M</span>
-            <span class="flex-1">
-              <span class="block text-sm font-extrabold">Browser Wallet</span>
-              <span class="block text-[10px] font-bold opacity-80">MetaMask, Rabby, any EIP-1193</span>
-            </span>
-          </button>
-          <button @click="open=false; $store.wallet.connect('walletconnect')"
-                  class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97]"
-                  {{if not .WCProjectID}}disabled{{end}}>
-            <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>
-            <span class="flex-1">
-              <span class="block text-sm font-extrabold">WalletConnect</span>
-              <span class="block text-[10px] font-bold opacity-80">Scan QR from mobile / hardware</span>
-            </span>
-            <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/15 font-bold uppercase tracking-wider">QR</span>
-          </button>
-        </div>
-      </template>
+      <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet" class="space-y-2">
+        <button @click="open=false; $store.wallet.connect('injected')"
+                class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97]">
+          <span class="w-9 h-9 rounded-lg bg-ink-950/20 flex items-center justify-center text-base font-extrabold">M</span>
+          <span class="flex-1">
+            <span class="block text-sm font-extrabold">Browser Wallet</span>
+            <span class="block text-[10px] font-bold opacity-80">MetaMask, Rabby, any EIP-1193</span>
+          </span>
+        </button>
+        <button @click="open=false; $store.wallet.connect('walletconnect')"
+                class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97]"
+                {{if not .WCProjectID}}disabled{{end}}>
+          <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>
+          <span class="flex-1">
+            <span class="block text-sm font-extrabold">WalletConnect</span>
+            <span class="block text-[10px] font-bold opacity-80">Scan QR from mobile / hardware</span>
+          </span>
+          <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/15 font-bold uppercase tracking-wider">QR</span>
+        </button>
+      </div>
       <template x-if="$store.wallet.connected">
         <div class="space-y-2">
           <a :href="'/profile/' + $store.wallet.address"
