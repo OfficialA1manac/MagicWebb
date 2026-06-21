@@ -65,3 +65,47 @@ git pull && fly deploy
 
 Migrations auto-apply on boot; the indexer resumes from the last indexed
 block stored in Postgres.
+
+## 6. Automated deploys via GitHub Actions
+
+Every push to `main` automatically rebuilds and re-deploys via
+`.github/workflows/deploy.yml`:
+
+1. **test** job — `make test` (Go race detector). Gates the deploy.
+2. **deploy** job — `fly deploy --remote-only --strategy rolling`. The
+   Docker image is built on Fly's infrastructure; the workflow checks
+   out the source but does **not** build the binary locally.
+
+### One-time secret setup
+
+```bash
+# Create a scoped deploy token (NOT your personal auth token — this one
+# is checked into GitHub Actions and has deploy-only scope).
+fly tokens create deploy
+
+# GitHub repo → Settings → Secrets and variables → Actions
+# → New repository secret:
+#   Name:  FLY_API_TOKEN
+#   Value: <paste the token from `fly tokens create deploy`>
+```
+
+### Behaviour
+
+- Pushes to `main` queue sequentially — at most one rolling release
+  in flight per branch. Concurrent pushes wait for the in-progress
+  one to complete rather than cancel it.
+- PR branches do **not** trigger deploys (the workflow is bounded to
+  `push` of `main`).
+- A `make test` failure aborts the deploy; the previous release stays
+  live.
+- The `make test` target covers the full Go race-detector run
+  (`cd backend && go test ./... -race -count=1 -timeout 120s`).
+  Foundry contracts tests live separately in `ci.yml` and run
+  concurrently from the same push without blocking the deploy gate.
+
+If you ever need to revert an automated release:
+
+```bash
+fly releases              # list recent releases
+fly releases rollback <id> # atomic revert to a prior release
+```

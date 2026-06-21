@@ -1,0 +1,117 @@
+# ── Auto-deploy on push to main ──────────────────────────────────────────────
+#
+# Flow:  push to main  →  make test (Go race)  →  fly deploy --remote-only --strategy rolling
+#                                       └─ smoke check: curl /healthz
+#
+# Why a separate workflow instead of extending `ci.yml`:
+#   * The existing `ci.yml` runs 4 jobs in parallel on PR + push (backend,
+#     contracts/Foundry, slither, gitleaks). Adding a deploy job there
+#     would force Foundry tests on every push, adding ≈5–10 min to the
+#     go-to-green gate. Foundry is slow and the user-visible deploy
+#     latency should be tight.
+#   * A dedicated `deploy.yml` keeps the deploy gate short and cheap
+#     (just `make test`), and the broader CI runs concurrently from
+#     the same push event — both run on a push, neither blocks the
+#     other.
+#
+# Why `make test` only (not Foundry):
+#   The `test:` Makefile target already runs `cd backend && go test ./...
+#   -race -count=1 -timeout 120s`, which includes the full render-smoke
+#   suite plus the race detector. Foundry contracts tests (slow, flaky
+#   on Foundry cache misses) live in CI's contracts job, not here. The
+#   Go test runs as the deploy gate; contracts/foundry are the wider
+#   safety net.
+#
+# Concurrency: `cancel-in-progress: false` queues any commit pushed
+# while a previous deploy is still rolling — at most ONE release is in
+# flight per branch at any time. This protects the single-machine
+# `min_machines_running = 1` deployment from a race where two deploys
+# try to replace the machine simultaneously.
+#
+# Permissions: each job declares `permissions: { contents: read }`,
+# the minimum needed for `actions/checkout`. This drops the default
+# write scope on `GITHUB_TOKEN` (OpenSSF Scorecard "least-privilege").
+# FLY_API_TOKEN is the only deploy-scope credential — it is scoped to
+# a single deploy step (not the job) so a future step that accidentally
+# logs `$GITHUB_ENV` cannot leak it.
+#
+# flyctl install: the canonical `superfly/flyctl-actions` third-party
+# action ships without semver tags that would survive a breaking
+# release, so we install flyctl directly from https://fly.io/install.sh
+# (the same curl-pipe-sh one-liner used in the official Fly docs).
+# This drops the third-party-action supply-chain dependency entirely.
+#
+# Secrets required (GitHub → Settings → Secrets and variables → Actions):
+#   FLY_API_TOKEN   — Fly API token with deploy scope.
+#                     Create once with:  fly tokens create deploy
+#
+# Once the secret is set, every push to `main` runs the full pipeline.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Deploy (push to main)
+
+on:
+  push:
+    branches: [main]
+
+# Repo-wide default: deny everything except contents:read. Each job
+# can request additional permissions if needed; both jobs in this
+# workflow only need contents:read.
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-${{ github.ref }}
+  cancel-in-progress: false
+
+jobs:
+  test:
+    name: make test (Go race detector)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-go@v5
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: make test
+        run: make test
+
+  deploy:
+    name: fly deploy --remote-only --strategy rolling
+    needs: test
+    # Belt-and-suspenders: even though `on.push.branches:[main]` already
+    # constrains this workflow to main, the explicit ref check prevents
+    # an accidental deploy if anyone widens the trigger later.
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+      - name: Install flyctl
+        # Direct curl install — avoids `superfly/flyctl-actions` SHA-pinning
+        # supply-chain concern. flyctl is a single static binary on the
+        # runner PATH once this step completes.
+        run: |
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+      - name: Deploy (Fly remote build → rolling release)
+        # FLY_API_TOKEN scoped to this single step — narrower blast
+        # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        run: fly deploy --remote-only --strategy rolling
+      - name: Post-deploy smoke check (curl /healthz)
+        # Catches the class of failure where `fly deploy` succeeds
+        # (image pushes, machine replaces) but the new binary boots
+        # into a broken state — first deploy after a bad migration, a
+        # failing HTTP check inside the new release, etc.
+        if: success()
+        run: |
+          # 5s grace for the new machine to come up + healthcheck
+          # register inside Fly's checks subsystem.
+          sleep 5
+          curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors \
+            https://magicwebb.fly.dev/healthz
