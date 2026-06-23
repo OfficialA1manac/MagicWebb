@@ -175,14 +175,25 @@ func (q *Q) SetOfferStatus(ctx context.Context, collection, tokenID, bidder, sta
 }
 
 // GetActiveOffersForToken returns all pending positions on a token, high to low.
-func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID string) ([]OfferRow, error) {
+// GetActiveOffersForToken returns pending positions on a token, high to low.
+// `limit` caps the returned row count at both the SQL LIMIT (efficiency)
+// and the caller's expected maximum (DoS surface against a "hot" token
+// with thousands of stacked offers — a single GET would otherwise pull
+// multi-MB JSON). The caller is responsible for passing a sensible value;
+// the API layer uses 200 to keep the worst-case response bounded while
+// still surfacing the top of the leaderboard.
+func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID string, limit int) ([]OfferRow, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 200
+	}
 	rows, err := q.pool.Query(ctx,
 		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
 		        fee_wei::text, units, standard::text, expires_at, status::text,
 		        COALESCE(make_tx,''), created_at
 		 FROM offers
 		 WHERE collection=$1 AND token_id=$2 AND status='pending' AND expires_at > now()
-		 ORDER BY principal_wei::numeric DESC`, collection, tokenID)
+		 ORDER BY principal_wei::numeric DESC
+		 LIMIT $3`, collection, tokenID, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -729,10 +740,15 @@ func (q *Q) UpdateImageURI(ctx context.Context, collection, tokenID, imageURI st
 // using exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h (capped). Once count
 // reaches maxImageRetries the token is permanently skipped by the retry query.
 func (q *Q) BumpImageRetry(ctx context.Context, collection, tokenID string, count int) error {
+	// Exponential backoff via power(): PG `^` is BITWISE XOR, not exponentiation
+	// — using it gave a schedule of 3h, 0h, 1h, 6h, … instead of 1h, 2h, 4h, 8h,
+	// 16h, capped at 24h. power(2.0, exp)::int yields the intended geometric
+	// series; GREATEST clamps count-1 to ≥ 0 so the very first bump doesn't
+	// schedule the next retry in the past.
 	_, err := q.pool.Exec(ctx,
 		`UPDATE nft_metadata
 		 SET image_retry_count = $3,
-		     next_image_retry_at = now() + LEAST(2 ^ GREATEST($3 - 1, 0), 24) * interval '1 hour'
+		     next_image_retry_at = now() + LEAST(power(2.0, GREATEST($3 - 1, 0))::int, 24) * interval '1 hour'
 		 WHERE collection=$1 AND token_id=$2`,
 		collection, tokenID, count+1)
 	return err

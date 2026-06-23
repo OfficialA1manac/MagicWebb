@@ -70,13 +70,24 @@ func NewBridged(ctx context.Context, pool *pgxpool.Pool, dsn string) *Broadcaste
 
 // Publish delivers locally (non-blocking; slow clients skipped) and, when
 // bridged, notifies other instances.
+//
+// Local enqueue and the cross-instance bridge are intentionally COUPLED:
+// if the local fan-out queue is saturated we suppress the bridge too. That
+// prevents a drift bug where this instance's subscribers miss an event while
+// remote instances' subscribers receive it (the Origin UUID in the LISTEN
+// path only suppresses SAME-origin messages; bridge-dispatched events from
+// this origin already passed the local check, so dropping here keeps every
+// instance's view consistent). The trade-off is that under saturation we
+// drop the event everywhere rather than partially — we never tell one
+// instance "yes" and another "no" for the same publish call.
 func (b *Broadcaster) Publish(ev Event) {
 	select {
 	case b.events <- ev:
+		if b.pool != nil {
+			b.notify(ev)
+		}
 	default:
-	}
-	if b.pool != nil {
-		b.notify(ev)
+		log.Warn().Str("type", ev.Type).Msg("sse: local fan-out saturated; dropping event (bridge suppressed for consistency)")
 	}
 }
 

@@ -2,6 +2,7 @@ package api
 
 import (
 	"context"
+	"errors"
 	"math/big"
 	"strings"
 	"time"
@@ -33,19 +34,45 @@ func listingPreflightWithChain(q *db.Q, eth chain.Caller) fiber.Handler {
 		}
 
 		// On-chain verify before buy: repair missing ownership or orphan stale listings.
+		// DB writes during repair are NOT silently swallowed: if the repair write fails
+		// (transient pgx error, lock contention, etc.) we must NOT update the in-memory
+		// `pf` cache to "true" while the DB still holds the stale row. The response is
+		// built from `pf` directly, so lying in the cache would send the buyer into a
+		// tx the on-chain call reverts, with no clue why. Log the failure and report the
+		// truth: the DB is still in its pre-repair state. Client-context cancellations
+		// (browser disconnect, request timeout) are filtered out — those are not real
+		// DB failures, just a torn-down request, so they down-grade to debug noise.
 		if pf.Listed && !pf.Orphaned && eth != nil {
 			owns, std, amt, verified, verr := verifySellerOnChain(c.Context(), eth, coll, tokenID, seller)
 			if verr == nil && verified {
 				if owns {
 					if !pf.SellerOwns {
-						_ = q.EnsureListingSellerOwnership(c.Context(), coll, tokenID, seller, std, amt)
-						pf.SellerOwns = true
+						if werr := q.EnsureListingSellerOwnership(c.Context(), coll, tokenID, seller, std, amt); werr != nil {
+							if isClientGone(werr) {
+								log.Debug().Err(werr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+									Msg("listing-preflight: client gone before repair write")
+							} else {
+								log.Warn().Err(werr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+									Msg("listing-preflight: failed to repair seller-owns row; reporting stale db state")
+							}
+						} else {
+							pf.SellerOwns = true
+						}
 					}
 				} else {
-					_ = q.OrphanListing(c.Context(), coll, tokenID, seller)
-					pf.Orphaned = true
-					pf.Listed = false
-					pf.SellerOwns = false
+					if oerr := q.OrphanListing(c.Context(), coll, tokenID, seller); oerr != nil {
+						if isClientGone(oerr) {
+							log.Debug().Err(oerr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+								Msg("listing-preflight: client gone before orphan write")
+						} else {
+							log.Warn().Err(oerr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+								Msg("listing-preflight: failed to orphan stale listing; reporting stale db state")
+						}
+					} else {
+						pf.Orphaned = true
+						pf.Listed = false
+						pf.SellerOwns = false
+					}
 				}
 			}
 		}
@@ -279,4 +306,11 @@ func isRetriableUpstream(uri string) bool {
 	return strings.HasPrefix(uri, "http://") ||
 		strings.HasPrefix(uri, "https://") ||
 		strings.HasPrefix(uri, "ipfs://")
+}
+
+// isClientGone reports whether err is just a torn-down request (cancelled or
+// timed out) rather than a real DB / RPC failure. Used to keep noisy browser-
+// disconnects out of the warn-level log stream.
+func isClientGone(err error) bool {
+	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
 }

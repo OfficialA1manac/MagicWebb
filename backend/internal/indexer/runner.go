@@ -244,11 +244,21 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 	blockTimes := make(map[uint64]uint64)
 	for _, l := range logs {
 		if _, ok := blockTimes[l.BlockNumber]; !ok {
-			if h, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(l.BlockNumber))); err == nil {
-				blockTimes[l.BlockNumber] = h.Time
-			} else {
-				blockTimes[l.BlockNumber] = uint64(time.Now().Unix())
+			// Per-RPC 2s timeout so a stuck HeaderByNumber can't stall the
+			// whole 30-block chunk. Log + skip on failure rather than faking
+			// a wall-clock timestamp — chains drift from wall-clock and
+			// downstream sort-by-block-time queries would otherwise see
+			// drift between chain-truth and DB-truth. The next indexer
+			// cycle re-indexes this log when the RPC recovers; processTransfers
+			// sees the same blockTimes map and skips blocks it has no header for.
+			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
+			hcancel()
+			if herr != nil {
+				log.Warn().Err(herr).Uint64("block", l.BlockNumber).Msg("watcher: header lookup failed; skip log this cycle")
+				continue
 			}
+			blockTimes[l.BlockNumber] = h.Time
 		}
 		if err := r.h.dispatch(ctx, l, blockTimes[l.BlockNumber]); err != nil {
 			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: dispatch")
@@ -558,7 +568,14 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	if err != nil {
 		return common.Hash{}, err
 	}
-	tipCap, _ := r.eth.SuggestGasTipCap(ctx)
+	tipCap, err := r.eth.SuggestGasTipCap(ctx)
+	if err != nil {
+		// RPC failure on tip-cap query → tipCap stays nil and the very next
+		// line's `new(big.Int).Add(tipCap, ...)` would panic, taking down
+		// the keeper loop for the rest of the process lifetime. Bounce a
+		// clean error to the caller; the next tx build will retry.
+		return common.Hash{}, fmt.Errorf("suggest gas tip cap: %w", err)
+	}
 	gasPrice, err := r.eth.SuggestGasPrice(ctx)
 	if err != nil {
 		return common.Hash{}, err

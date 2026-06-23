@@ -76,42 +76,66 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_MARKETPLACE",   "window.MW_MARKETPLACE   = '0xMarketF00Dbabe'"},
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
-		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},
-	// Self-hosted assets served with `?v=16` cache-buster — bumping
-	// from v15 forces returning browsers to re-fetch layout.html (and
-	// the rest of the bundled vendor scripts) so the v16 fix lands
-	// on users that loaded the previous shell. v15 shipped the desktop
-	// Connect Wallet dropdown treatment (@click.outside on the dropdown
-	// itself, type="button" on inner buttons, connect-then-close order,
-	// @click.stop on the X close); v16 ships the same treatment on
-	// every other wallet surface that lives inside the mobile-hamburger
-	// drawer:
-	//   templates/layout.html — mobile-drawer wallet section now
-	//     matches the v15 desktop pattern end-to-end:
-	//       1. Saved-wallet pill: Forget × button has type="button",
-	//          @click.stop, expanded visible hover target with
-	//          aria-label="Forget saved wallet"; Reconnect button
-	//          reorders `$store.wallet.reconnectSaved()` ahead of
-	//          `open = false` so the QR/silent-reconnect flow starts
-	//          before the drawer folds out from under it.
-	//       2. Connect buttons (Browser Wallet + WalletConnect):
-	//          type="button", reordered to `$store.wallet.connect(...);
-	//          open = false`. Without this, the order matched the
-	//          pre-v15 desktop bug and a fast-clicking user could
-	//          observe the drawer collapse before MetaMask's pop-up
-	//          appeared.
-	//       3. Disconnect Wallet: type="button" only — the confirm()
-	//          wrapper stays because accidental disconnect on a mobile
-	//          is much harder to recover from than on desktop.
+		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},  // Self-hosted assets served with `?v=19` cache-buster — bumping
+  // from v18 forces returning browsers to re-fetch layout.html so the
+  // v19 cleanup lands on users that loaded the previous shell.
+  // v19 ships a CODE HYGIENE pass only — no behaviour change.
+  // Three dead window.* exports are removed from static/wallet.js:
+  //   window.fmtFLR, window.fmtAddr, window.mediaURL — each had zero
+  //   live call sites outside the wallet.js IIFE closure (templates
+  //   resolve these names against the per-partial x-data scope, NOT
+  //   the global window). Dropping them leaves the wallet store's
+  //   local fmtFLR/fmtAddr/mediaURL call sites unchanged.
+  // The wallet store's `_toast(msg, type)` method wrapper is inlined
+  // to direct `toast(...)` calls (top-level IIFE function declared at
+  // line ~1350, hoisted throughout). The wrapper had no external
+  // callers; it was a 1-line `return toast(...)` shortcut. Inlining
+  // removes one indirection without changing observable behaviour.
+  // v17/v18 history (cross-tab hardening + MW_WC_HIDE removal) is still
+  // shipping in the same wallet.js bundle that ships v19 — only the
+  // cache-buster bumped so returning browsers refetch. v17 ships
+	// the cross-tab / cross-modal hardening pass:
+	//   layout.html — every dropdown / drawer surface
+	//     (Connect Wallet dropdown, bell notifications dropdown,
+	//     mobile-hamburger drawer, WC pairing chip trigger) now
+	//     carries an inline `style="display: none;"` for first-paint
+	//     fail-safe hiding (so an Alpine init error or a wedged
+	//     x-transition cannot leave any modal stuck onscreen).
+	//     Connect Wallet dropdown ditched its
+	//     `x-transition.opacity.duration.150ms` because Alpine's
+	//     transition listener (requestAnimationFrame) pauses when a
+	//     tab is hidden — that pause was the mechanism that produced
+	//     the "frozen across tabs" + "auto-displays and won't close"
+	//     user-reported class of bugs. Bell + mobile drawer get the
+	//     same anti-stuck protection. Each surface picked up a
+	//     `@keydown.escape.window` handler so Esc closes any of them
+	//     without depending on Alpine's reactive x-show path (the
+	//     path that's frozen in the bug).
+	//   partials/action_modal.html — keeps its heavier x-transition
+	//     (because fade-in is desirable on a modal that hides the
+	//     rest of the page), but adds a `x-bind:style` fail-safe
+	//     that forces `display: none !important` when the reactive
+	//     `$store.modals.open` flips to false. This breaks the
+	//     wedged-transition visibility race without giving up the
+	//     fade-in aesthetic.
+	//   static/wallet.js — surfaces a global `window.MW_HIDE_ALL()`
+	//     kill-switch that force-flips every dropdown flag false and
+	//     force-hides every modal-root via direct DOM. Registered as
+	//     a `visibilitychange` listener so on every tab-focus return
+	//     any modal that was wedged by an interrupted x-transition
+	//     while the tab was hidden gets torn down before the user
+	//     sees it. The action_modal is exempt from auto-dismiss
+	//     when `step >= 1` (in-flight signing) so a user mid-buy
+	//     doesn't lose their modal context on tab switch.
 	// Mounted under /static/* with a 60-second Cache-Control: max-
 	// age=60 (see mountStatic) so the baseline freshness policy isn't
 	// solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=16"},
-	{"wallet-js-defer",      "wallet.js?v=16"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=16"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=16"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=16"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=16"},
+	{"tailwind-static-link", "tailwind.css?v=19"},
+	{"wallet-js-defer",      "wallet.js?v=19"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=19"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=19"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=19"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=19"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.

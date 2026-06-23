@@ -34,9 +34,16 @@ func NewPg(pool *pgxpool.Pool) *PgStore {
 func (s *PgStore) SetIfFree(address, nonce string, ttl time.Duration) (ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)
 	defer cancel()
+	// A previous nonce for the same address that has EXPIRED but whose row
+	// hasn't yet been garbage-collected (cleanup runs every 60s) must NOT
+	// block this address from getting a fresh nonce. We bump the row in
+	// the conflict branch ONLY when the existing row is already expired,
+	// so a still-live nonce still wins (returns false → caller re-issues).
 	err := s.pool.QueryRow(ctx,
 		`INSERT INTO siwe_nonces(address, nonce, expires_at) VALUES($1,$2,$3)
-		 ON CONFLICT(address) DO NOTHING
+		 ON CONFLICT(address) DO UPDATE
+		   SET nonce=EXCLUDED.nonce, expires_at=EXCLUDED.expires_at
+		 WHERE siwe_nonces.expires_at <= now()
 		 RETURNING true`,
 		address, nonce, time.Now().Add(ttl),
 	).Scan(new(bool))

@@ -42,7 +42,7 @@ func offerPosition(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		coll := strings.ToLower(c.Params("collection"))
 		tokenID := c.Params("id")
-		rows, err := q.GetActiveOffersForToken(c.Context(), coll, tokenID)
+		rows, err := q.GetActiveOffersForToken(c.Context(), coll, tokenID, 200)
 		if err != nil {
 			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
