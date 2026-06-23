@@ -185,6 +185,26 @@ neither can regress silently again.
     still opens the WC QR overlay.
   - `tools/check-fly-sync.sh` exits 0 once the SHA-baked binary
     replaces the live machine (post-deploy verification below).
+  - **Negative-side-effects audit (literal evidence).** The userInitiated
+    gate is contained entirely to wallet.js + action_modal.html's
+    listener. The other overlay surfaces (`mw-wc-show`/`mw-wc-hide`
+    in `wc_qr_overlay.html`, `mw-nft-picker-show`/`mw-nft-picker-hide`
+    in `nft_picker.html`) are untouched. Verifiable with:
+    ```bash
+    # Between the v22 merge (76e46a7^) and v23.1 (76e46a7):
+    git diff --numstat 76e46a7^ 76e46a7 -- backend/internal/ui/static/wallet.js
+    # -> 26 0 (wallet.js gained 26 lines: userInitiated: true on
+    #    MODAL_OPTS_FALLBACK + the gate block + 2 runAction callers)
+    git diff --name-only 76e46a7^ 76e46a7 -- backend/internal/ui/templates/partials
+    # -> backend/internal/ui/templates/partials/action_modal.html
+    #    (only the listener gate; nft_picker.html and wc_qr_overlay.html
+    #    do NOT appear in the output = untouched)
+    ```
+    And the four canonical wallet.js anchors are at: line 93
+    (`MODAL_OPTS_FALLBACK` `userInitiated: true,`), line 347
+    (`if (opts.userInitiated !== true)` store gate), line 977 (no-
+    signer `runAction` branch `userInitiated: true,`), line 993
+    (good-signer `runAction` branch `userInitiated: true,`).
 - **Status:** FIXED. Verified live at https://magicwebb.fly.dev/.
   Commits `76e46a7` (initial v23.1 push: wallet.js /
   action_modal.html / rest.go var / Makefile ldflags / deploy.yml / tool
