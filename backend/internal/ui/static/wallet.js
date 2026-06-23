@@ -327,9 +327,25 @@ window.addEventListener('alpine:init', () => {
      *   { ok: true,  txHash }  — confirmed on-chain
      *   { ok: false, error }   — errored or user-cancelled
      *   null                   — busy with prior modal (auto-skipped)
+     *
+     * Defensive contract: if a caller passes undefined / null / a primitive
+     * (rather than a real opts object), fall back to MODAL_OPTS_FALLBACK
+     * (a friendly dismissable info-card) instead of throwing on
+     * `opts.kind`. The action_modal partial's `x-on:open-action.window`
+     * listener forwards `$event.detail` directly into modals.open(), so a
+     * third-party or stale dispatch that fires with no detail would
+     * otherwise pin Alpine with "Cannot read properties of undefined
+     * (reading 'kind')" globally.
+     *
+     * Implementation note: the sanitiser is INLINED here rather than
+     * factored into a `_sanitizeOpts()` method. Alpine.store objects are
+     * reactive Proxies; methods defined on the source literal are not
+     * always returned as callable functions by the Proxy.get trap
+     * (depends on interceptor chain). Inlining removes the
+     * `_sanitizeOpts is not a function` regression risk entirely.
      */
     open(opts) {
-      opts = this._sanitizeOpts(opts);
+      opts = (opts && typeof opts === 'object') ? opts : MODAL_OPTS_FALLBACK;
       if (this.open && this._resolver) {
         return new Promise((resolve) => {
           const tick = setInterval(() => {
