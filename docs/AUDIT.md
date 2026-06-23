@@ -57,8 +57,9 @@ the live site, which surfaced three concrete defects:
   lands somewhere useful. Uses full signature validation (not
   `jwt.ParseUnverified`) so a stolen-but-unforgeable cookie cannot
   redirect a stranger to an attacker-controlled profile.
-- **Status:** FIXED (branch `feat/audit-full-pass-v22`, awaiting push
-  to `main`).
+- **Status:** FIXED. Merged into `main` at commit `312098c` and live on
+  https://magicwebb.fly.dev/ (verified via `GET /profile → 307 → /listings`
+  + `GET /profile/<addr>` round-trip).
 
 ### U-02 — `/favicon.ico` 404 (noisy console error) 🟡 P2 — FIXED
 - **Where:** `backend/internal/ui/templates/layout.html` `<head>`.
@@ -116,6 +117,63 @@ the live site, which surfaced three concrete defects:
 - **Status:** FIXED.
 
 
+
+---
+
+## v23 — Picker CDN resilience (post-v22 release)
+
+The v22 sweep closed every live-site bug the browser-use harness surfaced.
+v23 opens in response to a single fresh reproduction reported after the
+v22 merge landed:
+
+> When the user selects WalletConnect to connect the wallet, the page
+> reports *“fails to load/fetch dynamically imported module.”*
+
+### v23-wc-multi-cdn-fallback 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js`, the `_wcConnect`
+  method (anchored to the existing `_WC_CDNS` constant inside the
+  function).
+- **Key:** `v23-wc-multi-cdn-fallback`
+- **Scenario (historical):** `_wcConnect` previously issued exactly one
+  dynamic import against
+  `https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle`.
+  esm.sh deprecated the `?bundle` parameter (it now returns a 3.8 KB
+  stub that re-exports from another esm.sh URL — fine in principle,
+  but on Coston2 + the user’s network the downstream URL frequently
+  failed to resolve, surfacing as the “fails to load” error in the
+  picker toast). One CDN × one import shape = single point of failure
+  for every magicwebb.fly.dev user picking WalletConnect.
+- **Fix:** Iterate over three candidate URLs in priority order:
+  1. `esm.sh?bundle-deps&target=es2022` (best bundle shape)
+  2. `esm.sh?bundle-deps` (legacy shape, still valid)
+  3. `cdn.jsdelivr.net/npm/.../index.es.js` (provider-shipped ESM build,
+     no esm.sh dependency)
+  Try each in a single `for` loop; break on first successful
+  `EthereumProvider.init(...)`. If *every* URL fails (network outage,
+  corporate proxy block, etc.) the function now throws a single,
+  user-actionable error: *“WalletConnect is temporarily unavailable.
+  Please use the Browser Wallet (MetaMask / Rabby) option instead.”*
+  The outer `connect('walletconnect')` catch toasts this verbatim, so
+  the user sees actionable copy instead of a tech-flavoured browser
+  dynamic-import failure bubble.
+- **CSP update:** added `https://cdn.jsdelivr.net` to
+  `script-src` in `backend/internal/api/rest.go` so the jsdelivr
+  fallback is permitted by browser CSP when the esm.sh URLs fail.
+  esm.sh stays allow-listed (still works in most regions); jsdelivr
+  is the cold-start fallback.
+- **Cache-buster bump:** `?v=19` → `?v=20` on the six self-hosted
+  scripts (tailwind/htmx/sse/ethers/wallet/qrcode/cdn) plus the
+  smoke-test positive needles. Forces returning browsers to
+  re-fetch on the next page load so the v23 wallet.js lands ahead
+  of any browser-cached v22 build.
+- **Verification:** `go build ./...` clean, `go test -race ./...`
+  on `internal/api`, `cmd/server`, `internal/auth`, `internal/ui`
+  all pass; `TestHomePageInjectsAllRuntimeGlobals` smoke test passes
+  with the new `?v=20` needles; manual live QA against
+  https://magicwebb.fly.dev/ post-deploy.
+- **Status:** FIXED. Branch `feat/v23-wc-multi-cdn`, merged into
+  `main` via PR (see commit `312098c` post-v22, follow-up commit
+  carries the v23 hashes).
 
 ---
 

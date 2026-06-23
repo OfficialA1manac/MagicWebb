@@ -56,7 +56,7 @@ const (
 		// self-hosted Alpine + dynamic injection. Nonces per response are
 		// the strict pattern; we revisit when a richer threat model requires
 		// it.
-		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh; " +
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +

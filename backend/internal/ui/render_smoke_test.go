@@ -130,12 +130,12 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	// Mounted under /static/* with a 60-second Cache-Control: max-
 	// age=60 (see mountStatic) so the baseline freshness policy isn't
 	// solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=19"},
-	{"wallet-js-defer",      "wallet.js?v=19"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=19"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=19"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=19"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=19"},
+	{"tailwind-static-link", "tailwind.css?v=20"},
+	{"wallet-js-defer",      "wallet.js?v=20"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=20"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=20"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=20"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=20"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
