@@ -46,7 +46,17 @@ const (
 		// here is the lowest-friction fix for self-hosted Alpine without
 		// weakening XSS mitigation (templates remain literal script content;
 		// only the Alpine runtime parses expressions).
-		"script-src 'self' 'unsafe-eval' https://esm.sh; " +
+		//
+		// 'unsafe-inline' is required so the server-rendered inline <script>
+		// blocks in templates/layout.html execute: the runtime-config inject
+		// (window.MW_MARKETPLACE = '{{.MarketplaceAddr}}') and the SSE bump
+		// IIFE. Both blocks contain only env-controlled values plus literal
+		// JS — Go's html/template auto-escapes the injected strings — so the
+		// 'unsafe-inline' tradeoff is the standard practical match for
+		// self-hosted Alpine + dynamic injection. Nonces per response are
+		// the strict pattern; we revisit when a richer threat model requires
+		// it.
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +

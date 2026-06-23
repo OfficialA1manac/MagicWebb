@@ -11,19 +11,19 @@
 <div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
   <div class="bg-neutral-900 rounded-xl p-4">
     <p class="text-xs text-neutral-500 mb-1">Active Listings</p>
-    <p class="text-2xl font-bold text-white">{{.TotalActiveListings}}</p>
+    <p class="text-2xl font-bold text-white">{{.totalActiveListings}}</p>
   </div>
   <div class="bg-neutral-900 rounded-xl p-4">
     <p class="text-xs text-neutral-500 mb-1">Total Sales</p>
-    <p class="text-2xl font-bold text-white">{{.TotalSales}}</p>
+    <p class="text-2xl font-bold text-white">{{.totalSales}}</p>
   </div>
   <div class="bg-neutral-900 rounded-xl p-4">
     <p class="text-xs text-neutral-500 mb-1">Gross Volume</p>
-    <p class="text-2xl font-bold text-emerald-400">{{wei2eth .GrossVolumeWei}} FLR</p>
+    <p class="text-2xl font-bold text-emerald-400">{{wei2eth .grossVolumeWei}} FLR</p>
   </div>
   <div class="bg-neutral-900 rounded-xl p-4">
     <p class="text-xs text-neutral-500 mb-1">Total Auctions</p>
-    <p class="text-2xl font-bold text-white">{{.TotalAuctions}}</p>
+    <p class="text-2xl font-bold text-white">{{.totalAuctions}}</p>
   </div>
 </div>
 {{end}}
