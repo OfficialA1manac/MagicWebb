@@ -6,7 +6,6 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
-	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -212,7 +211,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	api.Get("/indexer/status", indexerStatus(q))
 }
 
-// ── Middleware ────────────────────────────────────────────────────────────────
+// ── Middleware ───────────────────────────────────────────────────────────────
 
 // jwtMiddleware authenticates either via an Authorization: Bearer token OR
 // an address-bound HttpOnly session cookie (the cookie is set by the SIWE
@@ -415,7 +414,7 @@ func buildOrigins(frontendURL, env string) string {
 	return origins
 }
 
-// ── JSON helpers ──────────────────────────────────────────────────────────────
+// ── JSON helpers ─────────────────────────────────────────────────────────────
 
 func writeErr(c *fiber.Ctx, status int, msg string) error {
 	return c.Status(status).JSON(fiber.Map{"error": msg})
@@ -439,6 +438,30 @@ func bodyDecode(c *fiber.Ctx, v any) error {
 // route is the live update channel for bids, listings, offers, auction
 // tick-downs, and notifications — every page subscribes to it as a
 // background EventSource.
+//
+// Cleanup contract (the fix this revision introduces):
+//   • `cancel()` is deferred INSIDE the SetBodyStreamWriter callback, not
+//     at the outer handler scope. Putting `defer cancel()` on the outer
+//     scope fired the instant the handler returned `nil` — BEFORE fasthttp
+//     could serialise headers or hand the bufio.Writer to the stream
+//     callback — tearing the subscriber out before a single byte was
+//     written and leaving the browser stalled on /events with zero
+//     headers and zero body.
+//   • Every `w.WriteString` and `w.Flush` is now error-checked; on error
+//     (which happens when the TCP socket / fasthttp response closes
+//     because the client disconnected, the edge proxy timed out, or the
+//     broadcaster cancelled the channel) we `return` from the callback
+//     so the deferred `cancel()` reliably releases the subscriber slot.
+//   • Earlier revisions spawned a `go func() { <-c.Context().Done(); ... }`
+//     watcher to "belt-and-braces" the lifecycle, but `fasthttp`'s
+//     `RequestCtx.Done()` closes immediately when the request handler
+//     returns, not when the TCP socket actually drops — so that
+//     goroutine fired the cancel atomically, also tearing the
+//     subscriber out before any stream, AND racing with `RequestCtx`
+//     state mutation (a documented fasthttp gotcha). It is gone. The
+//     write/flush error path inside the callback is the only reliable
+//     signal we have on the fiber side, and when combined with the
+//     deferred `cancel()` it covers every disconnect path we care about.
 func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/event-stream")
@@ -451,51 +474,29 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
 		}
 
-		// Belt-and-braces: even when SetBodyStreamWriter's callback never
-		// fires (client disconnect during header serialization — fasthttp
-		// can skip the callback in that path), the subscription must be
-		// released so the broadcaster map doesn't leak. We attach a
-		// watcher goroutine that fires cancel() the moment the request
-		// context is done. sync.Once makes the call safe whether the
-		// outer fallback goroutine or the inner defer wins.
-		vctx := c.Context()
-		var cancelOnce sync.Once
-		cancelOnceFn := func() { cancelOnce.Do(cancel) }
-		go func() {
-			<-vctx.Done()
-			cancelOnceFn()
-		}()
-
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-			// Belt-and-braces: cancel SCOPED TO THE WRITER'S LIFETIME, not
-			// the handler's. The previous code put `defer cancel()` at the
-			// outer handler scope, where it fired IMMEDIATELY when the
-			// handler returned nil — BEFORE fasthttp could serialize
-			// headers or hand the bufio.Writer to the stream callback.
-			// That race tore the subscriber out of the broadcaster map
-			// before any bytes were written, leaving the client
-			// permanently stalled on /events with zero bytes and zero
-			// headers (the edge proxy would then time out and return 502
-			// to the browser).
-			defer cancelOnceFn()
+			defer cancel()
 
 			// Keepalive cadence: short enough to detect dead connections
 			// within ~30s, long enough not to spam clients with empty
-			// frames. The very first tick fires 15s AFTER the handler
-			// return — the sentinel flush below makes that wait invisible
-			// from the client side.
+			// frames. Until the ticker fires, the sentinel flush below
+			// is what keeps the edge proxy from holding buffered bytes.
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
 
 			// Sentinel first-byte flush. Forces fasthttp to commit the
-			// response headers + the first chunk in the same TCP write so
-			// the edge proxy and the browser never see a zero-bytes
-			// prelude. The ": connected" comment is an SSE comment line —
-			// ignored by EventSource consumers but counted as data flush
-			// by the transport, which is exactly what we want for the
-			// initial flush trigger.
-			_, _ = w.WriteString(": connected\n\n")
-			_ = w.Flush()
+			// response headers + the first chunk in the same TCP write
+			// so the edge proxy and the browser never see a zero-bytes
+			// prelude. ": connected" is an SSE comment line (ignored by
+			// EventSource consumers but transported identically to a
+			// data frame). On error, return immediately — the deferred
+			// `cancel()` releases the subscriber.
+			if _, err := w.WriteString(": connected\n\n"); err != nil {
+				return
+			}
+			if err := w.Flush(); err != nil {
+				return
+			}
 
 			for {
 				select {
@@ -503,11 +504,19 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 					if !ok {
 						return
 					}
-					_, _ = w.WriteString(msg)
-					_ = w.Flush()
+					if _, err := w.WriteString(msg); err != nil {
+						return
+					}
+					if err := w.Flush(); err != nil {
+						return
+					}
 				case <-ticker.C:
-					_, _ = w.WriteString(": keepalive\n\n")
-					_ = w.Flush()
+					if _, err := w.WriteString(": keepalive\n\n"); err != nil {
+						return
+					}
+					if err := w.Flush(); err != nil {
+						return
+					}
 				}
 			}
 		})
