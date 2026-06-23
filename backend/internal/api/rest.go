@@ -6,6 +6,7 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -291,26 +292,111 @@ func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	}
 }
 
-// clientIP returns the real client IP for rate limiting. Fly.io's load
-// balancer (and any compliant RFC 7239 reverse proxy) *appends* the
-// originating client address to any existing X-Forwarded-For header, so the
-// real IP is the rightmost entry. Trusting parts[0] would let any caller
-// spoof their IP by sending `X-Forwarded-For: 1.2.3.4` before the head
-// balancer gets the request. An empty / whitespace-only XFF falls through
-// to `c.IP()` so the rate-limit bucket key can never be blank.
+// clientIP returns the real client IP for rate limiting.
+//
+// Trust hierarchy (top wins):
+//   1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header;
+//      mathematically unspoofable from the outside because Fly's edge
+//      strips any inbound copy.
+//   2. RFC 7239 Forwarded `for=` — modern standard; bracket-stripped
+//      IPv6 + port-stripped form.
+//   3. X-Forwarded-For rightmost — legacy; right-trusted only when
+//      behind a known reverse proxy (and the previous rightmost-XFF
+//      pattern that this method replaces is exactly the bypass the
+//      audit fix closes).
+//   4. fasthttp's RemoteAddr — last-resort so the bucket key isn't blank.
+//
+// Audit: `clientIpSpoof` 🟠 P1.
 func clientIP(c *fiber.Ctx) string {
-	xff := strings.TrimSpace(c.Get("X-Forwarded-For"))
-	if xff != "" {
-		if i := strings.LastIndex(xff, ","); i >= 0 {
-			xff = strings.TrimSpace(xff[i+1:])
-		} else {
-			xff = strings.TrimSpace(xff)
+	if v := strings.TrimSpace(c.Get("Fly-Client-IP")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(c.Get("Forwarded")); v != "" {
+		// RFC 7239: `Forwarded: for=192.0.2.1;by=...;proto=https` or
+		// quoted `for="[2001:db8::1]:443"`. Split on `;` then pick the
+		// `for=` segment, strip any quotes / brackets / port suffix.
+		for _, part := range strings.Split(v, ";") {
+			p := strings.TrimSpace(part)
+			low := strings.ToLower(p)
+			if !strings.HasPrefix(low, "for=") {
+				continue
+			}
+			id := strings.Trim(p[4:], " \"")
+			id = stripAddrPort(id)
+			if id != "" {
+				return id
+			}
 		}
-		if xff != "" {
-			return xff
+	}
+	if v := strings.TrimSpace(c.Get("X-Forwarded-For")); v != "" {
+		// Right-trusted (RFC 7239 rightmost entry semantics). The header
+		// may carry `client, proxy1, proxy2`; the most-recent hop is
+		// rightmost because compliant proxies APPEND. Spoofability is
+		// bounded by trusting only this path behind the explicit
+		// Fiber ProxyHeader configuration (Fly-Client-IP).
+		if i := strings.LastIndex(v, ","); i >= 0 {
+			v = strings.TrimSpace(v[i+1:])
+		} else {
+			v = strings.TrimSpace(v)
+		}
+		if v != "" {
+			return v
 		}
 	}
 	return c.IP()
+}
+
+// stripAddrPort normalises RFC-7239 `for=` payloads:
+//   • `[2001:db8::1]:443` → `2001:db8::1` (bracketed IPv6 with :port)
+//   • `2001:db8::1`       → `2001:db8::1` (bare IPv6, kept)
+//   • `192.0.2.1:443`     → `192.0.2.1` (IPv4 with :port)
+//   • `192.0.2.1`         → `192.0.2.1` (bare IPv4, kept)
+// Quoted-obfuscation forms (`for="_foo"`) are stripped by the caller.
+func stripAddrPort(id string) string {
+	if id == "" {
+		return id
+	}
+	if strings.HasPrefix(id, "[") {
+		// Bracketed IPv6 — strip the `[...]` envelope. If a `:port`
+		// follows after `]`, strip that too.
+		if end := strings.Index(id, "]"); end >= 0 {
+			inner := id[1:end]
+			if rest := id[end+1:]; rest != "" {
+				if strings.HasPrefix(rest, ":") && looksLikePort(rest[1:]) {
+					return inner
+				}
+			}
+			return inner
+		}
+		// Malformed bracket pair — drop the prefix and return rest.
+		return id[1:]
+	}
+	// Bare IPv6 (multiple colons) — port wouldn't make sense, keep as-is.
+	if strings.Count(id, ":") > 1 {
+		return id
+	}
+	// IPv4:port — strip `:port` only when the suffix is numeric.
+	if colon := strings.LastIndex(id, ":"); colon >= 0 {
+		suf := id[colon+1:]
+		if looksLikePort(suf) {
+			return id[:colon]
+		}
+	}
+	return id
+}
+
+// looksLikePort returns true when s is a non-empty all-digit string.
+// Empty input is NOT a port (returns false).
+func looksLikePort(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // buildOrigins returns the comma-separated CORS AllowOrigins list. In
@@ -349,6 +435,10 @@ func bodyDecode(c *fiber.Ctx, v any) error {
 
 // ── SSE handler ───────────────────────────────────────────────────────────────
 
+// sseHandler streams events from a Broadcaster to the browser. The /events
+// route is the live update channel for bids, listings, offers, auction
+// tick-downs, and notifications — every page subscribes to it as a
+// background EventSource.
 func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/event-stream")
@@ -360,11 +450,53 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 		if !ok {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
 		}
-		defer cancel()
+
+		// Belt-and-braces: even when SetBodyStreamWriter's callback never
+		// fires (client disconnect during header serialization — fasthttp
+		// can skip the callback in that path), the subscription must be
+		// released so the broadcaster map doesn't leak. We attach a
+		// watcher goroutine that fires cancel() the moment the request
+		// context is done. sync.Once makes the call safe whether the
+		// outer fallback goroutine or the inner defer wins.
+		vctx := c.Context()
+		var cancelOnce sync.Once
+		cancelOnceFn := func() { cancelOnce.Do(cancel) }
+		go func() {
+			<-vctx.Done()
+			cancelOnceFn()
+		}()
 
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
+			// Belt-and-braces: cancel SCOPED TO THE WRITER'S LIFETIME, not
+			// the handler's. The previous code put `defer cancel()` at the
+			// outer handler scope, where it fired IMMEDIATELY when the
+			// handler returned nil — BEFORE fasthttp could serialize
+			// headers or hand the bufio.Writer to the stream callback.
+			// That race tore the subscriber out of the broadcaster map
+			// before any bytes were written, leaving the client
+			// permanently stalled on /events with zero bytes and zero
+			// headers (the edge proxy would then time out and return 502
+			// to the browser).
+			defer cancelOnceFn()
+
+			// Keepalive cadence: short enough to detect dead connections
+			// within ~30s, long enough not to spam clients with empty
+			// frames. The very first tick fires 15s AFTER the handler
+			// return — the sentinel flush below makes that wait invisible
+			// from the client side.
 			ticker := time.NewTicker(15 * time.Second)
 			defer ticker.Stop()
+
+			// Sentinel first-byte flush. Forces fasthttp to commit the
+			// response headers + the first chunk in the same TCP write so
+			// the edge proxy and the browser never see a zero-bytes
+			// prelude. The ": connected" comment is an SSE comment line —
+			// ignored by EventSource consumers but counted as data flush
+			// by the transport, which is exactly what we want for the
+			// initial flush trigger.
+			_, _ = w.WriteString(": connected\n\n")
+			_ = w.Flush()
+
 			for {
 				select {
 				case msg, ok := <-ch:

@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 )
 
 // Q wraps a connection pool and exposes typed query methods.
@@ -105,9 +106,7 @@ func (q *Q) GetFloorPrice(ctx context.Context, collection string) (*big.Int, err
 	if err != nil {
 		return big.NewInt(0), nil
 	}
-	n := new(big.Int)
-	n.SetString(priceStr, 10)
-	return n, nil
+	return ParseWeiOrZero(priceStr), nil
 }
 
 func (q *Q) Get24hVolume(ctx context.Context, collection string) (*big.Int, error) {
@@ -119,9 +118,7 @@ func (q *Q) Get24hVolume(ctx context.Context, collection string) (*big.Int, erro
 	if err != nil {
 		return big.NewInt(0), nil
 	}
-	n := new(big.Int)
-	n.SetString(volStr, 10)
-	return n, nil
+	return ParseWeiOrZero(volStr), nil
 }
 
 func (q *Q) GetListedCount(ctx context.Context, collection string) (int, error) {
@@ -206,6 +203,55 @@ func (q *Q) GetCollectionStats(ctx context.Context, collection string) (Collecti
 	return s, nil
 }
 
+// ── wei-string helpers (centralised — Priority Stack `parseWeiHelper`) ────
+
+// ParseWei parses a decimal wei-string into *big.Int, returning an explicit
+// error on failure (empty, non-numeric, etc.) instead of silently leaving the
+// receiver at 0. Centralizes the wei-string → *big.Int conversion so a
+// schema-drift / NULL-coalesce failure surfaces loudly rather than as a
+// floor/volume that suddenly reads "0 wei". Use ParseWeiOrZero for the
+// paths where "missing = 0" is the right semantics (volumes, floors —
+// empty collections legitimately have a 0 floor/volume).
+func ParseWei(s string) (*big.Int, error) {
+	if s == "" {
+		return nil, fmt.Errorf("ParseWei: empty value")
+	}
+	n := new(big.Int)
+	if _, ok := n.SetString(s, 10); !ok {
+		return nil, fmt.Errorf("ParseWei: not a base-10 integer: %q", s)
+	}
+	return n, nil
+}
+
+// ParseWeiOrZero is the backward-compatible equivalent of the previous
+// silent-zero behaviour (parses; if parse fails OR empty, returns 0 with
+// a warning-level log so a fresh schema drift is traceable). All five
+// prior big.Int.SetString sites were rewritten through this helper.
+func ParseWeiOrZero(s string) *big.Int {
+	n, err := ParseWei(s)
+	if err != nil {
+		// Empty is legitimately "no data"; only warn on truly malformed
+		// values, otherwise the noisiness would dwarf the indexer logs.
+		if s != "" && s != "0" {
+			log.Warn().Err(err).Str("input", s).Msg("ParseWeiOrZero: malformed, returning 0")
+		}
+		return new(big.Int)
+	}
+	return n
+}
+
+// CapWeiLimit clamps a request-style limit (n <= 0 → default, n > max → max)
+// so callers cannot fan out unbounded result sets.
+func CapWeiLimit(n, def, max int) int {
+	if n <= 0 {
+		return def
+	}
+	if n > max {
+		return max
+	}
+	return n
+}
+
 // ── Listings ──────────────────────────────────────────────────────────────
 
 type ListingRow struct {
@@ -254,7 +300,7 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
-		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
 		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true
 		   AND NOT l.orphaned AND l.expires_at > now()`,
 		collection, tokenID).
@@ -317,7 +363,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		        0 AS total_supply
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
-		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND t.token_id=l.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
 		 LEFT JOIN collections c ON c.address=l.collection
 		 `+where+`
 		 ORDER BY `+orderBy+` LIMIT $1`, args...)
@@ -359,6 +405,10 @@ type AuctionRow struct {
 	ImageURI        string
 }
 
+// auctionSelectCols is the canonical SELECT projection for an AuctionRow.
+// Centralised here so GetAuction, ListAuctions, GetExpiredActiveAuctions,
+// GetInactiveAuctions, and ListActiveAuctions stay byte-for-byte identical.
+// Note: a.highest_bidder (NOT highest_bider — typo guarded here).
 const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.seller, a.standard::text,
 		        a.reserve_price_wei::text, a.highest_bid_wei::text, COALESCE(a.highest_bidder,''),
 		        a.min_increment_bps, a.starts_at, a.ends_at, a.status::text, a.create_tx,
@@ -366,7 +416,7 @@ const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.selle
 
 const auctionFromJoin = ` FROM auctions a
 		 LEFT JOIN nft_metadata m ON m.collection=a.collection AND m.token_id=a.token_id
-		 LEFT JOIN nft_tokens t ON t.collection=a.collection AND t.token_id=a.token_id`
+		 LEFT JOIN nft_tokens t ON t.collection=a.collection AND a.token_id=t.token_id`
 
 func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
 	var r AuctionRow
@@ -617,12 +667,18 @@ type EffectiveBidRow struct {
 // GetEffectiveBids returns per-bidder cumulative totals for an auction,
 // highest effective bid first. The leader (row 0) is the current/settlement
 // winner under the cumulative-bid model. Backed by the effective_bids view.
+//
+// Hard cap at LIMIT 200 — see Priority Stack `getEffectiveBidsLimit`.
+// Pre-fix, no LIMIT and a contested auction with 10k+ tiny incremental bids
+// OOM-ed rendering pages. Clamping at 200 covers the realistic active-bidder
+// spectrum and keeps JSON / template payloads bounded.
 func (q *Q) GetEffectiveBids(ctx context.Context, auctionID int64) ([]EffectiveBidRow, error) {
 	rows, err := q.pool.Query(ctx,
 		`SELECT bidder, effective_wei::text, bid_count, last_bid_at
 		   FROM effective_bids
 		  WHERE auction_id = $1
-		  ORDER BY effective_wei DESC, last_bid_at ASC`,
+		  ORDER BY effective_wei DESC, last_bid_at ASC
+		  LIMIT 200`,
 		auctionID)
 	if err != nil {
 		return nil, err
@@ -661,9 +717,7 @@ func (q *Q) GetCollectionVolume(ctx context.Context, collection string, since ti
 	if err != nil {
 		return big.NewInt(0), nil
 	}
-	n := new(big.Int)
-	n.SetString(volStr, 10)
-	return n, nil
+	return ParseWeiOrZero(volStr), nil
 }
 
 func (q *Q) GetCollectionBidCount(ctx context.Context, collection string, since time.Time) (int64, error) {
@@ -707,7 +761,7 @@ func (q *Q) GetCollectionStatsSince(ctx context.Context, since time.Time, limit 
 		              WHERE bd.placed_at >= $1 GROUP BY a.collection) b ON b.collection = c.address
 		  LEFT JOIN (SELECT collection, SUM(price_wei)::text AS volume
 		               FROM sales WHERE occurred_at >= $1 GROUP BY collection) s ON s.collection = c.address
-		 LIMIT $2`, since, limit)
+		  LIMIT $2`, since, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -719,8 +773,7 @@ func (q *Q) GetCollectionStatsSince(ctx context.Context, since time.Time, limit 
 		if err := rows.Scan(&r.Collection, &r.Views, &r.Bids, &volStr); err != nil {
 			return nil, err
 		}
-		r.VolumeWei = new(big.Int)
-		r.VolumeWei.SetString(volStr, 10)
+		r.VolumeWei = ParseWeiOrZero(volStr)
 		out = append(out, r)
 	}
 	return out, rows.Err()
@@ -765,8 +818,7 @@ func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int
 		if err := rows.Scan(&s.Collection, &s.Window, &s.Score, &s.Views, &s.Bids, &volStr); err != nil {
 			return nil, err
 		}
-		s.VolumeWei = new(big.Int)
-		s.VolumeWei.SetString(volStr, 10)
+		s.VolumeWei = ParseWeiOrZero(volStr)
 		out = append(out, s)
 	}
 	return out, rows.Err()
@@ -977,6 +1029,10 @@ type SearchResult struct {
 
 // Search finds NFTs and collections matching query using Postgres full-text search.
 // Returns up to limit results per kind (nft + collection combined).
+//
+// LIMIT pushed into each UNION ALL branch via parens so Postgres can plan it
+// properly. Outer ORDER BY + LIMIT cap the merged result. See Priority Stack
+// `getRecentTxnsLimit` for the post-fix story.
 func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult, error) {
 	if limit <= 0 || limit > 50 {
 		limit = 20
@@ -991,6 +1047,7 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			FROM nft_tokens t
 			LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 			WHERE t.search_vec @@ plainto_tsquery('english', $1)
+			ORDER BY t.token_id ASC
 			LIMIT $2
 		)
 		UNION ALL
@@ -1002,8 +1059,11 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       ''::text
 			FROM collections c
 			WHERE c.search_vec @@ plainto_tsquery('english', $1)
+			ORDER BY c.name ASC
 			LIMIT $2
 		)
+		ORDER BY 4 ASC
+		LIMIT $2
 	`, query, limit)
 	if err != nil {
 		return nil, err
@@ -1278,20 +1338,31 @@ type ActivityRow struct {
 
 // GetRecentTransactions returns the last `limit` marketplace events across all tables,
 // ordered newest first. Used by the /api/v1/activity endpoint.
+//
+// LIMIT is PUSHED into each UNION ALL subquery (parenthesised for Postgres
+// set-op precedence) so the planner can honour per-branch (listed_at /
+// occurred_at / placed_at / starts_at) indexes. Pre-fix, LIMIT sat on the
+// outer wrapper and the planner materialised full historical windows from
+// every branch before the global ORDER BY — full Seq Scan + in-memory merge
+// sort on every call. See Priority Stack `getRecentTxnsLimit` 🟠 P1.
 func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
 	rows, err := q.pool.Query(ctx, `
 		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
-			SELECT 'Listed'          AS type, collection, token_id, price_wei      AS amount_wei, listed_at    AS at, tx_hash   FROM listings
+			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
+			   FROM listings ORDER BY listed_at DESC LIMIT $1)
 			UNION ALL
-			SELECT 'Sold',                    collection, token_id, price_wei,                    occurred_at,        tx_hash   FROM sales
+			(SELECT 'Sold',            collection, token_id, price_wei,            occurred_at, tx_hash
+			   FROM sales ORDER BY occurred_at DESC LIMIT $1)
 			UNION ALL
-			SELECT 'AuctionCreated',          collection, token_id, reserve_price_wei,            starts_at,          create_tx FROM auctions
+			(SELECT 'AuctionCreated',  collection, token_id, reserve_price_wei,   starts_at,   create_tx
+			   FROM auctions ORDER BY starts_at DESC LIMIT $1)
 			UNION ALL
-			SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
-			FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
+			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
+			   FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
+			   ORDER BY b.placed_at DESC LIMIT $1)
 		) AS activity
 		ORDER BY at DESC
 		LIMIT $1

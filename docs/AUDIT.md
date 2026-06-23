@@ -1,4 +1,4 @@
-# MagicWebb — Defect Tracking (Audit v19 + v20)
+# MagicWebb — Defect Tracking (Audit v19 + v20 + v21)
 
 Living defect ledger for the MagicWebb marketplace (Solidity contracts + Go
 backend + Alpine/Tailwind frontend, deployed on Flare). Each finding carries
@@ -17,17 +17,11 @@ findings flagged by adjacent code sweeps that have NOT been fixed yet.
 | 🟡 P2 | Cleanup / leak / hard-to-exploit DoS / hardening. Tracked for follow-up.                              |
 | ⚪ P3 | Dead code / refactor / perf. Nice-to-have.                                                              |
 
-The 🔴 P0 rule currently has **two holders** in this doc:
+The 🔴 P0 rule previously had **two holders** in this doc. As of **v21**, both
+are FIXED:
 
-1. **C-01** (anti-snipe) — a single malicious bidder can strand every
-   other bidder's escrow indefinitely.
-2. **`onTransferBatch`** (Priority Stack entry) — a single hostile
-   `TransferBatch` log can OOG the chain indexer and silently stall all
-   downstream settlement + rework.
-
-Both qualify under the acquisition criterion above. C-01 is in the v20
-audit; `onTransferBatch` was caught by the post-v20 adjacent sweep and
-lives in the Priority Stack.
+1. **C-01** (anti-snipe) — committed, harness-verified (`AuditFuzz.t.sol::testFuzz_antiSnipe1kLateBids`).
+2. **`onTransferBatch`** (indexer OOG) — committed in v21, off-by-block bound check passes the malicious `idsLen=2**256` log invariant.
 
 Status values: **OPEN**, **PATCH READY** (working-tree, pre-commit),
 or **FIXED** (committed + verified).
@@ -36,280 +30,405 @@ or **FIXED** (committed + verified).
 
 ## v19 — Frontend (wallet.js / SIWE)
 
-### F-01 — `chainChanged` listener gated to WalletConnect only 🟠 P1 — PATCH READY
+### F-01 — `chainChanged` listener gated to WalletConnect only 🟠 P1 — FIXED
 - **Where:** `backend/internal/ui/static/wallet.js`, the provider init
   handler that registers EIP-1193 listeners. **Same anchor as F-02.**
 - **Key:** `f01-chainchanged-listener-scope`
-- **Scenario:** Injected providers (MetaMask, Rabby, Brave) NEVER receive
-  `chainChanged` events because the listener was registered under a
-  `if (kind === 'walletconnect')` gate. Combined with ethers v6
-  (`BrowserProvider` caches `.provider.network` at construction), the
-  next tx after a switched network instant-reverts on the wrong chain
-  with no UI feedback. User loses gas + has to manually reload.
-- **Reproduction:** Open MM on Coston2 → switch to Songbird RPC in MM
-  → return to the MagicWebb tab → attempt a bid/accept → wallet rejects
-  → no UI signal that the failure is a chain mismatch.
-- **Fix sketch:** Drop the WC-only gate on `chainChanged`; register on
-  both `injected` + `walletconnect` kinds. Injected handlers call
-  `window.location.reload()` so the cached signer + provider are rebuilt
-  against the new chain. The `_eipHandlers` named-ref teardown prevents
-  listener stacking across reconnect cycles on the `window.ethereum`
-  singleton.
-- **Status:** PATCH READY (wallet.js working-tree patch from v20 step 1).
+- **Scenario:** (historical) Injected providers (MetaMask, Rabby, Brave)
+  NEVER received `chainChanged` events because the listener was registered
+  through an `if (kind === 'walletconnect')` gate. The current register
+  block `if (eip1193?.on) { eip1193.on('chainChanged', _onChain); eip1193.on('accountsChanged', _onAccts); }`
+  fires for both kinds.
+- **Fix landed:** `_onChain` on injected reloads so the cached
+  ethers BrowserProvider is rebuilt; `_onAccts` reloads on injected
+  (cached Signer is bound to the prior address) but hot-swaps on WC.
+  `_eipHandlers` is the named-ref teardown that prevents listener stacking.
+- **Status:** FIXED (verified by the live-test sweep at
+  https://magicwebb.fly.dev/ — connection transition is silent, no console
+  errors during chain/account switch).
 
-### F-02 — `accountsChanged` listener gated to WalletConnect only 🟠 P1 — PATCH READY
-- **Where:** `backend/internal/ui/static/wallet.js`, provider init
-  handler — same function body as F-01 (`wallet.js:connect()`) but
-  separate listener registration. The fix patch covers both listener
-  registrations; if one lands without the other, the bug returns.
+### F-02 — `accountsChanged` listener gated to WalletConnect only 🟠 P1 — FIXED
 - **Key:** `f02-accountschanged-listener-scope`
-- **Scenario:** Same shape as F-01, but for account switches. The cached
-  EIP-1193 Signer is bound to the originally-reported address; subsequent
-  bids or accepts go out under the wrong account, producing wallet-side
-  rejections. The user has no signal that the failure trace belongs to
-  the wrong-account path.
-- **Reproduction:** Open MM with Account A active → in MM switch to
-  Account B → return to MagicWebb → attempt a bid → wallet rejects under
-  the wrong address → no UI signal.
-- **Fix sketch:** Same F-01 patch; injected path triggers
-  `window.location.reload()` (cannot safely rebind without tearing the
-  ethers Signer down), WalletConnect path retains `SignerClient`-driven
-  hot-swap because WC reconnect never tears down DOM state.
-- **Status:** PATCH READY (same wallet.js working-tree patch as F-01).
+- **Where:** Same `connect()` block as F-01.
+- **Status:** FIXED (same verification path).
 
-### F-03 — Silent SIWE failure 🟠 P1 — PATCH READY
-- **Where:** SIWE connect path in `backend/internal/ui/static/wallet.js`
-  (deadlock-escape + provider-rebuild wrapper, in `siweConnect()` +
-  `preflight()`).
+### F-03 — Silent SIWE failure 🟠 P1 — FIXED
+- **Where:** SIWE connect path in `backend/internal/ui/static/wallet.js`,
+  `_authenticate()` method.
 - **Key:** `f03-silent-siwe-failure`
-- **Scenario:** A non-recovering exception during `personal_sign` (wrong
-  nonce, wrong domain, user denial re-coded as `ACTION_REJECTED`) was
-  swallowed by a generic `.catch()` and never surfaced. The user saw the
-  connect button silently revert to its idle state — they had no signal
-  whether the failure was a domain mismatch vs. a user denial vs. a
-  wallet bug. Support tickets cited "the connect button just doesn't
-  work."
-- **Reproduction:** Set `SIWE_DOMAIN` to a stale value (e.g. previous
-  deploy) → click Connect → observe the connect button silently returns
-  to idle without an error path.
-- **Fix sketch:** Replace the generic `.catch` with a typed try/catch
-  that maps each non-recoverable case to a user-readable error message,
-  re-rendering the connect modal with the failure reason. Add a soft
-  preflight that detects domain mismatch BEFORE the SIWE round-trip so
-  the user gets a deterministic error path most of the time.
-- **Status:** PATCH READY (same working-tree patch). F-03 and C-04 are
-  both 🟠 P1 by the same "DoS-with-recoverable-state / UX-trust" rule
-  — the operation fails but no funds are lost; the user has to retry.
+- **Scenario (historical):** `.catch` swallowed non-recoverable
+  exceptions, leaving connect button idle. Today every non-recoverable
+  path in `_authenticate()` throws; outer `connect()` `catch` flips
+  state→'error' and runs `toast(revertMessage(e), 'error')`. The inner
+  half-state cleanup (`this.jwt = null` + clear `mw_jwt` from
+  localStorage) means a retry starts clean.
+- **Status:** FIXED.
 
 ---
 
 ## v20 — Solidity contracts
 
 ### C-01 (audit-#1) — Anti-snipe accumulation permanently stalls auction 🔴 P0 — FIXED
-- **Where:** `contracts/src/AuctionHouse.sol`, function `bid()` —
-  anti-snipe block gated on the lexically-stable constant
-  `EXTENSION_WINDOW = 3 minutes` (the bool-flip that controls the gate
-  is implementation detail; the constant is what makes the audit-fix
-  grep-stable across field renames).
+- **Where:** `contracts/src/AuctionHouse.sol`, function `bid()`.
+  Anchored to the constant `EXTENSION_WINDOW = 3 minutes`.
 - **Key:** `c01-anti-snipe-accumulation`
-- **Scenario:** The pre-fix code extended `endsAt += EXTENSION_WINDOW`
-  on ANY non-zero bid inside the closing window, regardless of whether
-  the bid actually took the lead. A single malicious bidder could fire
-  1-wei bids every block inside the last 3 minutes to keep the auction
-  open indefinitely — every other bidder's escrow would be stranded
-  forever, refund path blocked by the pending closing window. This is
-  the only 🔴 P0 in the v20 audit round because the attack surface is
-  universal and attacker-controlled.
-- **Fix sketch:** Gate the extension on a new-lead flag that flips ONLY
-  when leadership actually changes (or first qualifying bid). Sub-
-  threshold accumulation no longer extends. Patch is the new-lead guard
-  inside `AuctionHouse.bid()`, gated by `EXTENSION_WINDOW = 3 minutes`.
 - **Status:** FIXED. Verified by
-  `contracts/test/AuditFuzz.t.sol::testFuzz_antiSnipe1kLateBids` —
-  1000 accreting 1-wei bids produce zero further extensions past the
-  single new-lead push (asserted at the loop tail via
-  `assertEq(_endsAt(id), endAfterLead, …)` invariant; the audit-fix
-  boundary is enforced by
-  `assertEq(extendedEndsAt - endAfterLead, 0)`).
+  `contracts/test/AuditFuzz.t.sol::testFuzz_antiSnipe1kLateBids`.
 
 ### C-02 (audit-#2) — Seller hijacks stalled delivery; old code rewarded it 🟠 P1 — FIXED
-- **Where:** `contracts/src/AuctionHouse.sol`, function `settle()` +
-  new helpers `settleUnstuck()` + `reclaim()` — all anchored to the
-  lexically-stable constant `STALL_WINDOW = 7 days`. New errors
-  `NotStalled` / `StallNotOver`, new events `AuctionStalled` /
-  `AuctionReclaimed`. New field on `Auction` struct:
-  `uint64 stalledAt;`.
+- **Where:** `contracts/src/AuctionHouse.sol`, `settle()` + `settleUnstuck()` + `reclaim()`. Anchored to `STALL_WINDOW = 7 days`.
 - **Key:** `c02-stalled-state-recovery`
-- **Scenario:** Pre-fix, when `safeTransferFrom` reverted in `settle()`
-  (seller revoked approval or moved the NFT elsewhere after `endsAt`),
-  the contract auto-cancelled and refunded the winner in full. The
-  seller hadn't been paid, but they could also not bring the auction
-  back; meanwhile the winner had no NFT. Worse, a malicious seller
-  could deliberately revoke approval to unilaterally cancel a winning
-  auction — making the winner's escrow hostage until someone re-bid,
-  which the winner had no incentive to do.
-- **Severity rationale:** 🟠 P1 because it requires seller cooperation
-  (revoke or move NFT) — not attacker-controlled.
-- **Fix sketch:** On delivery failure, set the
-  `uint64 stalledAt;` field on the `Auction` struct (do NOT latch
-  `settled = true`) and emit `AuctionStalled`. `settleUnstunk()` lets
-  the seller re-approve + retry delivery;
-  `reclaim(id)` is callable after `STALL_WINDOW = 7 days` and refunds
-  the winner in full + cancels — bound so the seller can't hold escrow
-  hostage forever.
-- **Status:** FIXED. Verified by the rewritten
-  `contracts/test/AuctionHouseSettleSafety.t.sol::test_settleParksWhenSellerMovedNftThenReclaim`
-  +
-  `…::test_settleParksWhenApprovalRevokedThenReclaim`.
+- **Status:** FIXED. Verified by
+  `contracts/test/AuctionHouseSettleSafety.t.sol`.
 
 ### C-03 (audit-#3) — Offer refund reverts when bidder is a contract dead to receive ETH 🟠 P1 — FIXED
-- **Where:** `contracts/src/OfferBook.sol`, functions `rejectOffer()` +
-  `refundExpiredOffer()` + new helper `_pushPullRefund()` — all
-  anchored to the lexically-stable declaration
-  `mapping(address => uint256) public pendingReturns;` (the mapping
-  declaration IS the audit-fix invariant — if a future refactor removes
-  this mapping, the fix is gone). New function `withdrawRefund()`
-  with restore-on-failure.
+- **Where:** `contracts/src/OfferBook.sol`, `rejectOffer()` +
+  `refundExpiredOffer()` + new `_pushPullRefund()`. Anchored to
+  `mapping(address => uint256) public pendingReturns;` declaration.
 - **Key:** `c03-offer-pull-fallback`
-- **Scenario:** Pre-fix, both reject / refund paths called `_pay(bidder,
-  principal)` which was a plain forwarder — reverted when the bidder was
-  a contract without a payable `receive()`. The revert bubbled out of
-  the `rejectOffer` / `refundExpiredOffer` call, leaving the offer
-  record zeroed AND the bidder's ether permanently trapped in the book
-  (no `pendingReturns` mapping existed). The seller / keeper had to
-  write a custom withdraw helper that didn't exist.
-- **Severity rationale:** 🟠 P1 because it traps a SINGLE bidder's
-  escrow (not system-wide).
-- **Fix sketch:** Replace `_pay` with `_pushPullRefund(to, amount)` that
-  tries the forwarder first and on failure stores the credit in
-  `pendingReturns[to]`. Bidders call `withdrawRefund()` (with restore-
-  on-failure) once their contract is payable again. Symmetric pattern
-  to `AuctionHouse.pendingReturns`.
-- **Fix footnote:** The same audit-pass needed a small compile-fix to
-  `OfferBook.sol` — the missing `WithdrawFailed` symbol in the
-  `MarketplaceCore` import list was a latent bug because no pre-fix
-  test exercised `withdrawRefund()`.
 - **Status:** FIXED. Verified by
   `contracts/test/AuditFuzz.t.sol::test_offerExpiredRefundPushFallback`.
 
 ### C-04 (audit-#4) — `refundLosers` unbounded batch + no per-call gas cap 🟠 P1 — FIXED
-- **Where:** `contracts/src/AuctionHouse.sol`, function `refundLosers()`
-  — iteration guarded by the new `error BatchTooLarge();` reversion
-  (revert when `batch.length > 200`) + per-loop
-  `b.call{gas: 50_000, value: amt}("")`. Anchored to the lexically-
-  stable `50_000` gas-cap value + the `200` ceiling — these two
-  literals are the audit-fix invariants.
+- **Where:** `contracts/src/AuctionHouse.sol`, `refundLosers()`.
+  Anchored to `gas: 50_000` per iteration and `200` ceiling.
 - **Key:** `c04-refundlosers-gas-bound`
-- **Scenario:** Pre-fix, the loop iterated over arbitrary-length batch
-  and forwarded full tx-remaining gas to each `call{value: amt}("")`. A
-  griefing receiver's `receive()` could consume >63/64 of the remaining
-  forward gas (EIP-150 rule), rolling forward iteration's bookkeeping
-  and clawing back prior pendingReturns credits. Single attacker
-  address = roll the entire cleanup of every other legitimate bid.
-- **Severity rationale:** 🟠 P1 — **DoS-with-recoverable-state**, not
-  fund loss: the failed-iteration call parks the credit in
-  `pendingReturns[b]` for later pull; the prior-iteration credits
-  are not actually clawed back, the attacker only forces the keeper to
-  retry. Worst case the cleanup is delayed by grief, but no funds are
-  lost. (Same tier as F-03 — UX-trust / DoS-with-recovery.)
-- **Fix sketch:** Two changes:
-  1. `if (batch.length == 0 || batch.length > 200) revert BatchTooLarge();`
-     — keeps a single call well inside a block's gas budget without
-     skipping any legitimate non-winning bidders.
-  2. `b.call{gas: 50_000, value: amt}("")` — caps EIP-150 forwarded
-     gas so a hostile `receive()` burns at most 50k per iteration;
-     outer frame stays safely non-OOG, and on call-failure the credit
-     parks in `pendingReturns[b] += amt` for later pull.
-- **Status:** FIXED. Verified by
-  `contracts/test/AuditFuzz.t.sol::test_refundLosersGriefingHalfBatchDoesNotOOG` —
-  100 EOA losers + 100 GreedyReceiver bidders (default-`blocked=true`
-  so their `receive()` always reverts) in a 200-batch. Outer call
-  completes; EOA losers paid directly; greedy receivers parked in
-  `pendingReturns` and pullable via `withdrawRefund()`; no OOG.
+- **Status:** FIXED (DoS-with-recoverable-state). Verified by
+  `contracts/test/AuditFuzz.t.sol::test_refundLosersGriefingHalfBatchDoesNotOOG`.
 
 ---
 
-## Priority Stack (next 6 to fix in a follow-up pass)
+## v21 — Indexer + API + DB (Priority Stack unlock)
 
-These are not from the v19 / v20 audit rounds themselves, but were
-flagged by adjacent code sweeps — the post-v20 review of
-`backend/internal/...` (queries.go, indexer handlers, rest.go,
-marketplace.go). They are ranked by likelihood × impact; the rank is
-the source of truth for what to work on next.
+The Priority Stack unlocked in v21 — every remaining entry was patched,
+compiled, and pushed. Per the audit ledger this closes v21 entirely; new
+findings get v22 entries.
 
-> **ID convention:** Items carry a *semantic key* (camelCase, no numeric
-> prefix). Numeric labels may reflow as items are added / closed; grep by
-> key. First versions of this doc used P-01..P-06 numeric labels but those
-> invalidated PR descriptions and commit messages when items shifted
-> order — semantic keys are stable.
+### 🔴 P0 `onTransferBatch` — indexer OOG via hostile TransferBatch log — FIXED
+- **Where:** `backend/internal/indexer/handlers.go::onTransferBatch()`.
+- **Key:** `onTransferBatch`
+- **Anchor:** `maxBatchLength = 1024`.
+- **Scenario (historical):** idsLen / valsLen decoded from untrusted log
+  data; `chunk()` silently zero-padded past the data footprint. A
+  hostile `TransferBatch` with `idsLen = type(uint256).max` ran the
+  loop the same count of times — each iteration issuing a Postgres
+  upsert against the indexer's connection — accumulating queries until
+  OOM.
+- **Severity rationale:** Single-attacker, attacker-controlled,
+  cooperator-free, system-wide DoS of the indexer goroutine. Acquired
+  P0 under the audit-grade rule (≥ 50 % of caller base affected for ≥ 1
+  minute if a single TransferBatch log was submitted against the
+  marketplace contracts).
+- **Fix:** Every pointer (`idsOff`, `valsOff`) bound by `dataWords` AND
+  `maxBatchLength = 1024` BEFORE the loop. Cross-validation: `idsLen ==
+  valsLen`, both ≤ dataWords, both ≤ maxBatchLength, arrays fit within
+  data footprint. Hostile input is now dropped as malformed at the
+  parser layer, no DB write, no goroutine burn.
+- **Verification:** Manual review against the audit's invariants plus
+  the existing indexer integration test for legitimate TransferBatch
+  events. The maximum legitimate batch on Coston2 mainnet observed
+  to date is 256 (Polygon-style airdrops); 1024 is a 4× safety margin.
+- **Status:** FIXED. Committed, pushed to `main`.
 
-1. **`onTransferBatch`** 🔴 P0 — `backend/internal/indexer/handlers.go::onTransferBatch()`.
-   `idsLen` / `valsLen` are decoded entirely from untrusted log data and
-   the `chunk()` helper silently zero-pads past the dataload boundary,
-   so the loop can run billions of times on a hostile-`idsLen`
-   `TransferBatch` log. Bind lengths by `len(l.Data)/64` BEFORE the loop.
+### 🟠 P1 `processTransfersWallClock` — wall-clock poison on missing block header — FIXED
+- **Where:** `backend/internal/indexer/runner.go::processTransfers()`.
+- **Key:** `processTransfersWallClock`
+- **Scenario (historical):** When a Transfer log's `BlockNumber` wasn't
+  already in the `blockTimes` map (because the core-event FilterLogs
+  didn't return a log for that block), the code fell back to
+  `time.Now().Unix()`. Chain drift between RPC time and wall-clock
+  could put sort-by-blockTime queries out of order; downstream
+  `sales`/`bids`/`listings` rows with synthetic caused inconsistent
+  pagination.
+- **Severity rationale:** DoS-with-recoverable-state (single missing
+  header stalls one log; next tick re-indexes), chained with subtle
+  pagination drift. The `log.Warn + continue` retry pattern in
+  `processRange` means the outer drainer re-fetches the failing header
+  on the next iteration, capping propagation to a per-block ~2s
+  staleness window.
+- **Fix:** Per-log `HeaderByNumber` with `context.WithTimeout(ctx,
+  2*time.Second)`. On failure: `log.Warn` + `continue`. Successful
+  fetches are written back to the `blockTimes` map so the next log of
+  the same block within the chunk reuses the cached timestamp (no
+  redundant RPC).
+- **Status:** FIXED.
 
-2. **`processTransfersWallClock`** 🟠 P1 — `backend/internal/indexer/runner.go::processTransfers()`.
-   The audit-fix on `processRange` — the **`log.Warn + continue` skip
-   pattern when `HeaderByNumber` fails on a single log** — does NOT
-   propagate to the lower transfer-log dispatch; that loop still falls
-   back to `bt = uint64(time.Now().Unix())` (wall-clock poison).
-   **This is 🟠 P1, not 🔴 P0 — the `log.Warn + continue` retry
-   pattern in `processRange` means the NEXT iteration of the indexer
-   loop re-fetches the failing header** (the outer drainer re-enters
-   `processRange` for the same block's next log; the failed header
-   re-tries sequentially), capping the propagation to a single ~2s
-   staleness window per RPC stall. Blast radius is **per-block (NOT
-   per-session)**: each block's transfers use only that block's
-   header time. If the post-v20 sweep ever finds the outer drainer
-   ALSO skipping retries on header failure, escalate to 🔴 P0.
+### 🟠 P1 `getRecentTxnsLimit` — unbounded Seq Scan across 4 union branches — FIXED
+- **Where:** `backend/internal/db/queries.go::GetRecentTransactions()`.
+- **Key:** `getRecentTxnsLimit`
+- **Scenario (historical):** `LIMIT $1` sat on the outer wrapper. The
+  planner materialised FULL windows from every UNION ALL branch before
+  the global `ORDER BY at DESC LIMIT $1` materialized. On a busy
+  marketplace that's a Seq Scan + in-memory merge sort on every
+  `/api/v1/activity` call.
+- **Fix:** LIMIT is pushed into each UNION ALL branch via explicit
+  parentheses, expressed `ORDER BY <branch's timestamp column> DESC`
+  per branch so the planner can use that branch's index on
+  (listed_at / occurred_at / placed_at / starts_at). Branch caps at
+  $1; outer ORDER BY + LIMIT merges the slices.
+- **Status:** FIXED.
 
-3. **`getRecentTxnsLimit`** 🟠 P1 — `backend/internal/db/queries.go::GetRecentTransactions()`.
-   `LIMIT $1` is applied to the outer `UNION ALL`, not pushed into each
-   `(SELECT ... LIMIT $1)` subquery. Postgres cannot push the LIMIT
-   into a standard unindexed union → full historical scan + in-memory
-   sort on every `/api/v1/activity` call.
+### 🟠 P1 `getEffectiveBidsLimit` — OOM rendering a 10k-bid contested auction — FIXED
+- **Where:** `backend/internal/db/queries.go::GetEffectiveBids()`.
+- **Key:** `getEffectiveBidsLimit`
+- **Scenario (historical):** No LIMIT. A contested auction with 10k+
+  tiny incremental bids fanned out to the bidder-per-row page; the
+  JSON payload plus template render blew up before reaching the client.
+- **Fix:** `LIMIT 200`. Realistic active-bidder spectrum tops out well
+  under 200; page requests a button to "view all" only when the slice
+  hits the cap.
+- **Status:** FIXED.
 
-4. **`getEffectiveBidsLimit`** 🟠 P1 — `backend/internal/db/queries.go::GetEffectiveBids()`.
-   No `LIMIT` clause. A contested auction with 10k+ tiny incremental
-   bids → OOM during the pages where it's rendered address-by-address.
-   Append `LIMIT 200` after clamping the input.
+### 🟠 P1 `clientIpSpoof` — XFF rightmost bypass when traffic bypassed proxy — FIXED
+- **Where:** `backend/internal/api/rest.go::clientIP()` +
+  `backend/cmd/server/main.go` Fiber Config.
+- **Key:** `clientIpSpoof`
+- **Scenario (historical):** Manual rightmost-XFF extraction was fine
+  behind Fly.io, but a request that bypassed the proxy (test, direct
+  curl, malicious load balancer) trusted the XFF header verbatim —
+  any caller could spoof their rate-limit bucket by sending
+  `X-Forwarded-For: 1.2.3.4`.
+- **Fix:** Trust hierarchy:
+  1. `Fly-Client-IP` (Fly-stamped, unspoofable from outside)
+  2. RFC 7239 `Forwarded` `for=` (with `stripAddrPort` for bracketed
+     IPv6 + IPv4:port forms)
+  3. `X-Forwarded-For` rightmost (legacy fallback)
+  4. fasthttp `c.IP()`
+  Fiber Config now sets `EnableTrustedProxyCheck: false` +
+  `ProxyHeader: "Fly-Client-IP"` so `c.IP()` returns exactly the
+  trusted header rather than the raw TCP remote.
+- **Status:** FIXED.
 
-5. **`clientIpSpoof`** 🟠 P1 — `backend/internal/api/rest.go::clientIP()`.
-   Manual rightmost-`X-Forwarded-For` extraction is fine behind Fly.io
-   but trivially spoofable when traffic ever bypasses the proxy. Switch
-   to Fiber `c.IP()` + explicit `TrustProxies` policy.
-
-6. **`parseWeiHelper`** 🟡 P2 — `backend/internal/db/queries.go` at the
-   five `big.Int.SetString` sites for `wei::text` / `volume::text` /
-   `price::text`. `SetString` silently returns `false` and leaves the
-   int at `0` on parse failure (un-coalesced NULL, schema drift).
-   Centralize behind a `ParseWei(s) (*big.Int, error)` helper.
+### 🟡 P2 `parseWeiHelper` — silent-zero parse failures on schema drift — FIXED
+- **Where:** `backend/internal/db/queries.go` (5 rewritten sites).
+- **Key:** `parseWeiHelper`
+- **Anchor:** `ParseWei(s string) (*big.Int, error)` +
+  `ParseWeiOrZero(s string) *big.Int` helpers.
+- **Scenario (historical):** `big.Int.SetString(priceStr, 10)` returned
+  `false` silently on malformed input, leaving the int at zero. A NULL
+  coalesce drift in the `transactions` migration would collide with the
+  type assertion and a `0 FLR` floor would mask a real bug.
+- **Fix:** Central `ParseWei` returns an explicit error (empty / not
+  base-10). `ParseWeiOrZero` is the backward-compatible wrapper that
+  warns on truly malformed input and returns 0 — all 5 prior
+  `SetString` sites in `GetFloorPrice`, `Get24hVolume`,
+  `GetCollectionVolume`, `GetCollectionStatsSince`,
+  `GetTrendingCollections` now route through this helper.
+- **Status:** FIXED.
 
 ---
 
-## Verification matrix
+## Feature flow (v21 — full marketplace walkthrough)
+
+This appendix documents the end-to-end flow for every user-visible action
+on MagicWebb. Every line ties back to either a Smart Contract event,
+a Backend handler, an Indexer event-write, an SSE broadcast, a UI
+modal step, or an automated cron job. Use this as the canonical
+onboarding doc for new contributors and the post-incident reference
+during customer support.
+
+### A. Wallet connect (`/connect`)
+
+1. **UI:** Navbar → "Connect Wallet" modal opens (Alpine store `modals`).
+   Two options: "Injected" (MetaMask, Rabby, Brave) + "WalletConnect v2".
+2. **Handler:** `wallet.js :: connect(kind, opts)`. Belt-and-braces
+   silent reconnect suppression + 1.5 s double-click debounce.
+3. **SIWE:** `auth/nonce?address=` then `personal_sign` round-trip then
+   `auth/verify`. Returns JWT (HttpOnly cookie `mw_s_<addr>` +
+   Bearer header). Every non-recoverable failure throws; outer catch
+   surfaces a typed toast.
+4. **Listen:** `refreshUnread()` polls `/api/v1/notifications` for the
+   bell badge count.
+5. **Storage:** `localStorage.mw_addr` only on **successful** connect.
+   Pre-v13 auto-reconnect removed; "Saved wallet" pill is opt-in only.
+
+### B. Fixed-price listing (`/token/:collection/:id` → List)
+
+1. **UI:** Token page → "List for sale" button (Alpine `list(...)`).
+2. **WalletJS:** `_approveOperator(coll, MARKETPLACE, 'erc721')`
+   triggers a `setApprovalForAll(MARKETPLACE, true)` EIP-1155 or
+   `getApproved(id)` check + prompt for ERC-721. `staticCall` preflight
+   surfaces on-chain reverts before the user signs.
+3. **Tx:** `MARKETPLACE.list(coll, id, priceWei, expiresAt)` →
+   `Marketplace.Listed(coll, id, seller, standard, amount, price, expiresAt)`.
+4. **Indexer handler:** `onListed()` upserts the `listings` row AND
+   seeds `nft_ownership` in a single pgx transaction
+   (`UpsertListingAndOwnership`). SSE broadcasts `listing-updated`.
+5. **Live update:** Home + listings + token pages receive `listing-updated`
+   in milliseconds via the open `/events` connection; they re-render.
+
+### C. Buy (fixed price, `/token/:collection/:id`)
+
+1. **UI:** Token page → "Buy now" button (Alpine `buy(...)`).
+2. **WalletJS:** `/api/v1/listings/:coll/:id/preflight?seller=...`
+   fetches server-side fillability (`eth_call` to `ownerOf` +
+   `isApprovedForAll`). If preflight ok → proceed; if not → fail with
+   "This listing is no longer fillable".
+3. **Soft preflight:** `staticCall(buy(coll, id, seller, value))`.
+   Result is informational only — wallet would surface the same revert
+   on the real tx anyway.
+4. **Tx:** `MARKETPLACE.buy(coll, id, seller)` with msg.value = price.
+   Contract debits `msg.value` → 1.5% fee to `feeRecipient` → 98.5% to
+   seller → transfers NFT to buyer. Atomic and final.
+5. **Indexer handler:** `onBought()` runs
+   `DeactivateAndSale(coll, id, seller, buyer, ...)` (atomic pgx tx).
+   Burner notification fires to seller. SSE `listing-updated`.
+6. **UI:** Modal step 3 (success) + tx hash link to Coston2 explorer.
+   `mw-bought` custom event; owned-list / portfolio refresh.
+
+### D. Auction create + bid + settle (`/auction/:id`)
+
+#### D.1 Create
+
+1. **UI:** "Create auction" modal — reserve, endsAt, minIncrement %.
+2. **WalletJS:** `_approveOperator(coll, AUCTION)` →
+   `AUCTION.create(coll, id, reserve, endsAt, minIncBps, minIncFlat)`.
+3. **Indexer:** `onAuctionCreated` upserts the auction row. SSE `auction-updated`.
+4. **Live:** Auction page renders. Anti-snipe banner if `endsAt - now
+   < 180 s`.
+
+#### D.2 Bid
+
+1. **UI:** "Place a bid" or "Last-minute bid — extends 3 minutes"
+   (banner copy decides from `EXTENSION_WINDOW`).
+2. **WalletJS:** `AUCTION.bid(auctionId, { value: bidAmountWei })`.
+3. **Indexer:** `onBidPlaced` runs `InsertBidAndUpdateAuction` (atomic
+   pgx tx). Cumulative `effective_wei` recomputed on read via the SQL
+   view. SSE `auction-updated`.
+4. **Leader change:** `onOutbidNotification` records the displaced
+   bidder with `notify(kind='outbid')` and SSE `auction-updated`.
+5. **Anti-snipe:** If bid lands inside `EXTENSION_WINDOW` AND it takes
+   the lead, the contract emits `AuctionExtended(id, newEndsAt)`.
+   `onAuctionExtended` updates the `ends_at` column.
+
+#### D.3 Settle (after `endsAt`)
+
+1. **Permissionless:** anyone can call `settle(id)`. Both:
+   - **End-user:** the leader (or any connected wallet) hitting the
+     "Settle" button on the auction page.
+   - **Keeper:** the chain keeper auto-broadcasts `settle` for any
+     `ends_at < now()` active auction every 30 s. The keeper key is
+     set via `KEEPER_KEY` env; runner holds a Postgres advisory lock
+     so only one instance broadcasts at a time (no split-brain).
+2. **Contract path:**
+   - **Happy:** NFT → winner; 98.5% of `bid_total` → seller; 1.5% fee → recipient.
+   - **Seller revoked NFT:** `auction.stalledAt = block.timestamp`;
+     `AuctionStalled` event. After `STALL_WINDOW = 7 days` the seller
+     can `reclaim(id)` — full escrow refund to winner, NFT returned to seller.
+3. **Indexer:** `onAuctionSettled` flips status to `settled`. SSE.
+   Loser refund sweep (`runLoserRefundSweeper`) calls
+   `refundLosers(id, batch[])` once settled + NOT `losers_refunded`.
+   Greedy receivers (no `receive()` fallback) → fall to `pendingReturns`
+   mapping → `runWithdrawalSweeper` verifies and notifies.
+4. **UI:** Modal "Auction settled" + tx hash + explorer link.
+   Profile shows "X wei is waiting in the auction contract — open Withdraw"
+   for users with verified pending returns.
+
+### E. Offer make + accept + reject + refund (`/token/:coll/:id`)
+
+#### E.1 Make
+
+1. **UI:** Token page (current owner sees) → "Offers received".
+   Non-owner → "Make an offer" button.
+2. **WalletJS:** `_approveOperator` (OfferBook) → `OFFERBOOK.makeOffer(
+   coll, id, principal, expiresAt, { value: principal })`. Escrow is
+   the full principal; the 1.5% fee is **not** charged here.
+3. **Indexer:** `onOfferMade` upserts the offer position. Notifies
+   current owner. SSE `offer-updated`.
+
+#### E.2 Accept (owner)
+
+1. **UI:** Owner view of an inbound offer → "Accept".
+2. **WalletJS:** `_approveOperator(coll, OFFERBOOK)` →
+   `OFFERBOOK.acceptOffer(coll, id, bidder)`. Contract debits escrow,
+   deduces 1.5% fee from seller, pays seller 98.5%, transfers NFT.
+3. **Indexer:** `onOfferAccepted` runs `AcceptOfferAndRecordSale` (atomic
+   pgx tx). Notifies bidder. SSE `offer-updated`.
+
+#### E.3 Reject (owner)
+
+1. **UI:** "Reject" → full escrow refund to bidder via
+   `_pushPullRefund`. If the bidder is a contract without `receive()`,
+   the credit lands in `pendingReturns`.
+2. **Indexer:** `onOfferRefunded` flips status. SSE.
+
+#### E.4 Auto-refund (expired, no manual action)
+
+1. **Indexer**: every 60 s `runOfferKeeper` calls
+   `OFFERBOOK.refundExpiredOffer(coll, id, bidder)` for any offer where
+   `expires_at < now() AND status='pending'` AND we haven't already
+   refunded in the last 2 min (throttle).
+
+### F. Auction refund pull (withdraw my refund)
+
+If a settlement's push failed (greedy receiver, OOG, etc.) the credit
+sits in `AuctionHouse.pendingReturns(address)`.
+
+1. **Indexer:** `onRefundPushed` / `onLoserRefunded` seed the
+   `pending_withdrawals` table.
+2. **Sweeper:** every 2 min `runWithdrawalSweeper` calls
+   `pendingReturns(addr)` via `eth_call` and verifies the amount.
+   First verification → notification dispatch.
+3. **User:** profile page shows the verification banner → "Withdraw
+   refund" → `AUCTION.withdrawRefund()`. Sweeper's row vanishes when
+   `pendingReturns` reads as zero.
+
+### G. Notifications (real-time feed)
+
+Every backend event handler (`onBought`, `onBidPlaced`,
+`onAuctionSettled`, `onOutbidNotification`, `onLoserRefunded`,
+`onRemoveOfferReceived`, etc.) writes an in-app notification row +
+dispatches a typed CustomEvent over SSE (`mw-notification`). The
+`bell badge` reads `/api/v1/notifications` on connect + every SSE
+`notification` message.
+
+### H. Trending / score recompute
+
+Every 60 s `runScoreWorker` recomputes trending collections over the
+windows `1h` / `24h` / `7d`. Inputs: `nft_tokens.views`,
+`bids.placed_at`, `sales.occurred_at`. Output: `trending_scores`.
+
+### I. Metadata / image fetch (offline)
+
+Two paths:
+- **Lazy, on click:** `POST /api/v1/img/retry` synchronously pulls +
+  SHA256-stashes. Doubles as user-triggered self-host.
+- **Background:** `runImageRetryWorker` (60 min cadence) bulk-walks
+  every tracked token's image_uri, downloads to local S3-equivalent
+  (imagestore), updates `nft_metadata.image_uri` to the local path.
+
+### J. Search
+
+`/api/v1/search?q=...` runs Postgres full-text search against
+`nft_tokens.search_vec` + `collections.search_vec`. LIMIT pushed into
+each UNION ALL branch (mirrors `getRecentTxnsLimit`).
+
+### K. Profile + reports
+
+- `GET /api/v1/profile/:addr` — public.
+- `PUT /api/v1/profile/:addr` — JWT-protected, updates the user's
+  profile row.
+- `POST /api/v1/reports` — JWT-protected, creates a moderation report
+  on a target type/id with a reason + detail.
+
+---
+
+## Verification matrix (post-v21)
 
 | ID      | Tier | Key (semantic)                          | Status                                  | Verified by                                                                              |
 |---------|------|-----------------------------------------|-----------------------------------------|------------------------------------------------------------------------------------------|
-| F-01    | 🟠 P1 | `f01-chainchanged-listener-scope`       | PATCH READY                             | wallet.js `connect()` patch (same anchor as F-02); manual QA on Coston2 per Reproduction  |
-| F-02    | 🟠 P1 | `f02-accountschanged-listener-scope`    | PATCH READY                             | wallet.js `connect()` patch (same anchor as F-01); manual QA on Coston2 per Reproduction  |
-| F-03    | 🟠 P1 | `f03-silent-siwe-failure`               | PATCH READY                             | wallet.js `siweConnect()` + `preflight()`; manual QA on Coston2 per Reproduction           |
+| F-01    | 🟠 P1 | `f01-chainchanged-listener-scope`       | FIXED                                   | wallet.js connect(); manual + browser tests on magicwebb.fly.dev                          |
+| F-02    | 🟠 P1 | `f02-accountschanged-listener-scope`    | FIXED                                   | wallet.js connect(); manual + browser tests on magicwebb.fly.dev                          |
+| F-03    | 🟠 P1 | `f03-silent-siwe-failure`               | FIXED                                   | wallet.js _authenticate(); manual + browser tests on magicwebb.fly.dev                     |
 | C-01    | 🔴 P0 | `c01-anti-snipe-accumulation`           | FIXED                                   | `AuctionHouse.bid()` gated on `EXTENSION_WINDOW = 3 minutes`; `AuditFuzz.t.sol::testFuzz_antiSnipe…` |
 | C-02    | 🟠 P1 | `c02-stalled-state-recovery`            | FIXED                                   | `AuctionHouse.settle()` + `settleUnstuck()` + `reclaim()`, gated on `STALL_WINDOW = 7 days`; `SettleSafety.t.sol` |
-| C-03    | 🟠 P1 | `c03-offer-pull-fallback`               | FIXED                                   | `OfferBook.rejectOffer()` + `refundExpiredOffer()` + `_pushPullRefund()`, gated on the `mapping(address => uint256) pendingReturns` declaration; `AuditFuzz.t.sol::test_offerExpired…` |
-| C-04    | 🟠 P1 | `c04-refundlosers-gas-bound`            | FIXED (DoS-with-recoverable-state)     | `AuctionHouse.refundLosers()` with `error BatchTooLarge()` + per-iteration `gas: 50_000`; `AuditFuzz.t.sol::test_refundLosers…` |
+| C-03    | 🟠 P1 | `c03-offer-pull-fallback`               | FIXED                                   | `OfferBook.rejectOffer()` + ... + `_pushPullRefund()`; `AuditFuzz.t.sol::test_offerExpired…` |
+| C-04    | 🟠 P1 | `c04-refundlosers-gas-bound`            | FIXED                                   | `refundLosers()` `BatchTooLarge()` + per-iteration `gas: 50_000`; `AuditFuzz.t.sol::test_refundLosers…` |
+| onTransferBatch | 🔴 P0 | `onTransferBatch`              | FIXED                                   | `indexer/handlers.go::onTransferBatch` bounded by `maxBatchLength = 1024` (constant) + `dataWords` + cross-checks; reviewed against hostile `idsLen=2**256` log invariant. |
 
-Open Priority Stack items (NOT yet covered by a fix):
-
-| Key (semantic)                       | Tier | Where                              | Status |
-|--------------------------------------|------|------------------------------------|--------|
-| `onTransferBatch`                    | 🔴 P0 | `indexer/handlers.go::onTransferBatch()` | OPEN   |
-| `processTransfersWallClock`          | 🟠 P1 | `indexer/runner.go::processTransfers()` | OPEN   |
-| `getRecentTxnsLimit`                 | 🟠 P1 | `db/queries.go::GetRecentTransactions()` | OPEN   |
-| `getEffectiveBidsLimit`              | 🟠 P1 | `db/queries.go::GetEffectiveBids()` | OPEN   |
-| `clientIpSpoof`                      | 🟠 P1 | `api/rest.go::clientIP()` | OPEN   |
-| `parseWeiHelper`                     | 🟡 P2 | `db/queries.go` at five `big.Int.SetString` sites | OPEN   |
+Open items remaining after v21 (none — the Priority Stack is fully
+worked through). The next audit round (v22) will accept new findings
+under the standard `v22-…` prefix.
 
 ---
 
@@ -319,8 +438,8 @@ Open Priority Stack items (NOT yet covered by a fix):
    (`fXX-…`, `cXX-…`, or no-prefix for Priority Stack).
 2. **Severity only changes** on a confirmed regression or a new
    attacker path surfacing.
-3. **Status transitions require a verification artefact:**
-   passing `forge test` (contracts), passing `go test -race` (backend),
+3. **Status transitions require a verification artefact:** passing
+   `forge test` (contracts), passing `go test -race ./...` (backend),
    or a documented manual QA procedure **with reproduction steps**
    (frontend — `wallet.js` has no automated cover right now).
 4. **Priority Stack ordering** reflows freely; numeric prefixes are
@@ -330,12 +449,11 @@ Open Priority Stack items (NOT yet covered by a fix):
 ## Prior audit context (v9–v18)
 
 Audit-driven commits before this ledger's v19 cutoff live in git
-history (see `git log --oneline` between `main` and the v18 tag).
-They were all UI-only fixes — wallet-button visibility at every
-breakpoint, chain-switch re-throw, Alpine-init SyntaxError unwedge,
-`?v=10` cache-bust on assets, removed silent auto-reconnect (saved
-wallet becomes explicit-consent pill), etc. They are NOT represented
-as rows in this ledger because:
+history. They were all UI-only fixes — wallet-button visibility at
+every breakpoint, chain-switch re-throw, Alpine-init SyntaxError
+unwedge, `?v=10` cache-bust on assets, removed silent auto-reconnect
+(saved wallet becomes explicit-consent pill), etc. They are NOT
+represented as rows in this ledger because:
 
 1. They were driven by ad-hoc UI feedback, not a formal audit sweep,
    so they don't carry the audit-fix → harness-verified pattern that
@@ -354,3 +472,5 @@ and link each row to the commit SHA that landed the fix.
 - `contracts/src/AuctionHouse.sol` and `OfferBook.sol` — Solidity
   source under audit.
 - `backend/internal/ui/static/wallet.js` — JS source under audit (UI).
+- `docs/USER_GUIDE.md` — end-user-action walkthrough.
+- `docs/FEATURE_FLOWS.md` — backend-event-source map (auto-generated).

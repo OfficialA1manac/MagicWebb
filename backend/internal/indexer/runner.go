@@ -288,6 +288,13 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 
 // processTransfers watches NFT Transfer events on every tracked collection in the
 // block range, maintaining ownership and orphaning listings whose seller moved out.
+//
+// Header policy mirrors processRange: per-RPC 2s timeout, on failure log+skip
+// (never fall back to wall-clock — chain drift would put sort-by-blockTime
+// queries out of order). The previous implementation zeroed blockTimes[blk]
+// to time.Now() when missing; flagged in Priority Stack as
+// `processTransfersWallClock` at 🟠 P1 (DoS-with-recoverable-state: the next
+// watcher tick re-indexes the log when HeaderByNumber recovers).
 func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTimes map[uint64]uint64) error {
 	tracked, err := r.q.ListTrackedCollections(ctx)
 	if err != nil {
@@ -312,7 +319,21 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 	for _, l := range logs {
 		bt, ok := blockTimes[l.BlockNumber]
 		if !ok {
-			bt = uint64(time.Now().Unix())
+			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
+			hcancel()
+			if herr != nil {
+				log.Warn().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
+					Msg("transfer: header lookup failed; skip log, watcher retries next tick")
+				continue
+			}
+			bt = h.Time
+			// Memoise so the next Transfer log in the same block
+			// within this chunk reuses the cached timestamp without
+			// another HeaderByNumber round-trip. A single 30-block
+			// chunk with N transfer-only blocks was firing N header
+			// fetches per block pre-memoization.
+			blockTimes[l.BlockNumber] = bt
 		}
 		if err := r.h.dispatch(ctx, l, bt); err != nil {
 			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: transfer dispatch")

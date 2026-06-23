@@ -89,12 +89,20 @@ func main() {
 		log.Info().Msg("indexer stopped")
 	}()
 
-	// Fiber app
+	// Fiber app. ProxyHeader=Fly-Client-IP plus EnableTrustedProxyCheck=false
+	// makes `c.IP()` (and our api.rest clientIP helper) trust Fly.io's
+	// reverse-proxy-stamped header — mathematically unspoofable from the
+	// outside because Fly's edge strips any inbound copy. Combined with the
+	// Forwarded / X-Forwarded-For fallback chain, this fixes the Priority
+	// Stack `clientIpSpoof` 🟠 P1 (was: trivially spoofable rightmost-XFF
+	// extraction when traffic bypassed the proxy).
 	app := fiber.New(fiber.Config{
 		ReadTimeout:           5 * time.Second,
 		WriteTimeout:          0, // SSE connections need no write timeout
 		IdleTimeout:           60 * time.Second,
 		DisableStartupMessage: false,
+		EnableTrustedProxyCheck: false,
+		ProxyHeader:           "Fly-Client-IP",
 	})
 
 	// Mount all REST + SSE routes

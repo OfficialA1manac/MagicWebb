@@ -27,6 +27,15 @@ func chunk(data []byte, i int) []byte {
 	return data[i*32 : (i+1)*32]
 }
 
+// maxBatchLength caps TransferBatch iteration as a safety ceiling against
+// hostile on-chain logs. Legitimate ERC-1155 batches rarely exceed ~100
+// elements; type(uint256).max encoded in the ids-length word previously
+// drove the inner loop to run billions of times (each iteration issuing
+// a Postgres upsert), OOM-ing the chain indexer in seconds. The bound
+// applies BEFORE the chunk() reads and BEFORE the loop. See audit
+// priority-stack `onTransferBatch`.
+const maxBatchLength = 1024
+
 func addrStr(b []byte) string   { return common.BytesToAddress(b).Hex() }
 func bigInt(b []byte) *big.Int  { return new(big.Int).SetBytes(b) }
 func bigStr(b []byte) string    { return bigInt(b).String() }
@@ -167,7 +176,7 @@ func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 //	address seller, uint8 standard, uint128 amount, uint128 price, uint256 fee)
 func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
-		return fmt.Errorf("onBought: short log")
+		return fmt.Errorf("onBought: short log tx=%s", l.TxHash.Hex())
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -508,20 +517,45 @@ func (h *handlers) onTransferSingle(ctx context.Context, l types.Log) error {
 
 // TransferBatch(address operator, address indexed from, address indexed to, uint256[] ids, uint256[] values).
 // Data layout: [offset_ids][offset_values][len_ids][ids...][len_values][values...].
+//
+// Belt-and-braces bound check (Priority Stack P0 `onTransferBatch`): the
+// pre-fix code decoded idsLen/valsLen straight off the log data and the
+// inner `chunk()` helper silently zero-padded past the data footprint,
+// letting a hostile TransferBatch with idsLen=type(uint256).max run the
+// loop billions of times. Each iteration issued a Postgres upsert,
+// accumulating queries against the indexer connection until OOM. The fix
+// caps EVERY pointer by data footprint AND by the application ceiling
+// BEFORE the loop runs, so any malicious structure is dropped here as
+// malformed.
 func (h *handlers) onTransferBatch(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 2*32 {
-		return fmt.Errorf("onTransferBatch: short log")
+		return fmt.Errorf("onTransferBatch: short log tx=%s", l.TxHash.Hex())
 	}
 	collection := addrStr(l.Address.Bytes())
 	from := addrStr(l.Topics[2].Bytes())
 	to := addrStr(l.Topics[3].Bytes())
 
+	dataWords := int64(len(l.Data) / 32)
 	idsOff := bigInt(chunk(l.Data, 0)).Int64() / 32
 	valsOff := bigInt(chunk(l.Data, 1)).Int64() / 32
-	idsLen := bigInt(chunk(l.Data, int(idsOff))).Int64()
-	valsLen := bigInt(chunk(l.Data, int(valsOff))).Int64()
-	if idsLen != valsLen {
-		return fmt.Errorf("onTransferBatch: ids/values length mismatch")
+	if idsOff <= 0 || idsOff >= dataWords-1 {
+		return fmt.Errorf("onTransferBatch: ids offset out of bounds (%d/%d)", idsOff, dataWords)
+	}
+	if valsOff <= 0 || valsOff >= dataWords-1 {
+		return fmt.Errorf("onTransferBatch: vals offset out of bounds (%d/%d)", valsOff, dataWords)
+	}
+	idsLenRaw := bigInt(chunk(l.Data, int(idsOff))).Int64()
+	valsLenRaw := bigInt(chunk(l.Data, int(valsOff))).Int64()
+
+	idsLen := idsLenRaw
+	if idsLen <= 0 || idsLen > maxBatchLength || idsLen > dataWords {
+		return fmt.Errorf("onTransferBatch: ids length out of bounds (%d, max=%d)", idsLen, maxBatchLength)
+	}
+	if valsLenRaw != idsLen {
+		return fmt.Errorf("onTransferBatch: ids/values length mismatch (%d vs %d)", idsLen, valsLenRaw)
+	}
+	if idsOff+1+idsLen > dataWords || valsOff+1+idsLen > dataWords {
+		return fmt.Errorf("onTransferBatch: array extends past data boundary")
 	}
 	for i := int64(0); i < idsLen; i++ {
 		id := bigStr(chunk(l.Data, int(idsOff+1+i)))
