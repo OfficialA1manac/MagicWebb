@@ -14,6 +14,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ui"
@@ -434,6 +435,83 @@ func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
 		"Activity":   activity,
 		"PendingWei": pendingWei,
 	}
+}
+
+// uiProfileRedirect is the bare /profile rescue route. The route table
+// has /profile/:addr (a specific user's page) but NOT /profile — a
+// user typing that in the address bar (or clicking any link that points
+// at the bare path) hits Fiber's 404. We rescue by:
+//   1. Walking every cookie on the request.
+//   2. Looking for any mw_s_<prefix> cookie (the SIWE session cookie).
+//   3. Verifying its JWT against JWT_SECRET + DefaultAudience.
+//   4. Returning a 302 to /profile/<sub> where sub = wallet address.
+//   5. Falling back to a 307 to /listings when no valid session cookie
+//      is present (this is what a logged-out browser sees).
+//
+// We deliberately use auth.Verify (signature validation) rather than
+// jwt.ParseUnverified — a stolen cookie with a forged signature MUST
+// be rejected, otherwise an attacker could redirect any visitor to a
+// profile they control. The cost is a single HMAC compute per session.
+func uiProfileRedirect(c *fiber.Ctx) error {
+	for _, name := range cookieNames(c) {
+		if !strings.HasPrefix(name, "mw_s_") {
+			continue
+		}
+		raw := c.Cookies(name)
+		if raw == "" {
+			continue
+		}
+		addr, err := auth.Verify(raw, config.C.JWTSecret, auth.DefaultAudience)
+		if err != nil || !isEthAddr(addr) {
+			continue
+		}
+		return c.Redirect("/profile/"+strings.ToLower(addr), fiber.StatusFound)
+	}
+	// No valid session cookie — send the visitor to the marketplace
+	// homepage so they land somewhere useful instead of a 404.
+	return c.Redirect("/listings", fiber.StatusTemporaryRedirect)
+}
+
+// cookieNames returns every cookie name from the Fiber context. Fiber 2.x
+// exposes the cookie name only via c.Cookies(name) and c.Request().Header
+// has the raw Cookie header — we parse it ourselves so we don't depend
+// on a future Fiber helper. Cheap: ≤ a handful of cookies in practice.
+func cookieNames(c *fiber.Ctx) []string {
+	hdr := c.GetReqHeaders()["Cookie"]
+	if len(hdr) == 0 {
+		return nil
+	}
+	var names []string
+	for _, line := range hdr {
+		for _, seg := range strings.Split(line, ";") {
+			seg = strings.TrimSpace(seg)
+			if i := strings.IndexByte(seg, '='); i > 0 {
+				names = append(names, seg[:i])
+			}
+		}
+	}
+	return names
+}
+
+// isEthAddr is a strict-format check on the JWT sub claim — 0x prefix
+// + 40 lowercase-or-uppercase hex chars. Anything else is treated as
+// "no valid session cookie found" and the request falls through to
+// /listings. Defence-in-depth: even if a JWT signing key is leaked,
+// the redirect only ever lands on a syntactically-valid EVM address.
+func isEthAddr(s string) bool {
+	if len(s) != 42 || !strings.HasPrefix(s, "0x") {
+		return false
+	}
+	for _, r := range s[2:] {
+		switch {
+		case r >= '0' && r <= '9':
+		case r >= 'a' && r <= 'f':
+		case r >= 'A' && r <= 'F':
+		default:
+			return false
+		}
+	}
+	return true
 }
 
 // helpers

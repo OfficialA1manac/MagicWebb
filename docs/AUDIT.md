@@ -28,6 +28,97 @@ or **FIXED** (committed + verified).
 
 ---
 
+## v22 — Live-site sweep (post-v21 release on magicwebb.fly.dev)
+
+The v21 ledger closed every Priority Stack item with a CI-verified fix.
+v22 opened in response to a fresh end-to-end browser-use sweep against
+the live site, which surfaced three concrete defects:
+
+### U-01 — Bare `/profile` route 404 🟠 P1 — FIXED
+- **Where:** `backend/cmd/server/ui.go` (new helper `uiProfileRedirect`
+  + helpers `cookieNames`, `isEthAddr`); `backend/cmd/server/main.go`
+  registers `app.Get("/profile", uiProfileRedirect)` after the existing
+  `/profile/:addr` route.
+- **Key:** `v22-profile-bare-redirect`
+- **Scenario (historical):** A user typing `/profile` in the address
+  bar — or clicking any deep link that pointed at the bare path
+  (no `:addr`) — hit Fiber's default 404 because only the parametrised
+  `/profile/:addr` was registered. The navbar has no `/profile` link
+  that doesn't already carry an address, but copy-pasted links from
+  external pages or muscle-memory URL entry stranded the user on a
+  bare "Cannot GET /profile" page.
+- **Fix:** Server-side rescue route. Walks every cookie in the
+  request, finds any `mw_s_<prefix>` cookie (the SIWE session cookie),
+  verifies its JWT against `JWT_SECRET` + `DefaultAudience` via
+  `auth.Verify`, extracts the wallet address from the `sub` claim,
+  validates the `0x[40 hex]` format, then 302-redirects to
+  `/profile/<lowercase addr>`. If no valid session cookie is present
+  (logged-out visitor), 307-redirects to `/listings` so the visitor
+  lands somewhere useful. Uses full signature validation (not
+  `jwt.ParseUnverified`) so a stolen-but-unforgeable cookie cannot
+  redirect a stranger to an attacker-controlled profile.
+- **Status:** FIXED (branch `feat/audit-full-pass-v22`, awaiting push
+  to `main`).
+
+### U-02 — `/favicon.ico` 404 (noisy console error) 🟡 P2 — FIXED
+- **Where:** `backend/internal/ui/templates/layout.html` `<head>`.
+- **Key:** `v22-favicon-inline-svg`
+- **Scenario (historical):** Every page load logged a `GET /favicon.ico
+  404` in browser console. Cosmetic but recurrent — DI'd every sweep
+  audit and is the kind of oso-level lint check that hides real errors
+  in CI console capture.
+- **Fix:** Inline `<link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,...">`
+  in `<head>`. Same-origin SVG data URL featuring the ✦ glyph on the
+  brand sky background (matches the navbar logo). Browser scribes
+  the implicit favicon request as rendered — never hits a 404.
+- **Status:** FIXED.
+
+### U-03 — Stray `</div>` prematurely closed navbar right-cluster flex 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/templates/layout.html`, between
+  the dropdown's `Connection is non-custodial…` paragraph and the
+  `<!-- Notification bell -->` comment.
+- **Key:** `v22-navbar-div-stacking`
+- **Scenario (historical):** A closing `</div>` (indent 6) was
+  placed between the wallet dropdown's closing tag and the bell
+  template, prematurely closing the `<div class="flex items-center gap-2">`
+  right-cluster. Every subsequent element — the bell template, the
+  connected-pill template, the saved-wallet-pill template, the WC
+  pairing chip template, and the hamburger button — was dropped out
+  of the flex container. Visually the page rendered OK in some
+  browsers (flex below was still inline-rendering) but the bell +
+  connected pill + saved pill + WC chip + hamburger all lived on
+  the same horizontal line break. Alpine `x-if` evaluates the
+  templates in document order, and dropping the pill + bell out of
+  the flex sometimes triggered `AddEventListener` order races that
+  hid the connect button's click handler. Confirmed via a count of
+  `<div` opens (3 inside the dropdown block) vs `</div>` closes
+  (4); the extra close was orphaning the flex container.
+- **Fix:** Removed the stray `</div>`. The right-cluster flex
+  container now closes correctly after the hamburger button.
+- **Status:** FIXED.
+
+### v22-samesite-strict-ux 🟡 P2 — FIXED
+- **Where:** `backend/cmd/server/main.go::setSessionCookie()`.
+- **Key:** `v22-samesite-strict-ux`
+- **Scenario (historical):** SIWE session cookies were emitted with
+  `SameSite: "Strict"`. `Strict` blocks the browser from attaching
+  the authentication cookie on **any** cross-origin top-level GET
+  navigation — including first-page-load arrivals from Twitter,
+  Discord, Telegram, etc. Symptom: a user clicking a MagicWebb link
+  in chat was silently signed-out on every fresh inbound visit and
+  had to reconnect their wallet before any state-aware UI surfaced.
+- **Fix:** `SameSite: "Lax"`. `Lax` is the web standard for session
+  cookies — cookie IS sent on top-level cross-origin GETs (so inbound
+  links re-authenticate the user mid-render) but is NOT sent on
+  cross-site sub-resource loads or POSTs (CSRF defences are unchanged).
+  The JWT signature gate on every mutating endpoint remains the
+  authoritative defence; the cookie is for browser-navigation auth.
+- **Status:** FIXED.
+
+
+
+---
+
 ## v19 — Frontend (wallet.js / SIWE)
 
 ### F-01 — `chainChanged` listener gated to WalletConnect only 🟠 P1 — FIXED
