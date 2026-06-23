@@ -136,5 +136,20 @@ jobs:
         # GitHub Actions UI even though Fly itself reported success.
         # This step is the contract that future drift can never again
         # be silently observed by a user on the live URL.
-        if: success()
+        #
+        # v23.1.1 — `if: always()` (not `if: success()`).
+        # If the previous `curl /healthz` smoke step failed (binary
+        # returned 503, network blip, machine still warming up), the
+        # original gating made the sync gate SKIP silently — so a deploy
+        # that broke the binary OR left Fly serving a stale-SHA binary
+        # both reported GREEN to the v23.1 series. Switching to
+        # `if: always()` means the drift check runs in every terminal
+        # state: success / failure / cancelled. check-fly-sync.sh
+        # already handles degraded `/healthz` (curl 000 / non-200 / no
+        # header) by exiting 2 — so a smoke-check failure today ALSO
+        # lights up the sync gate with a loud `no X-MW-Build-SHA
+        # header` output. Operators see exactly which class of bug
+        # the deploy had (binary-broken vs SHA-drift) instead of
+        # ambiguous green.
+        if: always()
         run: ./tools/check-fly-sync.sh
