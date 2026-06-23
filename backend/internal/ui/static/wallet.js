@@ -719,23 +719,46 @@ window.addEventListener('alpine:init', () => {
           window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
         } catch (_) {}
       }
-      let wc;
-      try {
-        const mod = await import('https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle');
-        wc = await mod.EthereumProvider.init({
-          projectId: WC_PROJECT_ID,
-          chains:    [CHAIN_ID],
-          rpcMap:    { [CHAIN_ID]: RPC_URL },
-          showQrModal: false,
-          metadata: {
-            name: 'MagicWebb',
-            description: 'Non-custodial NFT marketplace on Flare Network',
-            url: window.location.origin,
-            icons: [`${window.location.origin}/static/icon-512.png`],
-          },
-        });
-      } catch (e) {
-        throw new Error('WalletConnect failed to load: ' + (e?.message || e));
+      // v23 — Try multiple CDNs in sequence (esm.sh ?bundle-deps,
+      // ?bundle, jsdelivr). esm.sh periodically changes its bundling
+      // shape and that has stranded every user mid-pick before. If
+      // EVERY one fails emit a clean, user-actionable error rather
+      // than a generic 'failed to load' bubble &mdash; the outer
+      // connect() catch surfaces this via the standard toast so the
+      // user sees 'WalletConnect is temporarily unavailable. Please
+      // use the Browser Wallet option for now.' and picks MetaMask.
+      let wc = null, lastErr = null;
+      const _WC_CDNS = [
+        'https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle-deps&amp;target=es2022',
+        'https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle-deps',
+        'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.es.js',
+      ];
+      for (const cdnUrl of _WC_CDNS) {
+        try {
+          const mod = await import(/* @vite-ignore */ cdnUrl);
+          wc = await mod.EthereumProvider.init({
+            projectId: WC_PROJECT_ID,
+            chains:    [CHAIN_ID],
+            rpcMap:    { [CHAIN_ID]: RPC_URL },
+            showQrModal: false,
+            metadata: {
+              name: 'MagicWebb',
+              description: 'Non-custodial NFT marketplace on Flare Network',
+              url: window.location.origin,
+              icons: [`${window.location.origin}/static/icon-512.png`],
+            },
+          });
+          break;
+        } catch (e) {
+          lastErr = e;
+          // continue to next CDN URL
+        }
+      }
+      if (!wc) {
+        throw new Error(
+          'WalletConnect is temporarily unavailable. Please use the Browser Wallet (MetaMask / Rabby) option instead. (' +
+          (lastErr?.message || lastErr) + ')'
+        );
       }
       this._raw.wc = R(wc);
 
