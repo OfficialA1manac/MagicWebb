@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel} from "../src/AuctionHouse.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -223,17 +223,40 @@ contract AuctionHouseTest is Test {
     // ── cancelEarly ─────────────────────────────────────────────────────────────
 
     function test_cancelEarlyRefundsAllViaLosers() public {
+        // v21 — audit-#6: cancelEarly is now BLOCKED once a qualifying leader
+        // exists (leaderTotal >= reserve). To exercise the original "refund
+        // everyone via refundLosers" path we keep both bids BELOW the reserve
+        // (1 ETH). No leader is set, cancelEarly proceeds, and refundLosers
+        // returns every escrow to its bidder.
         (uint256 id,) = _create();
-        _bid(id, alice, 1 ether);
-        _bid(id, bob, 2 ether);
+        _bid(id, alice, 0.4 ether);                // below reserve → no leader
+        _bid(id, bob,   0.5 ether);                // below reserve → still no leader
         vm.prank(seller);
         ah.cancelEarly(id);
         address[] memory batch = new address[](2);
         batch[0] = alice; batch[1] = bob;
         uint256 aB = alice.balance; uint256 bB = bob.balance;
         ah.refundLosers(id, batch);
-        assertEq(alice.balance, aB + 1 ether);
-        assertEq(bob.balance,   bB + 2 ether);    // even the would-be winner refunded
+        assertEq(alice.balance, aB + 0.4 ether);
+        assertEq(bob.balance,   bB + 0.5 ether);  // full escrow returned
+    }
+
+    // ── cancelEarly reserve-met invariant (audit-#6) ───────────────────────────
+    function test_cancelEarlyAfterReserveMetReverts() public {
+        (uint256 id,) = _create();                 // reserve = 1 ETH
+        _bid(id, alice, 1 ether);                  // alice meets reserve → leader
+        vm.prank(seller);
+        vm.expectRevert(CannotCancel.selector);
+        ah.cancelEarly(id);                        // cannot cancel: leader has
+    }                                              //   qualified the auction
+
+    function test_cancelEarlyAfterLeaderOvertakesReserveReverts() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 0.5 ether);                // below reserve
+        _bid(id, bob,   1.5 ether);                // newLead, clears reserve
+        vm.prank(seller);
+        vm.expectRevert(CannotCancel.selector);
+        ah.cancelEarly(id);
     }
 
     function test_cancelEarlyNotSellerReverts() public {

@@ -20,6 +20,7 @@ error NothingToWithdraw();
 error BatchTooLarge();
 error NotStalled();
 error StallNotOver();
+error CannotCancel();
 
 /// @title AuctionHouse
 /// @notice English auctions with a CUMULATIVE bid model, escrow-until-settle, and
@@ -56,6 +57,13 @@ contract AuctionHouse is MarketplaceCore {
     ///         the winner in full and cancels the auction. Prevents a seller
     ///         from monopolising the winner's escrow indefinitely.
     uint64 public constant STALL_WINDOW        = 7 days;
+    /// @notice Minimum absolute increment when both `minIncrementBps` and
+    ///         `minIncrementFlat` are zero (or both below this floor). Prevents
+    ///         collusive 1-wei bid exchanges that perpetually satisfy the
+    ///         `newLead=true` anti-snipe gate and stall the auction forever
+    ///         (audit-#5). At 0.001 ETH per flip, two coordinated wallets
+    ///         cannot afford to keep the timer extending.
+    uint128 public constant MIN_BID_INCREMENT  = 0.001 ether;
 
     struct Auction {
         address       seller;
@@ -176,13 +184,15 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         Auction storage a = auctions[id];
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
-        // v8 — STOP clamping minIncrementBps=0 to 500 bps (5%). A seller can
-        // now opt out of percent increments by passing 0; with minIncFlat=0
-        // the bid() path falls through to `if (inc == 0) inc = 1;` so the
-        // next bid must beat the previous top by exactly 1 wei (the +1 rule
-        // called out in the marketplace spec). Existing auctions are
-        // unaffected — this only governs auctions created after the
-        // redeploy.
+        // v21 — INC floor: when both minIncrementBps and minIncrementFlat are
+        // 0, the bid() path now falls through to MIN_BID_INCREMENT (0.001
+        // ether) instead of the legacy +1 wei rule. The previous 1-wei
+        // fall-through let two colluding wallets perpetually trade 1-wei
+        // leads and stall an auction indefinitely via repeated anti-snipe
+        // extensions (audit-#5). 0.001 ETH per flip is economically unviable
+        // for griefing while remaining trivial for any legitimate bidder.
+        // Existing auctions are unaffected — this only governs auctions
+        // created after the redeploy.
         a.minIncrementBps = minIncBps;
         a.standard        = standard;
         a.collection      = coll;
@@ -239,7 +249,10 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
             // may not sit above the leader without taking the lead.
             uint256 incPct  = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
             uint256 inc     = incPct > a.minIncrementFlat ? incPct : a.minIncrementFlat;
-            if (inc == 0) inc = 1;
+            // Floor at MIN_BID_INCREMENT so a 0/0 increment config cannot be
+            // reduced to a 1-wei griefing loop (audit-#5). Per-cycle
+            // gas cost vs. 0.001 ETH flip cost makes the attack uneconomic.
+            if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
             uint128 minNext = uint128(uint256(a.leaderTotal) + inc);
             if (newTotal < minNext) revert BidTooLow();
             newLead = true;
@@ -439,11 +452,22 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
 
     /// @notice Seller cancels before `endsAt`. No sale; every bidder's escrow becomes
     ///         refundable via refundLosers.
+    /// @dev A seller cannot cancel once a qualifying leader (cleared the reserve)
+    ///      has taken the lead — bidders have committed capital in good faith
+    ///      and auction integrity forbids the seller from walking away with the
+    ///      bidding time paid for. Bidders can withdraw via `withdrawRefund()`
+    ///      only after settlement (v8: `cancelEarly` leaves escrow in place
+    ///      until `refundLosers(id, batch)` is called — the keeper sweeper
+    ///      drives this automatically for cancelled auctions).
     function cancelEarly(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller != msg.sender) revert NotSeller();
         if (a.settled) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
+        // Reserve-met lock: the auction has met its reserve and a leader
+        // exists. Walking back at this point would let the seller snipe
+        // their own auction (audit-#6).
+        if (a.leader != address(0) && a.leaderTotal >= a.reserve) revert CannotCancel();
         a.settled = true;
         emit AuctionCancelled(id);
     }

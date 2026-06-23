@@ -40,6 +40,13 @@ type Broadcaster struct {
 	mu      sync.RWMutex
 	clients map[string]chan string // id → formatted SSE line(s)
 	events  chan Event
+	// bridge feeds a SINGLE bridge goroutine that performs pg_notify. This
+	// caps the cross-instance bridge at one in-flight DB call (one pool
+	// connection) regardless of publish burst depth. Without this, every
+	// Publish would launch its own goroutine holding a 3s pg_notify context
+	// + pool connection — a 1000-event backfill tick would briefly hold
+	// up to 1000 connections, draining the pool and starving regular reads.
+	bridge  chan Event
 	pool    *pgxpool.Pool // nil → local-only (tests/single instance)
 	origin  string        // this instance's id, for own-notify suppression
 }
@@ -49,6 +56,7 @@ func New() *Broadcaster {
 	b := &Broadcaster{
 		clients: make(map[string]chan string),
 		events:  make(chan Event, 256),
+		bridge:  make(chan Event, 256),
 		origin:  uuid.New().String(),
 	}
 	go b.loop()
@@ -60,9 +68,15 @@ func New() *Broadcaster {
 // session connection, so pass the Postgres DSN. If dsn is empty or the listen
 // conn drops, this instance degrades gracefully to local delivery (its own
 // clients still get every event it publishes).
+// Starts a single bridge goroutine (when pool != nil) so cross-instance
+// fan-out uses at most one DB connection at a time, with explicit
+// backpressure via the `bridge` channel.
 func NewBridged(ctx context.Context, pool *pgxpool.Pool, dsn string) *Broadcaster {
 	b := New()
 	b.pool = pool
+	if pool != nil {
+		go b.bridgeLoop(ctx)
+	}
 	if dsn != "" {
 		go b.listen(ctx, dsn)
 	}
@@ -93,12 +107,23 @@ var (
 )
 
 func (b *Broadcaster) Publish(ev Event) {
-	select {
-	case b.events <- ev:
-		SaturationStreak.Store(0)
-		if b.pool != nil {
-			b.notify(ev)
-		}
+	select {		case b.events <- ev:
+			SaturationStreak.Store(0)
+			if b.pool != nil {
+				// Hand the event to the single bridge goroutine via a
+				// bounded buffered channel. The bridge is intentionally
+				// decoupled from the local fan-out so a stall on pg_notify
+				// cannot back up the publish site (which is called from the
+				// indexer watcher loop). Under sustained bridge saturation we
+				// drop the cross-instance forward (logged) rather than block
+				// the publisher; remote instances may see a transient gap,
+				// but the local view stays consistent.
+				select {
+				case b.bridge <- ev:
+				default:
+					log.Warn().Str("type", ev.Type).Msg("sse: bridge channel saturated; dropping cross-instance forward")
+				}
+			}
 	default:
 		// Metrics MUST get here before the log so a sequential reader of the
 		// /metrics endpoint after this Warn sees the counter incremented.
@@ -106,6 +131,23 @@ func (b *Broadcaster) Publish(ev Event) {
 		SaturationStreak.Add(1)
 		log.Warn().Str("type", ev.Type).Uint64("streak", SaturationStreak.Load()).
 			Msg("sse: local fan-out saturated; dropping event (bridge suppressed for consistency)")
+	}
+}
+
+// bridgeLoop sequentially consumes events from the bridge channel and
+// performs pg_notify. Single goroutine → at most one in-flight bridge DB
+// call at any time, eliminating the pool-exhaustion risk of per-event
+// goroutines (a 1000-event backfill tick would briefly hold up to 1000
+// connections under the old `go b.notify(ev)` design). The ctx cancels
+// the loop on shutdown so a wedged notify cannot outlive the process.
+func (b *Broadcaster) bridgeLoop(ctx context.Context) {
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case ev := <-b.bridge:
+			b.notify(ev)
+		}
 	}
 }
 

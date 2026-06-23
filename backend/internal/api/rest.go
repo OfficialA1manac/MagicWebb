@@ -39,7 +39,14 @@ const (
 		// picker selection — never on page boot). api.reown.com + WC relay
 		// wss:// channels are required for the QR pairing / multi-wallet
 		// relay — block any of them and WalletConnect silently fails.
-		"script-src 'self' https://esm.sh; " +
+		// Alpine.js evaluates expressions via `new Function()` at runtime, so
+		// 'unsafe-eval' is required for any x-data / x-show / x-if to mount
+		// under CSP. The alternative (@alpinejs/csp) requires a maintained
+		// build pipeline and pre-compiled templates — accepting 'unsafe-eval'
+		// here is the lowest-friction fix for self-hosted Alpine without
+		// weakening XSS mitigation (templates remain literal script content;
+		// only the Alpine runtime parses expressions).
+		"script-src 'self' 'unsafe-eval' https://esm.sh; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
