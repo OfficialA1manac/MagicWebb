@@ -65,9 +65,9 @@ const (
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
-	hstsHeader          = "max-age=63072000; includeSubDomains; preload"
-	permissionsPolicy   = "geolocation=(), microphone=(), camera=(), payment=(self \"https://magicwebb.xyz\"), usb=()"
-	referrerPolicy      = "strict-origin-when-cross-origin"
+	hstsHeader        = "max-age=63072000; includeSubDomains; preload"
+	permissionsPolicy = "geolocation=(), microphone=(), camera=(), payment=(self \"https://magicwebb.xyz\"), usb=()"
+	referrerPolicy    = "strict-origin-when-cross-origin"
 )
 
 // securityHeaders installs the response headers above on every response.
@@ -109,8 +109,22 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// keeps the SSE channel uncompressed. If you switch to LevelBestSpeed
 	// or otherwise loosen the filter, audit the SSE path here — a
 	// compressed text/event-stream breaks the nginx buffering fix.
+	//
+	// Belt-and-braces path-level skip for `/events` itself: the default
+	// filter excludes SSE by Content-Type but Fiber still installs its
+	// response-writer wrap around the handler. With our `SetBodyStreamWriter`
+	// callback pattern that streaming writer can race with the wrap and
+	// stall the response — clients see no headers, no body, and (because
+	// the server has nothing to flush) eventually a 502 from the fly.io
+	// edge. Bridging to /parts/event-types by path (not just content-type)
+	// means the compress middleware never touches the SSE stream — not
+	// even as a pass-through. The default whitelist still excludes the
+	// actual encode step; this skip just removes the wrap entirely.
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelDefault,
+		Next: func(c *fiber.Ctx) bool {
+			return c.Path() == "/events"
+		},
 	}))
 
 	// /healthz = liveness. Must respond 200 within ~3.5s even when the
