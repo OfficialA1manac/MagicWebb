@@ -21,6 +21,9 @@ import {
     NotStalled,
     StallNotOver
 } from "../src/AuctionHouse.sol";
+// Note: `Auction` is an inner struct of AuctionHouse, accessed as
+// `AuctionHouse.Auction` from the test contract — Solidity user-defined
+// value types only accept elementary types, so keep the inline qualification.
 import {
     OfferBook,
     NoOffer,
@@ -94,18 +97,22 @@ contract AuditFuzzTest is Test {
         ah.bid{value: amt}(id);
     }
 
-    // de-structure the 14-tuple Auction struct returned by `auctions(id)`
-    function _endsAt(uint256 id) internal view returns (uint64 e) {
-        (,,,,,, e,,,,,,,) = ah.auctions(id); // 6+7 commas = 14 elements (endsAt at position 6)
+    // Position-stable reads via AuctionHouse.getAuction(id) — if the Auction
+    // struct field order ever changes, these helpers self-update by name rather
+    // than relying on a brittle positional comma count. The previous
+    // destructuring silently misread on struct reflow: `audit-#2`'s
+    // stalledAt-at-position-14 assumption could shift to a different slot if
+    // anyone inserted a field before it, and the compile would still pass
+    // while every C-02 invariant asserted wrong numbers.
+    function _a(uint256 id) internal view returns (AuctionHouse.Auction memory) {
+        return ah.getAuction(id);
     }
-    function _settled(uint256 id) internal view returns (bool s) {
-        (,,, s,,,,,,,,,,) = ah.auctions(id);
-    }
-    function _stalled(uint256 id) internal view returns (uint64 s) {
-        (,,,,,,,,,,,,, s) = ah.auctions(id); // 13 commas before s = position 13 (stalledAt)
-    }
-    function _leader(uint256 id) internal view returns (address l, uint128 t) {
-        (,,,,,,,,,, l, t,,) = ah.auctions(id);
+    function _endsAt(uint256 id)   internal view returns (uint64)  { return _a(id).endsAt; }
+    function _settled(uint256 id)  internal view returns (bool)    { return _a(id).settled; }
+    function _stalled(uint256 id)  internal view returns (uint64)  { return _a(id).stalledAt; }
+    function _leader(uint256 id)   internal view returns (address, uint128) {
+        AuctionHouse.Auction memory a = _a(id);
+        return (a.leader, a.leaderTotal);
     }
 
     /// @dev Deterministic EOA factory: seed ("EOA" || i) -> address. Avoids

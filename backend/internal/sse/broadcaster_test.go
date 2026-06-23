@@ -82,3 +82,16 @@ func TestSubscriberCap(t *testing.T) {
 		t.Fatal("subscribe beyond MaxClients should be rejected")
 	}
 }
+
+
+func TestPublishSaturationMetricsIncrement(t *testing.T) {
+	b := New()
+	pre := DroppedTotal.Load()
+	for i := 0; i < 256; i++ { b.events <- Event{Type: "filler"} }
+	b.Publish(Event{Type: "dropped"})
+	if DroppedTotal.Load()-pre < 1 { t.Fatal("expected drop") }
+	if SaturationStreak.Load() < 1 { t.Fatal("expected streak") }
+	for len(b.events) > 0 { <-b.events }
+	b.Publish(Event{Type: "ok"})
+	if SaturationStreak.Load() != 0 { t.Fatal("expected streak reset") }
+}

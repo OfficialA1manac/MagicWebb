@@ -255,8 +255,17 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
 			hcancel()
 			if herr != nil {
-				log.Warn().Err(herr).Uint64("block", l.BlockNumber).Msg("watcher: header lookup failed; skip log this cycle")
-				continue
+				// ABORT the whole range so lastBlock does NOT advance past this
+				// unindexed block. The previous log.Warn + continue pattern
+				// silently dropped the log: the cursor advanced with the rest of
+				// the chunk and the unwitnessed block's events became permanently
+				// unindexed. Returning an error makes backfill() exit; the next
+				// watcher tick re-attempts the same lastBlock+1..target range, so
+				// when the RPC recovers the events byte-for-byte replay (handlers
+				// are idempotent upserts). The log.Error preserves the structured
+				// per-block context that the old log.Warn surfaced.
+				log.Error().Err(herr).Uint64("block", l.BlockNumber).Msg("watcher: header lookup failed; aborting range for retry on next tick")
+				return fmt.Errorf("watcher: header lookup failed for block %d: %w", l.BlockNumber, herr)
 			}
 			blockTimes[l.BlockNumber] = h.Time
 		}

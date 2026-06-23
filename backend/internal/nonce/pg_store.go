@@ -34,23 +34,54 @@ func NewPg(pool *pgxpool.Pool) *PgStore {
 func (s *PgStore) SetIfFree(address, nonce string, ttl time.Duration) (ok bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)
 	defer cancel()
-	// A previous nonce for the same address that has EXPIRED but whose row
-	// hasn't yet been garbage-collected (cleanup runs every 60s) must NOT
-	// block this address from getting a fresh nonce. We bump the row in
-	// the conflict branch ONLY when the existing row is already expired,
-	// so a still-live nonce still wins (returns false → caller re-issues).
-	err := s.pool.QueryRow(ctx,
+	// Race-safe nonce issuance.
+	//
+	// The previous ON CONFLICT DO UPDATE WHERE expires_at <= now() pattern did
+	// NOT eliminate the race: a concurrent SetIfFree from another caller could
+	// read the same expired row, both pass the WHERE evaluation at slightly
+	// different snapshots, and BOTH callers would see their own row (each
+	// considering the row "watermark" stale at the moment of their own index
+	// scan). Both would return true → both treat their nonce as live.
+	//
+	// New approach: chain DELETE (any expired row) + INSERT ON CONFLICT DO
+	// NOTHING in a single transaction with row-level locking. Sequence:
+	//   1. DELETE any expired row for this address (locks it).
+	//   2. INSERT the new nonce with ON CONFLICT DO NOTHING RETURNING.
+	//      - If the row was just deleted by step 1, INSERT succeeds.
+	//      - If a concurrent transaction is holding the row lock, this
+	//        INSERT blocks until that txn commits; it then either sees
+	//        a fresh row (expires_at > now()) and returns nothing, or
+	//        sees a freshly-deleted row and succeeds.
+	//   3. RETURNING evaluates to true iff the row was just inserted.
+	tx, err := s.pool.Begin(ctx)
+	if err != nil {
+		log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free begin failed")
+		return false
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err := tx.Exec(ctx,
+		`DELETE FROM siwe_nonces WHERE address=$1 AND expires_at <= now()`,
+		address,
+	); err != nil {
+		log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free cleanup failed")
+		return false
+	}
+
+	err = tx.QueryRow(ctx,
 		`INSERT INTO siwe_nonces(address, nonce, expires_at) VALUES($1,$2,$3)
-		 ON CONFLICT(address) DO UPDATE
-		   SET nonce=EXCLUDED.nonce, expires_at=EXCLUDED.expires_at
-		 WHERE siwe_nonces.expires_at <= now()
+		 ON CONFLICT(address) DO NOTHING
 		 RETURNING true`,
 		address, nonce, time.Now().Add(ttl),
 	).Scan(new(bool))
 	if err != nil {
 		if !errors.Is(err, pgx.ErrNoRows) {
-			log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free failed")
+			log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free insert failed")
 		}
+		return false
+	}
+	if err := tx.Commit(ctx); err != nil {
+		log.Error().Err(err).Str("address", address).Msg("nonce: pg set-if-free commit failed")
 		return false
 	}
 	return true

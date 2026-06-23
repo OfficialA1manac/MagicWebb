@@ -56,16 +56,21 @@ func offerPosition(q *db.Q) fiber.Handler {
 				total.Add(total, p)
 			}
 		}
-		if len(rows) > 0 {
-			best = rows[0].AmountWei // rows ordered principal DESC
-		}
-		return c.JSON(fiber.Map{
-			"collection": coll,
-			"token_id":   tokenID,
-			"positions":  rows,
-			"count":      len(rows),
-			"highest":    best,
-			"total_wei":  total.String(),
-		})
+	if len(rows) > 0 {
+		best = rows[0].AmountWei // rows ordered principal DESC
 	}
+	// truncated = true when the SQL LIMIT was hit — UI surfaces "+N more" /
+	// "load all" affordance. Without this flag, hot tokens with stacked
+	// offers silently cap at 200 with no signal.
+	truncated := len(rows) >= 200
+	return c.JSON(fiber.Map{
+		"collection": coll,
+		"token_id":   tokenID,
+		"positions":  rows,
+		"count":      len(rows),
+		"highest":    best,
+		"total_wei":  total.String(),
+		"truncated":  truncated,
+	})
+}
 }

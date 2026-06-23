@@ -79,6 +79,17 @@ contract AuctionHouse is MarketplaceCore {
     uint256 public nextAuctionId;
     mapping(uint256 => Auction) public auctions;
 
+    /// @notice Position-stable getter for the Auction struct. Off-chain and
+    /// off-test code MUST use this instead of the auto-generated `auctions(id)`
+    /// getter, which returns a positional tuple — silent misreads on struct
+    /// reflow if a new field is ever added before `stalledAt`. Test harnesses
+    /// also gain audit-fix stability: invariants can assert on a named field
+    /// (`.endsAt`, `.settled`, `.stalledAt`, `.leader`, `.leaderTotal`)
+    /// rather than counting commas in a destructuring tuple.
+    function getAuction(uint256 id) external view returns (Auction memory) {
+        return auctions[id];
+    }
+
     /// @notice cumulative[auctionId][bidder] → total wei this bidder has escrowed.
     mapping(uint256 => mapping(address => uint128)) public cumulative;
     /// @notice Distinct bidders per auction, for off-chain enumeration + refund batching.

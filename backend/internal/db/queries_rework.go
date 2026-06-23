@@ -740,6 +740,9 @@ func (q *Q) UpdateImageURI(ctx context.Context, collection, tokenID, imageURI st
 // using exponential backoff: 1h, 2h, 4h, 8h, 16h, 24h (capped). Once count
 // reaches maxImageRetries the token is permanently skipped by the retry query.
 func (q *Q) BumpImageRetry(ctx context.Context, collection, tokenID string, count int) error {
+	if count >= maxImageRetries {
+		return nil
+	}
 	// Exponential backoff via power(): PG `^` is BITWISE XOR, not exponentiation
 	// — using it gave a schedule of 3h, 0h, 1h, 6h, … instead of 1h, 2h, 4h, 8h,
 	// 16h, capped at 24h. power(2.0, exp)::int yields the intended geometric

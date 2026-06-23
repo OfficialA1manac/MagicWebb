@@ -796,31 +796,14 @@ window.addEventListener('alpine:init', () => {
         this.jwt = token;
         localStorage.setItem('mw_jwt', token);
       } catch (e) {
+        // Clean up the half-authenticated state — drop JWT + persisted token
+        // so a subsequent retry starts from nonce-issue. We do NOT surface a
+        // local toast here; the parent connect() catch already toasts via the
+        // canonical revertMessage() message channel. The previous double-toast
+        // (inner toast + parent's) was the F-03 audit finding users reported.
         this.jwt = null;
         try { localStorage.removeItem('mw_jwt'); } catch (e) {}
-        // Heuristic: a user-cancelled signature prompt can show up as:
-        //   - ethers v6 ACTION_REJECTED code, OR
-        //   - EIP-1193 code 4001 (canonical user-rejected-request), OR
-        //   - "user rejected signature" / "user denied transaction" in
-        //     shortMessage or message (MetaMask, Rabby, WalletConnect, mobile
-        //     wallets differ on which field carries the rejection text).
-        // Anything else is treated as a generic "Login failed" — the parent's
-        // catch + the previous-error toast chain will surface the real server
-        // reason.
-        const code = e?.code;
-        const txt = String(e?.shortMessage ?? e?.message ?? e ?? '').toLowerCase();
-        const userRejected =
-          code === 4001 ||
-          code === 'ACTION_REJECTED' ||
-          txt.includes('user rejected') ||
-          txt.includes('user denied')  ||
-          txt.includes('action_rejected') ||
-          txt.includes('action rejected');
-        const msg = userRejected
-          ? 'Signature required to log in.'
-          : 'Login failed. Please try again.';
-        if (typeof toast === 'function') toast(msg, 'error');
-        throw e; // propagate → connect() catch flips state to 'error'
+        throw e;
       }
     },
 

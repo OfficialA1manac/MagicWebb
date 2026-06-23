@@ -308,9 +308,22 @@ func isRetriableUpstream(uri string) bool {
 		strings.HasPrefix(uri, "ipfs://")
 }
 
-// isClientGone reports whether err is just a torn-down request (cancelled or
-// timed out) rather than a real DB / RPC failure. Used to keep noisy browser-
-// disconnects out of the warn-level log stream.
+// isClientGone reports whether err is just a torn-down request (cancelled,
+// timed out, or backed by a now-closed connection) rather than a real DB / RPC
+// failure. Used to keep noisy browser-disconnects and pgx transport errors
+// out of the warn stream. False positives tolerated.
 func isClientGone(err error) bool {
-	return errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	// pgx.ErrTxClosed and connection-reset patterns do NOT wrap
+	// context.Canceled cleanly; substring predicate.
+	msg := err.Error()
+	return strings.Contains(msg, "closed") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset") ||
+		strings.Contains(msg, "use of closed network connection")
 }

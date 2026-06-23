@@ -8,6 +8,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/google/uuid"
@@ -80,14 +81,31 @@ func NewBridged(ctx context.Context, pool *pgxpool.Pool, dsn string) *Broadcaste
 // instance's view consistent). The trade-off is that under saturation we
 // drop the event everywhere rather than partially — we never tell one
 // instance "yes" and another "no" for the same publish call.
+// DroppedTotal accumulates every event we couldn't fan out due to a saturated
+// local queue. Saturation is DELIBERATELY fatal: dropping locally + still
+// bridging would create per-instance drift, but a single log.Warn was too
+// quiet to surface the failure mode in metrics. The /api/v1/metrics handler
+// reads these atomics so the metrics page can show a "saturation alert"
+// panel when the count is non-zero over any window.
+var (
+	DroppedTotal     atomic.Uint64
+	SaturationStreak atomic.Uint64
+)
+
 func (b *Broadcaster) Publish(ev Event) {
 	select {
 	case b.events <- ev:
+		SaturationStreak.Store(0)
 		if b.pool != nil {
 			b.notify(ev)
 		}
 	default:
-		log.Warn().Str("type", ev.Type).Msg("sse: local fan-out saturated; dropping event (bridge suppressed for consistency)")
+		// Metrics MUST get here before the log so a sequential reader of the
+		// /metrics endpoint after this Warn sees the counter incremented.
+		DroppedTotal.Add(1)
+		SaturationStreak.Add(1)
+		log.Warn().Str("type", ev.Type).Uint64("streak", SaturationStreak.Load()).
+			Msg("sse: local fan-out saturated; dropping event (bridge suppressed for consistency)")
 	}
 }
 
