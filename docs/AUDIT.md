@@ -238,6 +238,44 @@ neither can regress silently again.
   Follow-up commits (Dockerfile ARG + `deploy.yml` `--build-arg` +
   this AUDIT entry) complete the runtime contract.
 
+### ops-01 / v23.1.1 — Gate coupling + rolling-deploy race window — FOLLOW-UP FIXED
+- **Where:**
+  - `.github/workflows/deploy.yml`: the `Post-deploy sync gate`
+    step's `if:` changed from `success()` to `always()`. Comment
+    block expanded to explain why a future operator narrowing back
+    would re-introduce the silent-skip regression.
+  - Same file: the `Post-deploy smoke check (curl /healthz)` step's
+    `sleep 5` bumped to `sleep 30` so the rolling-deploy swap window
+    cannot route the smoke curl to the OLD machine mid-transition
+    (which would surface an OUT-OF-DATE SHA to check-fly-sync.sh and
+    produce a false-positive DRIFT on a healthy deploy).
+- **Key:** `ops01-v2311-gate-coupling-and-rolling-race`
+- **Scenario (in v23.1 initial push):** the audit's original gate
+  was `if: success()` — if the upstream `curl /healthz` smoke step
+  failed (DB unreachable, /healthz returned 503, network blip during
+  machine warm-up), the drift-detection step was SKIPPED silently.
+  Two classes of deploy bug therefore reported GREEN to Actions:
+  binary-broken deploys AND SHA-drift deploys. Separately, the 5 s
+  grace was shorter than the typical rolling-swap transition on a
+  single-machine app, so a curl landed on the OLD machine during the
+  swap could see the previous commit's SHA — both false-positive
+  (gating healthy deploys RED) and false-negative (blocking the gate
+  if the OLD machine's /healthz pre-emptively returned 503).
+- **Fix:**
+  1. `if: always()` on the sync gate so the drift check runs in
+     every terminal state (success / failure / cancelled). check-
+     fly-sync.sh already exits 2 on degraded `/healthz` (curl 000,
+     non-200, 200-but-no-X-MW-Build-SHA header), so a smoke-check
+     failure today ALSO lights up the gate with a loud diagnostic.
+     Operators see exactly which class of bug the deploy had instead
+     of ambiguous green.
+  2. `sleep 30` in the smoke check covers the rolling swap window on
+     a single-machine app. With both fixes in place, the gate is
+     both always-on AND race-free.
+- **Status:** FIXED. Verified end-to-end via force-deploy with
+  `--build-arg "GIT_SHA=$(git rev-parse HEAD)"` and a
+  `check-fly-sync.sh` post-deploy run returning 0.
+
 ---
 
 ## v23 — Picker CDN resilience (post-v22 release)

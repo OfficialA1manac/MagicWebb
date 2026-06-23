@@ -119,9 +119,20 @@ jobs:
         # failing HTTP check inside the new release, etc.
         if: success()
         run: |
-          # 5s grace for the new machine to come up + healthcheck
-          # register inside Fly's checks subsystem.
-          sleep 5
+          # v23.1.1 — bump 5s → 30s grace.
+          # `fly deploy --strategy rolling` keeps the OLD machine serving
+          # until the NEW machine's Fly-side health-check passes. During
+          # the swap window both machines can respond to /healthz; a
+          # shorter sleep can land the smoke check on the OLD machine,
+          # which then surfaces an OUT-OF-DATE SHA to the next sync-gate
+          # step (false-positive DRIFT, gates a healthy deploy RED).
+          # 30s comfortably covers the rolling-swap transition on a
+          # single-machine app — the OLD machine is destroyed and the
+          # NEW machine is the sole responder by the time the curl
+          # below fires. If you tighten this below ~25s, audit the
+          # rolling-strategy swap window on a real OpsGenie-style
+          # incident simulation first.
+          sleep 30
           curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors \
             https://magicwebb.fly.dev/healthz
       - name: Post-deploy sync gate (origin/main SHA == live X-MW-Build-SHA)
