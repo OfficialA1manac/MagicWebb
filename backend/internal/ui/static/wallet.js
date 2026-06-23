@@ -308,20 +308,6 @@ window.addEventListener('alpine:init', () => {
     // _resolver is the per-open callback dispatched on click of Confirm.
     _resolver: null,
 
-    // ── make open() robust to malformed callers ──
-    // The action_modal partial listens for `open-action.window` events
-    // and forwards `$event.detail` into modals.open(). A listener-site
-    // guard (`if ($event.detail)`) is the primary defence — kept in sync
-    // here as a belt-and-braces: ANY future caller that forgets to
-    // validate its own input gets a small dismissable info-card instead
-    // of pinning Alpine with "Cannot read properties of undefined
-    // (reading 'kind')". Behaviour changes to be user-friendly: the copy
-    // reads as an action-availability hint, not as engineering jargon.
-    _sanitizeOpts(opts) {
-      if (opts && typeof opts === 'object') return opts;
-      return MODAL_OPTS_FALLBACK;
-    },
-
     /**
      * Open the modal with the supplied summary. Promise resolves on:
      *   { ok: true,  txHash }  — confirmed on-chain
