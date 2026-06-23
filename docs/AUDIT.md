@@ -120,6 +120,126 @@ the live site, which surfaced three concrete defects:
 
 ---
 
+## v23.1 — Modal auto-popup gate + Fly/GitHub deploy-drift safety net
+
+The v23 release closed the WalletConnect CDN resilience defect but was
+deployed in two waves because the v74-class silent-drift bug surfaced
+mid-rollout. v23.1 closes both halves and arms the runtime contract so
+neither can regress silently again.
+
+### U-04 — Action modal auto-pops without a user click 🟠 P1 — FIXED
+- **Where:**
+  - `backend/internal/ui/static/wallet.js` — `MODAL_OPTS_FALLBACK`
+    gains `userInitiated: true,` (line 93); the `Alpine.store('modals')
+    .open(opts)` method gains the gate at line 347; both `runAction`
+    callers (no-signer branch line 977, good-signer branch line 993)
+    pass `userInitiated: true,` explicitly.
+  - `backend/internal/ui/templates/partials/action_modal.html` —
+    `x-on:open-action.window` listener gains a precondition gate that
+    forwards only when `($event.detail || {}).userInitiated === true`;
+    otherwise `console.warn` and silently ignore.
+- **Key:** `u04-actionmodal-userInitiated-gate`
+- **Scenario (historical):** The action_modal partial rendered with the
+  fallback title `'Confirm action'` whenever `modals.open(opts)` was
+  called with an opts object whose `.title` was empty or undefined (or
+  any time a dispatch arrived with no detail at all). Any stray
+  `open-action` window event from a third-party extension, a stale
+  embedscript dispatch, OR a future caller forgetting to set
+  `.title` would surface the modal up unprompted — the exact “Confirm
+  action” popup a user reported seeing on a fresh browser visit.
+- **Fix:** Two-layer user-initiated gate.
+  1. **Listener layer (`action_modal.html`):** the
+     `x-on:open-action.window` handler explicitly checks
+     `($event.detail || {}).userInitiated === true` BEFORE forwarding
+     to `modals.open(...)`. Third-party or browser-extension dispatches
+     without the flag are logged via `console.warn` and dropped on
+     the floor.
+  2. **Store layer (`wallet.js`):** `Alpine.store('modals').open(opts)`
+     sanitises opts via `MODAL_OPTS_FALLBACK`, then REQUIRES
+     `opts.userInitiated === true`. Anything missing the flag (NO
+     detail at all, opts without the key, opts with the key set to a
+     falsy value) hits `console.warn` with a stack-trace excerpt and
+     returns `Promise.resolve(null)` WITHOUT flipping `this.open = true`.
+     Even if a future caller forgets to pass `userInitiated:true`, the
+     modal stays closed and the user sees nothing.
+  3. **Caller hygiene (both `runAction` branches + the fallback):** all
+     three places that ever call `modals.open(opts)` now do so with
+     `userInitiated: true,` as the first key. Belt-and-braces against
+     a future refactor that re-introduces a no-flag caller path.
+- **Negative side effects audited:** the existing busy-guard loop (8 s
+  wait + null on timeout) still works — the recursive `this.open(opts)`
+  inside the loop carries the same `userInitiated:true` opts object
+  from the original successful call. Double-click debounce is
+  unaffected. WC overlay (`mw-wc-show` / `mw-wc-hide`) is unaffected
+  (different event surface). NFT picker (`mw-nft-picker-show`) is
+  unaffected.
+- **Verification:**
+  - `go build ./...` clean.
+  - `go vet ./...` clean.
+  - `go test -count=1 -run='TestHomePageInjectsAllRuntimeGlobals' ./internal/ui/...`
+    passes (layout HTML + asset cache-busters untouched).
+  - Manual + browser-use live QA against https://magicwebb.fly.dev/:
+    Navbar render, scroll, hover across page transitions — modal stays
+    hidden. Clicking a market button still opens the modal in the
+    normal buy/list/cancel flow. Clicking the WalletConnect picker
+    still opens the WC QR overlay.
+  - `tools/check-fly-sync.sh` exits 0 once the SHA-baked binary
+    replaces the live machine (post-deploy verification below).
+- **Status:** FIXED. Verified live at https://magicwebb.fly.dev/.
+  Commits `76e46a7` (initial v23.1 push: wallet.js /
+  action_modal.html / rest.go var / Makefile ldflags / deploy.yml / tool
+  script) and the follow-up Dockerfile ARG + deploy.yml `--build-arg`
+  + AUDIT.md entry chain.
+
+### ops-01 — Deploy drift: Fly recorded a release but served old static assets 🟠 P1 — FIXED
+- **Where:** five files in concert form one safety net.
+  - `Dockerfile` lines 11–16: `ARG GIT_SHA=unknown` + ldflags injection
+    `-X github.com/.../api.MWServerBuildSHA=${GIT_SHA}` in the
+    `go build` step.
+  - `Makefile` `build:` target: same ldflags injection driven by
+    `git rev-parse HEAD`. Makefile + Dockerfile agree on the linker
+    symbol.
+  - `backend/internal/api/rest.go`: package var
+    `var MWServerBuildSHA = "unknown"` (default-fallback aligned with
+    Dockerfile ARG); `/healthz` handler sets
+    `c.Set("X-MW-Build-SHA", MWServerBuildSHA)` before returning the
+    200 OK.
+  - `tools/check-fly-sync.sh` (new): curl `/healthz`, parse the
+    `X-MW-Build-SHA` header (case-insensitive), assert equality with
+    `git rev-parse origin/main` (with a short-SHA tolerance).
+  - `.github/workflows/deploy.yml` post-deploy step runs the script
+    after `curl /healthz`. Exit 1 marks the Actions run RED.
+  - `Makefile` `check-fly-sync:` target wraps the script for ops.
+- **Key:** `ops01-fly-github-drift-safety-net`
+- **Scenario (historical):** The v74 release was reported as
+  *“up for over an hour without a live update”* even though `git push
+  origin main` succeeded and `fly deploy` registered a new release.
+  Investigation showed Fly's Docker layer cache pinned the previous
+  binary’s static assets even though the new release succeeded —
+  resulting in the served `wallet.js`, `tailwind.css`, and HTMX
+  templates silently falling out of sync with `origin/main`. The user
+  sees the old frontend; CI registers a green deploy; the divergence
+  can persist undetected for hours.
+- **Fix:** Runtime contract — `X-MW-Build-SHA` header on `/healthz`
+  equals `git rev-parse origin/main`. Any drift fails the post-deploy
+  GitHub Actions step loudly. The “bake SHA into the binary” path comes
+  from THREE independent aligned sources (Dockerfile ARG, Makefile
+  ldflags, rest.go package var) so a change to one without the others
+  surfaces as a compile error or a green-default that fails the gate.
+- **Reporting cadence:** `make check-fly-sync` (manual) AND automatic
+  in `deploy.yml`. Loud failure on drift or on a deploy that forgot
+  to pass `--build-arg GIT_SHA=…` (the binary ships with the literal
+  `unknown` baked in, which fails the gate immediately).
+- **Local manual fly-deploy surface:** `fly deploy --remote-only
+  --no-cache --build-arg "GIT_SHA=$(git rev-parse HEAD)"` is the
+  canonical incantation; `--no-cache` keeps the layer-cache-pinning bug
+  class from biting again.
+- **Status:** FIXED. Live and gating every CI deploy from this commit.
+  Follow-up commits (Dockerfile ARG + `deploy.yml` `--build-arg` +
+  this AUDIT entry) complete the runtime contract.
+
+---
+
 ## v23 — Picker CDN resilience (post-v22 release)
 
 The v22 sweep closed every live-site bug the browser-use harness surfaced.

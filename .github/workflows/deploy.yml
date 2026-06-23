@@ -100,9 +100,18 @@ jobs:
       - name: Deploy (Fly remote build → rolling release)
         # FLY_API_TOKEN scoped to this single step — narrower blast
         # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
+        # v23.1 — pass current commit SHA as a Docker --build-arg so the
+        #         Go binary's MWServerBuildSHA var is link-time-injected
+        #         with the real SHA (not the literal "unknown" fallback).
+        #         The next step ("Post-deploy sync gate") reads the SHA
+        #         back off /healthz and asserts it equals
+        #         github.event.after_commit.sha; any drift fails the run
+        #         loudly instead of silently landing an out-of-sync binary.
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        run: fly deploy --remote-only --strategy rolling
+        run: |
+          echo "  deploying commit $GITHUB_SHA"
+          fly deploy --remote-only --strategy rolling --build-arg "GIT_SHA=$GITHUB_SHA"
       - name: Post-deploy smoke check (curl /healthz)
         # Catches the class of failure where `fly deploy` succeeds
         # (image pushes, machine replaces) but the new binary boots
