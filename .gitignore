@@ -79,3 +79,9 @@ backend/internal/ui/static/uploads/
 # `/~/` anchors to a TOP-LEVEL entry literally named `~` only. Per
 # project policy this is dev-only on the working machine.
 /~/
+
+# Foundry (audit install only — never commit lib/)
+contracts/lib/
+contracts/foundry.lock
+# seed-testnet built binary (run via `go run` from tools/seed-testnet)
+tools/seed-testnet/seed-testnet

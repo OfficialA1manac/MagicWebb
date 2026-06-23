@@ -246,7 +246,15 @@ func setSessionCookie(c *fiber.Ctx, address, token string) {
 		Path:     "/",
 		HTTPOnly: true,
 		Secure:   config.C.Env == "production" || c.Protocol() == "https",
-		SameSite: "Strict",
+		// v22 audit: dropped from "Strict" to "Lax". Strict blocks the auth
+		// cookie on cross-origin top-level GET navigations — the user-visible
+		// symptom: anyone arriving from Twitter / Discord / Telegram is
+		// silently signed-out on first page load and has to reconnect. Lax
+		// still defends against CSRF on cross-origin state-changing POSTs
+		// (browser does NOT send Lax cookies on cross-site POSTs); JWT gate
+		// on every mutating endpoint is the real defence. SameSite=Lax is
+		// the explicit web standard for session cookies.
+		SameSite: "Lax",
 		MaxAge:   int((24 * time.Hour).Seconds()),
 	})
 }
@@ -284,6 +292,10 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/auction/:id", uiAuctionDetail(q))
 	app.Get("/offers", uiOffers(q))
 	app.Get("/profile/:addr", uiProfile(q))
+	// /profile (no addr) — rescue route. Resolves to /profile/<own addr>
+	// when a valid SIWE session cookie is present, else /listings. See
+	// uiProfileRedirect for the security rationale.
+	app.Get("/profile", uiProfileRedirect)
 	app.Get("/collection/:addr", uiCollection(q))
 	app.Get("/token/:addr/:id", uiToken(q))
 	app.Get("/search", uiSearch(q))
