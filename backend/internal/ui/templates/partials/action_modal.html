@@ -11,6 +11,9 @@
      class="contents">
   <template x-if="true">
     <div x-show="$store.modals.open" x-cloak
+         style="display: none;"
+         x-bind:style="$store.modals.open ? '' : 'display: none !important'"
+         @keydown.escape.window="if ($store.modals.open && $store.modals.step < 1) $store.modals.dismiss()"
          class="fixed inset-0 z-[70] flex items-center justify-center p-4"
          x-transition.opacity.duration.200ms>
       <!-- Backdrop: deep black w/ 80% opacity + subtle blur, kills click-through. -->

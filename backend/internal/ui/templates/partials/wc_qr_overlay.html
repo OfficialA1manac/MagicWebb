@@ -78,7 +78,7 @@
         // ── mw-wc-hide (POSITIVE CLOSE) ─────────────────────────────────
         // Fired by wallet.js on disconnect, by this overlay on Esc / X /
         // Got it, and by the persistent wc-pairing chip's fall-back call
-        // `window.MW_WC_HIDE()`. Always closes — no gate.
+        // `window.MW_HIDE_ALL()` (the v17 cross-tab kill-switch). Always
         this._hideListener = () => this.close();
 
         // ── mw-wallet-state (auto-close on terminal transition) ──────

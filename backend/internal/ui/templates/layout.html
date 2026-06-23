@@ -17,7 +17,7 @@
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
        the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=16">
+  <link rel="stylesheet" href="/static/tailwind.css?v=19">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -30,9 +30,9 @@
        ethereum-provider remains ESM-imported on demand from esm.sh, gated
        by the user's explicit click on the WalletConnect method in the
        picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=16" defer></script>
-  <script src="/static/sse.js?v=16" defer></script>
-  <script src="/static/ethers.umd.min.js?v=16" defer></script>
+  <script src="/static/htmx.min.js?v=19" defer></script>
+  <script src="/static/sse.js?v=19" defer></script>
+  <script src="/static/ethers.umd.min.js?v=19" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -49,13 +49,13 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=16" defer></script>
+  <script src="/static/wallet.js?v=19" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=16" defer></script>
-  <script src="/static/cdn.min.js?v=16" defer></script>
+  <script src="/static/qrcode.min.js?v=19" defer></script>
+  <script src="/static/cdn.min.js?v=19" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -208,8 +208,9 @@
           */}}
           <div x-show="wcOpen"
                x-cloak
-               x-transition.opacity.duration.150ms
-               @click.outside="wcOpen = false"
+               style="display: none;"
+               @click.outside="if (wcOpen) wcOpen = false"
+               @keydown.escape.window="if (wcOpen) wcOpen = false"
                class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus cursor-auto">
             <div class="px-3 pt-2 pb-1.5 flex items-center justify-between">
               <p class="text-[10px] uppercase tracking-wider text-white/60 font-extrabold">Choose wallet</p>
@@ -265,7 +266,9 @@
                   class="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] px-1 rounded-full btn-gold text-ink-950 text-[10px] font-extrabold flex items-center justify-center glow-gold"
                   x-text="$store.wallet.unread > 99 ? '99+' : $store.wallet.unread"></span>
           </button>
-          <div x-show="openBell" x-cloak @click.outside="openBell = false"
+          <div x-show="openBell" x-cloak style="display: none;"
+               @click.outside="if (openBell) openBell = false"
+               @keydown.escape.window="if (openBell) openBell = false"
                class="absolute right-0 mt-2 w-80 max-w-[90vw] bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl overflow-hidden z-50 backdrop-blur">
             <div class="px-4 py-2 border-b border-white/10 text-xs font-bold text-white/60 uppercase tracking-wider">Notifications</div>
             <div class="max-h-96 overflow-y-auto divide-y divide-white/5">
@@ -367,7 +370,10 @@
        navbar (the previous "wallet button not visible" complaint).
        Controls mirror the desktop navbar behaviour via $store.wallet
        so state stays consistent regardless of entry point. -->
-  <div x-show="open" x-cloak class="md:hidden border-t border-white/10 px-4 py-3 space-y-1.5 text-sm">
+  <div x-show="open" x-cloak style="display: none;"
+       @click.outside.window="if (open) open = false"
+       @keydown.escape.window="if (open) open = false"
+       class="md:hidden border-t border-white/10 px-4 py-3 space-y-1.5 text-sm">
     <a href="/"          class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Home</a>
     <a href="/listings"  class="block py-2 px-3 rounded-lg text-sky-200 hover:bg-sky-500/15 transition">Listings</a>
     <a href="/auctions"  class="block py-2 px-3 rounded-lg text-violet-200 hover:bg-violet-500/15 transition">Auctions</a>

@@ -17,6 +17,9 @@ error BidOverflow();
 error BadIncrement();
 error NotSettled();
 error NothingToWithdraw();
+error BatchTooLarge();
+error NotStalled();
+error StallNotOver();
 
 /// @title AuctionHouse
 /// @notice English auctions with a CUMULATIVE bid model, escrow-until-settle, and
@@ -48,6 +51,11 @@ contract AuctionHouse is MarketplaceCore {
     uint64 public constant EXTENSION_WINDOW     = 3 minutes;
     /// @notice Maximum auction duration from creation.
     uint64 public constant MAX_AUCTION_DURATION = 7 days;
+    /// @notice Window after which a stalled auction (settle() failed delivery
+    ///         because the seller revoked approval) can be reclaimed — refunds
+    ///         the winner in full and cancels the auction. Prevents a seller
+    ///         from monopolising the winner's escrow indefinitely.
+    uint64 public constant STALL_WINDOW        = 7 days;
 
     struct Auction {
         address       seller;
@@ -63,6 +71,9 @@ contract AuctionHouse is MarketplaceCore {
         address       leader;            // current highest-cumulative bidder
         uint128       leaderTotal;       // leader's cumulative escrow
         uint128       minIncrementFlat;  // absolute min increment in wei (may be 0)
+        uint64        stalledAt;         // timestamp when settle() detected a delivery
+                                         // failure and parked the auction. 0 = active.
+                                         // Allows settleUnstuck() / reclaim() recovery.
     }
 
     uint256 public nextAuctionId;
@@ -103,6 +114,8 @@ contract AuctionHouse is MarketplaceCore {
     event LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount);
     event AuctionCancelled(uint256 indexed id);
     event RefundPushed(address indexed bidder, uint256 amount);
+event AuctionStalled(uint256 indexed id, address indexed winner, address indexed seller);
+event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refundAmount);
 
     constructor(address recipient, address manager_) MarketplaceCore(recipient, manager_) {}
 
@@ -194,12 +207,19 @@ contract AuctionHouse is MarketplaceCore {
         cumulative[id][msg.sender] = newTotal;
 
         // Leadership update. Invariant: the leader always holds the max cumulative.
+        // `newLead` flips true ONLY when leadership actually changes; the anti-snipe
+        // extension below reads that flag so escrow-accumulating sub-threshold bids
+        // can no longer keep pushing endsAt forward (audit-#1: griefer repeated
+        // 1-wei bids inside the closing window and permanently stalled the
+        // auction, stranding winner + losers' funds).
+        bool newLead = false;
         if (a.leader == msg.sender) {
-            a.leaderTotal = newTotal; // leader tops up
+            a.leaderTotal = newTotal; // leader tops up; no leadership change.
         } else if (a.leaderTotal == 0) {
             // No leader yet: clearing the reserve takes the lead; otherwise the
             // bid simply accumulates (no revert) toward a future qualifying total.
-            if (newTotal >= a.reserve) {
+            newLead = newTotal >= a.reserve;
+            if (newLead) {
                 a.leader      = msg.sender;
                 a.leaderTotal = newTotal;
             }
@@ -211,17 +231,19 @@ contract AuctionHouse is MarketplaceCore {
             if (inc == 0) inc = 1;
             uint128 minNext = uint128(uint256(a.leaderTotal) + inc);
             if (newTotal < minNext) revert BidTooLow();
+            newLead = true;
             address prev  = a.leader;
             a.leader      = msg.sender;
             a.leaderTotal = newTotal;
             emit OutbidNotification(id, prev, newTotal);
         }
-        // else (newTotal <= leaderTotal): escrow accumulates, no lead change — allowed.
+        // else (newTotal <= leaderTotal): escrow accumulates, no lead change.
 
-        // Anti-snipe. Underflow-safe: the AuctionEnded check above guarantees
-        // block.timestamp < a.endsAt here.
+        // Anti-snipe — gated on `newLead` so sub-threshold accumulation cannot
+        // extend the timer. Underflow-safe: the AuctionEnded check above
+        // guarantees block.timestamp < a.endsAt here.
         unchecked {
-            if (a.endsAt - block.timestamp < EXTENSION_WINDOW) {
+            if (newLead && a.endsAt - block.timestamp < EXTENSION_WINDOW) {
                 uint64 newEnd = uint64(block.timestamp) + EXTENSION_WINDOW;
                 a.endsAt = newEnd;
                 emit AuctionExtended(id, newEnd);
@@ -243,11 +265,11 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
-
-        a.settled = true;
+        if (a.stalledAt != 0) revert NotStalled(); // parked after delivery failure — use settleUnstuck() or reclaim()
 
         address winner = a.leader;
         if (winner == address(0)) {
+            a.settled = true;
             emit AuctionCancelled(id); // no qualifying bid; all escrow refundable
             return;
         }
@@ -260,7 +282,8 @@ contract AuctionHouse is MarketplaceCore {
         uint128       winBid  = a.leaderTotal;
         uint128       fee     = uint128(_feeOf(winBid));
 
-        // Consume the winner's escrow up front so refundLosers never repays them.
+        // Consume the winner's escrow up front so refundLosers never repays them
+        // (whichever path the settle takes).
         cumulative[id][winner] = 0;
 
         bool moved = false;
@@ -269,14 +292,21 @@ contract AuctionHouse is MarketplaceCore {
         } else {
             try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {}
         }
+
         if (!moved) {
-            // Can't deliver NFT → refund the winner in full, cancel.
-            (bool refunded,) = winner.call{value: winBid}("");
-            if (!refunded) pendingReturns[winner] += winBid;
-            emit RefundPushed(winner, winBid);
-            emit AuctionCancelled(id);
+            // Seller revoked approval between endsAt and settle() (or any other
+            // delivery failure). Park the auction in STALLED state instead of
+            // auto-cancelling — the previous behavior let the seller unilaterally
+            // cancel a winning auction by revoking approval (audit-#2). Now:
+            //   - the seller can re-approve + call settleUnstuck(id) to re-attempt,
+            //   - after STALL_WINDOW, anyone can call reclaim(id) to refund the winner
+            //     in full and cancel the auction.
+            a.stalledAt = uint64(block.timestamp);
+            emit AuctionStalled(id, winner, sel);
             return;
         }
+
+        a.settled = true;
 
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
         if (fee > 0) {
@@ -291,15 +321,91 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
 
-    /// @notice Refund a batch of non-winning bidders their full escrow. Callable by
-    ///         anyone once the auction is settled. Idempotent (zeroed escrow is
-    ///         skipped); pull-fallback per address so one bad recipient can't brick
-    ///         the batch. The keeper enumerates bidders via bidderCount/getBidder.
+    /// @notice Re-attempt delivery for a stalled auction (settle() bailed into
+    ///         STALLED because the seller revoked approval between endsAt and
+    ///         the original settle call). On success, completes the settlement
+    ///         normally. On another delivery failure, refreshes `stalledAt`
+    ///         (frontend re-poll) and the caller can wait out STALL_WINDOW for
+    ///         reclaim().
+    // slither-disable-next-line reentrancy-eth
+    function settleUnstuck(uint256 id) external nonReentrant {
+        Auction storage a = auctions[id];
+        if (a.seller == address(0) || a.settled) revert NotActive();
+        if (a.stalledAt == 0) revert NotStalled();
+
+        address       winner = a.leader;
+        TokenStandard std    = a.standard;
+        address       coll   = a.collection;
+        address       sel    = a.seller;
+        uint128       winBid = a.leaderTotal;
+        uint128       fee    = uint128(_feeOf(winBid));
+
+        bool moved = false;
+        if (std == TokenStandard.ERC721) {
+            try IERC721(coll).safeTransferFrom(sel, winner, a.tokenId) { moved = true; } catch {}
+        } else {
+            try IERC1155(coll).safeTransferFrom(sel, winner, a.tokenId, a.amount, "") { moved = true; } catch {}
+        }
+        if (!moved) {
+            a.stalledAt = uint64(block.timestamp);
+            emit AuctionStalled(id, winner, sel);
+            return;
+        }
+
+        a.settled   = true;
+        a.stalledAt = 0;
+
+        if (fee > 0) {
+            (bool okFee,) = feeRecipient.call{value: fee}("");
+            if (!okFee) pendingReturns[feeRecipient] += fee;
+        }
+        uint128 proceeds;
+        unchecked { proceeds = winBid - fee; }
+        (bool okSel,) = sel.call{value: proceeds}("");
+        if (!okSel) pendingReturns[sel] += proceeds;
+
+        emit AuctionSettled(id, winner, sel, winBid, fee);
+    }
+
+    /// @notice Anyone can call this after STALL_WINDOW has elapsed to refund
+    ///         the stalled auction's winner in full and cancel the auction.
+    ///         Prevents a seller from holding the winner's escrow hostage
+    ///         indefinitely after revoking approval.
+    // slither-disable-next-line reentrancy-eth
+    function reclaim(uint256 id) external nonReentrant {
+        Auction storage a = auctions[id];
+        if (a.seller == address(0) || a.settled) revert NotActive();
+        if (a.stalledAt == 0) revert NotStalled();
+        if (block.timestamp < a.stalledAt + STALL_WINDOW) revert StallNotOver();
+
+        address winner = a.leader;
+        uint128 winBid = a.leaderTotal;
+
+        a.settled   = true;
+        a.stalledAt = 0;
+
+        if (winBid > 0) {
+            (bool ok,) = winner.call{value: winBid}("");
+            if (!ok) pendingReturns[winner] += winBid;
+            emit RefundPushed(winner, winBid);
+        }
+        emit AuctionReclaimed(id, winner, winBid);
+        emit AuctionCancelled(id);
+    }
+
+    /// @notice Refund a batch of non-winning bidders their full escrow. Callable
+    ///         by anyone once the auction is settled. Idempotent (zeroed escrow
+    ///         is skipped); pull-fallback per address. Bounded `batch.length` (200)
+    ///         keeps a single call inside a block's gas budget, and per-call
+    ///         `gas: 50_000` caps the EIP-150 63/64 forwarding budget so a griefing
+    ///         receiver can't cascade OOG the keeper mid-loop and roll back prior
+    ///         pendingReturns credits (audit-#4).
     // slither-disable-next-line reentrancy-eth
     function refundLosers(uint256 id, address[] calldata batch) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0)) revert NotActive();
         if (!a.settled) revert NotSettled();
+        if (batch.length == 0 || batch.length > 200) revert BatchTooLarge();
 
         for (uint256 i; i < batch.length; ++i) {
             address b = batch[i];
@@ -308,8 +414,11 @@ contract AuctionHouse is MarketplaceCore {
             cumulative[id][b] = 0;
             // Safe: amt is b's OWN escrowed balance (zeroed above, CEI); a non-bidder
             // address has 0 and was skipped, so funds can only return to their owner.
+            // `gas: 50_000` caps the EIP-150 forward-budget — a hostile receive()
+            // can burn at most 50k of in-loop gas per iteration; the outer tx
+            // can never OOG with a surviving prior-iteration pendingReturns credit.
             // slither-disable-next-line arbitrary-send-eth
-            (bool ok,) = b.call{value: amt}("");
+            (bool ok,) = b.call{gas: 50_000, value: amt}("");
             if (!ok) pendingReturns[b] += amt;
             emit LoserRefunded(id, b, amt);
         }

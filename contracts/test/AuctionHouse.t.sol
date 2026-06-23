@@ -43,7 +43,7 @@ contract AuctionHouseTest is Test {
     }
 
     function _leader(uint256 id) internal view returns (address l, uint128 t) {
-        (,,,,,,,,,, l, t,) = ah.auctions(id);
+        (,,,,,,,,,, l, t,,) = ah.auctions(id);
     }
 
     // ── Cumulative bidding ──────────────────────────────────────────────────────
@@ -126,7 +126,7 @@ contract AuctionHouseTest is Test {
         vm.stopPrank();
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
-        (,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
+        (,,,,,,uint64 newEnd,,,,,,,) = ah.auctions(id);
         assertEq(newEnd, uint64(block.timestamp) + ah.EXTENSION_WINDOW());
     }
 
@@ -155,7 +155,7 @@ contract AuctionHouseTest is Test {
         vm.warp(block.timestamp + 8 days);
         vm.prank(carol);                          // not keeper, not party
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
 
@@ -171,7 +171,7 @@ contract AuctionHouseTest is Test {
         _bid(id, alice, 0.5 ether);               // below reserve → no leader
         vm.warp(block.timestamp + 8 days);
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,) = ah.auctions(id);
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
         assertEq(ah.cumulative(id, alice), 0.5 ether, "refundable, not consumed");
     }

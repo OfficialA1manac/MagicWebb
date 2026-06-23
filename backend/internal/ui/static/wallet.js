@@ -575,16 +575,60 @@ window.addEventListener('alpine:init', () => {
         localStorage.setItem('mw_addr', this.address);
         localStorage.setItem('mw_kind', kind);
 
+        // Named handler refs so ANY prior registration on the same eip1193
+        // (window.ethereum is a singleton) can be removed before re-mounting.
+        // Without this, repeated connect()/disconnect() cycles on INJECTED
+        // stack N copies of every listener and one chainChanged event would
+        // fire N reloads, N storage writes, races. WalletConnect's session-
+        // bound provider gets garbage-collected on session end so it doesn't
+        // accumulate, but we remove there too for symmetry.
+        const _onChain = () => location.reload();
+        const _onAccts = (accs) => {
+          if (!accs || !accs.length) { this.disconnect(); return; }
+          this.address = accs[0].toLowerCase();
+          localStorage.setItem('mw_addr', this.address);
+          if (kind !== 'walletconnect') location.reload();
+        };
+        let _onDisc = null;
+
+        // Tear down any prior pair before re-registering. window.ethereum
+        // persists across reconnects — listener stacking was the post-fix
+        // regression caught by code-review.
+        if (this._eipHandlers && eip1193?.removeListener) {
+          try { eip1193.removeListener('chainChanged',    this._eipHandlers.chain); } catch (e) {}
+          try { eip1193.removeListener('accountsChanged', this._eipHandlers.accts); } catch (e) {}
+          if (this._eipHandlers.disc) {
+            try { eip1193.removeListener('disconnect',     this._eipHandlers.disc); } catch (e) {}
+          }
+        }
+        this._eipHandlers = { chain: _onChain, accts: _onAccts };
+
+        // EIP-1193 'disconnect' fires on WalletConnect session endings only.
+        // Injected providers don't surface this event for user-initiated UI
+        // changes — the disconnect button there calls this.disconnect()
+        // directly. We do not skip the WC registration on subsequent
+        // connect() cycles: each new connect() re-binds to a fresh WC
+        // SignClient instance anyway, and the eip1193.removeListener call
+        // above clears any prior pair defensively.
         if (kind === 'walletconnect' && eip1193?.on) {
-          eip1193.on('disconnect', () => this.disconnect());
-          eip1193.on('chainChanged', () => location.reload());
-          eip1193.on('accountsChanged', (accs) => {
-            if (!accs.length) this.disconnect();
-            else {
-              this.address = accs[0].toLowerCase();
-              localStorage.setItem('mw_addr', this.address);
-            }
-          });
+          _onDisc = () => this.disconnect();
+          this._eipHandlers.disc = _onDisc;
+          eip1193.on('disconnect', _onDisc);
+        }
+
+        // chainChanged + accountsChanged are standard EIP-1193 events from
+        // every compliant provider. The previous version gated these on
+        // kind==='walletconnect' which left injected (MetaMask, Rabby,
+        // mobile wallets) blind to mid-session switches — this was the
+        // audit's #1 critical. ethers.BrowserProvider caches `.provider.network`
+        // at construction, so an unnoticed chainChanged routes the next tx
+        // against the stale snapshot and instant-reverts on the wrong chain.
+        // accountsChanged on injected reloads because the cached Signer is
+        // bound to the prior address; on WC, SignerClient reflows account-
+        // keyed sessions automatically.
+        if (eip1193?.on) {
+          eip1193.on('chainChanged', _onChain);
+          eip1193.on('accountsChanged', _onAccts);
         }
 
         await this._authenticate();
@@ -726,9 +770,18 @@ window.addEventListener('alpine:init', () => {
     },
 
     async _authenticate() {
+      // SIWE sign-in flow. Every failure path THROWS — replacing the
+      // previous console.warn + silent return pattern that left this.jwt=null
+      // when connected() proceeded to setState('connected'). That was the
+      // source of the "green UI / 401 toasts down the stack" UX bug: a
+      // rejected signature looked successful in the navbar but every
+      // /api/v1/profile/* + /api/v1/reports call then produced confusing
+      // 401 toasts. Now the parent connect()'s catch flips state→'error'
+      // and we surface a typed toast here so the user sees what actually
+      // went wrong (signature rejection vs. server unavailable).
       try {
         const nonceRes = await fetch('/auth/nonce?address=' + this.address);
-        if (!nonceRes.ok) return;
+        if (!nonceRes.ok) throw new Error('/auth/nonce HTTP ' + nonceRes.status);
         const { nonce } = await nonceRes.json();
         const message = `Sign in to MagicWebb\nAddress: ${this.address}\nNonce: ${nonce}`;
         const sig = await R(this.signer).signMessage(message);
@@ -737,11 +790,38 @@ window.addEventListener('alpine:init', () => {
           headers: { 'Content-Type': 'application/json' },
           body:    JSON.stringify({ address: this.address, message, signature: sig }),
         });
-        if (!verifyRes.ok) return;
+        if (!verifyRes.ok) throw new Error('/auth/verify HTTP ' + verifyRes.status);
         const { token } = await verifyRes.json();
+        if (typeof token !== 'string' || !token) throw new Error('/auth/verify returned no token');
         this.jwt = token;
         localStorage.setItem('mw_jwt', token);
-      } catch (e) { console.warn('SIWE auth failed:', e); }
+      } catch (e) {
+        this.jwt = null;
+        try { localStorage.removeItem('mw_jwt'); } catch (e) {}
+        // Heuristic: a user-cancelled signature prompt can show up as:
+        //   - ethers v6 ACTION_REJECTED code, OR
+        //   - EIP-1193 code 4001 (canonical user-rejected-request), OR
+        //   - "user rejected signature" / "user denied transaction" in
+        //     shortMessage or message (MetaMask, Rabby, WalletConnect, mobile
+        //     wallets differ on which field carries the rejection text).
+        // Anything else is treated as a generic "Login failed" — the parent's
+        // catch + the previous-error toast chain will surface the real server
+        // reason.
+        const code = e?.code;
+        const txt = String(e?.shortMessage ?? e?.message ?? e ?? '').toLowerCase();
+        const userRejected =
+          code === 4001 ||
+          code === 'ACTION_REJECTED' ||
+          txt.includes('user rejected') ||
+          txt.includes('user denied')  ||
+          txt.includes('action_rejected') ||
+          txt.includes('action rejected');
+        const msg = userRejected
+          ? 'Signature required to log in.'
+          : 'Login failed. Please try again.';
+        if (typeof toast === 'function') toast(msg, 'error');
+        throw e; // propagate → connect() catch flips state to 'error'
+      }
     },
 
     authHeaders() {
@@ -784,10 +864,10 @@ window.addEventListener('alpine:init', () => {
       if (approved) return true;
       // Write: signer only.
       const writeContract = new ethers.Contract(collection, abi, R(signer));
-      this._toast('Approve in your wallet…', 'info');
+      toast('Approve in your wallet…', 'info');
       const tx = await writeContract.setApprovalForAll(operator, true);
       await tx.wait();
-      this._toast('Approved.', 'success');
+      toast('Approved.', 'success');
       return true;
     },
 
@@ -822,7 +902,7 @@ window.addEventListener('alpine:init', () => {
 
     async runAction(opts) {
       if (this.busy) {
-        this._toast('Another action is already in progress — please wait.', 'info');
+        toast('Another action is already in progress — please wait.', 'info');
         return { ok: false, error: 'busy' };
       }
       this.busy = true;
@@ -838,7 +918,7 @@ window.addEventListener('alpine:init', () => {
             ctaLabel: 'Got it',
             run: async ({ fail, setStep }) => {
               setStep(1, 'Open the wallet picker…');
-              this._toast('Click "Connect Wallet" above to choose a wallet.', 'info');
+              toast('Click "Connect Wallet" above to choose a wallet.', 'info');
               fail({ title: 'Wallet not connected', body: 'Connect a wallet to continue.' });
             },
           });
@@ -946,7 +1026,7 @@ window.addEventListener('alpine:init', () => {
             // context before signing, but do NOT block: a flaky RPC
             // should not silently kill their flow on a perfectly valid
             // listing. The toast is INFORMAITONAL only, not a fail().
-            this._toast('Preflight flagged: ' + revertMessage(staticErr) + ' \u2014 your wallet will surface the same error if it is a real revert, so you can sign safely.', 'info');
+            toast('Preflight flagged: ' + revertMessage(staticErr) + ' \u2014 your wallet will surface the same error if it is a real revert, so you can sign safely.', 'info');
           } catch (_) {}
         }
         const tx = await writeContract.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
@@ -1300,8 +1380,8 @@ window.addEventListener('alpine:init', () => {
           body: JSON.stringify({ target_type: targetType, target_id: targetId, reason, detail: detail || '' }),
         });
         if (!res.ok) throw new Error('report failed');
-        this._toast('Report submitted. Thank you.', 'success');
-      } catch (_) { this._toast('Could not submit report.', 'error'); }
+        toast('Report submitted. Thank you.', 'success');
+      } catch (_) { toast('Could not submit report.', 'error'); }
     },
     async saveProfile(fields) {
       try {
@@ -1309,11 +1389,10 @@ window.addEventListener('alpine:init', () => {
           method: 'PUT', headers: this.authHeaders(), body: JSON.stringify(fields),
         });
         if (!res.ok) throw new Error('save failed');
-        this._toast('Profile saved.', 'success');
-      } catch (_) { this._toast('Could not save profile.', 'error'); }
+        toast('Profile saved.', 'success');
+      } catch (_) { toast('Could not save profile.', 'error'); }
     },
 
-    _toast(msg, type = 'info') { return toast(msg, type); },
   });
 
   // ── Hydrate the "saved wallet" hint on page load (v13 — NO auto-reconnect).
@@ -1420,11 +1499,100 @@ function mediaURL(uri) {
 // UMD bootstrap will install it. Pre-setting `window.Alpine = undefined`
 // would race against later bundles that guard with `if (!window.Alpine)`
 // and break the registration in some Alpine builds.
-window.fmtFLR  = fmtFLR;
-window.fmtAddr = fmtAddr;
-window.mediaURL = mediaURL;
 
-// Force-open the WC pairing overlay from anywhere — used by the
+// ────────────────────────────────────────────────────────────────────────
+// Force-hide ALL modals/dropdowns — global kill-switch.
+//
+// Bug class (v17): an Alpine `x-transition.opacity` mid-flight that
+// gets interrupted by a tab visibility change can leave a dropdown
+// visually frozen onscreen even though its reactive flag is false. The
+// DOM `display:` style never gets set because Alpine's transition
+// listener is awaiting the next anim frame that's never going to arrive.
+// The user sees a stuck dropdown that "won't close" even though every
+// @click handler, every X button, every outside-click has already
+// fired. Worse: on tab-switch BACK to the page the same stale state
+// greets the user, who concludes "frozen across tabs".
+//
+// `MW_HIDE_ALL()` is the belt-and-braces disarm: every dropdown flag
+// that is safe to close in isolation flips to false, plus each modal
+// closes via its own defensive path (mw-wc-hide event, NFT picker
+// hide event, modal dismiss). Safe-to-close == not mid-confirmation
+// (step < 1). The action_modal.killSwitch flag distinguishes "user
+// dropped the modal mid-cancel" from "tx is signing in the wallet
+// and we MUST NOT cancel" (step >= 1).
+//
+// Additionally: a `visibilitychange` listener below calls this on every
+// tab-focus return so any DOM state that was wedged by a mid-flight
+// transition when the tab was hidden gets torn down before the user
+// sees it.
+// ────────────────────────────────────────────────────────────────────────
+function MW_HIDE_ALL() {
+  // 1. Navbar/local-state dropdowns. We grab the nav's x-data via the
+  //    DOM and force-evaluate its data — more robust than assuming
+  //    global nav.x because every page loads layout.html with its own
+  //    nav instance.
+  const nav = document.querySelector('nav[x-data]');
+  if (nav && nav._x_dataStack && nav._x_dataStack[0]) {
+    const d = nav._x_dataStack[0];
+    if (d && typeof d === 'object') {
+      try { if (d.wcOpen)    d.wcOpen    = false; } catch (_) {}
+      try { if (d.openBell)  d.openBell  = false; } catch (_) {}
+      try { if (d.open)      d.open      = false; } catch (_) {}
+    }
+  }
+  // 2. WC QR overlay (event-bus driven, no nav-scope tie).
+  try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+  // 3. NFT picker.
+  try { window.dispatchEvent(new CustomEvent('mw-nft-picker-hide')); } catch (_) {}
+  // 4. Action modal — only when NOT in the middle of a wallet signing
+  //    confirmation. The store's dismiss() callback is the canonical
+  //    path; we guard with step < 1 explicitly so an in-flight buy
+  //    (step >= 1) is NEVER touched (the user can't cancel a
+  //    signed tx from the server anyway, but dismissing the modal
+  //    mid-flight leaves them with no UI feedback for the tx).
+  try {
+    const m = typeof Alpine !== 'undefined' && Alpine.store && Alpine.store('modals');
+    if (m && m.open && typeof m.step === 'number' && m.step < 1) {
+      m.dismiss();
+    }
+  } catch (_) {}
+  // 5. CSS-level DOM poke: any modal-root that has `style="display:none"`
+  //    already at init gets stamped now via inline style override so a
+  //    wedged `x-transition` cannot hold the dropdown onscreen even
+  //    if every reactive flag is correctly false. Belt vs. the known
+  //    "Alpine transition freezing on tab-hide" race.
+  try {
+    const ids = ['wc-modal-root', 'nft-picker-modal-root', 'mw-modal-killer'];
+    for (const id of ids) {
+      const el = document.getElementById(id);
+      if (el) el.style.display = 'none';
+    }
+    // The action modal's root div is unnamed in action_modal.html
+    // (wrapped in <template x-if="true">) — pattern-match its class.
+    const actionRoot = document.querySelector('div.fixed.inset-0.z-\\[70\\]');
+    if (actionRoot) actionRoot.style.display = 'none';
+  } catch (_) {}
+}
+window.MW_HIDE_ALL = MW_HIDE_ALL;
+
+// visibilitychange: when the tab comes BACK into focus, force-hide
+// anything that was wedged while the tab was hidden. The browser
+// pauses `requestAnimationFrame` on hidden tabs, which is the trigger
+// for the x-transition freeze class. We listen on document because
+// `window.addEventListener('visibilitychange', ...)` and
+// `document.addEventListener('visibilitychange', ...)` are equivalent
+// — both fire while the document is in the foreground or background.
+if (typeof document !== 'undefined') {
+  document.addEventListener('visibilitychange', () => {
+    if (document.visibilityState === 'visible') {
+      // Wait one microtask so Alpine finishes any binding-flush that
+      // accumulated during the hidden phase before we tear state down.
+      Promise.resolve().then(() => MW_HIDE_ALL());
+    }
+  });
+}
+
+
 // persistent Scan-QR-on-your-phone chip in the navbar. Idempotent:
 // if window.MW_WC_URI is cached from a prior display_uri emission,
 // dispatch mw-wc-show carrying that URI so the overlay rehydrates the
@@ -1447,13 +1615,5 @@ function MW_WC_OPEN_OVERLAY() {
 }
 window.MW_WC_OPEN_OVERLAY = MW_WC_OPEN_OVERLAY;
 
-// Emergency close hook. Any code (or the user, via DevTools) can call
-// `window.MW_WC_HIDE()` to dismiss the QR overlay. Used by the chip's
-// X-button adjacent handler, the disconnect path, and any future UI
-// that wants to ensure the overlay is hidden (e.g. when switching
-// routes mid-connect).
-function MW_WC_HIDE() {
-  try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
-}
-window.MW_WC_HIDE = MW_WC_HIDE;
+
 }());

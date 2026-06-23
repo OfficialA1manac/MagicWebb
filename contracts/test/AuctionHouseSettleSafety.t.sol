@@ -36,9 +36,10 @@ contract AuctionHouseSettleSafetyTest is Test {
         ah.bid{value: 2 ether}(id);
     }
 
-    /// Seller moves the NFT out after the auction ends → settle refunds the winner
-    /// their full bid and cancels; no fee taken.
-    function test_settleRefundsWinnerWhenSellerMovedNft() public {
+    /// Audit-#2: when the seller hijacks delivery (moves the NFT elsewhere) after
+    /// endsAt, settle() parks the auction INSTEAD of auto-refunding. After
+    /// STALL_WINDOW elapses, reclaim() refunds the winner in full.
+    function test_settleParksWhenSellerMovedNftThenReclaim() public {
         (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
         vm.prank(seller);
@@ -47,17 +48,29 @@ contract AuctionHouseSettleSafetyTest is Test {
         uint256 before = alice.balance;
         ah.settle(id);
 
-        assertEq(alice.balance, before + 2 ether, "winner fully refunded");
+        // settle() parks — no winner refund yet, no fee.
+        assertEq(alice.balance, before, "winner NOT auto-refunded on failed delivery");
+        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed from ledger");
         assertEq(nft.ownerOf(tid), carol, "NFT not delivered to winner");
-        assertEq(feeRecipient.balance, 0, "no fee on failed settlement");
-        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed");
+        assertEq(feeRecipient.balance, 0, "no fee on parked settlement");
 
-        vm.expectRevert(NotActive.selector);
+        // Re-trying settle() is now blocked (NotActive or NotStalled; either is OK).
+        vm.expectRevert();
         ah.settle(id);
+
+        // reclaim() must wait STALL_WINDOW before paying the winner.
+        vm.warp(block.timestamp + ah.STALL_WINDOW() - 1);
+        vm.expectRevert();
+        ah.reclaim(id);
+
+        vm.warp(block.timestamp + 1);
+        ah.reclaim(id);
+        assertEq(alice.balance, before + 2 ether, "winner fully refunded via reclaim");
+        assertEq(nft.ownerOf(tid), carol, "NFT still with carol (delivery never succeeded)");
     }
 
-    /// Seller revokes approval after end → same full refund of the winner.
-    function test_settleRefundsWinnerWhenApprovalRevoked() public {
+    /// Audit-#2 sibling: seller revokes approval → same parked-then-reclaim path.
+    function test_settleParksWhenApprovalRevokedThenReclaim() public {
         (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
         vm.prank(seller);
@@ -66,9 +79,21 @@ contract AuctionHouseSettleSafetyTest is Test {
         uint256 before = alice.balance;
         ah.settle(id);
 
-        assertEq(alice.balance, before + 2 ether, "winner fully refunded");
-        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller");
-        assertEq(feeRecipient.balance, 0, "no fee");
+        // settle() parks: no payout, no fee.
+        assertEq(alice.balance, before, "winner NOT auto-refunded on approval revoke");
+        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed from ledger");
+        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller (delivery never succeeded)");
+        assertEq(feeRecipient.balance, 0, "no fee on parked settlement");
+
+        // reclaim() is gated by STALL_WINDOW.
+        vm.warp(block.timestamp + ah.STALL_WINDOW() - 1);
+        vm.expectRevert();
+        ah.reclaim(id);
+
+        vm.warp(block.timestamp + 1);
+        ah.reclaim(id);
+        assertEq(alice.balance, before + 2 ether, "winner fully refunded via reclaim");
+        assertEq(nft.ownerOf(tid), seller, "NFT still with seller after reclaim");
     }
 
     /// feeRecipient cannot receive ETH → settle still completes: NFT → winner,
