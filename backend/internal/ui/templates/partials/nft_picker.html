@@ -72,13 +72,23 @@
           }
         };
 
-        window.addEventListener('mw-nft-picker-show', this._showListener);
-        window.addEventListener('keydown',           this._escHandler);
+        // Listen on `document` rather than `window`: Alpine's `$dispatch(...)`
+        // bubbles CustomEvents through DOM ancestors and reaches document
+        // (the canonical end of the bubble path). Using `window` historically
+        // caused the picker to silently miss dispatches fired from nested
+        // elements (deep in listing/auction/offer cards), producing the
+        // symptom where the picker never opened even though the page button
+        // click landed. `document` is on the path for any reasonable DOM
+        // nesting, plus shadow-DOM-safe, plus the same bubble behaviour
+        // we rely on for the `buy` / `cancel-listing` / `settle-auction`
+        // listeners in wallet.js. Consistency wins.
+        document.addEventListener('mw-nft-picker-show', this._showListener);
+        document.addEventListener('keydown',           this._escHandler);
       },
 
       destroy() {
-        if (this._showListener) window.removeEventListener('mw-nft-picker-show', this._showListener);
-        if (this._escHandler)   window.removeEventListener('keydown',           this._escHandler);
+        if (this._showListener) document.removeEventListener('mw-nft-picker-show', this._showListener);
+        if (this._escHandler)   document.removeEventListener('keydown',           this._escHandler);
       },
 
       // Pulls the user's NFT list once auth+provider are good. The
@@ -222,9 +232,9 @@
   (function () {
     if (window.__MW_NFT_PICKER_BRIDGE__) return;
     window.__MW_NFT_PICKER_BRIDGE__ = true;
-    window.addEventListener('open-nft-picker', function (e) {
+    document.addEventListener('open-nft-picker', function (e) {
       try {
-        window.dispatchEvent(new CustomEvent('mw-nft-picker-show', {
+        document.dispatchEvent(new CustomEvent('mw-nft-picker-show', {
           detail: (e && e.detail) || {},
         }));
       } catch (_) {}

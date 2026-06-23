@@ -84,6 +84,23 @@ const netOfFee = (wei) => BigInt(wei) - feeOf(wei);
 /* ── WalletConnect project id (server-injected) ── */
 const WC_PROJECT_ID = (window.MW_WC_PROJECT_ID || '').trim();
 
+/* ── Hoisted constant: fallback opts for `modals.open()` when called with
+ * undefined / null / non-object. Reused on every malformed dispatch so
+ * the happy path doesn't allocate a new object. Frozen so a caller
+ * (defensive only) can't mutate it across invocations.
+ * ── */
+const MODAL_OPTS_FALLBACK = Object.freeze({
+  kind: 'info',
+  icon: '\u2139',
+  title: 'This action isn\u2019t available right now',
+  subtitle: '',
+  disclaimer: 'Please try again from a button on the page.',
+  ctaLabel: 'Dismiss',
+  run: async ({ fail }) => {
+    fail({ title: 'Action unavailable', body: 'Please retry from a button on the page.' });
+  },
+});
+
 /* ── AuctionHouse constants ── */
 const EXTENSION_WINDOW = 180;
 
@@ -291,6 +308,20 @@ window.addEventListener('alpine:init', () => {
     // _resolver is the per-open callback dispatched on click of Confirm.
     _resolver: null,
 
+    // ── make open() robust to malformed callers ──
+    // The action_modal partial listens for `open-action.window` events
+    // and forwards `$event.detail` into modals.open(). A listener-site
+    // guard (`if ($event.detail)`) is the primary defence — kept in sync
+    // here as a belt-and-braces: ANY future caller that forgets to
+    // validate its own input gets a small dismissable info-card instead
+    // of pinning Alpine with "Cannot read properties of undefined
+    // (reading 'kind')". Behaviour changes to be user-friendly: the copy
+    // reads as an action-availability hint, not as engineering jargon.
+    _sanitizeOpts(opts) {
+      if (opts && typeof opts === 'object') return opts;
+      return MODAL_OPTS_FALLBACK;
+    },
+
     /**
      * Open the modal with the supplied summary. Promise resolves on:
      *   { ok: true,  txHash }  — confirmed on-chain
@@ -298,6 +329,7 @@ window.addEventListener('alpine:init', () => {
      *   null                   — busy with prior modal (auto-skipped)
      */
     open(opts) {
+      opts = this._sanitizeOpts(opts);
       if (this.open && this._resolver) {
         return new Promise((resolve) => {
           const tick = setInterval(() => {
@@ -1427,17 +1459,21 @@ function toast(msg, type = 'info') {
 /* ─────────────────────────────────────────────────────────────────────────────
  * Event bus → wallet action routing
  * ───────────────────────────────────────────────────────────────────────────── */
-window.addEventListener('buy', e => {
+// Listing-card Buy click reaches `document` via $dispatch bubbled CustomEvent;
+// previous `window.addEventListener` silently never fired from inside the
+// listing card's nested DOM, so the click fell through to the wrapping
+// <a href="/token/..."> navigation. `document` is reliably on the bubble path.
+document.addEventListener('buy', e => {
   const { collection, tokenId, seller, price } = e.detail || {};
   if (collection && tokenId && seller && price) {
     Alpine.store('wallet').buy(collection, tokenId, seller, price);
   }
 });
-window.addEventListener('cancel-listing', e => {
+document.addEventListener('cancel-listing', e => {
   const { collection, tokenId } = e.detail || {};
   Alpine.store('wallet').cancel(collection, tokenId);
 });
-window.addEventListener('settle-auction', e => {
+document.addEventListener('settle-auction', e => {
   Alpine.store('wallet').settle(e.detail.auctionId);
 });
 

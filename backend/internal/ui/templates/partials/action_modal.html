@@ -7,7 +7,7 @@
      once and reuse it everywhere. Available to every page because it's
      included from layout.html, not page-by-page. -->
 <div x-data="{ }"
-     x-on:open-action.window="Alpine.store('modals').open($event.detail)"
+     x-on:open-action.window="Alpine.store('modals').open($event.detail || {})"
      class="contents">
   <template x-if="true">
     <div x-show="$store.modals.open" x-cloak
