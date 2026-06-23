@@ -1,0 +1,4 @@
+# build artifacts
+seed-testnet*.exe
+*.exe
+go.sum
