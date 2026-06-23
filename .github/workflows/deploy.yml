@@ -115,3 +115,17 @@ jobs:
           sleep 5
           curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors \
             https://magicwebb.fly.dev/healthz
+      - name: Post-deploy sync gate (origin/main SHA == live X-MW-Build-SHA)
+        # v23.1 — belt-and-braces against the v74-class deploy-drift bug.
+        # Closes the gap where Fly records a new release "complete" but
+        # the Docker layer cache pinned the previous binary's static
+        # assets — origin/main advances, the served wallet.js /
+        # tailwind.css / templates silently fall behind. The script
+        # reads Fly's X-MW-Build-SHA header (linker-injected via
+        # Makefile -ldflags) and asserts equality with origin/main. A
+        # mismatch exit-codes 1 and the deploy is marked failed in the
+        # GitHub Actions UI even though Fly itself reported success.
+        # This step is the contract that future drift can never again
+        # be silently observed by a user on the live URL.
+        if: success()
+        run: ./tools/check-fly-sync.sh

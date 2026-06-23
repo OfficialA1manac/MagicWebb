@@ -6,8 +6,14 @@
      → Awaiting tx → Done) shared by every action so users learn the flow
      once and reuse it everywhere. Available to every page because it's
      included from layout.html, not page-by-page. -->
+<!-- v23.1 — userInitiated gate on the open-action listener. Only forward
+     into modals.open() when the dispatch clearly carries
+     userInitiated:true. Any third-party extension, stale event,
+     or browser-auto-fired open-action is silently dropped here at
+     the listener boundary so a stray dispatch can never flash the
+     modal with the fallback "Confirm action" title. -->
 <div x-data="{ }"
-     x-on:open-action.window="Alpine.store('modals').open($event.detail || {})"
+     x-on:open-action.window="if (($event.detail || {}).userInitiated === true) Alpine.store('modals').open($event.detail); else console.warn('[mw] open-action event ignored: missing userInitiated flag', $event.detail)"
      class="contents">
   <template x-if="true">
     <div x-show="$store.modals.open" x-cloak

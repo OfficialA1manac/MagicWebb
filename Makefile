@@ -19,8 +19,13 @@ dev: ## run server locally (go run, no build step)
 build: ## compile single binary → bin/magicwebb (auto-rebuilds tailwind.css first)
 	@mkdir -p bin
 	cd backend && go run ./cmd/buildtailwindcss || echo 'warning: tailwind rebuild failed (offline?); using committed tailwind.css'
-	cd backend && go build -o ../$(BINARY) $(SERVER:./backend/%=./%)
-	@echo "  built: $(BINARY)"
+	# v23.1 — Inject git SHA via -ldflags so X-MW-Build-SHA on /healthz reports
+	#         what's actually compiled in. Falls back to `unknown` when HEAD
+	#         is detached/unreadable (e.g. an unpacked tarball); operators see
+	#         the literal in /healthz and `make check-fly-sync` flags drift.
+	$(eval MW_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown))
+	cd backend && go build -ldflags "-X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=$(MW_GIT_SHA)" -o ../$(BINARY) $(SERVER:./backend/%=./%)
+	@echo "  built: $(BINARY)  sha=$(MW_GIT_SHA)"
 
 run: build ## build then run
 	./$(BINARY)
@@ -68,6 +73,18 @@ regen-abi: ## regenerate wallet.js ABIs from forge build (updates static/wallet.
 
 test: ## run Go test suite with the race detector
 	cd backend && go test ./... -race -count=1 -timeout 120s
+
+# v23.1 — verify Fly.io is serving the exact SHA in origin/main.
+# Catches the v74-class deploy-drift bug: Fly records a new release
+# successfully but the Docker layer cache pinned the previous binary's
+# static assets, so the served wallet.js / tailwind.css / templates
+# silently fall out of sync with what's in the git repo. The contract
+# is: live X-MW-Build-SHA header must equal origin/main SHA. Any drift
+# exit-codes 1 with a one-line actionable diff so a CI step can fail
+# loudly instead of silently shipping a stale frontend.
+check-fly-sync: ## verify magicwebb.fly.dev X-MW-Build-SHA matches origin/main
+	@./tools/check-fly-sync.sh
+.PHONY: check-fly-sync
 
 lint: ## run golangci-lint over the backend
 	cd backend && golangci-lint run ./...

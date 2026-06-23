@@ -90,6 +90,7 @@ const WC_PROJECT_ID = (window.MW_WC_PROJECT_ID || '').trim();
  * (defensive only) can't mutate it across invocations.
  * ── */
 const MODAL_OPTS_FALLBACK = Object.freeze({
+  userInitiated: true,
   kind: 'info',
   icon: '\u2139',
   title: 'This action isn\u2019t available right now',
@@ -332,6 +333,29 @@ window.addEventListener('alpine:init', () => {
      */
     open(opts) {
       opts = (opts && typeof opts === 'object') ? opts : MODAL_OPTS_FALLBACK;
+      // v23.1 — user-initiated gate. The action modal must NEVER auto-show
+      // because of a stray open-action event, a misbehaving extension, or
+      // any future code path that forgot to pass an opts object. Any
+      // caller that wants the modal to actually appear MUST pass
+      // userInitiated:true. We log the blocked attempt with a stack
+      // trace so the offender surfaces in the dev console even on
+      // production deploys, then return a resolved null without
+      // flipping this.open = true. Belt-and-braces: also keep the
+      // existing busy-guard loop (eight-second max wait, then null)
+      // untouched — it still serves the legitimate concurrent-modal
+      // debounce.
+      if (opts.userInitiated !== true) {
+        try {
+          const e = new Error('modals.open() blocked — missing opts.userInitiated=true');
+          console.warn('[mw] action modal auto-open blocked:', e.message, '
+', (e.stack || '').split('
+').slice(1, 4).join('
+'));
+        } catch (_) {
+          console.warn('[mw] action modal auto-open blocked: opts=', JSON.stringify(opts));
+        }
+        return Promise.resolve(null);
+      }
       if (this.open && this._resolver) {
         return new Promise((resolve) => {
           const tick = setInterval(() => {
@@ -950,6 +974,7 @@ window.addEventListener('alpine:init', () => {
         const signer = await this.ensureSigner();
         if (!signer) {
           return await Alpine.store('modals').open({
+            userInitiated: true,
             kind: 'list', icon: '⚡',
             title: 'Connect your wallet first',
             subtitle: opts.subtitle || '',
@@ -965,6 +990,7 @@ window.addEventListener('alpine:init', () => {
         }
         const provider = await resolveProvider(this);
         return await Alpine.store('modals').open({
+          userInitiated: true,
           kind: opts.kind,
           icon: opts.icon,
           title: opts.title,

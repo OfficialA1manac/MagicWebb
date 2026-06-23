@@ -86,6 +86,16 @@ func securityHeaders() fiber.Handler {
 	}
 }
 
+// MWServerBuildSHA is the git SHA the running binary was compiled from.
+// Injected at link time via `go build -ldflags '-X .../api.MWServerBuildSHA=<sha>'`
+// by the Makefile (driven by `git rev-parse HEAD` at build time) so the
+// /healthz endpoint can return an X-MW-Build-SHA header. tools/check-fly-sync.sh
+// reads this header off the live magicwebb.fly.dev to verify Fly is serving
+// the SHA that's actually on origin/main — closing the v23 deploy-drift
+// class of bug where Fly registered a new release successfully but the
+// Docker layer cache pinned the previous binary's static assets.
+var MWServerBuildSHA = "unknown"
+
 // Mount registers all REST + SSE routes on the Fiber app.
 func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller) {
 	app.Use(securityHeaders())
@@ -145,6 +155,15 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		if _, err := eth.BlockNumber(rpcCtx); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("rpc unhealthy")
 		}
+		// v23.1 — X-MW-Build-SHA header. Injected via Makefile -ldflags as
+		// `api.MWServerBuildSHA` (see top-of-file var declaration). Surfaced
+		// here so tools/check-fly-sync.sh can read it off the live site
+		// and assert it equals `git rev-parse origin/main` — the v74-class
+		// deploy-drift bug class (Fly records a new release, but the
+		// Docker layer cache still serves the previous build's static
+		// assets) becomes loudly detectable in CI instead of silently
+		// observable by a user hours later.
+		c.Set("X-MW-Build-SHA", MWServerBuildSHA)
 		return c.SendStatus(fiber.StatusOK)
 	})
 	// /readyz = readiness. DB-only (q.Ping verifies connectivity, NOT
