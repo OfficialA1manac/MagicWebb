@@ -110,15 +110,11 @@
         this.loading = false;
       },
 
-      // Routes to the connect path of the wallet store, then closes
-      // the picker so the WC overlay (or wallet popover) takes over.
-      connectInjected() {
-        this.close();
-        try { Alpine.store('wallet').connect('injected'); } catch (_) {}
-      },
+      // Routes to WalletConnect — the only connect path in v23.2 —
+      // then closes the picker so the WC QR overlay takes over.
       connectWC() {
         this.close();
-        try { Alpine.store('wallet').connect('walletconnect'); } catch (_) {}
+        try { Alpine.store('wallet').connect(); } catch (_) {}
       },
 
       // Routes the chosen NFT to /token/<collection>/<token_id>?action=…
@@ -179,20 +175,23 @@
 
       <div class="p-5 overflow-y-auto">
 
-        <!-- Connect gate: picker requires connected wallet. -->
+        <!-- Connect gate: picker requires connected wallet.
+             v23.2 — single WalletConnect CTA; the previous Browser
+             Wallet + WalletConnect two-button row collapses to one
+             because the MetaMask/injected path has been removed. -->
         <template x-if="needConnect">
           <div class="text-center py-10 space-y-4">
-            <p class="text-ink-100 text-sm">Connect a wallet to load your NFTs.</p>
-            <div class="flex gap-3 justify-center">
-              <button @click="connectInjected()" type="button"
-                      class="px-5 py-2.5 rounded-xl btn-sky text-ink-950 font-bold text-sm transition shadow-sky-glow active:scale-[0.97]">
-                Browser Wallet
-              </button>
-              <button @click="connectWC()" type="button"
-                      class="px-5 py-2.5 rounded-xl bg-violet-btn text-white font-bold text-sm transition shadow-violet-glow active:scale-[0.97]">
-                WalletConnect
-              </button>
-            </div>
+            <p class="text-ink-100 text-sm">Connect your wallet to load your NFTs.</p>
+            <button @click="connectWC()" type="button"
+                    class="px-6 py-3 rounded-xl bg-violet-btn text-white font-extrabold text-sm transition shadow-violet-glow active:scale-[0.97]">
+              <span class="inline-flex items-center gap-2">
+                <span>⌬</span>
+                <span>Connect via WalletConnect</span>
+              </span>
+            </button>
+            <p class="text-[10px] text-ink-500 leading-relaxed max-w-sm mx-auto">
+              Scan a QR or deep-link from any mobile or hardware wallet. Non-custodial — your keys never leave your device.
+            </p>
           </div>
         </template>
 

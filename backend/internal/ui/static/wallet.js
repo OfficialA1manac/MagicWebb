@@ -149,10 +149,15 @@ async function resolveSigner(store) {
     } catch (_) {}
   }
 
-  // Path 3 — full EIP-1193 reconstruction (last-resort)
+  // Path 3 — full EIP-1193 reconstruction (last-resort).
+  // v23.2 — WalletConnect-only. window.ethereum / any window-injected
+  // provider is no longer part of the connect surface, so the only
+  // valid EIP-1193 source for signing is the cached WC session on the
+  // wallet as `store._raw.wc`. Returning null on miss is the
+  // consistent failure mode: the caller surfaces "Connect wallet first"
+  // and the user re-pairs via QR.
   let eip1193 = null;
   try { eip1193 = R(store?._raw?.wc) || store?._raw?.wc || null; } catch (_) {}
-  if (!eip1193) eip1193 = window.ethereum || null;
   if (!eip1193 || typeof eip1193.request !== 'function') return null;
   try {
     const fresh = new ethers.BrowserProvider(eip1193);
@@ -174,8 +179,12 @@ async function resolveProvider(store) {
   for (const p of [R(store?._raw?.provider), store?._raw?.provider].filter(Boolean)) {
     if (p && typeof p.getNetwork === 'function' && typeof p.getBlockNumber === 'function') return p;
   }
-  // Fallback: WC provider OR injected window.ethereum
-  let eip = R(store?._raw?.wc) || store?._raw?.wc || window.ethereum;
+  // Fallback: WC provider only.
+  // v23.2 — WalletConnect-only; window.ethereum has been removed from
+  // the connect surface so the resolveProvider fallback must NOT
+  // resurrect it (otherwise a stale WC session could end up reading
+  // prices through an unrequested injected provider).
+  let eip = R(store?._raw?.wc) || store?._raw?.wc || null;
   if (!eip || typeof eip.request !== 'function') return null;
   try {
     const fresh = new ethers.BrowserProvider(eip);
@@ -345,17 +354,14 @@ window.addEventListener('alpine:init', () => {
       // untouched — it still serves the legitimate concurrent-modal
       // debounce.
       if (opts.userInitiated !== true) {
-        try {
-          const e = new Error('modals.open() blocked — missing opts.userInitiated=true');
-          console.warn('[mw] action modal auto-open blocked:', e.message, '
-', (e.stack || '').split('
-').slice(1, 4).join('
-'));
-        } catch (_) {
-          console.warn('[mw] action modal auto-open blocked: opts=', JSON.stringify(opts));
+          try {
+            const e = new Error('modals.open() blocked — missing opts.userInitiated=true');
+            console.warn('[mw] action modal auto-open blocked:', e.message, (e.stack || '').split('\n').slice(1, 4).join(' | '));
+          } catch (_) {
+            console.warn('[mw] action modal auto-open blocked: opts=', JSON.stringify(opts));
+          }
+          return Promise.resolve(null);
         }
-        return Promise.resolve(null);
-      }
       if (this.open && this._resolver) {
         return new Promise((resolve) => {
           const tick = setInterval(() => {
@@ -532,23 +538,24 @@ window.addEventListener('alpine:init', () => {
 
     // ── Connect (injected wallet OR WalletConnect v2 via QR) ──
 
-    async connect(kind = 'injected', { silent = false } = {}) {
+    // v23.2 — WalletConnect-only. The old `connect(kind, opts)` API
+    // branched on `kind === 'walletconnect'` vs `'injected'`; with the
+    // MetaMask/browser-injected path removed entirely per user request,
+    // the function takes only an opts bag with `{ silent }`. Every
+    // caller — the navbar Connect Wallet button, the nft_picker.html
+    // connect gate, the saved-wallet pill's reconnectSaved(), and the
+    // mobile-drawer button — funnels through this single entry point.
+    async connect({ silent = false } = {}) {
       // Belt-and-braces: silent reconnect (page-boot auto-reconnect for
       // returning users with a cached address in localStorage) may still
       // be in-flight when the user explicitly clicks the navbar/picker
-      // "Connect Wallet" button. The old behaviour was an unconditional
-      // `return` on `state === 'connecting'` — so a clicking user could
-      // be ignored while the silent MetaMask pop-up was still showing.
-      // Now: only short-circuit SILENT reconnects; always honor user
-      // intent (regardless of current state) so they cannot get stranded.
+      // "Connect Wallet" button. Only short-circuit SILENT reconnects;
+      // always honor user intent (regardless of current state) so they
+      // cannot get stranded.
       if (this.state === 'connecting' && silent) return;
-      // Rapid double-click debounce. With the connecting-escape fix
-      // above, two fast clicks now both call `connect('injected',
-      // {silent: false})` while one is mid-flight; `eth_requestAccounts`
-      // dedupes in MetaMask, but `_authenticate` and `refreshUnread`
-      // race on `this.address`. 1.5s window — short enough that a real
-      // retry after a rejected MetaMask prompt is unaffected, long
-      // enough to absorb a jittery double-tap.
+      // Rapid double-click debounce. 1.5s window — short enough that a
+      // real retry after a rejected WC prompt is unaffected, long enough
+      // to absorb a jittery double-tap.
       if (!silent) {
         const now = Date.now();
         if (now - (this._connectStartedAt || 0) < 1500) {
@@ -559,70 +566,26 @@ window.addEventListener('alpine:init', () => {
       const wasError = this.state === 'error';
       this.setState('connecting');
       try {
-        let eip1193;
-        if (kind === 'walletconnect') {
-            if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
-            eip1193 = await this._wcConnect({ silent });
-        } else {
-          if (!window.ethereum) {
-            this.setState('idle');
-            if (!silent) toast('No injected wallet found. Install MetaMask or use WalletConnect.', 'error');
-            return;
-          }
-          eip1193 = window.ethereum;
-        }
-        let provider = new ethers.BrowserProvider(eip1193);
+        if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
+        const eip1193 = await this._wcConnect({ silent });
+        const provider = new ethers.BrowserProvider(eip1193);
         const accounts = await provider.send('eth_requestAccounts', []);
         if (!accounts?.length) throw new Error('No account authorized.');
-        let network = await provider.getNetwork();
-        if (kind === 'injected' && Number(network.chainId) !== CHAIN_ID) {
-          // No inner try/catch on purpose — both the user-rejected path
-          // (`_switchChain` throws when the wallet denies BOTH
-          // `wallet_switchEthereumChain` and the auto-fallback
-          // `wallet_addEthereumChain`) and the retry-exhaustion path
-          // (network still != CHAIN_ID after the rebuild + 3× poll)
-          // must bubble out so the outer connect() catch can flip
-          // state to 'error', release the busy mutex, clear the
-          // double-click debounce, and surface ONE actionable toast.
-          // The pre-fix `catch (_) {}` silently swallowed both paths
-          // and connect() proceeded to declare success on the wrong
-          // chain, so staticCall and every signed tx ran against the
-          // OLD chain and instant-reverted with "Listing not fillable".
-          await this._switchChain();
-          // CRITICAL: ethers.BrowserProvider caches network state at
-          // construction. After wallet_switchEthereumChain succeeded,
-          // `network.chainId` and every subsequent provider call still
-          // see the OLD chain (until the provider is reset). Re-build
-          // from the same eip1193 so staticCall, getNetwork, and the
-          // real tx calls all target the post-switch chain. Without
-          // this, staticCall on Coston2 contract addresses runs against
-          // the OLD chain (Ethereum Mainnet) which has no contracts
-          // there → instant revert → user sees "Listing not fillable"
-          // before the real transaction ever prompts MetaMask.
-          provider = new ethers.BrowserProvider(eip1193);
-          // MetaMask confirms chain switches asynchronously; the first
-          // provider.getNetwork() call after the switch can still
-          // return the OLD chainId if the wallet is mid-confirm. Retry
-          // up to 3× with a 200 ms gap before giving up — covers user
-          // wallets that take ~600-1000 ms to visually confirm the new
-          // chain in the UI before the JSON-RPC provider reflects it.
-          for (let i = 0; i < 3; i++) {
-            network = await provider.getNetwork();
-            if (Number(network.chainId) === CHAIN_ID) break;
-            await new Promise(r => setTimeout(r, 200));
+        const network = await provider.getNetwork();
+        if (Number(network.chainId) !== CHAIN_ID) {
+          // WC pairs on the network the user's wallet is currently
+          // switched to. If the wallet is on the wrong chain we cannot
+          // auto-switch from the dApp side (no EIP-3326 surface) — the
+          // user must re-pair after flipping their wallet's network.
+          // Surface a single explicit toast and bail; do NOT silently
+          // mark connected, otherwise every ethers-provider call would
+          // target the wrong chain and instant-revert at the contract.
+          if (!silent) {
+            toast(`Connected wallet is on chain #${Number(network.chainId)} — expected Coston2 (114). Switch networks in your wallet, then Re-pair via QR.`, 'error', 8000);
           }
-          if (Number(network.chainId) !== CHAIN_ID) {
-            // Auto-fallback `_switchChain` already covers the
-            // retry-window-equivalent of wallet_addEthereumChain, but
-            // some wallets (notably Rabby in dev modes, and Trezor
-            // bridge) silently accept the add without flipping the
-            // active JSON-RPC endpoint. After 600ms we still see the
-            // old chainId — every subsequent ethers call would target
-            // the wrong network. Throw so the outer connect() catch
-            // surfaces a single explicit failure toast instead of
-            // declaring connected and immediate-reverting every tx.
-            throw new Error('Wallet chain did not switch to Coston2 (chainId 114). Please change the active network in your wallet and try again.');
-          }
+          this.setState('error');
+          this._connectStartedAt = 0; // release double-click debounce
+          return;
         }
         // Always store ROOT ethers objects unwrapped. Setters nested-call
         // R() so double-wrap is impossible.
@@ -631,21 +594,24 @@ window.addEventListener('alpine:init', () => {
         this.address       = accounts[0].toLowerCase();
         this.chainId       = Number(network.chainId);
         localStorage.setItem('mw_addr', this.address);
-        localStorage.setItem('mw_kind', kind);
+        // Hardcode the saved kind — there is only one connect method.
+        // Older clients that saved `"injected"` will overwrite this on
+        // next successful connect. Reading the value back is still
+        // supported for the saved-wallet pill so the WC QR-reconnect
+        // button label can branch on history.
+        localStorage.setItem('mw_kind', 'walletconnect');
 
         // Named handler refs so ANY prior registration on the same eip1193
-        // (window.ethereum is a singleton) can be removed before re-mounting.
-        // Without this, repeated connect()/disconnect() cycles on INJECTED
-        // stack N copies of every listener and one chainChanged event would
-        // fire N reloads, N storage writes, races. WalletConnect's session-
-        // bound provider gets garbage-collected on session end so it doesn't
-        // accumulate, but we remove there too for symmetry.
+        // (WC session object is unique per pairing) can be removed before
+        // re-mounting on the next session. The pre-WC-only listener-stack
+        // bug (window.ethereum singleton, repeated connect/disconnect
+        // cycles) is gone; this defensive teardown stays as a belt.
         const _onChain = () => location.reload();
         const _onAccts = (accs) => {
           if (!accs || !accs.length) { this.disconnect(); return; }
           this.address = accs[0].toLowerCase();
           localStorage.setItem('mw_addr', this.address);
-          if (kind !== 'walletconnect') location.reload();
+          location.reload();
         };
         let _onDisc = null;
 
@@ -832,22 +798,13 @@ window.addEventListener('alpine:init', () => {
     },
 
     async _switchChain() {
-      if (!window.ethereum?.request) return;
-      await window.ethereum.request({
-        method: 'wallet_switchEthereumChain',
-        params: [{ chainId: '0x72' }],
-      }).catch(async () => {
-        await window.ethereum.request({
-          method: 'wallet_addEthereumChain',
-          params: [{
-            chainId: '0x72',
-            chainName: 'Coston2',
-            nativeCurrency: { name: 'C2FLR', symbol: 'C2FLR', decimals: 18 },
-            rpcUrls: [RPC_URL],
-            blockExplorerUrls: [EXPLORER],
-          }],
-        });
-      });
+      // v23.2 — WalletConnect-only. Chain switching is handled inside
+      // the WC session: the wallet negotiates the network per-pairing
+      // (the user picks Coston2 in their mobile/hardware wallet when
+      // approving the session). Keeping this method as a no-op rather
+      // than deleting it because legacy callers in this file may still
+      // reference it after a code review — a TypeError here would
+      // surface as a connect-failure toast and confuse the user.
     },
 
     async _authenticate() {
@@ -941,19 +898,31 @@ window.addEventListener('alpine:init', () => {
     // clear "Connect your wallet first" message rather than letting Ethers
     // throw its AbstractProvider error mid-flow.
     async ensureSigner() {
-      if (!this.signer) {
-        await this.connect(localStorage.getItem('mw_kind') || 'injected', { silent: true });
-      }
+      // v23.2 — WalletConnect-only. Page-boot NO LONGER auto-reconnects.
+      // The previous design (v9-v22) silently tried `_wcConnect({silent:true})`
+      // on page load whenever a saved address was present, which opened
+      // the QR overlay without an explicit user click. That was the same
+      // class of silent-popup that the v23.1 modal-gate was written to
+      // prevent, but the gate was bypassed because the original connect()
+      // path had its own silent flow. Now we just bail: returning users
+      // pair via the explicit saved-wallet pill (`reconnectSaved()` in
+      // the navbar / drawer), which calls non-silent `connect()` and shows
+      // the QR on a real click. Fresh visitors click Connect Wallet the
+      // first time and stay paired via the standard WC session lifetime.
       if (!this.signer) return null;
       const s = await resolveSigner(this);
       if (s) {
         this._raw.signer = s;
         return s;
       }
-      // Last-resort: a fresh full reconnect before declaring failure.
-      try {
-        await this.connect(localStorage.getItem('mw_kind') || 'injected');
-      } catch (_) {}
+      // Last-resort: surface a single explicit toast so the user is never
+      // left staring at a disabled button with no feedback. The toast
+      // names the actual recovery action so the next click is unambiguous.
+      // Note: wording is "could not restore" (not "timed out") — ensureSigner
+      // does not have a timeout; it bails on first null. The user's mental
+      // model is "previous session lost; re-pair needed", which matches
+      // the silent-auto-reconnect removal in v23.2.
+      try { toast('Could not restore your saved wallet. Click Connect Wallet to re-pair.', 'error', 6000); } catch (_) {}
       const s2 = await resolveSigner(this);
       if (s2) {
         this._raw.signer = s2;
@@ -1478,9 +1447,18 @@ window.addEventListener('alpine:init', () => {
   // for any state-changing endpoint — JWTs are TS-signed and the server
   // validates every request. The bell + notifications can keep reading
   // (unauth reads return 401, the badge falls back to 0 unread).
+  // v23.2 — WalletConnect-only. The previous default of 'injected'
+  // propagated the legacy MetaMask-pair kind, which the user-facing
+  // saved-wallet pill AND the silent reconnect branch both gated on.
+  // Default to '' (the empty string) so old browsers with addr-but-no-kind
+  // records would have hasSavedWallet=false at load — the Connect Wallet
+  // button is the only entry point. Returning users who had paired via
+  // MetaMask (savedKind='injected') are migrated: their session kind is
+  // overwritten on the next successful WC pair, and until then the saved
+  // pill is hidden (UX consistency with the WC-only contract).
   try {
     const addr = localStorage.getItem('mw_addr');
-    const kind = localStorage.getItem('mw_kind') || 'injected';
+    const kind = localStorage.getItem('mw_kind') || '';
     if (addr) {
       const w = Alpine.store('wallet');
       w.savedAddress = addr;

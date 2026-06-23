@@ -298,6 +298,157 @@ neither can regress silently again.
 
 ---
 
+## v23.2 — WalletConnect-only + page-boot no auto-reconnect
+
+The v23.1 wave closed the modal auto-pop + deploy-drift safety net.
+v23.2 closes the live “Connect Wallet button not visible” regression
+(root-caused to a SyntaxError introduced in the v23.1 modal-gate attempt),
+strips the MetaMask / browser-injected path entirely per user request,
+and removes the page-boot silent auto-reconnect that was the same class
+of silent-popup the v23.1 modal-gate was meant to prevent. Every fix
+lands in one commit on `main`; force-deploy via `fly deploy
+--remote-only --no-cache --build-arg GIT_SHA=<literal>` keeps the
+deploy-drift gate green.
+
+### U-04-modal — Live “Connect Wallet button missing” SyntaxError 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js`, line 350:
+  `console.warn('[mw] action modal auto-open blocked:', e.message, '\n` —
+  the v23.1 modal-gate attempt accidentally embedded literal LF bytes
+  inside a single-quoted `'\n'` string, so the entire `wallet.js`
+  failed to parse.
+- **Key:** `u04-modal-walletjs-syntaxerror`
+- **Scenario (discovered via live `browser-use`):** Browser console
+  showed `Uncaught SyntaxError: Invalid or unexpected token` plus a
+  cascade of `Alpine Expression Error: Cannot read properties of
+  undefined (reading 'address'/'connected'/'hasSavedWallet'/'open')`.
+  Root cause: as a knock-on, `Alpine.store('wallet')` never registered
+  and every `x-show="$store.wallet.*"` evaluated undefined — the
+  navbar templates rendered empty so the Connect Wallet button
+  disappeared from the live page.
+- **Fix:** Collapse the broken multi-line string into a single
+  properly-escaped line. The userInitiated gate semantics
+  (loud-fail with stack + `Promise.resolve(null)` return) are
+  preserved verbatim. Belt-and-braces repair: also fix the
+  follow-on corruption at line 355 where the prior
+  `str_replace` accidentally merged the `// debounce.` comment
+  line with the next statement's `if (...) {`.
+- **Verification:** `node --check backend/internal/ui/static/wallet.js`
+  returns clean; `go build ./cmd/server`, `go vet ./...`,
+  `go test ./internal/ui -run TestRender` all pass; live
+  `browser-use` confirms the Connect Wallet button is visible and
+  no console errors appear on a fresh page load.
+- **Status:** FIXED.
+
+### U-04-wc-only — Drop MetaMask / browser-injected entirely per user request 🟠 P1 — FIXED
+- **Where:**
+  - `backend/internal/ui/static/wallet.js` —
+    `connect(kind, opts)` signature drops the `kind` parameter
+    entirely (callers pass only `{ silent }` or no args); the
+    `if (kind === 'walletconnect')` branch becomes the only flow;
+    `resolveSigner` Path 3 loses the `eip1193 = window.ethereum ||
+    null` fallback; `resolveProvider`'s `eip || window.ethereum`
+    fallback loses the `window.ethereum` branch; `_switchChain()` is
+    kept as a no-op method for back-compat with any legacy caller;
+    listener `_onAccts` reloads unconditionally (the
+    `if (kind !== 'walletconnect') location.reload()` branch goes
+    away).
+  - `backend/internal/ui/templates/layout.html` — desktop dropdown
+    picker (Browser Wallet + WalletConnect two-row) collapses to a
+    single WC button calling `@click="$store.wallet.connect()"`.
+    Mobile drawer picker collapses to a single WC button. Navbar
+    `x-data` reduces from `{ open, wcOpen, helpersOpen }` to
+    `{ open: false }` (the dead `wcOpen` / `helpersOpen` flags are
+    dropped per the post-fix wipe). The inline pairing chip
+    template stays (it was already WC-only).
+  - `backend/internal/ui/templates/partials/nft_picker.html` —
+    `connectInjected()` method dropped (only `connectWC()` remains);
+    the connect-gate UI shows a single “Connect via WalletConnect”
+    button instead of the two-row Browser Wallet + WalletConnect.
+- **Key:** `u04-wc-only-metaMask-stripped`
+- **Scenario:** Per user request:
+  > “delete the metamask integration and only use wallet connect for
+  > users to connect there wallet. make sure that any user can connect
+  > using wallet connect via qr code or the other options wallet
+  > connect provides.”
+  The MetaMask / Rabby / Brave / any-window-ethereum EIP-1193 path
+  is REMOVED entirely. The only connection method is WalletConnect v2
+  — scan a QR or use any deep link the user’s wallet exposes
+  (mobile + hardware all share the same protocol).
+- **Verification (negative-side-effects audit):**
+  - `grep -rnE 'wallet\\.connect\\(\\x27injected\\x27|wallet\\.connect\\(\\x22injected\\x22|wallet\\.connect\\(\\x27walletconnect\\x27|wallet\\.connect\\(\\x22walletconnect\\x22' backend/internal/ui/templates/`
+    returns zero hits — no template still dispatches the old
+    `connect('injected')` / `connect('walletconnect')` form.
+  - All three callers now use `$store.wallet.connect()` (no args):
+    layout.html:155 (desktop navbar), layout.html:329 (mobile
+    drawer), pages/offers.html:26 (offers connect gate).
+  - The WC overlay (`partials/wc_qr_overlay.html` — `mw-wc-show` /
+    `mw-wc-hide` listeners) is UNCHANGED. v23.1’s Modal auto-pop
+    gate stays intact (`MODAL_OPTS_FALLBACK.userInitiated`,
+    `Alpine.store('modals').open()` guard, both `runAction` callers).
+- **Migrated-user UX:** a returning user who previously paired via
+  MetaMask has `localStorage.mw_addr=0x…` but `mw_kind` either
+  `'injected'` or absent. After this commit, `loadSaved()` defaults
+  `kind` to `''` so the saved-wallet pill (which gates on
+  `savedKind === 'walletconnect'` for its "Re-pair via QR" label) is
+  hidden — the user sees the plain Connect Wallet button, clicks it,
+  the WC QR pops, they pair via their mobile/hardware wallet. Their
+  `mw_kind` is overwritten to `'walletconnect'` on the successful
+  pair; the saved-wallet pill surfaces on every subsequent visit.
+- **Status:** FIXED.
+
+### U-04-no-silent-boot — Page-boot silent auto-reconnect removed entirely 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js`,
+  `async ensureSigner()`.
+- **Key:** `u04-no-silent-boot`
+- **Scenario:** The previous design (v9–v22) auto-reconnected on
+  page load whenever a saved address was present in localStorage,
+  dispatching `_wcConnect({silent:true})` and opening the QR
+  overlay without an explicit user click. This is the same class
+  of silent-popup that the v23.1 modal-gate was written to
+  prevent — but the gate was bypassed because `ensureSigner()`
+  had its own silent flow. Even after gating on
+  `savedKind === 'walletconnect'` (round-2 fix), returning
+  WC-paired users still got a silent auto-pop. The user's
+  intent (“don’t add another problem”) is incompatible with any
+  silent auto-flow at page boot.
+- **Fix:** `ensureSigner()` now just bails:
+  ```js
+  async ensureSigner() {
+    if (!this.signer) return null;
+    const s = await resolveSigner(this);
+    if (s) { this._raw.signer = s; return s; }
+    try { toast('Could not restore your saved wallet. Click Connect Wallet to re-pair.', 'error', 6000); } catch (_) {}
+    return null;
+  }
+  ```
+  Returning users pair via the explicit saved-wallet pill click
+  (`reconnectSaved()` in the navbar / drawer) which calls the
+  non-silent `connect()` and pops the QR on a real click.
+- **Last-resort UX:** if `resolveSigner` cannot restore from
+  `_raw` (genuinely stale localStorage, expired WC session), the
+  user gets a single typed toast naming the recovery action
+  rather than a frozen button. Wording was reviewed by the
+  post-deploy reviewer (round-3 nit) and corrected from
+  “Re-pair timed out.” to “Could not restore your saved wallet.”
+  because `ensureSigner` has no timeout mechanism — it bails
+  immediately on `this.signer` being null.
+- **Verification:** live `browser-use` confirms: navigate to the
+  landing page on a returning device, NO QR or modal appears; the
+  Connect Wallet button is visible; click → WC overlay renders
+  with QR; scan → SIWE → connected. Saved-wallet pill surfaces
+  after a successful pair with a “Re-pair via QR” button.
+- **Status:** FIXED.
+
+### ops-01 — (carried-forward) Deploy-drift safety net remains GREEN
+- (No change in v23.2; the v23.1 contract holds. `tools/check-fly-sync.sh`
+  returns 0 once the SHA-baked binary replaces the live machine; that
+  gate is the LIVE-CHECK performed after every force-deploy below.)
+- **Post-flight check** lives in this commit’s force-deploy step
+  (single-quoted SHA arg, per the documented incantation from the
+  v23.1.1 follow-up).
+
+---
+
 ## v23 — Picker CDN resilience (post-v22 release)
 
 The v22 sweep closed every live-site bug the browser-use harness surfaced.

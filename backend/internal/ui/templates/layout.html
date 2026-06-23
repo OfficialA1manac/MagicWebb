@@ -118,7 +118,11 @@
 <body hx-ext="sse" sse-connect="/events" x-data>
 
 <!-- Nav -->
-<nav x-data="{ open: false, wcOpen: false, helpersOpen: false }" class="sticky top-0 z-50 glass-dark border-b border-white/10 shadow-topbar">
+<!-- v23.2 — only `open` (mobile drawer) remains. The v22-era `wcOpen`
+     + `helpersOpen` flags drove the dropdown picker, which collapsed to
+     a single WC button (no dropdown surface). Keeping the dead flags
+     would invite future readers to chase them as live state. -->
+<nav x-data="{ open: false }" class="sticky top-0 z-50 glass-dark border-b border-white/10 shadow-topbar">
   <div class="max-w-7xl mx-auto px-4 flex items-center justify-between h-16">    <a href="/" class="text-xl font-extrabold tracking-tight flex-shrink-0 flex items-center gap-2.5 group">
       <span class="w-9 h-9 rounded-xl btn-sky flex items-center justify-center text-ink-950 text-lg glow-sky transition group-hover:scale-105">✦</span>
       <span class="text-white">Magic<span class="brand-text">Webb</span></span>
@@ -137,120 +141,46 @@
 
     <!-- Right: wallet + bell + WC pairing chip + hamburger -->
     <div class="flex items-center gap-2">
-      <!-- Connect: split into Browser Wallet + WalletConnect v2.
-           Hidden below md so on mobile viewports the wallet control
-           surfaces only inside the hamburger drawer (same controls,
-           full width, no cramped navbar dropdown clipping). On md+
-           this is the only wallet affordance in the right-navbar
-           cluster; the drawer mirrors it for symmetry.
-           Note: `hidden md:block` is the v14 swap — `md:block` was
-           missing from the JIT-output in v11, so v12 used `md:flex`
-           as a workaround. v14's `go run ./cmd/buildtailwindcss`
-           rebuilt the bundle from current templates, and `md:block`
-           is now present. The block→flex swap is a no-op for this
-           wrapper because the inner dropdown is `position:absolute`
-           and flows outside the parent regardless, so the swap is
-           purely a cosmetic restoration of idiomatic CSS.
-
-           v15 — mutual-exclusivity guard. The previous condition
-           was `!$store.wallet.connected` alone. For a returning user
-           with a saved wallet in localStorage the v13 "Saved wallet"
-           pill ALSO rendered (its condition `hasSavedWallet && !connected`
-           is not exclusive with `!connected`). Both elements then
-           competed for the same `flex items-center gap-2` right-cluster
-           slot — wide pill + wide button + WC chip on a fresh
-           desktop-load could overflow the navbar and clip the
-           Connect Wallet button off the visible edge of the right
-           cluster, producing the "wallet button still not displaying"
-           symptom even though the DOM element was present. v15 makes
-           the conditions mutually exclusive: saved pill wins; fresh
-           visitors get the picker button.
-
-           v16 — DOM-permanent visibility. The persistent "wallet
-           button still not visible" complaint across v9-v15 (the
-           user reported the symptom AGAIN after the v15 mutual-
-           exclusivity fix landed on Fly.io) is structural: `<template
-           x-if>` is `display:none` NATIVE in HTML — if Alpine fails
-           to evaluate the condition (wallet store not hydrated yet,
-           proxy unwrap error, $store reference undefined on first
-           paint, race between alpine:init fire and template scan),
-           the template element stays unrendered and the button inside
-           is invisible. To make the button visible WITHOUT requiring
-           Alpine to evaluate anything, we drop the `<template
-           x-if>` wrapper entirely and put the same mutual-exclusivity
-           condition on a plain `<div x-show=...>`. The `hidden md:block`
-           CSS class makes the div visible at md+ by default. `x-show`
-           is a NICE-TO-HAVE layer on top: when it works, it toggles
-           `display:none` so the saved pill and connect button never
-           both render. When it doesn't work (Alpine failed to load,
-           store getter threw, etc.), the user STILL sees the Connect
-           Wallet button. The dropdown logic still uses x-show on
-           `wcOpen` so it depends on Alpine — but the user-visible
-           button surface is now robust to hydration failures. -->
+      <!-- Connect Wallet — v23.2 single-button WalletConnect path.
+           The previous v9-v22 picker dropdown collapsed a Browser Wallet
+           entry (MetaMask/Rabby) + a WalletConnect entry. v23.2 strips
+           the MetaMask/injected path entirely per user request, so the
+           navbar now exposes ONE call-to-action that opens the WC QR
+           overlay directly. `hidden md:block` provides DOM-permanent
+           visibility (per the v16 robustness fix): if Alpine fails to
+           evaluate the wallet store on first paint (e.g. wallet.js
+           crashed with a SyntaxError), the button is still visible —
+           operators see the symptom and can fix upstream, but users
+           on a healthy build get the same button instantly.
+      -->
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet"
            class="relative hidden md:block">
-          <button type="button"
-                  @click="wcOpen = !wcOpen"
-                  class="px-5 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky active:scale-[0.97] flex items-center gap-2 ring-focus">
-            <span class="text-base leading-none">＋</span> Connect Wallet
-            <svg class="w-3 h-3" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="3" d="M19 9l-7 7-7-7"/></svg>
-          </button>
-          {{/* ── Dropdown ──────────────────────────────────────────────────────────────
-              `@click.outside` lives on the dropdown <div> (not the wrapper) — this
-              matches the bell dropdown's pattern that DOES close on outside-clicks
-              and DOES fire inner @click handlers. Putting `@click.outside` on the
-              outer wrapper created a target-tracking race where the click that
-              first opened the dropdown was re-evaluated as "outside" before the
-              inner @click had finished, suppressing both the close-X and the
-              wallet-connect buttons. Multi-statement @click handlers are also
-              re-ordered so `connect()` runs first and `wcOpen=false` fires
-              afterwards — the connect promise is what the user actually cares
-              about, and the dropdown closing just needs to not block it.
-              `type="button"` is added defensively on every inner <button> so
-              the browser never falls back to type="submit" within a form-less
-              page (the previous version was a latent bug — there is no form
-              here, but Chrome occasionally flags buttons without an explicit
-              type and stops dispatching click events).
-          */}}
-          <div x-show="wcOpen"
-               x-cloak
-               style="display: none;"
-               @click.outside="if (wcOpen) wcOpen = false"
-               @keydown.escape.window="if (wcOpen) wcOpen = false"
-               class="absolute right-0 mt-2 w-80 bg-ink-900/95 border border-white/10 rounded-2xl shadow-2xl backdrop-blur p-2 z-50 ring-focus cursor-auto">
-            <div class="px-3 pt-2 pb-1.5 flex items-center justify-between">
-              <p class="text-[10px] uppercase tracking-wider text-white/60 font-extrabold">Choose wallet</p>
-              <button type="button"
-                      @click.stop="wcOpen = false"
-                      aria-label="Close"
-                      class="text-white/40 hover:text-white text-base leading-none px-2 py-1 rounded-md hover:bg-white/10 transition cursor-pointer">&times;</button>
-            </div>
-            <button type="button"
-                    @click="$store.wallet.connect('injected'); wcOpen = false"
-                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 cursor-pointer">
-              <span class="w-10 h-10 rounded-xl bg-sky-500/20 border border-sky-400/40 flex items-center justify-center text-sky-200 text-base font-bold flex-shrink-0 glow-sky">M</span>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-bold text-white">Browser Wallet</p>
-                <p class="text-[11px] text-white/60 mt-0.5">MetaMask, Rabby, or any EIP-1193 wallet</p>
-              </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/10 text-white/80 font-bold uppercase tracking-wider">Quick</span>
-            </button>
-            <button type="button"
-                    @click="$store.wallet.connect('walletconnect'); wcOpen = false"
-                    class="w-full text-left px-3 py-2.5 rounded-xl hover:bg-ink-800 transition flex items-start gap-3 mt-1 cursor-pointer"
-                    {{if not .WCProjectID}}disabled{{end}}>
-              <span class="w-10 h-10 rounded-xl bg-violet-500/20 border border-violet-400/40 flex items-center justify-center text-violet-200 text-base flex-shrink-0 glow-violet">⌬</span>
-              <div class="flex-1 min-w-0">
-                <p class="text-sm font-bold text-white">WalletConnect</p>
-                <p class="text-[11px] text-white/60 mt-0.5">Scan a QR from any mobile or hardware wallet</p>
-              </div>
-              <span class="text-[10px] px-2 py-0.5 rounded-full bg-violet-500/20 text-violet-200 font-bold uppercase tracking-wider">QR</span>
-            </button>
-            <div class="px-3 pt-2.5 pb-2 text-[10px] text-white/40 leading-relaxed border-t border-white/5 mt-1">
-              Connection is non-custodial — your keys never leave your wallet. We verify ownership via a signed SIWE challenge (no transaction, no gas).
-            </div>
-          </div>
-        </div>
+        <button type="button"
+                @click="$store.wallet.connect()"
+                title="Connect via WalletConnect — scan QR or deep-link from any mobile or hardware wallet"
+                aria-label="Connect Wallet"
+                class="px-5 py-2 rounded-xl bg-violet-btn hover:opacity-95 text-white font-extrabold text-sm transition glow-violet active:scale-[0.97] flex items-center gap-2 ring-focus"
+                {{if not .WCProjectID}}disabled{{end}}>
+          <span class="text-base leading-none text-violet-100">⌬</span>
+          <span>Connect Wallet</span>
+        </button>
+      </div>
+
+      <!-- Inline persistent WC pairing chip — same surface as v22 but
+           lifted out of the dropdown so it sits at navbar level. Appears
+           while wc.connect() is in-flight and the user picked WC; the
+           overlay's close() keeps window.MW_WC_URI cached, so this
+           re-opens the same QR if the overlay was dismissed. -->
+      <template x-if="$store.wallet.state === 'connecting' && $store.wallet.isWalletConnect">
+        <button @click="(window.MW_WC_OPEN_OVERLAY || function(){})()"
+                class="px-3 py-2 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-300/40 text-violet-100 text-xs font-extrabold flex items-center gap-2 glow-violet pulse-violet transition ring-focus"
+                title="Tap to reopen the WalletConnect pairing QR"
+                aria-label="Reopen WalletConnect QR">
+          <span class="text-base">⌬</span>
+          <span class="hidden sm:inline">Scan QR on your phone</span>
+          <span class="sm:hidden">Scan QR</span>
+        </button>
+      </template>
 
       <!-- Notification bell -->
       <template x-if="$store.wallet.connected">
@@ -344,22 +274,6 @@
         </div>
       </template>
 
-      <!-- WalletConnect pairing chip — appears while wc.connect() is
-           in-flight and the user picked WalletConnect. Clicking re-opens
-           the WC overlay (user may have dismissed and forgotten which
-           QR to scan). The overlay's close() keeps window.MW_WC_URI
-           cached, so reopening rehydrates the same matrix. -->
-      <template x-if="$store.wallet.state === 'connecting' && $store.wallet.isWalletConnect">
-        <button @click="(window.MW_WC_OPEN_OVERLAY || function(){})()"
-                class="px-3 py-2 rounded-xl bg-violet-500/15 hover:bg-violet-500/25 border border-violet-300/40 text-violet-100 text-xs font-extrabold flex items-center gap-2 glow-violet pulse-violet transition ring-focus"
-                title="Tap to reopen the WalletConnect pairing QR"
-                aria-label="Reopen WalletConnect QR">
-          <span class="text-base">⌬</span>
-          <span class="hidden sm:inline">Scan QR on your phone</span>
-          <span class="sm:hidden">Scan QR</span>
-        </button>
-      </template>
-
       <button @click="open = !open" class="md:hidden p-2 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition ring-focus" aria-label="Menu">
         <svg x-show="!open" class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"/></svg>
         <svg x-show="open" x-cloak class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12"/></svg>
@@ -416,22 +330,13 @@
       </template>
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet" class="space-y-2">
         <button type="button"
-                @click="$store.wallet.connect('injected'); open = false"
-                class="w-full text-left px-3 py-3 rounded-xl btn-sky text-ink-950 font-extrabold flex items-center gap-3 glow-sky shadow-lg shadow-sky-500/30 transition active:scale-[0.97] cursor-pointer">
-          <span class="w-9 h-9 rounded-lg bg-ink-950/20 flex items-center justify-center text-base font-extrabold">M</span>
-          <span class="flex-1 min-w-0">
-            <span class="block text-sm font-extrabold">Browser Wallet</span>
-            <span class="block text-[10px] font-bold opacity-80">MetaMask, Rabby, any EIP-1193</span>
-          </span>
-        </button>
-        <button type="button"
-                @click="$store.wallet.connect('walletconnect'); open = false"
+                @click="$store.wallet.connect(); open = false"
                 class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97] cursor-pointer"
                 {{if not .WCProjectID}}disabled{{end}}>
           <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>
           <span class="flex-1 min-w-0">
-            <span class="block text-sm font-extrabold">WalletConnect</span>
-            <span class="block text-[10px] font-bold opacity-80">Scan QR from mobile / hardware</span>
+            <span class="block text-sm font-extrabold">Connect Wallet</span>
+            <span class="block text-[10px] font-bold opacity-80">WalletConnect · QR or deep link</span>
           </span>
           <span class="text-[10px] px-2 py-0.5 rounded-full bg-white/15 font-bold uppercase tracking-wider">QR</span>
         </button>
