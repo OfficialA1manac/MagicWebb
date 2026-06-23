@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/filesystem"
 	"github.com/rs/zerolog/log"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ui"
@@ -236,11 +237,20 @@ func uiSearch(q *db.Q) fiber.Handler {
 
 func uiMetrics(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		m, _ := q.GetMarketMetrics(c.Context())
+		// uiMetrics renders /metrics (HTML); the JSON sibling at
+		// /api/v1/metrics calls BuildMarketResponse too so both surfaces
+		// see the SAME wrapped map (sse_dropped_total, sse_saturation_streak,
+		// flat market fields, plus the metrics_unavailable sentinel when
+		// the query races). Passing the wrapped map as `.Metrics` lets the
+		// template use the same `{{with .Metrics}}{{.TotalActiveListings}}{{end}}`
+		// shape as before, AND access `.metrics_unavailable` inside the
+		// with-scope so a single banner template shows the unavailable
+		// state on both surfaces.
+		metricsMap := api.BuildMarketResponse(c.Context(), q)
 		activity, _ := q.GetRecentTransactions(c.Context(), 20)
 		return render(c, "pages/metrics.html", fiber.Map{
 			"Title":    "Metrics",
-			"Metrics":  m,
+			"Metrics":  metricsMap,
 			"Activity": activity,
 		})
 	}

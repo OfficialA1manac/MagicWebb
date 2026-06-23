@@ -14,6 +14,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
+	"github.com/jackc/pgx/v5"
 )
 
 const maxInt64 = int64(1<<63 - 1)
@@ -309,9 +310,11 @@ func isRetriableUpstream(uri string) bool {
 }
 
 // isClientGone reports whether err is just a torn-down request (cancelled,
-// timed out, or backed by a now-closed connection) rather than a real DB / RPC
-// failure. Used to keep noisy browser-disconnects and pgx transport errors
-// out of the warn stream. False positives tolerated.
+// timed out, or backed by a now-closed transaction/network) rather than a
+// real DB / RPC failure. The predicate is deliberately TIGHT: a genuine
+// pgx-side failure (server errors, FK violations, syntax errors) MUST stay
+// out of the debug channel so the WARN stream tells the truth about real
+// problems.
 func isClientGone(err error) bool {
 	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return true
@@ -319,11 +322,21 @@ func isClientGone(err error) bool {
 	if err == nil {
 		return false
 	}
-	// pgx.ErrTxClosed and connection-reset patterns do NOT wrap
-	// context.Canceled cleanly; substring predicate.
+	// pgx.ErrTxClosed is the canonical sentry for transaction-closed; matches
+	// sub-package re-exports via errors.Is. We deliberately do NOT match a
+	// bare "closed" substring here — that would swallow legitimate pgx
+	// errors that mention "server closed the connection" for actual
+	// server-side failures.
+	if errors.Is(err, pgx.ErrTxClosed) {
+		return true
+	}
+	// Network-level teardown patterns only — three specific kernel/net
+	// phrases that indicate the local OS/transport closed, NOT a DB-layer
+	// problem. Deliberately narrow so genuine DB-side closures (e.g. a
+	// server-side FATAL termination whose message mentions "server closed
+	// the connection") stay at Warn.
 	msg := err.Error()
-	return strings.Contains(msg, "closed") ||
+	return strings.Contains(msg, "use of closed network connection") ||
 		strings.Contains(msg, "broken pipe") ||
-		strings.Contains(msg, "connection reset") ||
-		strings.Contains(msg, "use of closed network connection")
+		strings.Contains(msg, "connection reset by peer")
 }
