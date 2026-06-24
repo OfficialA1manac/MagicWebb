@@ -1520,6 +1520,38 @@ window.addEventListener('alpine:init', () => {
       w.savedKind    = kind;
     }
   } catch (_) {}
+
+  // v23.8 — Bypass Alpine AST for the connect click.
+  // Diagnosis: Alpine 3 wraps the wallet store with a reactive Proxy.
+  // When the click handler `@click="$store.wallet.connect()"` evaluates
+  // the directive AST, the proxy returns a wrapped callable for
+  // $store.wallet.connect. In some Alpine builds that wrapper drops the
+  // chained await queue at the first microtask hop — so the call returns
+  // synchronously with no error, no toast, no [mw-wc-debug] log, but
+  // _wcConnect is never awaited. The four v23.x deploys captured this
+  // exact silent-drop symptom: namespace loads, no console errors, no
+  // telemetry logs, no overlay. The fix is to expose connect() through a
+  // direct global that re-reads Alpine.store('wallet') at click-time and
+  // invokes .connect() on the raw object — bypassing the directive AST
+  // entirely. window.MW_CONNECT_WALLET is registered at the end of
+  // alpine:init so Alpine.store is already defined when any click fires.
+  window.MW_CONNECT_WALLET = () => {
+    try { console.log('[mw-wc-debug] MW_CONNECT_WALLET invoked directly (bypasses $store.wallet.connect AST)'); } catch (_) {}
+    try {
+      const w = Alpine.store('wallet');
+      // .catch follows the returned promise so async rejections surface
+      // as a typed toast rather than an unhandled-rejection error in
+      // DevTools (the outer try/catch above catches sync throws but
+      // NOT promise rejections — it's Promise semantics, a JS trap).
+      return w.connect({ silent: false }).catch((e) => {
+        try { console.error('[mw] connect rejected:', e); } catch (_) {}
+        try { toast(revertMessage(e), 'error'); } catch (_) {}
+      });
+    } catch (e) {
+      try { console.error('[mw] MW_CONNECT_WALLET crashed:', e); } catch (_) {}
+      try { toast('Connect failed: ' + (e?.message || e), 'error'); } catch (_) {}
+    }
+  };
 });
 
 /* ─────────────────────────────────────────────────────────────────────────────
