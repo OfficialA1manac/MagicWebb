@@ -359,7 +359,7 @@
           </template>
           <a :href="'/profile/' + $store.wallet.address" class="text-xs text-white hover:text-gold-200 font-mono font-bold"
              x-text="$store.wallet.shortAddr"></a>
-          <button @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
+          <button @click="$store.wallet.disconnect()"
                   title="Disconnect wallet"
                   class="text-white/40 hover:text-gold-300 text-base leading-none transition">×</button>
         </div>
@@ -475,7 +475,7 @@
             </template>
           </a>
           <button type="button"
-                  @click="if (confirm('Disconnect wallet?')) $store.wallet.disconnect()"
+                  @click="$store.wallet.disconnect()"
                   class="w-full text-left px-3 py-2.5 rounded-xl border border-red-400/30 text-red-200 hover:bg-red-500/10 transition font-bold text-sm cursor-pointer">
             Disconnect Wallet
           </button>

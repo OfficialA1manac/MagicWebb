@@ -435,20 +435,16 @@ window.addEventListener('alpine:init', () => {
         };
         this._resolver = resolver;
         this.open = true;
+        // Auto-execute: skip the pre-confirm step and go straight to
+        // wallet signing. The wallet's native prompt is the confirmation.
+        this.stepLabel = 'Confirm in your wallet…';
+        this.progress = 25;
+        setTimeout(() => { Promise.resolve().then(resolver).catch((e) => toast(revertMessage(e), 'error')); }, 30);
       });
-    },
-    confirm() {
-      if (this.step >= 1) return; // re-entry guard (atomic action)
-      const r = this._resolver;
-      if (!r) return;
-      this.step = 1;
-      this.stepLabel = 'Confirm in your wallet…';
-      this.progress = 25;
-      setTimeout(() => { Promise.resolve().then(r).catch((e) => toast(revertMessage(e), 'error')); }, 30);
     },
     dismiss() {
       if (this.step === 1 || this.step === 2) {
-        toast('Action cancelled — your wallet may still show a pending prompt.', 'info');
+        toast('Action was starting — your wallet may still show a pending prompt.', 'info');
       }
       this.open = false;
       this._resolver = null;
@@ -464,6 +460,7 @@ window.addEventListener('alpine:init', () => {
     jwt:     localStorage.getItem('mw_jwt') || null,
     unread:  0,
     busy:    false,
+    _stateError: null,
     state:   'idle', // 'idle' | 'connecting' | 'connected' | 'awaiting' | 'error'
     // ── "Saved wallet" hydration (v13 — REPLACES auto-reconnect) ──
     // On prior deploys we auto-connected on every page load when a
@@ -515,8 +512,7 @@ window.addEventListener('alpine:init', () => {
     // wallet or retry without losing context).
     async reconnectSaved() {
       if (!this.savedAddress) return;
-      const kind = this.savedKind || 'injected';
-      await this.connect(kind, { silent: false });
+      await this.connect({ silent: false });
       if (this.connected && this.address === this.savedAddress) {
         // Reconnect succeeded — clear the pill.
         this.savedAddress = null;
@@ -1008,7 +1004,10 @@ window.addEventListener('alpine:init', () => {
       return null;
     },
 
-    // ── Per-action runner — single-button modal flow ──
+    // ── Per-action runner — direct wallet signing (no confirmation popup) ──
+    // Actions flow directly to wallet signing. The wallet's native prompt
+    // serves as the confirmation step — no extra modal needed. The modal
+    // is only used to display progress/success/error status.
 
     async runAction(opts) {
       if (this.busy) {
@@ -1019,23 +1018,14 @@ window.addEventListener('alpine:init', () => {
       try {
         const signer = await this.ensureSigner();
         if (!signer) {
-          return await Alpine.store('modals').open({
-            userInitiated: true,
-            kind: 'list', icon: '⚡',
-            title: 'Connect your wallet first',
-            subtitle: opts.subtitle || '',
-            summary: [{ label: 'Action', value: opts.title || 'Continue' }],
-            disclaimer: 'Connection is never custodial — your keys stay in your wallet.',
-            ctaLabel: 'Got it',
-            run: async ({ fail, setStep }) => {
-              setStep(1, 'Open the wallet picker…');
-              toast('Click "Connect Wallet" above to choose a wallet.', 'info');
-              fail({ title: 'Wallet not connected', body: 'Connect a wallet to continue.' });
-            },
-          });
+          toast('Connect your wallet first — click Connect Wallet above.', 'info');
+          return { ok: false, error: 'no-wallet' };
         }
         const provider = await resolveProvider(this);
-        return await Alpine.store('modals').open({
+        // Execute the action directly — no confirmation popup.
+        // The modal is used only for progress + result display.
+        const modals = Alpine.store('modals');
+        const result = await modals.open({
           userInitiated: true,
           kind: opts.kind,
           icon: opts.icon,
@@ -1056,6 +1046,11 @@ window.addEventListener('alpine:init', () => {
             }
           },
         });
+        if (result === null) {
+          toast('Action could not start — please try again.', 'error');
+          return { ok: false, error: 'modal-timeout' };
+        }
+        return result;
       } finally {
         this.busy = false;
       }

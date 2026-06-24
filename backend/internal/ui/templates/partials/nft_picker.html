@@ -110,11 +110,11 @@
         this.loading = false;
       },
 
-      // Routes to WalletConnect — the only connect path in v23.2 —
+      // Routes to WalletConnect — the only connect path —
       // then closes the picker so the WC QR overlay takes over.
       connectWC() {
         this.close();
-        try { Alpine.store('wallet').connect(); } catch (_) {}
+        try { Alpine.store('wallet').connect({ silent: false }); } catch (_) {}
       },
 
       // Routes the chosen NFT to /token/<collection>/<token_id>?action=…

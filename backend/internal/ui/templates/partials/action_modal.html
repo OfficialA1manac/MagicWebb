@@ -51,16 +51,15 @@
               <p class="text-xs text-white/60 mt-1" x-text="$store.modals.subtitle || ''"></p>
             </div>
           </div>
-          <button @click="$store.modals.dismiss()" :disabled="$store.modals.step >= 3"
+          <button @click="$store.modals.dismiss()" :disabled="$store.modals.step === 1 || $store.modals.step === 2"
                   class="text-white/40 hover:text-white text-2xl leading-none transition disabled:opacity-30 disabled:cursor-not-allowed">×</button>
         </div>
 
         <!-- Body: 3 sections, only one visible at a time. -->
 
-        <!-- (A) Summary — visible while step < 1. Lists price breakdown so the
-             user sees what they're about to send (sky), what the seller
-             receives net of fee (gold), and the 1.5% fee line (white). -->
-        <div x-show="$store.modals.step < 3" class="px-6 pt-5 pb-2">
+        <!-- (A) Summary — visible while action is in progress. Lists price
+             breakdown so the user sees what they're confirming in their wallet. -->
+        <div x-show="$store.modals.step >= 1 && $store.modals.step < 3" class="px-6 pt-5 pb-2">
           <div class="bg-white/[0.04] border border-white/10 rounded-2xl p-4 space-y-2.5">
             <template x-for="r in $store.modals.summary" :key="r.label">
               <div class="flex items-center justify-between text-sm">
@@ -126,23 +125,10 @@
           </template>
         </div>
 
-        <!-- Footer: action buttons. The "placeholder" card (Confirm + Cancel)
-             appears while step < 1; "Done" button replaces them on success. -->
+        <!-- Footer: actions auto-execute on open (wallet native prompt is
+             the confirmation). Only show status spinner or Done button. -->
         <div class="px-6 py-4 bg-white/[0.02] border-t border-white/10 flex gap-3">
-          <button x-show="$store.modals.step < 1"
-                  @click="$store.modals.dismiss()"
-                  class="flex-1 py-3 rounded-xl bg-white/5 hover:bg-white/10 text-white font-bold text-sm transition">
-            Cancel
-          </button>
-          <button x-show="$store.modals.step < 1"
-                  @click="$store.modals.confirm()"
-                  class="flex-1 py-3 rounded-xl font-extrabold text-sm transition active:scale-[0.98] glow-sky"
-                  :class="$store.modals.actionKind === 'offer' ? 'btn-gold glow-gold' : ($store.modals.actionKind === 'auction' || $store.modals.actionKind === 'bid' || $store.modals.actionKind === 'settle' ? 'btn-violet glow-violet' : 'btn-sky glow-sky')"
-                  x-text="'Confirm — ' + ($store.modals.ctaLabel || 'Continue')"></button>
-
-          <!-- Awaiting state can't be cancelled server-side; we only let the
-               user reject from inside their wallet (the tx itself). The
-               button just sits inert with a spinner-themed label. -->
+          <!-- While action is in-flight: spinner with current step label -->
           <button x-show="$store.modals.step >= 1 && $store.modals.step < 3"
                   disabled
                   class="flex-1 py-3 rounded-xl bg-white/5 text-white/50 font-bold text-sm flex items-center justify-center gap-2 cursor-wait">
