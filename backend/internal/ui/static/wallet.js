@@ -717,15 +717,37 @@ window.addEventListener('alpine:init', () => {
       // connect() catch surfaces this via the standard toast so the
       // user sees 'WalletConnect is temporarily unavailable. Please
       // use the Browser Wallet option for now.' and picks MetaMask.
+      // v23.5 — self-hosted WalletConnect SDK. The previous 3-URL cascade
+      // (esm.sh bundle-deps × 2 + jsdelivr +esm) loaded bundles whose first
+      // import line was itself a relative fetch to esm.sh ("/@msgpack/...").
+      // In any network that blocked even esm.sh (corp firewalls, some ISPs,
+      // geo-fences, ad-block browsers), the cascading chain died silently
+      // and the user saw "WalletConnect is unavailable" without a single
+      // network request logged to DevTools — impossible to debug.
+      //
+      // The fix is a TRUE single-file bundle: jsdelivr's `+esm` endpoint
+      // runs Rollup v2.79.2 + Terser v5.39.0 server-side and ships one
+      // ESM module with zero internal imports. We commit it as
+      // /static/wc-bundle.js (17 KB) and import same-origin. The browser
+      // no longer needs esm.sh / cdn.jsdelivr.net in script-src or
+      // connect-src for the WalletConnect SDK to load. (The CSP still
+      // allow-lists api.reown.com + *.walletconnect.com + relay wss:// for
+      // the WC PAIRING traffic — those are not the SDK-source CDNs.)
       let wc = null, lastErr = null;
-      const _WC_CDNS = [
-        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps&target=es2022',
-        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps',
-        'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.23.9/+esm',
+      const _WC_LOCAL_TRIES = [
+        // Fresh cache-busted cash first; the cache-buster is bumped in
+        // lock-step with `?v=` on the wallet.js script tag so any release
+        // ships both together. Each release has its own integer so a
+        // browser that pulled ?v=22 will re-fetch ?v=23 next.
+        '/static/wc-bundle.js?v=22',
+        // Bypass-cache fallback for browsers whose HTTP cache honors
+        // Cache-Control but not the query string (some Chrome flags +
+        // some reverse-proxy intermediates). Same file, different name.
+        '/static/wc-bundle.js',
       ];
-      for (const cdnUrl of _WC_CDNS) {
+      for (const bundleUrl of _WC_LOCAL_TRIES) {
         try {
-          const mod = await import(/* @vite-ignore */ cdnUrl);
+          const mod = await import(/* @vite-ignore */ bundleUrl);
           wc = await mod.EthereumProvider.init({
             projectId: WC_PROJECT_ID,
             chains:    [CHAIN_ID],
@@ -741,12 +763,20 @@ window.addEventListener('alpine:init', () => {
           break;
         } catch (e) {
           lastErr = e;
-          // continue to next CDN URL
+          // continue to next local fallback URL
         }
       }
       if (!wc) {
+        // v23.5 — the SDK lives at /static/wc-bundle.js (local). If this
+        // throws, the failure is browser-side, not on any third-party
+        // service. Direct the user to actionable LAN-free steps: a hard
+        // refresh forces the browser to re-fetch (some Safari versions
+        // cache ESM modules across tabs), browser-extension disablement
+        // defeats the small but real class of content-blockers that
+        // shadow ESM modules, and an incognito window tells us if the
+        // user's regular-browser profile is the cause.
         throw new Error(
-          'Could not load the WalletConnect SDK right now. Refresh and try again, or check status.walletconnect.com if it persists. (' +
+          'Could not load WalletConnect locally. Try Ctrl-Shift-R to hard-refresh, disable extensions that block scripts (NoScript/uBlock), or open an incognito window. (' +
           (lastErr?.message || lastErr) + ')'
         );
       }

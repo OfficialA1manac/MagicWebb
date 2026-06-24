@@ -13,7 +13,11 @@
   <title>{{if .Title}}{{.Title}} — {{end}}MagicWebb</title>
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link rel="preconnect" href="https://esm.sh" crossorigin>
+  <!-- v23.5: removed <link rel="preconnect" href="https://esm.sh" crossorigin>.
+       Was pre-warming DNS for the WalletConnect SDK at esm.sh. The SDK is
+       now self-hosted at /static/wc-bundle.js (17 KB, single Rollup bundle,
+       served same-origin) so the preconnect is wasted preflight traffic and
+       creates an unused third-party origin in the browser's connection pool. -->
   <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet">
   <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet">
   <!-- Self-hosted Tailwind CSS replaces the prior JIT-compiler runtime
@@ -22,23 +26,37 @@
        an XSS surface if cdn.tailwindcss.com were ever compromised. The
        static bundle at /static/tailwind.css is produced by
        `cmd/buildtailwindcss` from internal/ui/tailwind.config.cjs +
-       the template content glob; tree-shaken so only used rules ship. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=21">
+       the template content glob; tree-shaken so only used rules ship.
+       v23.5: bumped ?v=21 → ?v=22 to force the browser to re-fetch the
+       static bundle in case any future deploy invalidates it; happens in
+       lock-step with the wallet.js / wc-bundle.js buster bump below. -->
+  <link rel="stylesheet" href="/static/tailwind.css?v=22">
 
-  <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs) ─────────────────
+  <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs, walletconnect) ──
        Previously these were loaded from public CDNs with SHA-384 SRI
        integrity pinning. That scheme was brittle: any missed hash refresh
        made the browser fail-closed and reject the script — rendering the
        entire UI inert (no Alpine reactivity, no ethers contract calls,
        no SSE). Self-hosting eliminates the operational hazard: the bytes
        are committed to the repo, same-origin CSP allows them, and a
-       CDN-side compromise can no longer affect us. WalletConnect's
-       ethereum-provider remains ESM-imported on demand from esm.sh, gated
-       by the user's explicit click on the WalletConnect method in the
-       picker — see wallet.js's `_wcConnect()` for the dynamic import. -->
-  <script src="/static/htmx.min.js?v=21" defer></script>
-  <script src="/static/sse.js?v=21" defer></script>
-  <script src="/static/ethers.umd.min.js?v=21" defer></script>
+       CDN-side compromise can no longer affect us.
+       v23.5 — WalletConnect's ethereum-provider is ALSO self-hosted as
+       /static/wc-bundle.js (17 KB single Rollup/Terser bundle). It used
+       to be a dynamic import() from esm.sh that re-routed into ~422
+       nested sub-fetches any one of which, if blocked by the user's
+       network (corp firewall, ISP geo-fence, ad-blocker), would silence
+       the whole connect path. Now a single same-origin fetch on click.
+       See wallet.js's `_wcConnect()` for the dynamic import. -->
+  <!-- v23.5: ?v=21 → ?v=22 cache-buster bump. Forces the browser to
+       re-fetch every same-origin static JS bundle in lock-step with
+       the wc-bundle.js + wallet.js edits. Without this bump, a browser
+       that loaded ?v=21 wallet.js would still call the v23.4 cascade
+       (esm.sh rejected silently) even after v23.5 deployed — the cache
+       buster is the belt against the entire "browser is using stale
+       wallet.js" failure class. -->
+  <script src="/static/htmx.min.js?v=22" defer></script>
+  <script src="/static/sse.js?v=22" defer></script>
+  <script src="/static/ethers.umd.min.js?v=22" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -66,13 +84,26 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=21" defer></script>
+  <script src="/static/wallet.js?v=22" defer></script>
+  <!-- v23.5 — NO static <script src="/static/wc-bundle.js"> tag here.
+       Self-hosted WalletConnect SDK is loaded ON DEMAND by wallet.js's
+       `_wcConnect()` via a same-origin dynamic import(). It was removed
+       from this layout because (a) the dynamic import is the ONLY mount
+       path; (b) a static tag with `defer` would still fetch 17 KB on every
+       page load even for users who never click Connect Wallet; (c) the
+       HTTP cache dedupes identical URLs but the static tag introduces
+       a "why is wc-bundle loading twice?" question for future readers.
+       wc-bundle.js is committed to /static/wc-bundle.js (17 KB Rollup/
+       Terser single-file drop) and served same-origin; the dynamic
+       import URL is '/static/wc-bundle.js?v=22' (kept in lock-step with
+       wallet.js's v=22 cache-buster so any release ships both together
+       and the browser re-fetches atomically). -->
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=21" defer></script>
-  <script src="/static/cdn.min.js?v=21" defer></script>
+  <script src="/static/qrcode.min.js?v=22" defer></script>
+  <script src="/static/cdn.min.js?v=22" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }

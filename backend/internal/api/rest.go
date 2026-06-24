@@ -32,13 +32,21 @@ import (
 // where image handlers already set it.
 const (
 	cspHeader = "default-src 'self'; " +
-		// Self-hosted JS bundles (htmx/ethers/alpinejs) live under /static,
-		// served same-origin. Only esm.sh remains external — wallet.js
-		// dynamically imports @walletconnect/ethereum-provider from there
-		// at button-click time (gated by the user's explicit WalletConnect
-		// picker selection — never on page boot). api.reown.com + WC relay
-		// wss:// channels are required for the QR pairing / multi-wallet
-		// relay — block any of them and WalletConnect silently fails.
+		// Self-hosted JS bundles (htmx/ethers/alpinejs/walletconnect-sdk)
+		// all live under /static, served same-origin. ZERO third-party
+		// script-src origins remain — the WalletConnect SDK was previously
+		// dynamically imported from esm.sh, but each "bundle" URL was a
+		// meta-import that the browser resolved into ~422 nested sub-fetches
+		// (/@msgpack/msgpack/...); any user whose network blocked even one
+		// of those transitive URLs saw "WalletConnect is unavailable" with
+		// zero requests in DevTools. v23.5 committed the bundled SDK to
+		// /static/wc-bundle.js (17 KB Rollup/Terser single-file drop) and
+		// wallet.js does a same-origin import() on click. website origin
+		// is the only remaining script-src surface. api.reown.com + WC
+		// relay wss:// channels stay in connect-src — those are the
+		// PAIRING/DISCOVERY traffic (project metadata + relay socket),
+		// not the SDK source. Without them the QR pairs but never
+		// completes.
 		// Alpine.js evaluates expressions via `new Function()` at runtime, so
 		// 'unsafe-eval' is required for any x-data / x-show / x-if to mount
 		// under CSP. The alternative (@alpinejs/csp) requires a maintained
@@ -56,12 +64,42 @@ const (
 		// self-hosted Alpine + dynamic injection. Nonces per response are
 		// the strict pattern; we revisit when a richer threat model requires
 		// it.
-		"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh https://cdn.jsdelivr.net; " +
+		// v23.5 — script-src no longer references esm.sh or cdn.jsdelivr.net.
+	// The WalletConnect SDK is fully self-hosted as
+	// /static/wc-bundle.js (17 KB, served same-origin, single Rollup
+	// bundle). Previously these CDN origins were allowlisted so the
+	// browser could fetch the SDK on dynamic import() — now they are
+	// unused. Removing them tightens the CSP surface for any future
+	// XSS attempts: an injected script that tries <script src="https://
+	// esm.sh/evil.js"> is blocked because esm.sh is no longer in
+	// script-src. Same-origin `self` + inline runtime-config + Alpine's
+	// unsafe-eval (required for x-data reactivity) are the only exec
+	// surfaces remaining. verify.walletconnect.com stays in frame-src
+	// below in case future in-iframe verification flows use it.
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
-		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com https://esm.sh https://cdn.jsdelivr.net wss://*.esm.sh; " +
-		"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
+		// v23.5 — connect-src: dropped esm.sh + cdn.jsdelivr.net + wss://*.esm.sh
+	// (no longer needed because the WC SDK is self-hosted). Kept:
+	//   * coston2-api.flare.network — chain RPC reads/writes
+	//   * ipfs.io / dweb.link / gateway.pinata.cloud — image fallback for
+	//     /api/v1/media proxy upstream
+	//   * api.reown.com — WalletConnect explorer API (wallet listing metadata)
+	//   * https://*.walletconnect.com — WC verify endpoints + explorer-iframe
+	//   * wss://relay.walletconnect.com / wss://*.walletconnect.com — WC pairing
+	//     relay (REQUIRED — drop these and the QR pairs but never completes)
+	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
+		// v23.5 — worker-src explicitly allowlisted so the WC SDK v2.x can
+	// spawn its in-process relay-crypto Web Worker (a blob worker built
+	// from the SDK source — see wallet-connect/sdk's KeyChainStorage).
+	// Without this directive the browser falls back to child-src →
+	// script-src → default-src, and while `script-src 'self'` happens to
+	// pass for in-thread WASM, blob workers (URL.createObjectURL) need an
+	// explicit `blob:` token. Belt-and-braces: future SDK versions may
+	// switch from SubtleCrypto to a fallback worker in older browsers.
+	"worker-src 'self' blob:; " +
+	"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"

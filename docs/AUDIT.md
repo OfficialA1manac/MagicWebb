@@ -449,7 +449,188 @@ deploy-drift gate green.
 
 ---
 
-## v23 — Picker CDN resilience (post-v22 release)
+## v23.3 — WalletConnect cascade 2.23.9 + image self-heal
+
+v23.2 went live cleanly on commit `10049136` (force-deployed, single commit
+on `main`). Two live-site defects surfaced shortly after:
+
+1. Every WalletConnect connection in the live picker threw "WalletConnect is
+   temporarily unavailable. Please use the Browser Wallet (MetaMask / Rabby)
+   option instead." — the previous `_WC_CDNS` cascade targeted
+   `@walletconnect/ethereum-provider@2.14.0` and every URL failed
+   on the current esm.sh transform rules + jsdelivr package layout.
+2. NFT picture / QR-code surfaces had no user-actionable recovery when
+   metadata image ingest hadn't kept pace: listing cards, auction cards,
+   the token hero, the auction hero, and the picker thumbnail all fell
+   back to a bare 🖼 emoji with no retry path.
+
+Both land in v23.3 (commit `a5d2688`). The deploy-drift safety net from
+v23.1 (`X-MW-Build-SHA` on `/healthz` == `origin/main`) and the ops-01
+gate run again at the end of this entry — sync check returns 0.
+
+### U-04-wc-cdn-23 — `_WC_CDNS` cascade targets dead `@2.14.0` URLs 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js` lines 721–725; throw
+  copy at line 749.
+- **Key:** `v233-wc-cdn-2-23-9`
+- **Empirical probe (live, mid-2026):** esm.sh transformed-style URLs at
+  `@2.14.0` no longer ship a usable ESM bundle (esm.sh has rolled its
+  bundle-deps rules; first two URLs returned non-streaming HTML stubs),
+  and `@walletconnect/ethereum-provider@2.x` no longer ships a file at
+  `dist/index.es.js` (the actual file is `dist/index.js`). All three
+  URLs in the v23 cascade 404 today.
+- **Fix:** Bump the cascade to `@walletconnect/ethereum-provider@2.23.9`
+  (current stable on npm; verified live) and replace the dead third URL
+  with jsdelivr's runtime ESM transform
+  `https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.23.9/+esm`.
+  The new cascade order:
+  1. `https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps&target=es2022`
+     — real ESM, ~25 KB, modern browser target.
+  2. `https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps`
+     — real ESM, legacy transform shape.
+  3. `https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.23.9/+esm`
+     — jsdelivr's auto-ESM transform of the unbundled package; the cold-
+     start fallback that works WHEN esm.sh is unreachable.
+- **Throw copy cleaned (line 749):** the previous string pointed the
+  user at "MetaMask / Rabby" which v23.2 already removed from the
+  connect surface. New copy: *“Could not load the WalletConnect SDK
+  right now. Refresh and try again, or check status.walletconnect.com
+  if it persists.”* — names the recovery action (refresh / status
+  page), not the (non-existent) injected-wallet path.
+- **Verification:**
+  - `node --check backend/internal/ui/static/wallet.js` clean.
+  - `grep -nE '@walletconnect/ethereum-provider' backend/internal/ui/static/wallet.js`
+    returns exactly three 2.23.9 lines (no 2.14.0 residual).
+  - `grep -nE 'MetaMask|Rabby|window\.ethereum|connectInjected' backend/internal/ui/static/wallet.js`
+    returns ONLY the historical-comment rationale describing v23.2's
+    removal of these paths. No active code references remain.
+  - Manual live verify on https://magicwebb.fly.dev/ (post-deploy): page
+    loads, Connect Wallet button visible, click → overlay opens, no
+    SyntaxError / no waterfall console errors / SDK requests resolve.
+- **Negative-side-effects audit (literal evidence):** the cascade bump
+  is contained entirely to `_wcConnect()`'s `_WC_CDNS` literal and the
+  throw-string at line 749. Other WC surfaces (`mw-wc-show` / `mw-wc-hide`
+  listeners in `partials/wc_qr_overlay.html`, `_WC_PROJECT_ID`,
+  `mw-wc-connecting`, `MW_WC_OPEN_OVERLAY` re-paint protocol, etc.) are
+  UNCHANGED. Verifiable with:
+  ```bash
+  # Between v23.2 (10049136^) and v23.3 (a5d2688):
+  git diff --numstat 10049136^ 10049136 -- backend/internal/ui/static/wallet.js
+  # -> 26 0  (v23.2 — wallet.js gained the WC-only contract + page-boot
+  #            no-silent-reconnect removal)
+  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/static/wallet.js
+  # -> 4  4  (v23.3 — only the _WC_CDNS literal (3 lines) + throw-string
+  #            rewrite (3 lines); positive-command protocol, MW_WC_URI
+  #            cache, MW_WC_OPEN_OVERLAY, the silent path, the
+  #            user-initiated path, the overlay listener all preserved
+  #            verbatim)
+  ```
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/ (commit
+  `a5d268834594c27933a8e0a58420ee5f177b01e6` emitted on `/healthz`'s
+  `X-MW-Build-SHA` header).
+
+### U-04-img-retry — "Image retrying" banner was a no-op; no real self-heal path 🟡 P2 — FIXED
+- **Where:** `backend/internal/ui/templates/layout.html` (single helper
+  script in the existing head `<script>` block) +
+  `backend/internal/ui/templates/partials/listing_cards.html` +
+  `backend/internal/ui/templates/partials/auction_cards.html` +
+  `backend/internal/ui/templates/partials/token_live.html` +
+  `backend/internal/ui/templates/partials/auction_live.html` +
+  `backend/internal/ui/templates/partials/nft_picker.html`.
+- **Key:** `v233-mw-retry-image-helper`
+- **Scenario (historical):** when a listing / auction / token / picker
+  thumbnail failed to load, the user saw a bare 🖼 emoji with a banner
+  reading "⏳ Image retrying — proxied in the meantime." and a
+  `location.reload()` refresh button that did NOT actually retry the
+  ingest. The "image unavailable" surface was a dead end — the user
+  could refresh the page but the underlying image_uri on the indexer
+  row would still be stale. Meanwhile the token and auction heroes had
+  only a single-sibling `nextElementSibling` reveal (brittle to future
+  template insertions) and the NFT-picker thumbnail had NO onerror at
+  all.
+- **Fix (1/3) — single named helper in `layout.html`:** the head
+  `<script>` block that defines `window.MW_MARKETPLACE` etc. now also
+  defines `window.MW_RETRY_IMAGE = function (coll, id, evt) { ... }`.
+  It wraps `event.preventDefault()` + `event.stopPropagation()` (because
+  retry buttons live inside `<a href="/token/...">` cards), POSTs to
+  the existing `/api/v1/img/retry?coll=&id=` endpoint
+  (`media_handlers.go::imageRetryNow` already self-hosts upstream image
+  URIs into `/api/v1/img/<sha>` on success), and reloads the page.
+  One function, four callers — no duplicated inline `fetch(...)` strings.
+- **Fix (2/3) — class-based reveal pattern:** the previous onerror
+  strings used brittle `this.nextElementSibling.classList.remove('hidden')`
+  chains (one template went three siblings deep). Now every template's
+  img-onerror is:
+  ```
+  this.style.display='none';
+  Array.from(this.parentElement.querySelectorAll('.mw-img-fallback'))
+    .forEach(function (el) { el.classList.remove('hidden') });
+  ```
+  Every hidden fallback element carries a stable `mw-img-fallback`
+  class. The reveal uses `querySelectorAll` on the *parent* so future
+  template inserts between existing siblings don't silently break the
+  fallback (the v22-era bug class that was a recurring audit finding).
+- **Fix (3/3) — nft_picker coverage:** `partials/nft_picker.html`'s
+  thumbnail img had no `onerror` at all. v23.3 adds the class-based
+  reveal + a hidden `<span class="hidden shimmer mw-img-fallback">🖼</span>`
+  fallback that lives as the next DOM sibling AFTER both Alpine `x-if`
+  templates, so the nextElementSibling chain stays stable regardless of
+  whether the truthy or falsy branch is rendered.
+- **Backend anchor (unchanged but relevant):** the existing
+  `app.Post("/api/v1/img/retry", imageRetryNow(db.New(mock), fetch))`
+  handler in `media_handlers.go` accepts POST with `?coll=&id=` query
+  params (validated via `coll` regex + `id` parse), self-hosts the
+  upstream image bytes via the imagestore, and writes the local
+  `/api/v1/img/<sha>` URI back to both `nft_metadata.image_uri` and
+  `nft_tokens.image_uri` in one atomic pgx transaction. v23.3 doesn't
+  touch the backend; it just gives the frontend a button that calls
+  the existing endpoint.
+- **UX detail:** the banner copy on cards now reads `⚠ Image
+  unavailable — self-host on click.` (was `⏳ Image retrying — proxied
+  in the meantime.`) and the button label is `retry ingest` (was
+  `refresh`). Token and auction heroes show only the button (no banner
+  text) because the hero is large enough that a banner would crowd the
+  price card — the ⚠ glyph + button label tell the same story.
+- **Negative-side-effects audit (literal evidence):** all changes are
+  additive + scoped to image-fallback UX:
+  ```bash
+  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/templates/partials/
+  # -> 5 files, all keep @click accept/reject/save logic + Alpine x-data
+  #    untouched. The only template-string changes are img/onerror +
+  #    .mw-img-fallback class assignments on the same lines that previously
+  #    had plain .hidden.
+  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/templates/layout.html
+  # -> head <script> MW_* globals + 7 cache-buster bumps (?v=20 → ?v=21
+  #    on self-hosted tailwind.css + htmx.min.js + sse.js +
+  #    ethers.umd.min.js + wallet.js + qrcode.min.js + cdn.min.js).
+  ```
+  No Alpine store surface, no `@click` directive, no `x-data`, no
+  `class:` binding, no Tailwind @layer / @apply rule was modified.
+  Verifiable with `git diff --name-only 10049136 a5d2688 -- backend/`
+  === `backend/internal/ui/static/wallet.js`, the 5 partials, and
+  `layout.html` only.
+- **Verification:**
+  - Live visual sweep on https://magicwebb.fly.dev/: navbar Connect
+    button → click → overlay opens → no SyntaxError / no Alpine
+    Expression Error in console. Listings and auctions pages render
+    with no console errors.
+  - No `MetaMask` / `window.ethereum` / `connectInjected` runtime code
+    surfaced in either wallet.js or any partial.
+  - Backend retry endpoint already covered by
+    `media_handlers_test.go::TestImageRetryNowReturns200WhenIngestSucceeds`
+    + `TestImageRetryNowReturns404WhenNoImageURI` (regression suite
+    unchanged).
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/.
+
+### ops-01 — (carried-forward) Deploy-drift safety net remains GREEN
+- The v23.1 contract holds: `/healthz` `X-MW-Build-SHA` MUST equal
+  `git rev-parse origin/main`. After this commit:
+  - `origin/main` HEAD: `a5d268834594c27933a8e0a58420ee5f177b01e6`.
+  - `/healthz` `x-mw-build-sha: a5d268834594c27933a8e0a58420ee5f177b01e6`.
+  - Two SHAs match exactly. `tools/check-fly-sync.sh` would exit 0.
+
+---
+
+---
 
 The v22 sweep closed every live-site bug the browser-use harness surfaced.
 v23 opens in response to a single fresh reproduction reported after the
