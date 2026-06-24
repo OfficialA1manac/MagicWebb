@@ -30,7 +30,7 @@
        v23.5: bumped ?v=21 → ?v=22 to force the browser to re-fetch the
        static bundle in case any future deploy invalidates it; happens in
        lock-step with the wallet.js / wc-bundle.js buster bump below. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=25">
+  <link rel="stylesheet" href="/static/tailwind.css?v=26">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs, walletconnect) ──
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -73,11 +73,23 @@
        layout.html:224,398 + offers.html:26 are wholly script-side. The
        bump forces an atomic re-fetch so a returning browser doesn't
        serve the v23.7 wallet.js (which still has the broken $store.wallet
-       .connect() AST path) alongside the new @click="window.MW_CONNECT_WALLET()"
-       handler — those two would mismatch and the click would no-op.
+       .connect() AST path) along with the v23.8 inline handler bound to
+       window.MW_CONNECT_WALLET() at parse time — those two would mismatch
+       and the click would no-op.
        Other tags bumped in lock-step for hygiene. The bridge itself
        bypasses Alpine's reactive effect when invoking .connect() so it
        is not subject to the v23.7 silent-drop symptom. -->
+  <!-- v23.9: ?v=25 → ?v=26 cache-buster bump. Migration to NATIVE HTML
+       onclick on the 3 connect buttons (layout.html desktop + mobile
+       drawer + offers.html line 26) + HOIST of window.MW_CONNECT_WALLET
+       bridge OUT of alpine:init to a top-level IIFE statement in
+       wallet.js. The native onclick attribute bypasses Alpine's event
+       directive parser entirely (no reactive-effect involvement, no
+       proxy-stripped async-method silent drop); the top-level bridge
+       registration guarantees window.MW_CONNECT_WALLET exists the
+       moment wallet.js parses, before any click can fire. Combined
+       belt-and-braces against the v23.7/v23.8 intermittent
+       modal-doesn't-open failure mode. -->
   <script src="/static/htmx.min.js?v=23" defer></script>
   <script src="/static/sse.js?v=23" defer></script>
   <script src="/static/ethers.umd.min.js?v=23" defer></script>
@@ -128,13 +140,13 @@
        the performance cost is real but is the cheapest mitigation against
        the entire "CDN-dependent SDK" failure class. Unique per release:
        the cache-buster `?v=23` is bumped in lock-step with wallet.js so
-       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=25" defer></script>      <script src="/static/wallet.js?v=25" defer></script>
+       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=26" defer></script>      <script src="/static/wallet.js?v=26" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=25" defer></script>
-  <script src="/static/cdn.min.js?v=25" defer></script>
+  <script src="/static/qrcode.min.js?v=26" defer></script>
+  <script src="/static/cdn.min.js?v=26" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
@@ -229,7 +241,7 @@
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet"
            class="relative hidden md:block">
         <button type="button"
-                @click="window.MW_CONNECT_WALLET()"
+                onclick="window.MW_CONNECT_WALLET()"
                 title="Connect via WalletConnect — scan QR or deep-link from any mobile or hardware wallet"
                 aria-label="Connect Wallet"
                 class="px-5 py-2 rounded-xl bg-violet-btn hover:opacity-95 text-white font-extrabold text-sm transition glow-violet active:scale-[0.97] flex items-center gap-2 ring-focus"
@@ -403,7 +415,7 @@
       </template>
       <div x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet" class="space-y-2">
         <button type="button"
-                @click="window.MW_CONNECT_WALLET(); open = false"
+                onclick="window.MW_CONNECT_WALLET(); open = false"
                 class="w-full text-left px-3 py-3 rounded-xl bg-violet-btn text-white font-extrabold flex items-center gap-3 glow-violet shadow-lg shadow-violet-500/30 transition active:scale-[0.97] cursor-pointer"
                 {{if not .WCProjectID}}disabled{{end}}>
           <span class="w-9 h-9 rounded-lg bg-white/15 flex items-center justify-center text-base">⌬</span>

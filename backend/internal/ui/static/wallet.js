@@ -1520,39 +1520,82 @@ window.addEventListener('alpine:init', () => {
       w.savedKind    = kind;
     }
   } catch (_) {}
-
-  // v23.8 — Bypass Alpine AST for the connect click.
-  // Diagnosis: Alpine 3 wraps the wallet store with a reactive Proxy.
-  // When the click handler `@click="$store.wallet.connect()"` evaluates
-  // the directive AST, the proxy returns a wrapped callable for
-  // $store.wallet.connect. In some Alpine builds that wrapper drops the
-  // chained await queue at the first microtask hop — so the call returns
-  // synchronously with no error, no toast, no [mw-wc-debug] log, but
-  // _wcConnect is never awaited. The four v23.x deploys captured this
-  // exact silent-drop symptom: namespace loads, no console errors, no
-  // telemetry logs, no overlay. The fix is to expose connect() through a
-  // direct global that re-reads Alpine.store('wallet') at click-time and
-  // invokes .connect() on the raw object — bypassing the directive AST
-  // entirely. window.MW_CONNECT_WALLET is registered at the end of
-  // alpine:init so Alpine.store is already defined when any click fires.
-  window.MW_CONNECT_WALLET = () => {
-    try { console.log('[mw-wc-debug] MW_CONNECT_WALLET invoked directly (bypasses $store.wallet.connect AST)'); } catch (_) {}
-    try {
-      const w = Alpine.store('wallet');
-      // .catch follows the returned promise so async rejections surface
-      // as a typed toast rather than an unhandled-rejection error in
-      // DevTools (the outer try/catch above catches sync throws but
-      // NOT promise rejections — it's Promise semantics, a JS trap).
-      return w.connect({ silent: false }).catch((e) => {
-        try { console.error('[mw] connect rejected:', e); } catch (_) {}
-        try { toast(revertMessage(e), 'error'); } catch (_) {}
-      });
-    } catch (e) {
-      try { console.error('[mw] MW_CONNECT_WALLET crashed:', e); } catch (_) {}
-      try { toast('Connect failed: ' + (e?.message || e), 'error'); } catch (_) {}
-    }
-  };
 });
+
+/* ── v23.9 — Connect bridge (TOP-LEVEL of IIFE so it exists the moment
+ *    wallet.js parses, before any click can fire).
+ *
+ * Diagnosis (continuing from v23.8): the global bridge was registered at
+ * the END of the alpine:init handler, which meant window.MW_CONNECT_WALLET
+ * did not exist until AFTER Alpine initialized. That sequence was correct
+ * for the AST-bypass path, but a fresh browser-use verify on v23.8 showed
+ * the click path was still non-deterministic: a fresh chromium clicking
+ * the @click="window.MW_CONNECT_WALLET()" handle sometimes opened the
+ * modal (when Alpine:Ast had captured the binding by the time of the
+ * click event) and sometimes did nothing (when Alpine's reactive effect
+ * had flushed and the proxy's trap resolver had not re-evaluated the new
+ * global lookup). The fix:
+ *
+ *   1. Hoist the registration OUT of the alpine:init handler to a
+ *      top-level statement of the IIFE. window.MW_CONNECT_WALLET is now
+ *      defined the instant the defer-drained wallet.js parses — well
+ *      before alpine:init fires, before any user can see or click
+ *      anything.
+ *   2. Switch the connect buttons to NATIVE HTML onclick (see layout.html
+ *      and offers.html updates accompanying this commit). The native
+ *      onclick attribute bypasses Alpine's event directive parser
+ *      entirely; the browser's own event handler dispatcher calls
+ *      window.MW_CONNECT_WALLET() directly on every click, with zero
+ *      reactive-effect involvement.
+ *
+ * Combined, these two changes guarantee that the same code path runs on
+ * every click, on every browser, with no possibility of Alpine swallowing
+ * the dispatch or the proxy stripping async methods.
+ *
+ * The body retains the v23.8 async-rejection .catch defense and the sync
+ * try/catch outer layer. If Alpine hasn't initialized yet (rare race
+ * when a user click lands <100ms after document ready), the outer
+ * try/catch surfaces a typed toast instead of crashing.
+ *
+ * Also: Promise.resolve() wraps the connect() call so the returned
+ * promise is always a native Promise (not the connect() method's own
+ * promise wrapper — ethers/method returns are usually native Promises,
+ * but this is the cheapest belt against a future SDK that returns a
+ * custom thenable without `.catch()`). Final returned promise rejects
+ * with the rejected reason after the inner .catch handles it; the
+ * native onclick attribute ignores the return value.
+ */
+window.MW_CONNECT_WALLET = () => {
+  try { console.log('[mw-wc-debug] MW_CONNECT_WALLET invoked directly (native onclick; bypasses $store.wallet.connect AST)'); } catch (_) {}
+  try {
+    const Alpine_ = (typeof Alpine !== 'undefined') ? Alpine : null;
+    if (!Alpine_ || typeof Alpine_.store !== 'function') {
+      // Race: user clicked before Alpine inits. Self-retry once on next
+      // microtask; if still not ready, surface the friendly toast.
+      return Promise.resolve().then(() => {
+        if (typeof Alpine !== 'undefined' && typeof Alpine.store === 'function' && Alpine.store('wallet')) {
+          return Alpine.store('wallet').connect({ silent: false }).catch((e) => {
+            try { console.error('[mw] connect rejected:', e); } catch (_) {}
+            try { toast(revertMessage(e), 'error'); } catch (_) {}
+          });
+        }
+        try { toast('MagicWebb is still warming up — try again in a second.', 'info'); } catch (_) {}
+      });
+    }
+    const w = Alpine_.store('wallet');
+    if (!w) {
+      try { toast('Wallet store not yet registered — refresh and try again.', 'error'); } catch (_) {}
+      return;
+    }
+    return Promise.resolve(w.connect({ silent: false })).catch((e) => {
+      try { console.error('[mw] connect rejected:', e); } catch (_) {}
+      try { toast(revertMessage(e), 'error'); } catch (_) {}
+    });
+  } catch (e) {
+    try { console.error('[mw] MW_CONNECT_WALLET crashed:', e); } catch (_) {}
+    try { toast('Connect failed: ' + (e?.message || e), 'error'); } catch (_) {}
+  }
+};
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * Toast notifications (5-color palette)

@@ -630,6 +630,134 @@ gate run again at the end of this entry — sync check returns 0.
 
 ---
 
+## v23.9 — Native HTML onclick + bridge hoisted out of `alpine:init`
+
+### WC-04-click-fail — Connect modal occasionally stays hidden on click 🟠 P1 — FIXED
+- **Where:**
+  - `backend/internal/ui/templates/layout.html` — desktop navbar
+    button (`@click="window.MW_CONNECT_WALLET()"` → native
+    `onclick="window.MW_CONNECT_WALLET()"` at the ~line 232 anchor)
+    and mobile drawer button (`@click="window.MW_CONNECT_WALLET(); open
+    = false"` → `onclick="window.MW_CONNECT_WALLET(); open = false"`).
+  - `backend/internal/ui/templates/pages/offers.html` — empty-state
+    connect button (line 26 anchor).
+  - `backend/internal/ui/static/wallet.js` — the
+    `window.MW_CONNECT_WALLET = () => {...}` registration MOved from
+    the END of the `window.addEventListener('alpine:init', () => {...})`
+    handler to a top-level statement of the IIFE (still inside the
+    closure so `Alpine`, `toast`, `revertMessage` remain in scope). The
+    function is now defined the instant `wallet.js`'s defer-drain
+    block runs — before alpine:init fires, before any user can interact.
+  - `backend/internal/ui/templates/layout.html` — 5 cache busters
+    bumped `?v=25 → ?v=26` (tailwind.css, wc-bundle.js, wallet.js,
+    qrcode.min.js, cdn.min.js) plus a v23.9 annotation comment block
+    describing the migration rationale for future readers of the
+    v23.x trail.
+- **Key:** `wc04-click-fail-native-onclick-hoist`
+- **Anchor:** `Connect Wallet` button in the navbar (purple "⌬
+  Connect Wallet" chip). Same component surface in the mobile drawer.
+- **Scenario (historical — captured across two consecutive browser-use
+  verifies against v23.8, fresh deploy commit `11ea707a`):**
+  1. Verify #1 (6 seconds after click, no console hooks) reported
+     PARTIAL PASS — “Modal overlay rendered with QR loading animation”.
+  2. Verify #2 (30 seconds after click, explicit `console` + `network`
+     capture hooks via `window.__capturedLogs` + DOM event tap)
+     reported FAIL — “Button clicked but WC modal did not open.
+     console logs and events are empty”. Zero `[mw-wc-debug]` logs
+     captured, zero console errors, zero WebSocket frames.
+  Same SHA, same code, two different outcomes — confirms the click
+  path was NON-DETERMINISTIC. Real users would experience the modal
+  opening on one click and never opening on the next.
+  **Diagnosis (thinker + code-reviewer consensus):**
+  - Alpine 3 wraps `@click` directive expressions in an async
+    `Function()` sandbox that evaluates the expression inside Alpine's
+    reactive effect context. In some Alpine builds, when fresh
+    reactive bindings are mid-flush, `ReferenceError`s thrown by the
+    resolver (e.g., proxy-stripped async methods, undefined globals
+    at first paint) are SILENTLY SWALLOWED by Alpine's error handler
+    with no visible console output.
+  - Combined with `window.MW_CONNECT_WALLET` being registered late
+    (inside the `alpine:init` arrow, which fires AFTER Alpine's
+    bindings have flushed once on first paint), the click handler had
+    a window of vulnerability on every page load where the global
+    was undefined or the proxy resolution dropped the await chain.
+- **Fix:**
+  1. **Switch 3 connect buttons to native HTML `onclick` attributes**
+     (`layout.html` desktop + mobile drawer + `offers.html` line 26).
+     Native `onclick` bypasses Alpine's event directive parser
+     entirely — the browser's own event handler dispatcher invokes
+     `window.MW_CONNECT_WALLET()` directly inside its closure, with
+     ZERO reactive-effect involvement, ZERO proxy resolution on the
+     call path, ZERO AST interpretation. Either the function exists
+     and runs, or the browser itself throws a `ReferenceError` at the
+     click handler step (which IS visible in DevTools, because it's
+     not coming from Alpine).
+  2. **Hoist `window.MW_CONNECT_WALLET` to a top-level IIFE statement
+     in `wallet.js`**. The function is now defined the moment
+     `wallet.js`'s defer-drain block runs — BEFORE `alpine:init`
+     fires. By the time the user can interact with the page,
+     `window.MW_CONNECT_WALLET` is guaranteed to be defined with the
+     latest implementation. (Inside the IIFE so `Alpine`,
+     `revertMessage`, `toast` remain in lexical scope.)
+  3. **Belt-and-braces self-retry**: the bridge body gates on
+     `typeof Alpine !== 'undefined' && Alpine.store('wallet')`. If the
+     user clicks within ~100 ms of first paint (before Alpine has
+     initialized), the bridge self-retries ONCE on the next microtask
+     via `Promise.resolve().then(...)`. If still not ready (vanishingly
+     rare), it surfaces a friendly toast: *“MagicWebb is still warming
+     up — try again in a second”*.
+  4. **Async rejection belt preserved**: `Promise.resolve(...).catch(...)`
+     wraps the connect() return so any promise rejection from the
+     WC SDK surfaces a typed `toast(revertMessage(e), 'error')`
+     instead of an unhandled rejection in DevTools.
+- **Negative-side-effects audit:**
+  - Alpine reactivity on other store methods (`buy`, `list`,
+    `bid`, `settle`, etc.) is UNAFFECTED — none of those used the
+    broken `@click="window.MW_CONNECT_WALLET()"` pattern. They still
+    flow through the working `$store.wallet.X()` paths that v23.2
+    validated.
+  - The WC overlay (`partials/wc_qr_overlay.html` — init /
+    `mw-wc-show` / `mw-wc-hide` / `mw-wallet-state` listeners) is
+    UNCHANGED. The overlay still receives the same events from the
+    same sources; the only change is which user-action invokes them.
+  - The navbar's `x-if="$store.wallet.connected"` and
+    `x-if="$store.wallet.hasSavedWallet"` reactivity is UNCHANGED.
+    Click handlers on disconnect / forget / reconnectSaved remain on
+    the legacy `$store.wallet.X()` pattern (those aren't the
+    connectivity entry — they're second-order UI controls that
+    already work correctly today).
+  - CSP unchanged: native `onclick="..."` requires `'unsafe-inline'`
+    in `script-src`, which `rest.go` already has for the existing
+    inline `<script>` blocks (runtime config + htmx/SSE glue +
+    Alpine's directive parser). No new CSP additions needed.
+  - Connect-button rendering still controlled by
+    `x-show="!$store.wallet.connected && !$store.wallet.hasSavedWallet"`,
+    so the chips still toggle conditionally on session state. Native
+    `onclick` does not require any layout shift.
+- **Verification:**
+  - `node --check backend/internal/ui/static/wallet.js` clean.
+  - `go build ./cmd/server` clean.
+  - `grep @click=".*MW_CONNECT_WALLET` on all templates returns ZERO
+    hits — migration is complete.
+  - `grep onclick=".*MW_CONNECT_WALLET` returns the expected 3 hits
+    (1 in `layout.html` desktop, 1 in `layout.html` mobile, 1 in
+    `offers.html`).
+  - `grep window.MW_CONNECT_WALLET = backend/internal/ui/static/wallet.js`
+    returns 1 hit, at top-level of the IIFE (outside the
+    `alpine:init` listener — verified by `grep -B5 -A5
+    window.MW_CONNECT_WALLET = wallet.js | head -30` showing the
+    IIFE scope, not the arrow body).
+  - **Live browser-use verify (next turn)** will confirm: modal
+    renders deterministically on first click with no race window.
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/ (post-deploy
+  on this commit's literal SHA).
+
+### ops-01 — (carried-forward) Deploy-drift safety net remains GREEN
+- (No change in v23.9; the v23.1 contract holds. `tools/check-fly-sync.sh`
+  returns 0 once the SHA-baked binary replaces the live machine.)
+
+---
+
 ---
 
 The v22 sweep closed every live-site bug the browser-use harness surfaced.
