@@ -318,13 +318,37 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         }
 
         if (!moved) {
-            // Seller revoked approval between endsAt and settle() (or any other
-            // delivery failure). Park the auction in STALLED state instead of
-            // auto-cancelling — the previous behavior let the seller unilaterally
-            // cancel a winning auction by revoking approval (audit-#2). Now:
-            //   - the seller can re-approve + call settleUnstuck(id) to re-attempt,
-            //   - after STALL_WINDOW, anyone can call reclaim(id) to refund the winner
-            //     in full and cancel the auction.
+            // Delivery failed. Check whether the seller still owns the NFT.
+            // If the seller transferred it away (sold via another venue), the
+            // delivery will NEVER succeed — stalling would just lock the
+            // winner's escrow for 7 days for no reason. In that case, refund
+            // the winner immediately and cancel the auction. Only enter the
+            // stall path if the seller still owns but merely revoked approval
+            // (re-approve + settleUnstuck can recover).
+            bool sellerStillOwns = false;
+            if (std == TokenStandard.ERC721) {
+                try IERC721(coll).ownerOf(tid) returns (address o) {
+                    sellerStillOwns = (o == sel);
+                } catch { sellerStillOwns = false; }
+            } else {
+                try IERC1155(coll).balanceOf(sel, tid) returns (uint256 bal) {
+                    sellerStillOwns = (bal >= amt);
+                } catch { sellerStillOwns = false; }
+            }
+            if (!sellerStillOwns) {
+                // NFT is gone — will never be deliverable. Refund winner, cancel.
+                a.settled   = true;
+                a.stalledAt = 0;
+                if (winBid > 0) {
+                    (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
+                    if (!ok) pendingReturns[winner] += winBid;
+                    emit RefundPushed(winner, winBid);
+                }
+                emit AuctionReclaimed(id, winner, winBid);
+                emit AuctionCancelled(id);
+                return;
+            }
+            // Seller still owns but revoked approval — park for re-attempt.
             a.stalledAt = uint64(block.timestamp);
             emit AuctionStalled(id, winner, sel);
             return;
@@ -333,13 +357,15 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         a.settled = true;
 
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
+        // gas: 50_000 caps EIP-150 63/64 forwarding — a hostile seller contract
+        // cannot OOG-grief settlement and trap the winner's escrow forever.
         if (fee > 0) {
-            (bool okFee,) = feeRecipient.call{value: fee}("");
+            (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
             if (!okFee) pendingReturns[feeRecipient] += fee;
         }
         uint128 proceeds;
         unchecked { proceeds = winBid - fee; } // fee = 1.5% of winBid, always < winBid
-        (bool okSel,) = sel.call{value: proceeds}("");
+        (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
         if (!okSel) pendingReturns[sel] += proceeds;
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
@@ -371,6 +397,31 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
             try IERC1155(coll).safeTransferFrom(sel, winner, a.tokenId, a.amount, "") { moved = true; } catch {}
         }
         if (!moved) {
+            // Still can't deliver. If seller no longer owns, skip stall refresh
+            // and refund immediately (same ownership check as settle). Only
+            // refresh stalledAt if the seller still holds the NFT.
+            bool sellerStillOwns = false;
+            if (std == TokenStandard.ERC721) {
+                try IERC721(coll).ownerOf(a.tokenId) returns (address o) {
+                    sellerStillOwns = (o == sel);
+                } catch { sellerStillOwns = false; }
+            } else {
+                try IERC1155(coll).balanceOf(sel, a.tokenId) returns (uint256 bal) {
+                    sellerStillOwns = (bal >= a.amount);
+                } catch { sellerStillOwns = false; }
+            }
+            if (!sellerStillOwns) {
+                a.settled   = true;
+                a.stalledAt = 0;
+                if (winBid > 0) {
+                    (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
+                    if (!ok) pendingReturns[winner] += winBid;
+                    emit RefundPushed(winner, winBid);
+                }
+                emit AuctionReclaimed(id, winner, winBid);
+                emit AuctionCancelled(id);
+                return;
+            }
             a.stalledAt = uint64(block.timestamp);
             emit AuctionStalled(id, winner, sel);
             return;
@@ -380,12 +431,12 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         a.stalledAt = 0;
 
         if (fee > 0) {
-            (bool okFee,) = feeRecipient.call{value: fee}("");
+            (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
             if (!okFee) pendingReturns[feeRecipient] += fee;
         }
         uint128 proceeds;
         unchecked { proceeds = winBid - fee; }
-        (bool okSel,) = sel.call{value: proceeds}("");
+        (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
         if (!okSel) pendingReturns[sel] += proceeds;
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
@@ -409,7 +460,8 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         a.stalledAt = 0;
 
         if (winBid > 0) {
-            (bool ok,) = winner.call{value: winBid}("");
+            // gas: 50_000 caps EIP-150 63/64 forwarding to protect reclaim.
+            (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
             if (!ok) pendingReturns[winner] += winBid;
             emit RefundPushed(winner, winBid);
         }

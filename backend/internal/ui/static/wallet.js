@@ -381,9 +381,9 @@ window.addEventListener('alpine:init', () => {
         this.ctaLabel   = opts.ctaLabel || 'Continue';
         this.summary    = opts.summary || [];
         this.disclaimer = opts.disclaimer || '';
-        this.step = 0;
-        this.stepLabel = '';
-        this.progress = 0;
+        this.step = 1;
+        this.stepLabel = 'Preparing…';
+        this.progress = 25;
         this.success = false;
         this.txHash = '';
         this.successTitle = ''; this.successBody = '';
@@ -435,11 +435,13 @@ window.addEventListener('alpine:init', () => {
         };
         this._resolver = resolver;
         this.open = true;
-        // Auto-execute: skip the pre-confirm step and go straight to
-        // wallet signing. The wallet's native prompt is the confirmation.
+        // Auto-execute immediately — the wallet's native prompt IS the
+        // confirmation. Start at step 1 so the progress indicator and
+        // summary are visible from the first paint (no blank step-0 flash).
+        this.step = 1;
         this.stepLabel = 'Confirm in your wallet…';
         this.progress = 25;
-        setTimeout(() => { Promise.resolve().then(resolver).catch((e) => toast(revertMessage(e), 'error')); }, 30);
+        Promise.resolve().then(resolver).catch((e) => toast(revertMessage(e), 'error'));
       });
     },
     dismiss() {
@@ -659,11 +661,15 @@ window.addEventListener('alpine:init', () => {
         await this._authenticate();
         await this.refreshUnread();
         this.setState('connected');
-        // v24.0: WalletConnect-only path. The previous dual-source toast
-        // (`kind === 'walletconnect' ? ... : ...`) referenced a `kind`
-        // variable that no longer exists in this function's scope, which
-        // threw a strict-mode ReferenceError after every successful pair.
-        if (!silent) toast('Connected via WalletConnect', 'success');
+        // Close the WC QR overlay on successful connection so the user
+        // isn't left staring at a stale spinner or QR code. The overlay's
+        // state listener only closes on non-{connecting,connected} states
+        // (to avoid yanking the modal mid-pair), so we dispatch the
+        // explicit close command here.
+        if (!silent) {
+          try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+          toast('Connected via WalletConnect', 'success');
+        }
       } catch (e) {
         this.setState('error', { error: e });
         // Clear the double-click debounce so a real retry after a

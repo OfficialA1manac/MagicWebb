@@ -71,16 +71,21 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     }
 
     /// @dev Forward the platform fee to the immutable feeRecipient. Reverts on failure.
+    ///      gas: 50_000 caps EIP-150 63/64 forwarding so a hostile recipient
+    ///      contract cannot OOG-grief the settlement tx and trap buyer/seller funds.
     function _payFee(uint256 fee) internal {
         if (fee == 0) return;
-        (bool ok,) = feeRecipient.call{value: fee}("");
+        (bool ok,) = feeRecipient.call{gas: 50_000, value: fee}("");
         if (!ok) revert TransferFailed();
     }
 
     /// @dev Pay `amount` to `to`. Reverts on failure.
+    ///      gas: 50_000 caps EIP-150 63/64 forwarding — a malicious seller
+    ///      contract cannot burn all forwarded gas and permanently trap the
+    ///      buyer's ETH in a failed buy() tx.
     function _pay(address to, uint256 amount) internal {
         if (amount == 0) return;
-        (bool ok,) = to.call{value: amount}("");
+        (bool ok,) = to.call{gas: 50_000, value: amount}("");
         if (!ok) revert TransferFailed();
     }
 

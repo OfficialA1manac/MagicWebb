@@ -217,7 +217,10 @@ contract OfferBook is MarketplaceCore {
     ///      `delete` runs first, then the call, then the bookkeeping update.
     function _pushPullRefund(address to, uint256 amount) internal {
         if (amount == 0) return;
-        (bool ok,) = to.call{value: amount}("");
+        // gas: 50_000 caps EIP-150 63/64 forwarding — a hostile bidder
+        // contract cannot OOG-grief the keeper or seller calling reject/
+        // expire and trap the system. Mirrors AuctionHouse refundLosers.
+        (bool ok,) = to.call{gas: 50_000, value: amount}("");
         if (!ok) pendingReturns[to] += amount;
     }
 }
