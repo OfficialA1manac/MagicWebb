@@ -627,14 +627,19 @@ window.addEventListener('alpine:init', () => {
         }
         this._eipHandlers = { chain: _onChain, accts: _onAccts };
 
-        // EIP-1193 'disconnect' fires on WalletConnect session endings only.
-        // Injected providers don't surface this event for user-initiated UI
-        // changes — the disconnect button there calls this.disconnect()
-        // directly. We do not skip the WC registration on subsequent
-        // connect() cycles: each new connect() re-binds to a fresh WC
-        // SignClient instance anyway, and the eip1193.removeListener call
-        // above clears any prior pair defensively.
-        if (kind === 'walletconnect' && eip1193?.on) {
+        // EIP-1193 'disconnect' fires on WalletConnect session endings.
+        // v24.0: WalletConnect-only path (v23.2 removed the injected/MetaMask
+        // alternative). The previous version gated this listener on
+        // `kind === 'walletconnect'`, but `kind` was removed from the
+        // connect() signature in v23.2, which made the gating condition
+        // throw ReferenceError on every successful WC pair and abort the
+        // flow before _authenticate() ran. Now the listener registers
+        // unconditionally — a stale session from a prior pairing and any
+        // wallet-side disconnect (mobile app unplugged, network switch,
+        // session timeout) triggers the same UI teardown. The navbar
+        // disconnect button still calls this.disconnect() directly so an
+        // explicit user action bypasses the session-side event.
+        if (eip1193?.on) {
           _onDisc = () => this.disconnect();
           this._eipHandlers.disc = _onDisc;
           eip1193.on('disconnect', _onDisc);
@@ -658,9 +663,11 @@ window.addEventListener('alpine:init', () => {
         await this._authenticate();
         await this.refreshUnread();
         this.setState('connected');
-        if (!silent) toast(kind === 'walletconnect'
-          ? 'Connected via WalletConnect'
-          : 'Wallet connected', 'success');
+        // v24.0: WalletConnect-only path. The previous dual-source toast
+        // (`kind === 'walletconnect' ? ... : ...`) referenced a `kind`
+        // variable that no longer exists in this function's scope, which
+        // threw a strict-mode ReferenceError after every successful pair.
+        if (!silent) toast('Connected via WalletConnect', 'success');
       } catch (e) {
         this.setState('error', { error: e });
         // Clear the double-click debounce so a real retry after a
@@ -780,9 +787,24 @@ window.addEventListener('alpine:init', () => {
       }
       let wc;
       try {
+        // v24.0: WalletConnect v2 handshake rule. The `chains` array is
+        // the wallet-side REQUIRE — every wallet scanning the QR MUST
+        // currently be on those exact chains or the session is silently
+        // rejected. Coston2 (chain 114) is not in the default supported
+        // set for the vast majority of mobile/hardware wallets (MetaMask,
+        // Trust, Rainbow, Ledger, Trezor) so they would refuse to pair.
+        // The fix: declare ETH mainnet (chain 1) as the required primary
+        // because every mainstream wallet supports it natively, AND put
+        // Coston2 in optionalChains so the dApp can prompt the user to
+        // switch their wallet's network AFTER pairing completes. The
+        // existing chainId validation in connect() (lines ~656 — "Connected
+        // wallet is on chain #N — expected Coston2 (114). Switch networks
+        // in your wallet, then Re-pair via QR.") already handles the
+        // post-pair path.
         wc = await _EthereumProvider.init({
           projectId: WC_PROJECT_ID,
-          chains:    [CHAIN_ID],
+          chains:    [1],
+          optionalChains: [CHAIN_ID],
           rpcMap:    { [CHAIN_ID]: RPC_URL },
           showQrModal: false,
           metadata: {

@@ -53,6 +53,40 @@
       _escHandler:    null,
 
       init() {
+        // v24.0 BUFFERED-EVENT RECOVERY — captures any connect flow that
+        // fired mw-wc-show BEFORE Alpine finished hydrating this overlay's
+        // init() (the v23.9 hoisted bridge is a top-level IIFE statement
+        // that exists the moment wallet.js parses, so a user click landing
+        // <50ms after document.ready can dispatch mw-wc-show before Alpine
+        // has reached this x-data init). Without the buffer the URI gets
+        // lost into the void and the modal never opens. Two recovery
+        // sources are checked at init time:
+        //   (a) window.MW_WC_URI cached by _wcConnect's display_uri
+        //       listener — if it's set AND the wallet store is in a
+        //       connecting-flavor state, render the QR from the cached URI.
+        //   (b) the wallet store's connecting-state alien caller (an
+        //       external embed, future code path) — open with the spinner
+        //       and let a follow-up mw-wc-show fill in the URI when it
+        //       arrives.
+        try {
+          const wSt = (typeof Alpine !== 'undefined' && Alpine.store) ? Alpine.store('wallet') : null;
+          const wState = wSt ? wSt.state : null;
+          if (typeof window.MW_WC_URI === 'string' && window.MW_WC_URI.startsWith('wc:')
+              && (wState === 'connecting' || wState === 'awaiting')) {
+            this.uri     = window.MW_WC_URI;
+            this.loading = false;
+            this.open    = true;
+            try { const r = document.getElementById('wc-modal-root'); if (r) r.style.display = ''; } catch (_) {}
+            this.$nextTick(() => this.renderQr());
+          } else if (wState === 'connecting') {
+            // We are mid-connect but the URI hasn't arrived yet — open the
+            // spinner overlay so the user sees progress, defer URI render
+            // to the live mw-wc-show listener that fires below.
+            this.loading = true;
+            this.open    = true;
+            try { const r = document.getElementById('wc-modal-root'); if (r) r.style.display = ''; } catch (_) {}
+          }
+        } catch (_) {}
         // ── mw-wc-show (POSITIVE OPEN) ─────────────────────────────────
         // Fired by wallet.js _wcConnect on the user-initiated path with
         // loading:true (spinner state) and again via display_uri with
