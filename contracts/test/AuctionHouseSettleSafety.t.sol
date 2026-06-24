@@ -2,17 +2,54 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, NotActive} from "../src/AuctionHouse.sol";
+import {AuctionHouse, NotActive, NotStalled, StallNotOver} from "../src/AuctionHouse.sol";
 import {MockERC721}  from "./MockERC721.sol";
+import {MockERC1155} from "./MockERC1155.sol";
 
 /// Recipient that rejects all ETH (no receive/fallback) → forces pull-fallback.
 contract RejectEther {
     // no receive(); any plain transfer reverts
 }
 
+/// @dev Contract bidder that can be toggled to reject ERC1155 onERC1155Received.
+contract MaliciousBidder {
+    bool public blockReceive;
+    bool public blockERC1155Receive;
+
+    constructor() payable {
+        blockReceive = true;
+        blockERC1155Receive = true;
+    }
+
+    receive() external payable {
+        if (blockReceive) revert("blocked");
+    }
+
+    function setBlockReceive(bool b) external { blockReceive = b; }
+    function setBlockERC1155Receive(bool b) external { blockERC1155Receive = b; }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+        external view returns (bytes4)
+    {
+        if (blockERC1155Receive) revert("no ERC1155");
+        return this.onERC1155Received.selector;
+    }
+
+    function onERC721Received(address, address, uint256, bytes calldata)
+        external pure returns (bytes4)
+    {
+        return this.onERC721Received.selector;
+    }
+
+    function bidOn(AuctionHouse ah, uint256 id) external payable {
+        ah.bid{value: msg.value}(id);
+    }
+}
+
 contract AuctionHouseSettleSafetyTest is Test {
     AuctionHouse ah;
     MockERC721   nft;
+    MockERC1155  multi;
     address feeRecipient = address(0x1111000000000000000000000000000000111100);
     address seller = address(0xBEEF);
     address alice  = address(0xA11CE);
@@ -21,6 +58,7 @@ contract AuctionHouseSettleSafetyTest is Test {
     function setUp() public {
         ah  = new AuctionHouse(feeRecipient, address(0));
         nft = new MockERC721();
+        multi = new MockERC1155();
         vm.deal(alice, 100 ether);
     }
 
@@ -36,10 +74,8 @@ contract AuctionHouseSettleSafetyTest is Test {
         ah.bid{value: 2 ether}(id);
     }
 
-    /// Audit-#2: when the seller hijacks delivery (moves the NFT elsewhere) after
-    /// endsAt, settle() parks the auction INSTEAD of auto-refunding. After
-    /// STALL_WINDOW elapses, reclaim() refunds the winner in full.
-    function test_settleParksWhenSellerMovedNftThenReclaim() public {
+    /// C-02 fix: when the seller moves the NFT away, settle() refunds immediately.
+    function test_settleRefundsImmediatelyWhenSellerMovedNft() public {
         (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
         vm.prank(seller);
@@ -48,29 +84,17 @@ contract AuctionHouseSettleSafetyTest is Test {
         uint256 before = alice.balance;
         ah.settle(id);
 
-        // settle() parks — no winner refund yet, no fee.
-        assertEq(alice.balance, before, "winner NOT auto-refunded on failed delivery");
+        assertEq(alice.balance, before + 2 ether, "winner auto-refunded when seller moved NFT");
         assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed from ledger");
         assertEq(nft.ownerOf(tid), carol, "NFT not delivered to winner");
-        assertEq(feeRecipient.balance, 0, "no fee on parked settlement");
+        assertEq(feeRecipient.balance, 0, "no fee on cancelled settlement");
 
-        // Re-trying settle() is now blocked (NotActive or NotStalled; either is OK).
-        vm.expectRevert();
-        ah.settle(id);
-
-        // reclaim() must wait STALL_WINDOW before paying the winner.
-        vm.warp(block.timestamp + ah.STALL_WINDOW() - 1);
-        vm.expectRevert();
-        ah.reclaim(id);
-
-        vm.warp(block.timestamp + 1);
-        ah.reclaim(id);
-        assertEq(alice.balance, before + 2 ether, "winner fully refunded via reclaim");
-        assertEq(nft.ownerOf(tid), carol, "NFT still with carol (delivery never succeeded)");
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertTrue(a.settled);
     }
 
-    /// Audit-#2 sibling: seller revokes approval → same parked-then-reclaim path.
-    function test_settleParksWhenApprovalRevokedThenReclaim() public {
+    /// C-02 fix: seller revokes approval → immediate refund, not stall.
+    function test_settleRefundsImmediatelyWhenApprovalRevoked() public {
         (uint256 id, uint256 tid) = _setup();
         vm.warp(block.timestamp + 2 days);
         vm.prank(seller);
@@ -79,25 +103,60 @@ contract AuctionHouseSettleSafetyTest is Test {
         uint256 before = alice.balance;
         ah.settle(id);
 
-        // settle() parks: no payout, no fee.
-        assertEq(alice.balance, before, "winner NOT auto-refunded on approval revoke");
+        assertEq(alice.balance, before + 2 ether, "winner auto-refunded when seller revoked approval");
         assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed from ledger");
-        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller (delivery never succeeded)");
-        assertEq(feeRecipient.balance, 0, "no fee on parked settlement");
+        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller");
+        assertEq(feeRecipient.balance, 0, "no fee on cancelled settlement");
 
-        // reclaim() is gated by STALL_WINDOW.
-        vm.warp(block.timestamp + ah.STALL_WINDOW() - 1);
-        vm.expectRevert();
-        ah.reclaim(id);
-
-        vm.warp(block.timestamp + 1);
-        ah.reclaim(id);
-        assertEq(alice.balance, before + 2 ether, "winner fully refunded via reclaim");
-        assertEq(nft.ownerOf(tid), seller, "NFT still with seller after reclaim");
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertTrue(a.settled);
     }
 
-    /// feeRecipient cannot receive ETH → settle still completes: NFT → winner,
-    /// seller paid bid−fee, the bounced fee parked in pendingReturns.
+    /// C-01 fix: ERC721 uses transferFrom — normal settlement succeeds.
+    function test_erc721TransferFromSettleWorks() public {
+        (uint256 id, uint256 tid) = _setup();
+        vm.warp(block.timestamp + 2 days);
+
+        ah.settle(id);
+
+        assertEq(nft.ownerOf(tid), alice, "NFT delivered via transferFrom");
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertTrue(a.settled);
+    }
+
+    /// C-01 fix: for ERC1155, buyer-fault stall path — seller is ready
+    /// (approved + owns) but safeTransferFrom fails due to buyer's receiver.
+    function test_erc1155BuyerFaultCausesStall() public {
+        MaliciousBidder bidder = new MaliciousBidder();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        multi.mint(seller, 7, 5);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 2 ether}(id);
+        vm.warp(block.timestamp + 2 days);
+
+        // settle() → buyer's receiver reverts → seller is ready → stall.
+        ah.settle(id);
+
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertFalse(a.settled, "auction NOT settled (stalled)");
+        assertGt(a.stalledAt, 0, "stalledAt is set");
+
+        // Bidder fixes their contract and settleUnstuck succeeds.
+        bidder.setBlockERC1155Receive(false);
+        ah.settleUnstuck(id);
+
+        a = ah.getAuction(id);
+        assertTrue(a.settled, "settled after unstuck");
+        assertEq(multi.balanceOf(address(bidder), 7), 5, "bidder received ERC1155");
+    }
+
+    /// feeRecipient cannot receive ETH → settle still completes.
     function test_settleCompletesWhenFeeRecipientRejectsEther() public {
         RejectEther rej = new RejectEther();
         AuctionHouse ah2 = new AuctionHouse(address(rej), address(0));

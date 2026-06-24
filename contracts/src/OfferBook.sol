@@ -108,9 +108,18 @@ contract OfferBook is MarketplaceCore {
         if (principal < MIN_PRICE) revert BelowMinPrice();
         if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
 
+        // M-01 fix: when topping up an existing position, the new expiry must
+        // not be less than the existing expiry. Without this, a bidder can
+        // top up with MIN_PRICE and expiresAt=block.timestamp+1, effectively
+        // expiring their own locked offer in the next block. This breaks the
+        // "locked until expiry" invariant and lets a bidder front-run a
+        // seller's acceptOffer to withdraw a large escrow.
+        Position storage existing = positions[coll][tokenId][msg.sender];
+        if (existing.principal > 0 && expiresAt < existing.expiresAt) revert InvalidExpiry();
+
         if (msg.value != uint256(principal)) revert WrongValue();
 
-        Position storage p = positions[coll][tokenId][msg.sender];
+        Position storage p = existing;
         uint256 newPrincipal = uint256(p.principal) + principal;
         if (newPrincipal > type(uint128).max) revert InvalidAmount();
         p.principal = uint128(newPrincipal);

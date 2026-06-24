@@ -35,14 +35,22 @@ contract OfferHandler is Test {
         address b = bidders[bSeed % 3];
         uint256 tid = tokenIds[tSeed % 3];
         principal = uint128(bound(principal, 0.01 ether, 100 ether));
+
+        // M-01 fix: the new expiry must not reduce an existing position's expiry.
+        (uint128 existingPrincipal,, uint64 existingExp,) = ob.positions(address(nft), tid, b);
         uint64 exp = uint64(block.timestamp + bound(ttl, 1, 14 days));
+        // If existing position exists, ensure new expiry >= existing expiry.
+        if (existingPrincipal > 0 && exp < existingExp) {
+            exp = existingExp;
+        }
 
-        (uint128 existing,,,) = ob.positions(address(nft), tid, b);
-        if (uint256(existing) + principal > type(uint128).max) return;
+        if (uint256(existingPrincipal) + principal > type(uint128).max) return;
 
-        uint256 fee = uint256(principal) * 150 / 10_000;
         vm.prank(b);
-        ob.makeOffer{value: uint256(principal) + fee}(address(nft), tid, principal, exp);
+        // Fix: send exactly `principal` as msg.value (not principal + fee).
+        // makeOffer checks msg.value == principal. The seller-pays-fee model
+        // means offers are FREE — no fee at offer time.
+        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, exp);
         ghostEscrowed += principal;
     }
 
