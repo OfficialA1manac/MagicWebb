@@ -160,7 +160,7 @@
        hx-get="/partials/auction/{{.AuctionID}}"
        hx-trigger="sse:auction-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree($event.detail.target)">
+       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
     {{template "partials/auction_live.html" .}}
   </div>
 

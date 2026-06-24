@@ -52,7 +52,7 @@
   <div hx-get="/partials/offers?addr={{.Addr}}"
        hx-trigger="sse:offer-updated, sse:listing-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree($event.detail.target)">
+       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
   {{template "partials/offers_live.html" .}}
   </div>
 </div>

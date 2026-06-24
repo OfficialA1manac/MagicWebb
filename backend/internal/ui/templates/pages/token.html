@@ -22,7 +22,7 @@
        hx-get="/partials/token/{{.Contract}}/{{.TokenID}}"
        hx-trigger="sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree($event.detail.target)">
+       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
   {{template "partials/token_live.html" .}}
   </div>
 

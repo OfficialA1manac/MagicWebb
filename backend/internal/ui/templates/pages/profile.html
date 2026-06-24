@@ -95,7 +95,7 @@
   <div hx-get="/partials/profile/{{lower .Addr}}"
        hx-trigger="sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree($event.detail.target)">
+       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
   {{template "partials/profile_live.html" .}}
   </div>
 </div>
