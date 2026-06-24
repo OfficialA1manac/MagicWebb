@@ -717,68 +717,83 @@ window.addEventListener('alpine:init', () => {
       // connect() catch surfaces this via the standard toast so the
       // user sees 'WalletConnect is temporarily unavailable. Please
       // use the Browser Wallet option for now.' and picks MetaMask.
-      // v23.5 — self-hosted WalletConnect SDK. The previous 3-URL cascade
-      // (esm.sh bundle-deps × 2 + jsdelivr +esm) loaded bundles whose first
-      // import line was itself a relative fetch to esm.sh ("/@msgpack/...").
-      // In any network that blocked even esm.sh (corp firewalls, some ISPs,
-      // geo-fences, ad-block browsers), the cascading chain died silently
-      // and the user saw "WalletConnect is unavailable" without a single
-      // network request logged to DevTools — impossible to debug.
+      // v23.6 — self-hosted 1.8 MB UMD WalletConnect SDK. The previous
+      // (v23.3, v23.4, v23.5) attempts to load the SDK as an ES module
+      // from a CDN or self-hosted-served bundle all failed for a single
+      // root cause: the published ESM bundles (esm.sh `bundle-deps` and
+      // jsdelivr `+esm`) are META bundles whose first line is itself a
+      // relative-import ("from '/npm/...'") the browser resolves against
+      // the page origin. When the page is served from magicwebb.fly.dev,
+      // those relative imports fetch magicwebb.fly.dev/npm/...+esm and
+      // return 404. The `+esm` bundle also exhibited a
+      // "Maximum call stack size exceeded" RangeError when the chain
+      // failed at the relay crypto worker. The solution is the BUILT
+      // UMD bundle at `dist/index.umd.min.js` (~1.8 MB, jsdelivr
+      // Rollup v2.79.2 + Terser v5.39.0 output) which has ZERO internal
+      // relative imports and attaches to a single global namespace:
+      //   globalThis["@walletconnect/ethereum-provider"]
+      // where:
+      //   - `.default` is the `EthereumProvider` class (CommonJS-style
+      //     default export)
+      //   - `.EthereumProvider` is the same class duplicated as a named
+      //     export for native ESM-style consumers
       //
-      // The fix is a TRUE single-file bundle: jsdelivr's `+esm` endpoint
-      // runs Rollup v2.79.2 + Terser v5.39.0 server-side and ships one
-      // ESM module with zero internal imports. We commit it as
-      // /static/wc-bundle.js (17 KB) and import same-origin. The browser
-      // no longer needs esm.sh / cdn.jsdelivr.net in script-src or
-      // connect-src for the WalletConnect SDK to load. (The CSP still
-      // allow-lists api.reown.com + *.walletconnect.com + relay wss:// for
-      // the WC PAIRING traffic — those are not the SDK-source CDNs.)
-      let wc = null, lastErr = null;
-      const _WC_LOCAL_TRIES = [
-        // Fresh cache-busted cash first; the cache-buster is bumped in
-        // lock-step with `?v=` on the wallet.js script tag so any release
-        // ships both together. Each release has its own integer so a
-        // browser that pulled ?v=22 will re-fetch ?v=23 next.
-        '/static/wc-bundle.js?v=22',
-        // Bypass-cache fallback for browsers whose HTTP cache honors
-        // Cache-Control but not the query string (some Chrome flags +
-        // some reverse-proxy intermediates). Same file, different name.
-        '/static/wc-bundle.js',
-      ];
-      for (const bundleUrl of _WC_LOCAL_TRIES) {
-        try {
-          const mod = await import(/* @vite-ignore */ bundleUrl);
-          wc = await mod.EthereumProvider.init({
-            projectId: WC_PROJECT_ID,
-            chains:    [CHAIN_ID],
-            rpcMap:    { [CHAIN_ID]: RPC_URL },
-            showQrModal: false,
-            metadata: {
-              name: 'MagicWebb',
-              description: 'Non-custodial NFT marketplace on Flare Network',
-              url: window.location.origin,
-              icons: [`${window.location.origin}/static/icon-512.png`],
-            },
-          });
-          break;
-        } catch (e) {
-          lastErr = e;
-          // continue to next local fallback URL
-        }
-      }
-      if (!wc) {
-        // v23.5 — the SDK lives at /static/wc-bundle.js (local). If this
-        // throws, the failure is browser-side, not on any third-party
-        // service. Direct the user to actionable LAN-free steps: a hard
-        // refresh forces the browser to re-fetch (some Safari versions
-        // cache ESM modules across tabs), browser-extension disablement
-        // defeats the small but real class of content-blockers that
-        // shadow ESM modules, and an incognito window tells us if the
-        // user's regular-browser profile is the cause.
+      // We load the UMD via `<script defer>` in layout.html BEFORE
+      // wallet.js. Deferred scripts execute in document order, so
+      // `window["@walletconnect/ethereum-provider"]` is synchronously
+      // populated by the time `alpine:init` fires (during which
+      // `wallet.connect({silent:true})` is occasionally called for
+      // auto-reconnect of returning users) and well before any user
+      // click on Connect Wallet.
+      //
+      // SECURITY NOTE: the UMD exposes a global under the package name.
+      // That global is reachable from any other origins' scripts
+      // included via future XSS, but CSP `script-src 'self'` already
+      // restricts who can inject — and the wallet object's persist /
+      // session methods are only called from inside our own connect()
+      // flow, so the attack surface is bounded.
+      const _WC_NAMESPACE = window['@walletconnect/ethereum-provider'];
+      if (!_WC_NAMESPACE) {
+        // Belt-and-braces: the static <script defer> tag in layout.html
+        // is what loads this. If the user lands here without that tag
+        // having run (rare — only on a network that blocks the script
+        // tag itself, which CSP 'self' should prevent) the namespace
+        // is undefined. Surface an actionable error rather than the
+        // old "WalletConnect is unavailable" that gave no recourse.
         throw new Error(
-          'Could not load WalletConnect locally. Try Ctrl-Shift-R to hard-refresh, disable extensions that block scripts (NoScript/uBlock), or open an incognito window. (' +
-          (lastErr?.message || lastErr) + ')'
+          'WalletConnect was not loaded. Hard-refresh (Ctrl-Shift-R), disable extensions that block scripts (NoScript/uBlock), or open an incognito window.'
         );
+      }
+      // Both `default` (UMD default-export) and `EthereumProvider` (named
+      // export, present for native ESM consumers) are the same class.
+      // Prefer `EthereumProvider` to match the v23.2-v23.5 public API
+      // so any code-review grep on the call site is stable.
+      const _EthereumProvider = _WC_NAMESPACE.EthereumProvider || _WC_NAMESPACE.default;
+      if (!_EthereumProvider) {
+        throw new Error('WalletConnect SDK loaded but EthereumProvider class is missing — incompatible bundle version.');
+      }
+      let wc;
+      try {
+        wc = await _EthereumProvider.init({
+          projectId: WC_PROJECT_ID,
+          chains:    [CHAIN_ID],
+          rpcMap:    { [CHAIN_ID]: RPC_URL },
+          showQrModal: false,
+          metadata: {
+            name:    'MagicWebb',
+            description: 'Non-custodial NFT marketplace on Flare Network',
+            url:     window.location.origin,
+            icons:   [`${window.location.origin}/static/icon-512.png`],
+          },
+        });
+      } catch (e) {
+        // Init can fail because: (a) the user is offline, (b) the
+        // walletconnect relay socket can't be opened, (c) the project
+        // ID is rejected by api.reown.com's metadata validator. Surface
+        // a plausible error so the user can tell the difference between
+        // "their network" and "our config".
+        throw new Error('WalletConnect init failed: ' + (e?.message || e) +
+          ' — try a hard refresh, check status.walletconnect.com, or contact support if it persists.');
       }
       this._raw.wc = R(wc);
 

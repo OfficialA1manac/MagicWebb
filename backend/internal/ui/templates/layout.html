@@ -30,7 +30,7 @@
        v23.5: bumped ?v=21 → ?v=22 to force the browser to re-fetch the
        static bundle in case any future deploy invalidates it; happens in
        lock-step with the wallet.js / wc-bundle.js buster bump below. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=22">
+  <link rel="stylesheet" href="/static/tailwind.css?v=23">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs, walletconnect) ──
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -54,9 +54,16 @@
        (esm.sh rejected silently) even after v23.5 deployed — the cache
        buster is the belt against the entire "browser is using stale
        wallet.js" failure class. -->
-  <script src="/static/htmx.min.js?v=22" defer></script>
-  <script src="/static/sse.js?v=22" defer></script>
-  <script src="/static/ethers.umd.min.js?v=22" defer></script>
+  <!-- v23.6: ?v=22 → ?v=23 cache-buster bump. Forces the browser to
+       re-fetch every same-origin static JS bundle in lock-step with
+       the wc-bundle.js + wallet.js edits so the new UMD SDK is loaded
+       atomically. v=23 is the same buster as the earlier documented
+       versions (v=21 was v23.4, v=22 was v23.5) — each release bumps
+       every tag. A browser that pulled ?v=22 wallet.js would still
+       call the broken dynamic-import path; now they all move together. -->
+  <script src="/static/htmx.min.js?v=23" defer></script>
+  <script src="/static/sse.js?v=23" defer></script>
+  <script src="/static/ethers.umd.min.js?v=23" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -84,26 +91,35 @@
        alpine:init, which fires the moment Alpine executes. Deferred scripts
        run in document order — Alpine first would fire the event before the
        listener exists and every wallet UI element silently disappears. -->
-  <script src="/static/wallet.js?v=22" defer></script>
-  <!-- v23.5 — NO static <script src="/static/wc-bundle.js"> tag here.
-       Self-hosted WalletConnect SDK is loaded ON DEMAND by wallet.js's
-       `_wcConnect()` via a same-origin dynamic import(). It was removed
-       from this layout because (a) the dynamic import is the ONLY mount
-       path; (b) a static tag with `defer` would still fetch 17 KB on every
-       page load even for users who never click Connect Wallet; (c) the
-       HTTP cache dedupes identical URLs but the static tag introduces
-       a "why is wc-bundle loading twice?" question for future readers.
-       wc-bundle.js is committed to /static/wc-bundle.js (17 KB Rollup/
-       Terser single-file drop) and served same-origin; the dynamic
-       import URL is '/static/wc-bundle.js?v=22' (kept in lock-step with
-       wallet.js's v=22 cache-buster so any release ships both together
-       and the browser re-fetches atomically). -->
+  <!-- v23.6 — Self-hosted 1.8 MB UMD WalletConnect SDK. MUST load BEFORE
+       wallet.js so the global namespace is populated synchronously when
+       wallet.js evaluates. Both use `defer`, and deferred scripts execute
+       in document order, so by the time wallet.js runs the `defer`-drain
+       block runs wc-bundle.js FIRST, exposes
+       `window["@walletconnect/ethereum-provider"]`, then wallet.js reads
+       that namespace in `_wcConnect()` without any race.
+
+       1.8 MB is the cost of true network-agnostic bootstrapping. The
+       earlier CDN cascade (v23.3-v23.5) failed because esm.sh `bundle-deps`
+       and jsdelivr `+esm` are META bundles whose first import statement
+       references a relative path the browser resolves against the page
+       origin, producing 404s and RangeErrors. The shipping UMD bundle
+       is Rollup v2.79.2 + Terser v5.39.0 built once by jsdelivr from the
+       package's published `dist/index.umd.js` (the same file the
+       package's `unpkg` field points to) — ZERO internal imports,
+       leaves a single global. attach to flash disk on every page load:
+       the performance cost is real but is the cheapest mitigation against
+       the entire "CDN-dependent SDK" failure class. Unique per release:
+       the cache-buster `?v=23` is bumped in lock-step with wallet.js so
+       atomic re-fetch. -->
+  <script src="/static/wc-bundle.js?v=23" defer></script>
+  <script src="/static/wallet.js?v=23" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=22" defer></script>
-  <script src="/static/cdn.min.js?v=22" defer></script>
+  <script src="/static/qrcode.min.js?v=23" defer></script>
+  <script src="/static/cdn.min.js?v=23" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }

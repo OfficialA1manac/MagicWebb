@@ -1,18 +1,26 @@
 # Build
 FROM golang:1.25-alpine AS build
+# v23.6 — ARG moved to TOP of stage (immediately after FROM) so the
+# value is part of the layer-cache key from the first RUN evaluation.
+# The earlier placement AFTER all COPYs (line 15) left ARG as a
+# late-binding substitution; BuildKit computed the layer hash WITHOUT
+# the ARG value, so a subsequent `fly deploy --build-arg
+# GIT_SHA=<real>` was treated as a no-op on the cache and the binary
+# shipped with `MWServerBuildSHA=unknown`. Placing the ARG declaration
+# here pins it to the very first layer-key computation, so every new
+# SHA forces a fresh build. Defaults to "unknown" so any deploy that
+# forgets the arg still emits a loud-fail header.
+ARG GIT_SHA=unknown
 WORKDIR /src
 COPY backend/go.mod backend/go.sum ./
 RUN go mod download
 COPY backend/ ./
-# v23.1 — Inject git SHA via ARG+ldflags as api.MWServerBuildSHA so /healthz
-#         serves an X-MW-Build-SHA header that tools/check-fly-sync.sh
-#         reads against origin/main. Pass via `--build-arg GIT_SHA=<sha>`
-#         from CI deploys (`fly deploy --build-arg`) and from local
-#         Makefile-driven Docker builds. Defaults to "unknown" so any
-#         deploy that forgets the arg still emits a header — which fails
-#         the sync gate immediately. That loud-fail intent is the v74-class
-#         deploy-drift fix in action: silent drift is not an option.
-ARG GIT_SHA=unknown
+# v23.6 — The `ARG GIT_SHA=unknown` declaration was moved to the top
+# of this stage (immediately after FROM). It is referenced below via
+# shell interpolation `${GIT_SHA}` in the build ldflags. The comment
+# block here is kept as documentation of intent; the actual ARG line
+# lives at the top so BuildKit's layer-cache key includes the value
+# from the first RUN.
 # v23.1 polish — audit-trail echo. Writes the SHA we are baking into
 # the Fly builder log so an operator can `fly logs --app magicwebb`
 # (or inspect the CI step output, since GitHub Actions surfaces the
