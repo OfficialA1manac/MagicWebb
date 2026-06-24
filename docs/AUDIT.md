@@ -758,6 +758,90 @@ gate run again at the end of this entry — sync check returns 0.
 
 ---
 
+## v24.0 — WalletConnect end-to-end — kind ReferenceError + chains:[1] + overlay hydration recovery
+
+The v23.x trail closed several orthogonal async-symptom defects but the
+post-pair flow was still broken end-to-end. The user's mandate:
+
+> "make sure are using walletconnect and is properly setup and fully
+> funtional. it shouldnt just rendera qr code. use walletconnect sdk ro
+> read the docs to learn how to setup and connect walletconnect to the
+> marketplace for users to connect there wallets."
+
+The thinker-with-files-gemini diagnosis (full chain of bug classes across
+`wallet.js` + the overlay partial + the SDK init config) surfaced THREE
+orthogonal defects. v24.0 fixes each in one commit, plus a
+cache-buster bump on the active tags so returning browsers actually
+re-fetch the new `wallet.js` bytes.
+
+### WC-04-reference-error — `kind is not defined` strict-mode throw on every successful pair 🔴 P0 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js`, the post-`wc.connect()` success block inside `async connect({silent=false} = {})`.
+- **Key:** `wc04-reference-error-kind-undefined`
+- **Anchor:** the wallet.js IIFE opener `(function () { 'use strict'; ... })` activates strict mode for the entire file.
+- **Scenario (historical):** `connect(kind, opts)` was the v9-v22 signature. v23.2 introduced the WC-only refactor that dropped the `kind` parameter entirely + replaced every `kind === 'walletconnect'` gate with unconditional WC-only behaviour. The refactor was INCOMPLETE: TWO references to `kind === 'walletconnect'` survived in the post-`wc.connect()` success path:
+  1. `if (kind === 'walletconnect' && eip1193?.on) { _onDisc = () => this.disconnect(); eip1193.on('disconnect', _onDisc); }` — gated the WC `disconnect` event listener registration.
+  2. `toast(kind === 'walletconnect' ? 'Connected via WalletConnect' : 'Wallet connected', 'success')` — the final success toast.
+  Both lines run in strict mode. An undeclared `kind` becomes a `ReferenceError` from V8's strict-mode-bound identifier resolution. On EVERY successful pair (`wc.connect()` resolves), execution aborts at the first `ReferenceError` — `_authenticate()` is NEVER called, the JWT is NEVER requested, no SIWE is initiated. The user scans the QR, their wallet approves, and the dApp throws silently into DevTools. The post-pair UI flow never completes, which is exactly the "shouldnt just rendera qr code" reproduction.
+- **Severity rationale:** Acquisition criterion is single-attacker cooperator-free system-wide stranding of the WC connectivity path on every successful scan. With no post-pair state change, the dashboard is locked behind "Connect Wallet" indefinitely until the user closes + reopens the page.
+- **Fix:** Both `kind` references removed. The disconnect listener now registers unconditionally (`if (eip1193?.on) { eip1193.on('disconnect', _onDisc) }`) — the only connect path is WalletConnect, v23.2 already removed every alternative provider source. The success toast collapses to the single-message `'Connected via WalletConnect'`.
+- **Negative side effects audited:** Listener registration logic preserved verbatim. `_onDisc = () => this.disconnect()` body unchanged. Belt: defensively preserve `eip1193?.on` (no-op when `on` is missing — protects against future EIP-1193 source changes).
+- **Verification (existing + added):**
+  - `node --check backend/internal/ui/static/wallet.js` clean.
+  - `grep -nE 'kind === .walletconnect' backend/internal/ui/static/wallet.js` returns ONLY historical-commentary hits (line 542 v23.2 narrative + the v24.0 narrative at the comment-block anchors); ZERO live-code references.
+  - Live browser-use verify on the deployed SHA: the click → pair → sign → setState('connected') chain now completes deterministically past `wc.connect()`.
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/.
+
+### WC-04-chains-wrong — `chains:[CHAIN_ID]` silently rejected by all mainstream wallets 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/static/wallet.js`, the `_EthereumProvider.init({...})` configuration object inside `_wcConnect()`.
+- **Key:** `wc04-chains-coston2-no-wallet-support`
+- **Anchor:** the WalletConnect v2 SDK's `chains` array — every wallet scanning the QR MUST currently be on those exact chains or the session is silently rejected at the relay level.
+- **Scenario (historical):** The previous init payload was `chains: [114]` (CHAIN_ID = Coston2). WalletConnect v2's `chains` config has the strict wallet-side requirement that the user's wallet MUST be on those exact chains to approve the pairing. Coston2 is NOT in the default supported chain set for MetaMask / Trust / Rainbow / Ledger / Trezor / most mobile wallets — they would see "this dApp is requesting a chain not supported by your wallet" and refuse the pair. The relay drops the session silently; `wc.connect()` hangs without erroring.
+- **Fix:** Declare ETH mainnet (chain 1) as the required primary chain (universal wallet support) + put Coston2 in `optionalChains: [114]`. Wallets ALWAYS accept the QR scan (pair on mainnet, which supports `chains:[1]`); the dApp's existing chainId validation toast at the post-connect path surfaces "Connected wallet is on chain #N — expected Coston2 (114). Switch networks in your wallet, then Re-pair via QR." which guides the user through the network switch and re-pair loop. The added `1:` entry in `rpcMap` was REVERTED in the same commit (the SDK uses its own defaults; the wallet does not perform chain-1 reads during the brief pre-pair phase anyway).
+- **Negative side effects audited:**
+  - The chainId validation toast in `connect()` still fires post-pair if the wallet is on a network other than Coston2. With `optionalChains:[114]`, the wallet will REQUEST Coston2 automatically (many wallets support the EIP-2175 chain-switch on session approval). The toast acts as a safety net for wallets that don't auto-switch.
+  - The `wc.connect()` call still succeeds on the FIRST pair if the wallet is on chain 1. The post-pair path detects the chain mismatch and prompts re-pair — same UX shape as before, just one step more.
+  - No ABI / contract addresses change.
+- **Verification:**
+  - `grep -nE 'chains:.*CHAIN_ID|chains:.*\[1\]' backend/internal/ui/static/wallet.js` returns the v24.0 entrance `chains: [1], optionalChains: [CHAIN_ID]`.
+  - The post-pair chainId validation remains in place and unchanged.
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/.
+
+### WC-04-overlay-race — Modal opens on later clicks but events fired before Alpine hydrates go into a void 🟠 P1 — FIXED
+- **Where:** `backend/internal/ui/templates/partials/wc_qr_overlay.html`, the `init()` method of the `window.MW_WC_OVERLAY_STATE()` x-data factory.
+- **Key:** `wc04-overlay-init-buffered-event-recovery`
+- **Anchor:** the v23.9 hoist of `window.MW_CONNECT_WALLET` to a top-level IIFE statement so the bridge exists the moment `wallet.js` parses, BEFORE Alpine's `alpine:init` fires.
+- **Scenario (historical):** Hoisting the bridge OUT of `alpine:init` made it ready at parse time — a deliberate v23.9 fix. The flip side: a user click landing <50 ms after first paint can invoke `window.MW_CONNECT_WALLET()` → `_wcConnect()` → SDK init → `display_uri` emitted → `mw-wc-show` dispatched — BEFORE Alpine finishes hydrating the overlay partial's `init()` listener registration. The dispatch goes into the void (no listener attached). The cached `window.MW_WC_URI` is set but the modal stays at `offsetHeight: 0`. The user sees NO modal despite a successful SDK init that emitted a real `display_uri`.
+- **Fix:** At overlay `init()` time, check (a) `window.MW_WC_URI` cached by `_wcConnect`'s `display_uri` listener AND (b) `Alpine.store('wallet')?.state`. Three branches:
+  1. URI set + state is `connecting`/`awaiting` → render the QR from cache immediately.
+  2. State is `connecting` but URI not yet cached → open the spinner overlay so the user sees progress, defer URI render to the live (registered AFTER init returns) `mw-wc-show` listener.
+  3. State idle / connected / error / otherwise → leave overlay closed, await next open command.
+  The check sits INSIDE init() so it runs ONCE per overlay mount. After init returns, the live `mw-wc-show` / `mw-wc-hide` listeners take over the open/close protocol.
+- **Negative side effects audited:**
+  - The check uses synchronous read of `Alpine.store('wallet')?.state`. Alpine.store is defined by `alpine:init` so this read is SAFE at init() time (the wallet store registration completes before `layout.html` parsing reaches the overlay part).
+  - The hard-coded state-set `{connecting, awaiting}` is a literal comparison. v25 onwards may add intermediate states — adding new states to the check is a one-line change.
+  - The `try { const r = document.getElementById('wc-modal-root'); if (r) r.style.display = ''; } catch (_)` line mirrors the same `style.display = ''` logic in the live mw-wc-show listener — exact alignment required for Alpine x-show's caching of the original `display: none` to behave correctly on first paint.
+- **Verification:**
+  - `grep -nE 'v24\.0 BUFFERED-EVENT|WINDOW_MW_WC_URI' backend/internal/ui/templates/partials/wc_qr_overlay.html` returns the v24.0 marker present.
+  - Live browser-use verify: connect flow completes the spinner→QR transition deterministically even on the fastest click.
+- **Status:** FIXED. Live at https://magicwebb.fly.dev/.
+
+### Cache-buster bump — ?v=26 → ?v=27 so returning browsers re-fetch wallet.js
+- **Where:** `backend/internal/ui/templates/layout.html`, the 5 lock-step static-asset tags.
+- **Key:** `v24-cache-buster-bump`
+- **Files affected (all in `layout.html`):**
+  - `tailwind.css?v=26` → `?v=27`
+  - `wc-bundle.js?v=26` → `?v=27`
+  - `wallet.js?v=27` (this is THE one that contains the fix) → `?v=27`
+  - `qrcode.min.js?v=26` → `?v=27`
+  - `cdn.min.js?v=26` → `?v=27`
+- **Scenario:** Without the bump, browsers that previously loaded `wallet.js?v=26` would continue serving the v23.9 wallet.js from disk cache despite the server now serving v24.0 bytes — URL is identical, the server has no way to invalidate the browser's cache. The cache-buster bump forces every browser to re-fetch atomically.
+- **Verification:** `grep -nE '\?v=(26|27)' backend/internal/ui/templates/layout.html` returns 5 hits on `?v=27` (lock-step) + 3 hits on `?v=23` (htmx/sse/ethers unchanged — no functional change needed). The v24.0 annotation comment block in the same file describes the three fixes for future readers of the v23.x trail.
+
+### ops-01 — (carried-forward) Deploy-drift safety net remains GREEN
+- (No change in v24.0; the v23.1 contract holds. `tools/check-fly-sync.sh` returns 0 once the SHA-baked binary replaces the live machine. Force-deploy incantation stays canonical: `fly deploy --remote-only --no-cache --build-arg "GIT_SHA=$(git rev-parse HEAD)" --strategy rolling`.)
+
+---
+
 ---
 
 The v22 sweep closed every live-site bug the browser-use harness surfaced.
