@@ -701,6 +701,12 @@ window.addEventListener('alpine:init', () => {
       // (1) User-initiated only: open with spinner BEFORE init awaits.
       if (!silent) {
         try {
+          // v23.7 telemetry — surface in dev console so future browser-use
+          // captures the dispatch path. The v23.5/v23.6 silent-fail mode
+          // (click did nothing, no console errors) was diagnosed by adding
+          // these logs after-the-fact. Keep them LIGHTWEIGHT and behind
+          // `console.log` so production logs aren't polluted.
+          console.log('[mw-wc-debug] _wcConnect: dispatching mw-wc-show {loading:true}');
           window.dispatchEvent(new CustomEvent('mw-wc-show', {
             detail: { loading: true },
           }));
@@ -805,6 +811,10 @@ window.addEventListener('alpine:init', () => {
         if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
         try {
+          // v23.7 telemetry — surface in dev console so future browser-use
+          // captures the dispatch path (the v23.6 silent-fail mode was
+          // diagnosed by adding this log).
+          console.log('[mw-wc-debug] _wcConnect: display_uri received, dispatching mw-wc-show {uri}');
           window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { uri } }));
           // Legacy alias for any downstream listener still keyed on it.
           window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));

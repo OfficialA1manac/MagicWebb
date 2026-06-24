@@ -30,7 +30,7 @@
        v23.5: bumped ?v=21 → ?v=22 to force the browser to re-fetch the
        static bundle in case any future deploy invalidates it; happens in
        lock-step with the wallet.js / wc-bundle.js buster bump below. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=23">
+  <link rel="stylesheet" href="/static/tailwind.css?v=24">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs, walletconnect) ──
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -61,6 +61,13 @@
        versions (v=21 was v23.4, v=22 was v23.5) — each release bumps
        every tag. A browser that pulled ?v=22 wallet.js would still
        call the broken dynamic-import path; now they all move together. -->
+  <!-- v23.7: ?v=23 → ?v=24 cache-buster bump. The wc_qr_overlay fix +
+       wallet.js telemetry changes only affect script-side behavior;
+       the cache buster forces every browser to atomically re-fetch
+       wc-bundle.js + wallet.js + the partial so the fix and the
+       evidence-logging land together. Other tags (htmx/sse/ethers/
+       tailwind/qrcode/cdn) bumped in lock-step for consistency,
+       even though their bytes are unchanged. -->
   <script src="/static/htmx.min.js?v=23" defer></script>
   <script src="/static/sse.js?v=23" defer></script>
   <script src="/static/ethers.umd.min.js?v=23" defer></script>
@@ -112,14 +119,14 @@
        the entire "CDN-dependent SDK" failure class. Unique per release:
        the cache-buster `?v=23` is bumped in lock-step with wallet.js so
        atomic re-fetch. -->
-  <script src="/static/wc-bundle.js?v=23" defer></script>
-  <script src="/static/wallet.js?v=23" defer></script>
+  <script src="/static/wc-bundle.js?v=24" defer></script>
+  <script src="/static/wallet.js?v=24" defer></script>
   <!-- qrcode-generator 1.4.4 (public domain). Self-hosted so the WC
        overlay renders QRs without a third-party endpoint. Loaded just
        before Alpine so it is available by the time wallet.js dispatches
        mw-wc-show. -->
-  <script src="/static/qrcode.min.js?v=23" defer></script>
-  <script src="/static/cdn.min.js?v=23" defer></script>
+  <script src="/static/qrcode.min.js?v=24" defer></script>
+  <script src="/static/cdn.min.js?v=24" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }

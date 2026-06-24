@@ -58,7 +58,30 @@
         // loading:true (spinner state) and again via display_uri with
         // uri:'' (render the QR). The overlay unconditionally opens on
         // this event — no flag check, no defense-in-depth gating.
+        //
+        // v23.7 CRITICAL FIX: explicit `root.style.display = ''` BEFORE
+        // setting `open = true`. The HTML element ships with
+        //   style="display: none;"
+        // inline (the x-cloak first-paint defense) AND `close()` re-asserts
+        // `root.style.display = 'none'` after every hide. Alpine 3's
+        // `x-show` directive caches `element's originalDisplay` on FIRST
+        // observation — for an element that BEGINS at 'none', that cache
+        // is 'none'. Subsequent state-flip-back operations re-apply
+        // `style.display = 'none'` even when `open=true`. The result:
+        // the modal silently stays hidden despite the reactive flag
+        // flipping right. action_modal.html solves the same class with
+        // `x-bind:style="$store.modals.open ? '' : 'display: none
+        // !important'"`; we do it explicitly here because the kill-switch
+        // (`MW_HIDE_ALL()`) needs a single source of truth (`close()`,
+        // `mw-wc-hide`, Esc) and we don't want a second reactive binding
+        // racing. The fix: when the listener fires, physically clear
+        // `style.display` so Alpine's `x-show` has a fresh canvas to
+        // paint onto. Subsequent `close()` calls re-assert 'none'.
         this._showListener = (e) => {
+          try {
+            const root = document.getElementById('wc-modal-root');
+            if (root) root.style.display = '';
+          } catch (_) {}
           const d = (e && e.detail) || {};
           if (d.loading) {
             this.loading = true;
@@ -74,6 +97,10 @@
           // exists when the self-hosted encoder paints it.
           this.open = true;
           if (this.uri) this.$nextTick(() => this.renderQr());
+          // Telemetry: surface in dev console so future browser-use
+          // captures the dispatch path (the v23.5-v23.6 silent-fail
+          // mode was diagnosed by adding this log after-the-fact).
+          try { console.log('[mw-wc-debug] overlay opened, loading=', !!this.loading, 'uri=', this.uri ? this.uri.slice(0, 16) + '\u2026' : '(empty)'); } catch (_) {}
         };
         // ── mw-wc-hide (POSITIVE CLOSE) ─────────────────────────────────
         // Fired by wallet.js on disconnect, by this overlay on Esc / X /
@@ -206,9 +233,10 @@
 <div x-data="window.MW_WC_OVERLAY_STATE()" id="wc-overlay-root" class="contents">
 
   <div id="wc-modal-root" x-show="open" x-cloak
+       x-bind:style="open ? '' : 'display: none !important'"
        class="fixed inset-0 z-[80] flex items-center justify-center p-4"
        x-transition.opacity.duration.200ms
-       style="display: none;"> <!-- ensure first paint is hidden -->
+       style="display: none;"> <!-- ensure first paint is hidden; Alpine will manage after init via x-show + x-bind:style -->
 
     <!-- Backdrop: deep ink-black w/ 85% opacity + heavy blur. Click
          outside the modal = dismiss (UX consistency with action_modal). -->
