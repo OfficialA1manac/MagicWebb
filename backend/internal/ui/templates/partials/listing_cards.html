@@ -16,12 +16,12 @@
          alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
          loading="lazy"
          class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
-         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');this.nextElementSibling.nextElementSibling.classList.remove('hidden')">
-    <div class="hidden absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
-    <div class="hidden absolute inset-0 flex items-end p-3">
+         onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+    <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
+    <div class="hidden mw-img-fallback absolute inset-0 flex items-end p-3">
       <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
-        ⏳ Image retrying — proxied in the meantime.
-        <button onclick="event.preventDefault();event.stopPropagation();location.reload()" class="ml-2 underline text-sky-200 hover:text-white">refresh</button>
+        ⚠ Image unavailable — self-host on click.
+        <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="ml-2 underline text-sky-200 hover:text-white">retry ingest</button>
       </div>
     </div>
     {{else}}

@@ -9,8 +9,8 @@
   {{if .ImageURI}}
   <div class="relative group">
     <img src="{{mediaURL .ImageURI}}" alt="#{{.TokenID}}" class="w-full aspect-square object-cover"
-         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden')">
-    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden shimmer">🖼</div>
+         onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden mw-img-fallback shimmer">🖼</div>
     <div class="absolute top-4 left-4 flex flex-col gap-1.5">
       <div class="px-2.5 py-1 rounded-xl bg-ink-1000/85 backdrop-blur border border-violet-300/40 glow-violet flex items-center gap-1.5">
         <span class="w-1.5 h-1.5 rounded-full bg-violet-300 animate-pulse"></span>
@@ -20,6 +20,7 @@
       <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white backdrop-blur">{{.Standard}}</span>
       {{end}}
     </div>
+    <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="hidden mw-img-fallback absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-xl bg-ink-1000/85 border border-sky-300/40 backdrop-blur text-[11px] text-sky-200 hover:text-white font-extrabold uppercase tracking-wider glow-sky">⚠ retry image ingest</button>
   </div>
   {{else}}
   <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>

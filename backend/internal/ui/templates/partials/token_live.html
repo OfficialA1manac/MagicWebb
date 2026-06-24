@@ -14,8 +14,8 @@
   {{if $img}}
   <div class="relative group">
     <img src="{{mediaURL $img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
-         onerror="this.style.display='none';this.nextElementSibling.classList.remove('hidden');this.nextElementSibling.nextElementSibling.classList.remove('hidden')">
-    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden shimmer">🖼</div>
+         onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden mw-img-fallback shimmer">🖼</div>
     <div class="absolute top-4 left-4 flex flex-col gap-1.5">
       {{if .Standard}}
       <span class="px-2 py-1 rounded-md bg-ink-1000/80 backdrop-blur border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
@@ -27,6 +27,7 @@
       </span>
       {{end}}
     </div>
+    <button onclick="MW_RETRY_IMAGE('{{.Contract}}','{{.TokenID}}',event)" class="hidden mw-img-fallback absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-xl bg-ink-1000/85 border border-sky-300/40 backdrop-blur text-[11px] text-sky-200 hover:text-white font-extrabold uppercase tracking-wider glow-sky">⚠ retry image ingest</button>
   </div>
   {{else}}
   <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>

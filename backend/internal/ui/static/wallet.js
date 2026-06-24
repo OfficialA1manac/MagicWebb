@@ -719,9 +719,9 @@ window.addEventListener('alpine:init', () => {
       // use the Browser Wallet option for now.' and picks MetaMask.
       let wc = null, lastErr = null;
       const _WC_CDNS = [
-        'https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle-deps&amp;target=es2022',
-        'https://esm.sh/@walletconnect/ethereum-provider@2.14.0?bundle-deps',
-        'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.14.0/dist/index.es.js',
+        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps&amp;target=es2022',
+        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps',
+        'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.23.9/+esm',
       ];
       for (const cdnUrl of _WC_CDNS) {
         try {
@@ -746,7 +746,7 @@ window.addEventListener('alpine:init', () => {
       }
       if (!wc) {
         throw new Error(
-          'WalletConnect is temporarily unavailable. Please use the Browser Wallet (MetaMask / Rabby) option instead. (' +
+          'Could not load the WalletConnect SDK right now. Refresh and try again, or check status.walletconnect.com if it persists. (' +
           (lastErr?.message || lastErr) + ')'
         );
       }
