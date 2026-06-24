@@ -60,7 +60,7 @@ const (
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		"font-src 'self' https://fonts.gstatic.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
-		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
+		"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com https://esm.sh https://cdn.jsdelivr.net wss://*.esm.sh; " +
 		"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +

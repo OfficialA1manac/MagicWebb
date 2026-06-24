@@ -719,7 +719,7 @@ window.addEventListener('alpine:init', () => {
       // use the Browser Wallet option for now.' and picks MetaMask.
       let wc = null, lastErr = null;
       const _WC_CDNS = [
-        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps&amp;target=es2022',
+        'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps&target=es2022',
         'https://esm.sh/@walletconnect/ethereum-provider@2.23.9?bundle-deps',
         'https://cdn.jsdelivr.net/npm/@walletconnect/ethereum-provider@2.23.9/+esm',
       ];
