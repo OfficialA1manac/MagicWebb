@@ -93,7 +93,26 @@ contract Marketplace is MarketplaceCore {
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
     ///         Caller must have approved this contract on each collection.
-    function batchList(BatchItem[] calldata items) external entryGate {
+    /// @dev L-09 fix (v28 — Round 3): `nonReentrant` was previously missing
+    ///      here despite every other state-changing entry path on this
+    ///      contract using it (`list`, `list1155`, `buy` all carry it).
+    ///      The for-loop calls `_list()` which in turn performs three
+    ///      external reads per item (`ownerOf`, `isApprovedForAll`,
+    ///      `getApproved`) and one external write (the storage struct
+    ///      assignment; storage itself is not an external call but the
+    ///      surrounding read calls are). A malicious collection contract
+    ///      whose `isApprovedForAll` or `getApproved` includes a hook
+    ///      (e.g. via a proxy delegatecall into an attacker-controlled
+    ///      implementation) could re-enter this function mid-loop on the
+    ///      first item, see partial state (some listings already written,
+    ///      others not), and front-run a later item with an unexpected
+    ///      approval-state read. Even though each `_list` is strictly
+    ///      checks-effects-interactions (storage write happens AFTER all
+    │      external reads, BEFORE the next iteration), the missing
+    │      nonReentrant was a defense-in-depth gap that broke the
+    │      invariant "every state-changing external on the cores is
+    │      nonReentrant". Cheap, mechanical, conservative. Added.
+    function batchList(BatchItem[] calldata items) external nonReentrant entryGate {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         for (uint256 i; i < items.length; ++i) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);

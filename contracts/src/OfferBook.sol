@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, WithdrawFailed, BelowMinPrice} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, BelowMinPrice} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -12,7 +12,12 @@ error InvalidExpiry();
 error InvalidAmount();
 error WrongValue();
 error OfferActive();
-error NoPendingRefund();
+
+/// @dev NothingToWithdraw is inherited from MarketplaceCore — OfferBook
+/// does not redeclare or shadow withdrawRefund(), so every caller across all
+/// cores (Marketplace, AuctionHouse, OfferBook) sees the SAME custom error
+/// from the same storage slot. Single selector = simpler frontend/indexer
+/// code, fewer "if/else" branches per error-matching path.
 
 /// @dev Maximum offer lifetime from the latest top-up.
 uint64 constant MAX_OFFER_DURATION = 14 days;
@@ -44,12 +49,13 @@ contract OfferBook is MarketplaceCore {
     /// @notice positions[coll][tokenId][bidder] → Position.
     mapping(address => mapping(uint256 => mapping(address => Position))) public positions;
 
-    /// @notice Pull-pattern fallback for any push refund that fails (bidder
-    ///         contract without a payable receive/fallback). Mirrors
-    ///         AuctionHouse.pendingReturns so refund bookkeeping is symmetric
-    ///         across cores. Cleared by withdrawRefund() once the bidder's
-    ///         wallet can accept ETH again.
-    mapping(address => uint256) public pendingReturns;
+    // ── Storage note ───────────────────────────────────────────────────────
+    // `pendingReturns` is declared ONCE in MarketplaceCore. OfferBook inherits
+    // it without redeclaration; OfferBook does NOT override `withdrawRefund()`
+    // either, so callers hit the inherited implementation that emits
+    // NothingToWithdraw on empty balance. _pay() (also inherited) emits
+    // PushFailed on fallback — there are NO duplicated or divergent code paths.
+
 
     // ── Events ──────────────────────────────────────────────────────────────────
 
@@ -105,7 +111,6 @@ contract OfferBook is MarketplaceCore {
         uint128 units,
         uint64  expiresAt
     ) internal {
-        if (principal < MIN_PRICE) revert BelowMinPrice();
         if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
 
         // M-01 fix: when topping up an existing position, the new expiry must
@@ -122,6 +127,12 @@ contract OfferBook is MarketplaceCore {
         Position storage p = existing;
         uint256 newPrincipal = uint256(p.principal) + principal;
         if (newPrincipal > type(uint128).max) revert InvalidAmount();
+        // L-01 fix: apply MIN_PRICE to the total position, not the delta.
+        // Previously, a user with a 10 ETH position couldn't add 0.005 ETH
+        // because the check was on the increment. Now the check is on the
+        // new total — micro-top-ups of large positions are allowed while
+        // still preventing dust-sized initial offers.
+        if (newPrincipal < MIN_PRICE) revert BelowMinPrice();
         p.principal = uint128(newPrincipal);
         p.units     = units;
         p.expiresAt = expiresAt;
@@ -161,13 +172,14 @@ contract OfferBook is MarketplaceCore {
     }
 
     // ── Reject / expire (full principal refunded — offers are free) ────────────
-
-    /// @notice Owner rejects a bidder's offer, refunding the full principal.
-    // NOTE: rejectOffer moved below refundExpiredOffer + withdrawRefund (see
-    // pull-fallback rewrite deeper in the file). The original `_pay`-revert
-    // version that trapped refunds behind non-receiving bidder contracts is
-    // removed; the new version uses _pushPullRefund so a rejected offer's
-    // principal is always recoverable via withdrawRefund().
+    //
+    // Both paths use the INHERITED `_pay()` from MarketplaceCore so the
+    // pull-fallback (audit-#3 fix) automatically emits the `PushFailed` event,
+    // making any fallback visible to off-chain indexers, and credits to the
+    // same `pendingReturns` slot every other core writes to. A bidder whose
+    // contract cannot receive ETH can withdraw later via the inherited
+    // `withdrawRefund()` on their core (Marketplace / AuctionHouse / this).
+    // No code duplication, no shadowed storage, no divergent error selectors.
 
     /// @notice Reclaim an expired position's principal. Permissionless (keeper or bidder).
     ///         Full principal refunded — no fee was charged at offer time.
@@ -177,17 +189,14 @@ contract OfferBook is MarketplaceCore {
         if (block.timestamp <= p.expiresAt) revert OfferActive();
 
         delete positions[coll][tokenId][bidder];
-        _pushPullRefund(bidder, p.principal); // not _pay(): best-effort + pull-fallback (audit-#3)
+        _pay(bidder, p.principal); // inherited pull-fallback + PushFailed event
         emit OfferRefunded(coll, tokenId, bidder, p.principal);
     }
 
-    // ── Reject with pull-fallback ──────────────────────────────
-
     /// @notice Owner rejects a bidder's offer, refunding the FULL principal.
-    ///         Push payment is best-effort with pull-fallback — a bidder contract
-    ///         without a payable receive() no longer traps its own refund inside
-    ///         the offer record (the previous `_pay` revert permanently locked the
-    ///         position; audit-#3). Caller can withdraw via withdrawRefund().
+    ///         Best-effort push with pull-fallback — a bidder contract without
+    ///         a payable receive() never traps its own refund inside the offer
+    ///         record (audit-#3). Caller withdraws via `withdrawRefund()`.
     function rejectOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
@@ -199,37 +208,7 @@ contract OfferBook is MarketplaceCore {
         }
 
         delete positions[coll][tokenId][bidder];
-        _pushPullRefund(bidder, p.principal);
+        _pay(bidder, p.principal); // inherited pull-fallback + PushFailed event
         emit OfferRefunded(coll, tokenId, bidder, p.principal);
-    }
-
-    // ── Withdraw pending refund ──────────────────────────────
-
-    /// @notice Withdraw a pending refund (only needed when the automatic push
-    ///         in rejectOffer / refundExpiredOffer failed because the bidder's
-    ///         contract didn't implement receive()). Restores the bookkeeping
-    ///         on failure so the bidder can retry once their contract is fixed.
-    function withdrawRefund() external nonReentrant {
-        uint256 amt = pendingReturns[msg.sender];
-        if (amt == 0) revert NoPendingRefund();
-        pendingReturns[msg.sender] = 0;
-        (bool ok,) = msg.sender.call{value: amt}("");
-        if (!ok) {
-            pendingReturns[msg.sender] = amt; // restore on failure — no funds lost
-            revert WithdrawFailed();
-        }
-    }
-
-    /// @dev Best-effort push with pull-fallback. Mirrors the pattern used in
-    ///      AuctionHouse.settle() so a non-receiving bidder contract doesn't
-    ///      permanently lock its refund inside the offer record. CEI holds:
-    ///      `delete` runs first, then the call, then the bookkeeping update.
-    function _pushPullRefund(address to, uint256 amount) internal {
-        if (amount == 0) return;
-        // gas: 50_000 caps EIP-150 63/64 forwarding — a hostile bidder
-        // contract cannot OOG-grief the keeper or seller calling reject/
-        // expire and trap the system. Mirrors AuctionHouse refundLosers.
-        (bool ok,) = to.call{gas: 50_000, value: amount}("");
-        if (!ok) pendingReturns[to] += amount;
     }
 }

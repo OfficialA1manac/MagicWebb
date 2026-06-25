@@ -8,6 +8,7 @@ import {ERC1155Holder}   from "@openzeppelin/contracts/token/ERC1155/utils/ERC11
 
 error TransferFailed();
 error WithdrawFailed();
+error NothingToWithdraw();
 error ZeroAddress();
 error BelowMinPrice();
 error EntriesHalted();
@@ -35,11 +36,20 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     /// @notice Wallet that receives all platform fees. Immutable post-deploy.
     address public immutable feeRecipient;
 
+    /// @notice Pull-pattern fallback for any push payment that fails.
+    ///         Mirrors AuctionHouse / OfferBook pendingReturns so refund
+    ///         bookkeeping is symmetric across cores. Cleared by
+    ///         withdrawRefund() once the recipient can accept ETH.
+    mapping(address => uint256) public pendingReturns;
+
     /// @notice Optional MarketplaceManager consulted on ENTRY paths only
     ///         (list/buy/create/bid/makeOffer/acceptOffer). address(0) = ungated.
     ///         EXIT paths (settle, refunds, withdrawals, cancels, reject) never
     ///         consult it — escrowed funds can always leave regardless of any
     ///         role, pause, or manager compromise.
+    /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
+    event PushFailed(address indexed to, uint256 amount);
+
     address public immutable manager;
 
     constructor(address recipient, address manager_) {
@@ -70,23 +80,51 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         return (commitment * PLATFORM_FEE_BPS) / 10_000;
     }
 
-    /// @dev Forward the platform fee to the immutable feeRecipient. Reverts on failure.
-    ///      gas: 50_000 caps EIP-150 63/64 forwarding so a hostile recipient
-    ///      contract cannot OOG-grief the settlement tx and trap buyer/seller funds.
+    /// @dev Forward the platform fee to the immutable feeRecipient.
+    ///      Best-effort push with pull-fallback: if the feeRecipient cannot
+    ///      receive ETH (multisig needing >50k gas, contract without
+    ///      receive()), the fee is credited to pendingReturns for later
+    ///      withdrawal instead of reverting the entire settlement.
+    ///      This prevents a systemic DOS where a broken feeRecipient
+    ///      permanently bricks every buy() / acceptOffer() on the protocol.
+    ///      Mirrors AuctionHouse.settle() pull-fallback pattern.
     function _payFee(uint256 fee) internal {
         if (fee == 0) return;
         (bool ok,) = feeRecipient.call{gas: 50_000, value: fee}("");
-        if (!ok) revert TransferFailed();
+        if (!ok) {
+            pendingReturns[feeRecipient] += fee;
+            emit PushFailed(feeRecipient, fee);
+        }
     }
 
-    /// @dev Pay `amount` to `to`. Reverts on failure.
-    ///      gas: 50_000 caps EIP-150 63/64 forwarding — a malicious seller
-    ///      contract cannot burn all forwarded gas and permanently trap the
-    ///      buyer's ETH in a failed buy() tx.
+    /// @dev Pay `amount` to `to`. Best-effort push with pull-fallback.
+    ///      If the recipient cannot receive ETH, the amount is credited to
+    ///      pendingReturns for later withdrawal. Prevents a malicious seller
+    ///      contract from permanently trapping the buyer's ETH in a failed
+    ///      buy() or acceptOffer() transaction.
+    ///      gas: 50_000 caps EIP-150 63/64 forwarding.
     function _pay(address to, uint256 amount) internal {
         if (amount == 0) return;
         (bool ok,) = to.call{gas: 50_000, value: amount}("");
-        if (!ok) revert TransferFailed();
+        if (!ok) {
+            pendingReturns[to] += amount;
+            emit PushFailed(to, amount);
+        }
+    }
+
+    /// @notice Withdraw a pending refund from failed push payments.
+    ///         Callable by any address that has a pendingReturns credit.
+    ///         virtual so child contracts (AuctionHouse, OfferBook) can
+    ///         override with their own pendingReturns mapping.
+    function withdrawRefund() external virtual nonReentrant {
+        uint256 amt = pendingReturns[msg.sender];
+        if (amt == 0) revert NothingToWithdraw();
+        pendingReturns[msg.sender] = 0;
+        (bool ok,) = msg.sender.call{value: amt}("");
+        if (!ok) {
+            pendingReturns[msg.sender] = amt;
+            revert WithdrawFailed();
+        }
     }
 
     // ── Token dispatch ─────────────────────────────────────────────────────────

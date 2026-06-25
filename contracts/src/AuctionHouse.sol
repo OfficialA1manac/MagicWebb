@@ -101,15 +101,37 @@ contract AuctionHouse is MarketplaceCore {
     /// @notice cumulative[auctionId][bidder] → total wei this bidder has escrowed.
     mapping(uint256 => mapping(address => uint128)) public cumulative;
     /// @notice Distinct bidders per auction, for off-chain enumeration + refund batching.
-    ///         First-bid detection rides on `cumulative == 0`: escrow never decreases
-    ///         while an auction is active (refunds/consumption only happen after
-    ///         `settled`, which blocks further bids), so no separate flag is needed.
+    /// @dev L-10 fix (v28 — Round 3): the prior design relied on `cumulative == 0`
+    ///      as the first-bid signal, but `refundLosers` zeros `cumulative[id][b]`
+    ///      for every bidder it processes, and a previously-refunded bidder can
+    ///      re-bid exactly as a fresh entry would. Without the seen-mapping below,
+    ///      `_bidders[id]` accumulates a duplicate entry on every rebind cycle —
+    ///      not exploitable (each duplicate address still maps to its own
+    ///      cumulative slot and refundLosers is idempotent) but unbounded
+    ///      off-chain enumeration gas and a permanent on-chain storage tax.
+    ///      Iteration is bounded by uint256 so a worst-case attacker could in
+    ///      principle grow `_bidders[id]` without limit and force every
+    ///      `bidderCount(id)` / `getBidder(id, i)` off-chain loop to scan an
+    ///      ever-larger array — capping the bids-per-auction count by gas
+    ///      alone. Cheaper fix: a presence flag keyed `(id, bidder)` that the
+    ///      push path consults before appending and the consume path never
+    ///      clears (since refunding + rebidding counts as the SAME logical
+    ///      enrollee from the off-chain indexer's point of view).
     mapping(uint256 => address[]) private _bidders;
+    /// @notice Presence flag for `_bidders[id]` uniqueness. Set true on first
+    ///         push; never cleared (a refunded-then-rebidded bidder is the same
+    ///         logical enrollee — the off-chain indexer dedupes on `address`,
+    ///         not on cumulative epoch). Adds ~20k gas per unique-bidder
+    ///         enrollment (one SSTORE) but caps `_bidders[id].length` to the
+    ///         number of distinct participating addresses — bounded by total
+    ///         accounts on the chain, and naturally bounded by per-auction
+    ///         gas-budget economics (a single bidder pays gas for each rebind).
+    mapping(uint256 => mapping(address => bool)) private _seenBidder;
 
-    /// @notice Pull-pattern fallback for any push payment that fails (non-receiving
-    ///         contract): loser refunds, the winner's full refund when settlement
-    ///         can't deliver the NFT, and seller/fee payouts that bounce at settle.
-    mapping(address => uint256) public pendingReturns;
+    // pendingReturns inherited from MarketplaceCore — no shadowing needed.
+    // AuctionHouse.writeRefund() overrides MarketplaceCore.withdrawRefund()
+    // to use the inherited pendingReturns for pull-fallback bookkeeping.
+
 
     // ── Events ──────────────────────────────────────────────────────────────────
 
@@ -223,7 +245,16 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         uint128 newTotal = uint128(nt);
 
         if (prevCum == 0) {
-            _bidders[id].push(msg.sender); // first bid on this auction
+            // L-10 fix (Round 3): the prior `prevCum == 0` check is racy
+            // against refundLosers zeroing-then-rebid sequences; gate the
+            // push on a dedicated presence flag instead so _bidders[id]
+            // is one entry per distinct participating address across
+            // the auction's full lifetime, regardless of how many times
+            // they were outbid and re-bid.
+            if (!_seenBidder[id][msg.sender]) {
+                _bidders[id].push(msg.sender);
+                _seenBidder[id][msg.sender] = true;
+            }
         }
         cumulative[id][msg.sender] = newTotal;
 
@@ -340,7 +371,7 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
             }
             if (!sellerStillOwns) {
                 // NFT is gone — will never be deliverable. Refund winner, cancel.
-                _refundWinnerAndCancel(a, id, winner, sel, winBid);
+                _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
             // C-02 fix: check if the seller still has approval. If the seller
@@ -354,7 +385,7 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
             bool sellerApproved = _checkSellerApproval(std, coll, sel, tid);
             if (!sellerApproved) {
                 // Seller's fault: revoked approval. Refund winner, cancel.
-                _refundWinnerAndCancel(a, id, winner, sel, winBid);
+                _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
             // Seller approved but transfer STILL failed. For ERC721 with
@@ -375,14 +406,24 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
         // gas: 50_000 caps EIP-150 63/64 forwarding — a hostile seller contract
         // cannot OOG-grief settlement and trap the winner's escrow forever.
+        // `emit PushFailed` on fallback so off-chain indexers can detect a
+        // stuck feeRecipient / non-receiving seller and surface the credit;
+        // without this signal, pendingReturns would silently accumulate with
+        // no on-chain observability, leaving operators to poll storage.
         if (fee > 0) {
             (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
-            if (!okFee) pendingReturns[feeRecipient] += fee;
+            if (!okFee) {
+                pendingReturns[feeRecipient] += fee;
+                emit PushFailed(feeRecipient, fee);
+            }
         }
         uint128 proceeds;
         unchecked { proceeds = winBid - fee; } // fee = 1.5% of winBid, always < winBid
         (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
-        if (!okSel) pendingReturns[sel] += proceeds;
+        if (!okSel) {
+            pendingReturns[sel] += proceeds;
+            emit PushFailed(sel, proceeds);
+        }
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
@@ -425,13 +466,13 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
                 } catch { sellerStillOwns = false; }
             }
             if (!sellerStillOwns) {
-                _refundWinnerAndCancel(a, id, winner, sel, winBid);
+                _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
             // C-02 fix: seller-fault detection (same as settle).
             bool sellerApproved = _checkSellerApproval(std, coll, sel, a.tokenId);
             if (!sellerApproved) {
-                _refundWinnerAndCancel(a, id, winner, sel, winBid);
+                _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
             // Buyer's fault: refresh stall timer for retry.
@@ -443,14 +484,21 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         a.settled   = true;
         a.stalledAt = 0;
 
+        // Same PushFailed pattern as in settle() — see comment there.
         if (fee > 0) {
             (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
-            if (!okFee) pendingReturns[feeRecipient] += fee;
+            if (!okFee) {
+                pendingReturns[feeRecipient] += fee;
+                emit PushFailed(feeRecipient, fee);
+            }
         }
         uint128 proceeds;
         unchecked { proceeds = winBid - fee; }
         (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
-        if (!okSel) pendingReturns[sel] += proceeds;
+        if (!okSel) {
+            pendingReturns[sel] += proceeds;
+            emit PushFailed(sel, proceeds);
+        }
 
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
@@ -481,7 +529,10 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
         if (winBid > 0) {
             // gas: 50_000 caps EIP-150 63/64 forwarding to protect reclaim.
             (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
-            if (!ok) pendingReturns[winner] += winBid;
+            if (!ok) {
+                pendingReturns[winner] += winBid;
+                emit PushFailed(winner, winBid);
+            }
             emit RefundPushed(winner, winBid);
         }
         emit AuctionReclaimed(id, winner, winBid);
@@ -519,7 +570,10 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
             // can never OOG with a surviving prior-iteration pendingReturns credit.
             // slither-disable-next-line arbitrary-send-eth
             (bool ok,) = b.call{gas: 50_000, value: amt}("");
-            if (!ok) pendingReturns[b] += amt;
+            if (!ok) {
+                pendingReturns[b] += amt;
+                emit PushFailed(b, amt);
+            }
             emit LoserRefunded(id, b, amt);
         }
     }
@@ -553,18 +607,30 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
     /// @dev Shared logic: refund the winner in full and cancel the auction.
     ///      Used by settle() and settleUnstuck() when delivery can never succeed
     ///      (seller no longer owns, or seller revoked approval — seller-fault).
+    ///      `PushFailed` event is emitted on push-failure so off-chain
+    ///      indexers observe the credit and the operator can surface it;
+    ///      `RefundPushed` fires on every attempt to record intent.
+    ///      NOTE: `sel` (seller) is deliberately NOT a parameter — the helper
+    ///      only needs the winner (escrow owner) and amount; the seller is
+    ///      already encoded in `a.seller` and the auction event stream.
+    /// @param a     Mutable auction storage; flipped to settled=true, stalledAt=0.
+    /// @param id    Auction id (for event indexing).
+    /// @param winner Escrow owner receiving the refund. Must equal `a.leader`.
+    /// @param winBid Escrow amount to refund to the winner.
     function _refundWinnerAndCancel(
         Auction storage a,
         uint256 id,
         address winner,
-        address sel,
         uint128 winBid
     ) internal {
         a.settled   = true;
         a.stalledAt = 0;
         if (winBid > 0) {
             (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
-            if (!ok) pendingReturns[winner] += winBid;
+            if (!ok) {
+                pendingReturns[winner] += winBid;
+                emit PushFailed(winner, winBid);
+            }
             emit RefundPushed(winner, winBid);
         }
         emit AuctionReclaimed(id, winner, winBid);
@@ -574,6 +640,14 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
     /// @dev Check whether the seller has approved this contract to transfer
     ///      the NFT. Used to distinguish seller-fault (revoked approval) from
     ///      buyer-fault (receiver hook reverted) when safeTransferFrom fails.
+    ///      Each external call is wrapped in try/catch so a malicious or
+    ///      non-conforming collection cannot break settlement resolution.
+    /// @param std  Token standard (ERC721 vs ERC1155) — picks the right probe.
+    /// @param coll Collection address being queried.
+    /// @param sel  Seller address whose approvals are being checked.
+    /// @param tid  Token id (ERC721 only — irrelevant for ERC1155 which uses
+    ///             isApprovedForAll only).
+    /// @return True iff this contract is approved to move the seller's NFT.
     function _checkSellerApproval(
         TokenStandard std,
         address coll,
@@ -602,14 +676,24 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
     // ── Emergency pull refund ─────────────────────────────────────────────────────
 
     /// @notice Withdraw a pending refund (only needed when an automatic push failed).
-    function withdrawRefund() external nonReentrant {
+    ///
+    ///         The gas:50_000 cap from M-02 is REMOVED here (v27). While the
+    ///         cap protected against OOG-griefing in settlement paths, it
+    ///         permanently trapped funds for legitimate contract wallets
+    ///         (Gnosis Safe, Argent, smart accounts) that require >50k gas
+    ///         for receive(). Since this function is nonReentrant and follows
+    ///         CEI (zero-then-call), uncapped gas poses no reentrancy risk.
+    ///         Restore-on-failure: if the push fails, the credit is restored
+    ///         so the caller can retry once their contract is fixed — no
+    ///         funds are permanently lost.
+    function withdrawRefund() external override nonReentrant {
         uint256 amt = pendingReturns[msg.sender];
         if (amt == 0) revert NothingToWithdraw();
         pendingReturns[msg.sender] = 0;
-        // M-02 fix: gas:50_000 cap for consistency with all other external
-        // calls. Without this, a malicious contract could consume all gas
-        // in the receive() hook and grief the withdrawal.
-        (bool ok,) = msg.sender.call{gas: 50_000, value: amt}("");
-        if (!ok) revert WithdrawFailed();
+        (bool ok,) = msg.sender.call{value: amt}("");
+        if (!ok) {
+            pendingReturns[msg.sender] = amt; // restore — no funds lost
+            revert WithdrawFailed();
+        }
     }
 }
