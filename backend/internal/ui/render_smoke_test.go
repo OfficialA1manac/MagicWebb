@@ -47,10 +47,10 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	}
 	data := map[string]any{
 		"Title":           "Home",
-		"MarketplaceAddr": "0xMarketF00Dbabe",
-		"AuctionAddr":     "0xAuctionF00Dbabe",
-		"OfferBookAddr":   "0xOfferF00Dbabe",
-		"WCProjectID":     "af6aba4c71274871c3d77a60050171ba",
+		"MarketplaceAddr": "0xf9355c77f4dba5ceca217ceb4d762a33ab7efe37",
+		"AuctionAddr":     "0x9452518e29dea185da392e16be03982c1511753c",
+		"OfferBookAddr":   "0x0c6edb481bc73b4b817a2e7235b309276d703906",
+		"WCProjectID":     "ba97b5bd13de477c242103bfbf471930",
 		// v24.0.1 chain-metadata block — mirrors config.go's NEW
 		// NetworkName / NativeCurrency / ExplorerURL / ChainID fields.
 		// The render() helper in cmd/server/ui.go auto-injects these
@@ -90,10 +90,10 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		label, needle string
 	}{
 		// Runtime config injected (single source of truth: layout.html)
-		{"MW_WC_PROJECT_ID", "window.MW_WC_PROJECT_ID = 'af6aba4c71274871c3d77a60050171ba'"},
-		{"MW_MARKETPLACE",   "window.MW_MARKETPLACE   = '0xMarketF00Dbabe'"},
-		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
-		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
+		{"MW_WC_PROJECT_ID", "window.MW_WC_PROJECT_ID = 'ba97b5bd13de477c242103bfbf471930'"},
+		{"MW_MARKETPLACE",   "window.MW_MARKETPLACE   = '0xf9355c77f4dba5ceca217ceb4d762a33ab7efe37'"},
+		{"MW_AUCTION",       "window.MW_AUCTION       = '0x9452518e29dea185da392e16be03982c1511753c'"},
+		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0x0c6edb481bc73b4b817a2e7235b309276d703906'"},
 		// v24.0.1 — five-field WalletConnect config. The previous
 		// v23 audit only injected 4 fields; MW_NATIVE_CURRENCY is the
 		// missing 5th. These four pairs pin each shadow as a literal
@@ -202,12 +202,12 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	// cache-buster assertions had been silently failing pre-patch.
 	// Bumping to ?v=28 here closes the drift and pins the next-deployed
 	// buster version on lock-step with layout.html's <script src=> tags.
-	{"tailwind-static-link", "tailwind.css?v=28"},
-	{"wallet-js-defer",      "wallet.js?v=28"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=28"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=28"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=28"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=28"},
+	{"tailwind-static-link", "tailwind.css?v=29"},
+	{"wallet-js-defer",      "wallet.js?v=29"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=29"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=29"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=29"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=29"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -248,12 +248,9 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// comment: "v23.2 — WalletConnect-only"). The mobile drawer now
 		// exposes only the WalletConnect / QR affordance.)
 		{"mobile-drawer-wc-button",       "WalletConnect"},
-		// 1s polling guard: every live grid AND the activity ticker
-		// must carry `every 1s [!document.hidden]` so the listing /
-		// auction / home surfaces refresh at most once per second AND
-		// stop polling when the tab is hidden (otherwise a long-lived
-		// background tab hammers the DB).
-		{"home-activity-1s-poll",   "activity-ticker"},
+		// 1s polling guard: The `[!document.hidden]` condition is pinned
+		// below by `every-1s-condition`. The home page activity ticker
+		// was removed per user request.
 		{"home-listings-grid-poll", "id=\"listings-grid\""},
 		{"every-1s-condition",      "every 1s [!document.hidden]"},
 		// WC v2 wiring: partial body, picker connect call, persistent navbar reopen chip

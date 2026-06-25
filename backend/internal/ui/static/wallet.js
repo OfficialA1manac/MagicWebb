@@ -799,34 +799,32 @@ window.addEventListener('alpine:init', () => {
       }
       let wc;
       try {
-        // v24.0: WalletConnect v2 handshake rule. The `chains` array is
-        // the wallet-side REQUIRE — every wallet scanning the QR MUST
-        // currently be on those exact chains or the session is silently
-        // rejected. Coston2 (chain 114) is not in the default supported
-        // set for the vast majority of mobile/hardware wallets (MetaMask,
-        // Trust, Rainbow, Ledger, Trezor) so they would refuse to pair.
-        // The fix: declare ETH mainnet (chain 1) as the required primary
-        // because every mainstream wallet supports it natively, AND put
-        // Coston2 in optionalChains so the dApp can prompt the user to
-        // switch their wallet's network AFTER pairing completes. The
-        // existing chainId validation in connect() (lines ~656 — "Connected
-        // wallet is on chain #N — expected Coston2 (114). Switch networks
-        // in your wallet, then Re-pair via QR.") already handles the
-        // post-pair path.
+        // Reown / WalletConnect v2 EthereumProvider.init: every chain
+        // referenced in `chains` (required) and `optionalChains` MUST have
+        // a corresponding entry in `rpcMap` so the SDK can bootstrap its
+        // internal providers. Without entries for all declared chains, the
+        // SDK silently falls through to the Reown Cloud API which enforces
+        // stricter rate limits and domain-based project-id validation
+        // (https://docs.reown.com/advanced/providers/ethereum#initialization).
+        //
+        // `chains: [1]` (Ethereum mainnet) is the required chain — every
+        // mainstream wallet (MetaMask, Trust, Ledger, Rainbow, Trezor)
+        // supports it natively, so the QR scan succeeds universally.
+        // Coston2 (chain 114) in `optionalChains` allows wallets that DO
+        // support it to auto-connect, while the post-connect chainId
+        // validation toast handles the re-pair flow for wallets on other
+        // networks.
         wc = await _EthereumProvider.init({
           projectId: WC_PROJECT_ID,
           chains:    [1],
           optionalChains: [CHAIN_ID],
-          rpcMap:    { [CHAIN_ID]: RPC_URL },
+          rpcMap: {
+            [1]: 'https://ethereum-rpc.publicnode.com',
+            [CHAIN_ID]: RPC_URL,
+          },
           showQrModal: false,
           metadata: {
             name:    'MagicWebb',
-            // Network name interpolated from server-injected NETWORK_NAME.
-            // The WalletConnect approval card already shows the chainId
-            // (e.g. "Flare Coston2") natively next to the app name, so we
-            // only need to surface the human-readable network name in the
-            // description — the redundant "(chain N)" parenthetical gets
-            // truncated on the modal's narrow width.
             description: 'Non-custodial NFT marketplace on ' + NETWORK_NAME,
             url:     window.location.origin,
             icons:   [`${window.location.origin}/static/icon-512.png`],
