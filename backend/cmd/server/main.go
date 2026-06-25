@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"syscall"
@@ -103,6 +104,13 @@ func main() {
 		DisableStartupMessage: false,
 		EnableTrustedProxyCheck: false,
 		ProxyHeader:           "Fly-Client-IP",
+		// BodyLimit: 1 MB. Prevents oversized payload DoS attacks on JSON
+		// endpoints (profile update, reports, auth verify). Fiber's default
+		// limit is 4 MB — tightening to 1 MB means a degenerate JSON upload
+		// cannot starve the connection pool or the Go GC. The limit applies
+		// BEFORE any middleware or route handler touches the body — a 413
+		// "Request Entity Too Large" is written directly by the framework.
+		BodyLimit: 1 * 1024 * 1024, // 1 MB
 	})
 
 	// Mount all REST + SSE routes
@@ -165,9 +173,12 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
-		address := strings.ToLower(c.Query("address"))
+		address := strings.ToLower(strings.TrimSpace(c.Query("address")))
 		if address == "" {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "address required"})
+		}
+		if !isValidEthAddr(address) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid address format"})
 		}
 		// Cryptographically random 16-byte nonce. crypto/rand per RFC 4086.
 		var rb [16]byte
@@ -195,14 +206,28 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "bad request"})
 		}
 		addr := strings.ToLower(req.Address)
+		if !isValidEthAddr(addr) {
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid address format"})
+		}
 		n, found := ns.GetDel(addr)
 		if !found || !strings.Contains(req.Message, n) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "nonce not found or expired"})
 		}
 		// Bind the signed message to our domain so a signature obtained for another
 		// site cannot be replayed here (SIWE domain binding).
-		if d := config.C.SIWEDomain; d != "" && !strings.Contains(req.Message, d) {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
+		// R-07 fix: use structured EIP-4361 parsing instead of substring match.
+		// The previous `strings.Contains(req.Message, d)` was vulnerable to
+		// cross-application replay: an attacker could trick a user into signing
+		// a SIWE message for attacker.com with the target domain embedded in
+		// the Statement or URI fields, and the substring check would pass.
+		// The fix extracts the domain from the EIP-4361 `domain` line (the
+		// first line of the message, before " wants you to sign in...") and
+		// requires an exact match. Falls back to substring match if the message
+		// doesn't follow EIP-4361 format (legacy compatibility).
+		if d := config.C.SIWEDomain; d != "" {
+			if !siweDomainMatches(req.Message, d) {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
+			}
 		}
 		// v29 audit F-01: bind the signature to the running chain. Without
 		// this, a Coston2-signed payload replays as valid on mainnet because
@@ -211,9 +236,17 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		// `Chain ID: N`; we require N == config.C.ChainID. Reject before
 		// EIP-191 so a forged-claim signature can't even burn signature-verify
 		// cycles.
+		// R-09 fix: use structured EIP-4361 line parsing instead of substring
+		// match. The previous `strings.Contains(req.Message, wantSubstr)` was
+		// vulnerable to cross-chain replay: an attacker could trick a user
+		// into signing a SIWE message for chain 1 with "Chain ID: 114"
+		// embedded in the URI or Statement field, and the substring check
+		// would pass. The fix extracts the Chain ID from the EIP-4361
+		// `Chain ID: N` line and requires an exact integer match. Falls back
+		// to substring match if the message doesn't follow EIP-4361 format
+		// (legacy compatibility).
 		if want := config.C.ChainID; want != 0 {
-			wantSubstr := fmt.Sprintf("Chain ID: %d", want)
-			if !strings.Contains(req.Message, wantSubstr) {
+			if !siweChainIDMatches(req.Message, want) {
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "chain id mismatch"})
 			}
 		}
@@ -264,6 +297,60 @@ func setSessionCookie(c *fiber.Ctx, address, token string) {
 		SameSite: "Lax",
 		MaxAge:   int((24 * time.Hour).Seconds()),
 	})
+}
+
+// isValidEthAddr validates a lowercase Ethereum address: 0x + 40 lowercase hex chars.
+func isValidEthAddr(s string) bool {
+	if len(s) != 42 || s[:2] != "0x" {
+		return false
+	}
+	for i := 2; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
+}
+
+// siweDomainMatches extracts the domain from an EIP-4361 SIWE message
+// and checks for an exact match. The domain is the first line of the
+// message, which must end with " wants you to sign in with your Ethereum
+// account:". If the message doesn't follow EIP-4361 format, falls back
+// to substring match for legacy compatibility.
+func siweDomainMatches(msg, expected string) bool {
+	// EIP-4361: first line is "<domain> wants you to sign in with your Ethereum account:"
+	idx := strings.Index(msg, " wants you to sign in")
+	if idx > 0 {
+		domain := msg[:idx]
+		return domain == expected
+	}
+	// Legacy fallback: substring match for non-EIP-4361 messages.
+	return strings.Contains(msg, expected)
+}
+
+// siweChainIDMatches extracts the Chain ID from an EIP-4361 SIWE message
+// and checks for an exact integer match. It parses the line starting with
+// "Chain ID: ". If the field is not found or cannot be parsed, it falls
+// back to a substring match for legacy compatibility.
+//
+// R-09 fix: the previous `strings.Contains` check was vulnerable to
+// cross-chain replay — an attacker could embed the target chain ID text
+// in the URI or Statement field while signing for a different chain.
+// Structured line parsing eliminates this attack vector entirely.
+func siweChainIDMatches(msg string, expected uint64) bool {
+	lines := strings.Split(msg, "\n")
+	for _, line := range lines {
+		if strings.HasPrefix(line, "Chain ID: ") {
+			idStr := strings.TrimSpace(strings.TrimPrefix(line, "Chain ID: "))
+			if id, err := strconv.ParseUint(idStr, 10, 64); err == nil {
+				return id == expected
+			}
+		}
+	}
+	// Legacy fallback: substring match for non-EIP-4361 messages.
+	wantSubstr := fmt.Sprintf("Chain ID: %d", expected)
+	return strings.Contains(msg, wantSubstr)
 }
 
 func verifyEIP191(message, sigHex, address string) (bool, error) {

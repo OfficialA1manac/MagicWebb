@@ -45,7 +45,7 @@
 
     <!-- Top-right: price (gold gradient) — the loudest element on the card. -->
     <div class="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-ink-1000/70 backdrop-blur border border-gold-300/40 glow-gold">
-      <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>        <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{.NativeCurrency}}</span>
+      <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>        <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{$.NativeCurrency}}</span>
     </div>
 
     <!-- Bottom-right (live countdown for auctions only — listings have no expiry countdown but we'll surface short freshness) -->

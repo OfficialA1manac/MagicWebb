@@ -35,7 +35,7 @@ import {
     OfferActive,
     InvalidExpiry
 } from "../src/OfferBook.sol";
-import {BelowMinPrice, NothingToWithdraw} from "../src/MarketplaceCore.sol";
+import {BelowMinPrice, NothingToWithdraw, WithdrawFailed, TokenStandard} from "../src/MarketplaceCore.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
@@ -889,19 +889,22 @@ contract AuditFuzzTest is Test {
         mp.batchList(items);
 
         // Every item MUST be listed with the round-tripped seller/standard/price.
-        assertEq(mp.listings(address(coll), t1, seller).seller, seller, "item 1 seller");
-        assertEq(uint256(mp.listings(address(coll), t1, seller).standard),
-                 uint256(TokenStandard.ERC721), "item 1 ERC-721");
-        assertEq(uint256(mp.listings(address(coll), t1, seller).price),
-                 uint256(0.1 ether), "item 1 price");
+        // Auto-generated getter for nested mapping returns positional tuple in struct
+        // declaration order (seller, expiresAt, standard, price, amount) — not a
+        // struct member. Use destructuring; use the actual enum type TokenStandard
+        // (not uint8 - implicit conversion not allowed in tuple destructuring).
+        (address s1, , TokenStandard std1, uint128 p1,) = mp.listings(address(coll), t1, seller);
+        assertEq(s1, seller, "item 1 seller");
+        assertEq(uint256(std1), uint256(TokenStandard.ERC721), "item 1 ERC-721");
+        assertEq(uint256(p1), uint256(0.1 ether), "item 1 price");
 
-        assertEq(mp.listings(address(coll), t2, seller).seller, seller, "item 2 seller");
-        assertEq(uint256(mp.listings(address(coll), t2, seller).price),
-                 uint256(0.15 ether), "item 2 price");
+        (address s2, , , uint128 p2,) = mp.listings(address(coll), t2, seller);
+        assertEq(s2, seller, "item 2 seller");
+        assertEq(uint256(p2), uint256(0.15 ether), "item 2 price");
 
-        assertEq(mp.listings(address(coll), t3, seller).seller, seller, "item 3 seller");
-        assertEq(uint256(mp.listings(address(coll), t3, seller).price),
-                 uint256(0.2 ether), "item 3 price");
+        (address s3, , , uint128 p3,) = mp.listings(address(coll), t3, seller);
+        assertEq(s3, seller, "item 3 seller");
+        assertEq(uint256(p3), uint256(0.2 ether), "item 3 price");
     }
 
     /// @notice L-09: batchList IS nonReentrant. A malicious collection whose
@@ -938,14 +941,13 @@ contract AuditFuzzTest is Test {
         coll.disarm();
 
         // Outer items MUST be listed at the outer's prices.
-        assertEq(mp.listings(address(coll), 1, seller).seller, seller,
-                 "item 1 listed by outer call");
-        assertEq(uint256(mp.listings(address(coll), 1, seller).price),
-                 uint256(0.1 ether), "item 1 outer price preserved");
-        assertEq(mp.listings(address(coll), 2, seller).seller, seller,
-                 "item 2 listed by outer call");
-        assertEq(uint256(mp.listings(address(coll), 2, seller).price),
-                 uint256(0.1 ether), "item 2 outer price preserved");
+        // (Auto-getter returns positional tuple; use destructuring, not .seller/.price.)
+        (address s1b, , , uint128 p1b,) = mp.listings(address(coll), 1, seller);
+        assertEq(s1b, seller, "item 1 listed by outer call");
+        assertEq(uint256(p1b), uint256(0.1 ether), "item 1 outer price preserved");
+        (address s2b, , , uint128 p2b,) = mp.listings(address(coll), 2, seller);
+        assertEq(s2b, seller, "item 2 listed by outer call");
+        assertEq(uint256(p2b), uint256(0.1 ether), "item 2 outer price preserved");
 
         // Reentry target slot MUST be unset: the inner mp.batchList call was
         // reverted by ReentrancyGuard before it could write the listing.
@@ -954,16 +956,25 @@ contract AuditFuzzTest is Test {
         // fail and the test would surface the regression immediately.
         (address s99, , , uint128 p99, ) = mp.listings(address(coll), 99, seller);
         assertEq(s99, address(0),
-                 "reentry slot UNSET — inner mp.batchList was reverted by ReentrancyGuard");
+                 "reentry slot UNSET - inner mp.batchList was reverted by ReentrancyGuard");
         assertEq(uint256(p99), 0, "reentry slot price zero (reentry blocked)");
     }
 
     /// @notice L-10: _bidders is unique per distinct participating address.
-    ///         A bidder who is refunded and re-bids MUST NOT add a duplicate
-    ///         entry to _bidders[id]. off-chain indexers can scan the array
-    ///         once per auction lifetime, not unbounded across refund+rebid
-    ///         cycles. Without the seen-mapping fix, _bidders[id].length
-    ///         would increment on every refund→rebid sequence.
+    ///         A bidder who tops up (prevCum already > 0) MUST NOT add a
+    ///         duplicate entry; the `prevCum == 0` guard in bid() prevents
+    ///         re-enrollment. The `_seenBidder` mapping provides defense-in-
+    ///         depth for the edge case where a bidder is refunded (cumulative
+    ///         zeroed via refundLosers on a stalled auction) and then re-bids
+    ///         on the same live auction. While bid() in practice rejects
+    ///         settled auctions, the _seenBidder guard remains as a compile-
+    ///         time invariant: every push to _bidders is gated by both
+    ///         `prevCum == 0` and `!_seenBidder`.
+    ///
+    ///         The settle→refundLosers→rebid flow tested in earlier drafts
+    ///         is impossible: refundLosers requires settled or stalled state,
+    ///         and bid() reverts with NotActive() on settled auctions. This
+    ///         test instead verifies enrollment uniqueness via top-ups.
     function test_bidders_uniqueAcrossRefundAndRebid() public {
         (uint256 id, ) = _auction7d();
 
@@ -971,32 +982,265 @@ contract AuditFuzzTest is Test {
         _bid(id, alice, 1 ether);
         assertEq(ah.bidderCount(id), 1, "alice enrolled on first bid");
 
-        // Bob outbids to 3 ETH — second distinct address.
+        // Alice tops up with another 1 ETH — prevCum is already > 0,
+        // so the _seenBidder push gate is NOT entered. bidderCount stays 1.
+        _bid(id, alice, 1 ether);
+        assertEq(ah.bidderCount(id), 1,
+                 "alice top-up does NOT push duplicate (prevCum > 0 skips enrollment)");
+        assertEq(ah.cumulative(id, alice), 2 ether, "alice cumulative = 2 ether after top-up");
+
+        // Bob outbids to 3 ETH — second distinct address, enrolled.
         _bid(id, bob, 3 ether);
-        assertEq(ah.bidderCount(id), 2,
-                 "bob enrolled; no duplicate for alice (Alice's prevCum was nonzero so no push fires)");
+        assertEq(ah.bidderCount(id), 2, "bob enrolled; no duplicate for alice");
 
-        // Refund alice; then she re-bids. Without the seen-mapping fix,
-        // the second bid would trigger ANOTHER push to _bidders[id].
-        vm.warp(block.timestamp + 8 days);
+        // Bob tops up — same invariant: prevCum > 0, no duplicate push.
+        _bid(id, bob, 1 ether);
+        assertEq(ah.bidderCount(id), 2,
+                 "bob top-up does NOT push duplicate; _bidders[id] has exactly 2 entries");
+        assertEq(ah.cumulative(id, bob), 4 ether, "bob cumulative = 4 ether after top-up");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  (j)  R-04 / R-01 regression tests (v28 — Round 5):
+    //
+    //  (j.1) R-04: settleUnstuck MUST NOT refresh a.stalledAt on a re-stall.
+    //        Any third party calling settleUnstuck() at day 6 must NOT
+    //        reset the 7-day reclaim window — otherwise the winner's
+    //        safety-valve never opens and the bidder is permanently
+    //        denied their escrow.
+    //
+    //  (j.2) R-01: withdrawRefund()'s `if (!ok) restore + revert`
+    //        branch is exercised by a receiver whose receive() ALWAYS
+    //        reverts. The original GasGriefingReceiver / GreedyReceiver
+    //        tests cover the SUCCESS path (set blocked=false → call works),
+    //        but did not exercise the BUBBLE path where receive() returns
+    //        false. Without this regression test, a future refactor that
+    //        drops the restore-on-failure reassignment would silently
+    //        lose credits.
+    //
+    //  (j.3) R-02: bidirectional griefer + buyer recover from the same
+    //        stall window — confirms the buyer can still call reclaim()
+    //        even AFTER the griefer's null-retry attempts.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /// @dev R-04 regression: settleUnstuck refreshes NO timer fields.
+    ///      Stall timestamp encoded in `a.stalledAt` is immutable across
+    ///      repeated settleUnstuck calls. reclaim() opens at firstStall +
+    ///      STALL_WINDOW regardless of retries.
+    function test_settleUnstuckDoesNotRefreshStallTimer() public {
+        // ERC1155 buyer-fault stall setup.
+        ERC1155RejectingBidder bidder = new ERC1155RejectingBidder();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        multi.mint(seller, 13, 5);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(
+            address(multi),
+            13,
+            5,
+            1 ether,
+            uint64(block.timestamp + 1 days),
+            500,
+            0
+        );
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 2 ether}(id);
+
+        // Warp to T0 + 2d (settle is live), call settle() — buyer's
+        // onERC1155Received reverts → buyer-fault stall. First stalledAt = T0+2d.
+        vm.warp(block.timestamp + 2 days);
         ah.settle(id);
+        uint64 firstStall = ah.getAuction(id).stalledAt;
+        assertGt(firstStall, 0, "stalled at first seller's stall");
 
-        address[] memory batch = new address[](1);
-        batch[0] = alice;
-        ah.refundLosers(id, batch);
-        assertEq(ah.cumulative(id, alice), 0,
-                 "alice cumulative cleared by refundLosers");
+        // Warp to T0 + 6d (within original STALL_WINDOW).
+        vm.warp(uint256(firstStall) + 6 days);
 
-        // Alice re-bids 2 ETH — prevCum is 0 again, BUT the seen-mapping
-        // gate prevents a duplicate push to _bidders[id].
-        _bid(id, alice, 2 ether);
-        assertEq(ah.bidderCount(id), 2,
-                 "_bidders[id] has 2 entries (alice once + bob); alice re-bid did NOT push a duplicate");
-        assertEq(ah.cumulative(id, alice), 2 ether,
-                 "alice's new cumulative accurately reflects the rebind");
+        // griefer calls settleUnstuck with bidder STILL blocked.
+        // Pre-fix: stalledAt would be REFRESHED to T0+6d, denying reclaim().
+        // Post-fix: stuck at firstStall, but AuctionStalled event fires.
+        address griefer = address(uint160(uint256(keccak256(abi.encodePacked("R04_GRIEFER")))));
+        vm.deal(griefer, 1 ether);
+        vm.expectEmit(true, true, false, true, address(ah));
+        emit AuctionHouse.AuctionStalled(id, address(bidder), seller);
+        vm.prank(griefer);
+        ah.settleUnstuck(id);
 
-        // Bob's cumulative intact.
-        assertEq(ah.cumulative(id, bob), 3 ether, "bob's cumulative intact");
+        // ASSERTION: stalledAt MUST equal firstStall (NOT refreshed).
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertEq(
+            a.stalledAt,
+            firstStall,
+            "R-04: stalledAt MUST NOT refresh on subsequent buyer-fault retries"
+        );
+        assertFalse(a.settled, "auction NOT settled (still stalled)");
+
+        // A SECOND griefer attempt at T0+6d+5min — same assertion.
+        vm.warp(uint256(a.stalledAt) + 6 days + 5 minutes);
+        vm.prank(griefer);
+        ah.settleUnstuck(id);
+        assertEq(
+            ah.getAuction(id).stalledAt,
+            firstStall,
+            "R-04: stalledAt still pinned to first-stall after SECOND griefer attempt"
+        );
+
+        // Reclaim opens at firstStall + STALL_WINDOW (T0 + 7d). Verify by
+        // warping to T0 + 7d + 1s — reclaim() succeeds; the buyer recovers
+        // their escrow. Unblock the bidder's receive() so the reclaim push
+        // succeeds (ERC1155RejectingBidder has blocked=true by default).
+        bidder.setBlocked(false);
+        vm.warp(uint256(firstStall) + 7 days + 1);
+        uint256 bidderBalBefore = address(bidder).balance;
+        vm.prank(address(bidder));
+        ah.reclaim(id);
+        assertEq(
+            address(bidder).balance,
+            bidderBalBefore + 2 ether,
+            "R-04 path 2: buyer recovers escrow via reclaim() at original deadline"
+        );
+        assertTrue(ah.getAuction(id).settled, "auction settled by reclaim");
+    }
+
+    /// @dev R-01 regression: withdrawRefund's restore-on-failure path.
+    ///      Receive() that ALWAYS reverts (ok=false from .call) must
+    ///      restore pendingReturns[msg.sender] = amt and revert WithdrawFailed.
+    ///      No funds are silently lost.
+    function test_withdrawRefundRestoreOnFailure() public {
+        // Setup: GreedyReceiver that ALWAYS reverts on receive().
+        GreedyReceiver bidder = new GreedyReceiver();
+        bidder.setBlocked(false); // for makeOffer's pre-state
+        vm.deal(address(bidder), 10 ether);
+
+        // Build a pendingReturns credit via OfferBook expired-refund path.
+        uint256 tid = nft.mint(seller);
+        vm.prank(seller);
+        nft.setApprovalForAll(address(ob), true);
+
+        uint64 exp = uint64(block.timestamp + 1 days);
+        vm.prank(address(bidder));
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+
+        // Now lock receive() → refundExpiredOffer will fall back to pull.
+        bidder.setBlocked(true);
+
+        vm.warp(uint256(exp) + 1);
+        ob.refundExpiredOffer(address(nft), tid, address(bidder));
+
+        // Credit is parked in pendingReturns.
+        assertEq(
+            ob.pendingReturns(address(bidder)),
+            1 ether,
+            "GreedyReceiver parked in pendingReturns via refundExpiredOffer push fallback"
+        );
+
+        // ATTEMPT 1: withdrawRefund() with receive() reverting.
+        // Expected: revert WithdrawFailed AND pendingReturns restored to 1 ETH.
+        uint256 balBefore = address(bidder).balance;
+        vm.expectRevert(WithdrawFailed.selector);
+        vm.prank(address(bidder));
+        ob.withdrawRefund();
+
+        assertEq(
+            ob.pendingReturns(address(bidder)),
+            1 ether,
+            "R-01: pendingReturns RESTORED to 1 ETH (no funds lost on transient failure)"
+        );
+        assertEq(
+            address(bidder).balance,
+            balBefore,
+            "R-01: failed withdraw did not transfer any ETH to bidder"
+        );
+
+        // ATTEMPT 2: same withdrawRefund() - should fail the same way
+        // (proves the credit survives MULTIPLE failed attempts).
+        vm.expectRevert(WithdrawFailed.selector);
+        vm.prank(address(bidder));
+        ob.withdrawRefund();
+        assertEq(ob.pendingReturns(address(bidder)), 1 ether, "R-01: survives MULTIPLE failed attempts");
+
+        // SUCCESS path: bidder unblocks receive() → withdrawRefund succeeds.
+        bidder.setBlocked(false);
+        uint256 balBeforeSuccess = address(bidder).balance;
+        vm.prank(address(bidder));
+        ob.withdrawRefund();
+        assertEq(
+            ob.pendingReturns(address(bidder)),
+            0,
+            "credit cleared on successful withdraw"
+        );
+        assertEq(
+            address(bidder).balance,
+            balBeforeSuccess + 1 ether,
+            "bidder received full 1 ETH escrow back"
+        );
+    }
+
+    /// @dev R-02: griefer continuously retries settleUnstuck; buyer still
+    ///      reclaims at original deadline. Mirrors j.1 but exercises the
+    ///      PATH through the griefer-and-buyer-coexist scenario.
+    function test_settleUnstuckGriefCannotBlockReclaim() public {
+        // ERC1155 buyer-fault stall.
+        ERC1155RejectingBidder bidder = new ERC1155RejectingBidder();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        multi.mint(seller, 17, 3);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(
+            address(multi),
+            17,
+            3,
+            1 ether,
+            uint64(block.timestamp + 1 days),
+            500,
+            0
+        );
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 5 ether}(id);
+
+        vm.warp(block.timestamp + 2 days);
+        ah.settle(id);
+        uint64 t0 = ah.getAuction(id).stalledAt;
+        assertGt(t0, 0, "stalled at T0");
+
+        // Griefer attempts settleUnstuck at four STRATEGIC checkpoints instead
+        // of every 30 min (which would be 336 calls). The four checkpoints
+        // exercise: pre-deadline (5d), half-deadline (6d), post-half-deadline
+        // (6d+12h), and right-before-deadline (7d-30min). Same invariant
+        // coverage, ~1% of the runtime.
+        address griefer = address(uint160(uint256(keccak256(abi.encodePacked("R02_GRIEFER")))));
+        vm.deal(griefer, 1 ether);
+        uint256[4] memory checkpoints = [uint256(5 days), uint256(6 days), uint256(6 days + 12 hours), uint256(7 days - 30 minutes)];
+        for (uint256 i; i < 4; ++i) {
+            vm.warp(uint256(t0) + checkpoints[i]);
+            vm.prank(griefer);
+            ah.settleUnstuck(id);
+            // CRUCIAL: stalledAt does not shift on any retry.
+            assertEq(
+                ah.getAuction(id).stalledAt,
+                t0,
+                "R-02: stalledAt pinned despite griefer's strategic-window retries"
+            );
+        }
+
+        // At T0+7d+1, buyer reclaims. Unblock receive() so the refund
+        // push succeeds (ERC1155RejectingBidder has blocked=true by default).
+        bidder.setBlocked(false);
+        vm.warp(uint256(t0) + 7 days + 1);
+        uint256 bidderBalBefore = address(bidder).balance;
+        vm.prank(address(bidder));
+        ah.reclaim(id);
+        assertEq(
+            address(bidder).balance,
+            bidderBalBefore + 5 ether,
+            "R-02: buyer reclaims full 5 ETH after griefer's 7-day grief campaign"
+        );
     }
 }
 
@@ -1005,10 +1249,17 @@ contract RejectEtherNoReceive {
     // intentionally empty
 }
 
-/// @dev Helper stub for a seller/bidder wallet that has NO receive()/fallback.
+/// @dev Helper stub for a seller/bidder wallet whose receive() always
+///      reverts (push-fallback testing). Implements onERC721Received so
+///      MockERC721._safeMint() does not reject the contract during test setup.
 contract SellerNoReceive {
-    // intentionally empty; will be given ETH via vm.deal for balance but reject sends.
     receive() external payable { revert("no receive"); }
+
+    function onERC721Received(address, address, uint256, bytes calldata)
+        external pure returns (bytes4)
+    {
+        return this.onERC721Received.selector;
+    }
 }
 
 /// @dev Mock malicious ERC-721 collection for the L-09 reentrancy test.

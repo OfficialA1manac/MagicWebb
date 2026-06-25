@@ -72,12 +72,23 @@ contract Marketplace is MarketplaceCore {
     // ── List (free) ───────────────────────────────────────────────────────────
 
     /// @notice List an ERC-721 token at a fixed price. FREE — no listing fee.
-    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external entryGate {
+    /// @dev Defense-in-depth: nonReentrant added per L-09 invariant
+    ///      ("every state-changing external on the cores is nonReentrant").
+    ///      While a single-item list() reentrancy cannot front-run loop state
+    ///      (unlike batchList), a malicious ERC-721 collection whose
+    ///      isApprovedForAll or getApproved includes a reentrant hook could
+    ///      still cause unexpected state reads mid-call. The modifier costs
+    ///      ~2.3k gas on the first call and zero on re-entry (revert); the
+    ///      invariant is cheap insurance.
+    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external nonReentrant entryGate {
         _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
     }
 
     /// @notice List ERC-1155 units at a fixed price. FREE — no listing fee.
-    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external entryGate {
+    /// @dev Defense-in-depth: nonReentrant added per L-09 invariant.
+    ///      Same rationale as list() — a malicious ERC-1155 collection could
+    ///      re-enter during the balanceOf or isApprovedForAll probes.
+    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external nonReentrant entryGate {
         if (amount == 0) revert InvalidAmount();
         _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
     }
@@ -93,7 +104,7 @@ contract Marketplace is MarketplaceCore {
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
     ///         Caller must have approved this contract on each collection.
-    /// @dev L-09 fix (v28 — Round 3): `nonReentrant` was previously missing
+    /// @dev L-09 fix (v28 - Round 3): `nonReentrant` was previously missing
     ///      here despite every other state-changing entry path on this
     ///      contract using it (`list`, `list1155`, `buy` all carry it).
     ///      The for-loop calls `_list()` which in turn performs three
@@ -108,10 +119,10 @@ contract Marketplace is MarketplaceCore {
     ///      others not), and front-run a later item with an unexpected
     ///      approval-state read. Even though each `_list` is strictly
     ///      checks-effects-interactions (storage write happens AFTER all
-    │      external reads, BEFORE the next iteration), the missing
-    │      nonReentrant was a defense-in-depth gap that broke the
-    │      invariant "every state-changing external on the cores is
-    │      nonReentrant". Cheap, mechanical, conservative. Added.
+    ///      external reads, BEFORE the next iteration), the missing
+    ///      nonReentrant was a defense-in-depth gap that broke the
+    ///      invariant "every state-changing external on the cores is
+    ///      nonReentrant". Cheap, mechanical, conservative. Added.
     function batchList(BatchItem[] calldata items) external nonReentrant entryGate {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         for (uint256 i; i < items.length; ++i) {

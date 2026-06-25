@@ -16,6 +16,11 @@ func listListings(q *db.Q) fiber.Handler {
 		}
 		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
+				if n < 1 {
+					n = 1
+				} else if n > 200 {
+					n = 200
+				}
 				f.Limit = n
 			}
 		}
@@ -50,6 +55,11 @@ func listCollections(q *db.Q) fiber.Handler {
 		limit := 50
 		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
+				if n < 1 {
+					n = 1
+				} else if n > 200 {
+					n = 200
+				}
 				limit = n
 			}
 		}
@@ -105,6 +115,11 @@ func getTrending(q *db.Q) fiber.Handler {
 		limit := 20
 		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
+				if n < 1 {
+					n = 1
+				} else if n > 100 {
+					n = 100
+				}
 				limit = n
 			}
 		}

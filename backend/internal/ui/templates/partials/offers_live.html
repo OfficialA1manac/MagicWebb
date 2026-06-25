@@ -16,7 +16,7 @@
         <p class="text-xs text-white/40 mt-1">From <span class="font-mono text-white/80">{{shortAddr .Bidder}}</span> · Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
       </div>
       <div class="flex items-center gap-3 flex-shrink-0">
-        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{.NativeCurrency}}</span></span>
+        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
         {{if eq .Status "pending"}}
         <button class="px-3 py-1.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
                 @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
@@ -49,7 +49,7 @@
         <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
       </div>
       <div class="flex items-center gap-2 flex-shrink-0">
-        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{.NativeCurrency}}</span></span>
+        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
       </div>
     </div>
     {{end}}

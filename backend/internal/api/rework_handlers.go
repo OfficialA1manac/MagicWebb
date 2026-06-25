@@ -1,6 +1,7 @@
 package api
 
 import (
+	"net/url"
 	"strconv"
 	"strings"
 
@@ -64,6 +65,9 @@ func listNotifications(q *db.Q) fiber.Handler {
 		}
 		limit := 50
 		if n, err := strconv.Atoi(c.Query("limit")); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
 			limit = n
 		}
 		rows, err := q.ListNotifications(c.Context(), addr, limit)
@@ -133,6 +137,16 @@ func putProfile(q *db.Q) fiber.Handler {
 		if len(u.DisplayName) > 64 || len(u.Bio) > 500 {
 			return writeErr(c, fiber.StatusBadRequest, "field too long")
 		}
+		// R-08 fix: validate URI schemes to prevent stored XSS via javascript: URIs.
+		// Without this, an attacker can set website/avatar/banner to
+		// "javascript:alert(document.cookie)" which executes when rendered
+		// into an <a href> tag. Only http/https are allowed; everything else
+		// (javascript:, data:, vbscript:, etc.) is rejected.
+		for _, uri := range []string{u.AvatarURI, u.BannerURI, u.Website} {
+			if uri != "" && !isAllowedScheme(uri) {
+				return writeErr(c, fiber.StatusBadRequest, "uri must use http or https scheme")
+			}
+		}
 		p := db.ProfileRow{
 			Address: addr, DisplayName: u.DisplayName, Bio: u.Bio,
 			AvatarURI: u.AvatarURI, BannerURI: u.BannerURI, Twitter: u.Twitter, Website: u.Website,
@@ -142,6 +156,27 @@ func putProfile(q *db.Q) fiber.Handler {
 		}
 		return c.JSON(p)
 	}
+}
+
+// isAllowedScheme checks if a URI uses http or https scheme.
+// Rejects javascript:, data:, vbscript:, and other dangerous schemes.
+// Also rejects protocol-relative URLs (//evil.com) whose scheme
+// resolves to "" — those would render as href="//evil.com", which
+// inherits the current page's scheme at runtime. While CSP mitigates
+// the impact (img-src limits origins), rejecting them outright keeps
+// the validation simple and predictable.
+func isAllowedScheme(raw string) bool {
+	parsed, err := url.Parse(raw)
+	if err != nil {
+		return false
+	}
+	s := strings.ToLower(parsed.Scheme)
+	// Reject protocol-relative URLs ("") — the empty scheme is only
+	// acceptable when the entire URL is empty (no input).
+	if s == "" && raw != "" {
+		return false
+	}
+	return s == "http" || s == "https"
 }
 
 // ── Reports ────────────────────────────────────────────────────────────────

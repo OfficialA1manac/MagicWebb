@@ -17,6 +17,11 @@ func listAuctions(q *db.Q) fiber.Handler {
 		}
 		if lim := c.Query("limit"); lim != "" {
 			if n, err := strconv.Atoi(lim); err == nil {
+				if n < 1 {
+					n = 1
+				} else if n > 200 {
+					n = 200
+				}
 				f.Limit = n
 			}
 		}

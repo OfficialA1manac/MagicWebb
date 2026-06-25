@@ -95,6 +95,9 @@ func recentActivity(q *db.Q) fiber.Handler {
 		limit := 50
 		if s := c.Query("limit"); s != "" {
 			if n, err := strconv.Atoi(s); err == nil && n > 0 {
+				if n > 200 {
+					n = 200
+				}
 				limit = n
 			}
 		}

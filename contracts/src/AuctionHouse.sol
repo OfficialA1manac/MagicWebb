@@ -155,8 +155,8 @@ contract AuctionHouse is MarketplaceCore {
     event LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount);
     event AuctionCancelled(uint256 indexed id);
     event RefundPushed(address indexed bidder, uint256 amount);
-event AuctionStalled(uint256 indexed id, address indexed winner, address indexed seller);
-event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refundAmount);
+    event AuctionStalled(uint256 indexed id, address indexed winner, address indexed seller);
+    event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refundAmount);
 
     constructor(address recipient, address manager_) MarketplaceCore(recipient, manager_) {}
 
@@ -475,8 +475,24 @@ event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refun
                 _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
-            // Buyer's fault: refresh stall timer for retry.
-            a.stalledAt = uint64(block.timestamp);
+            // R-04 (Round 5): Buyer's fault. Emit AuctionStalled for
+            // observability, but DO NOT refresh `a.stalledAt`.
+            //
+            // The previous implementation set `stalledAt = block.timestamp`
+            // on every failed delivery attempt, which let any third party
+            // reset the 7-day reclaim window by calling settleUnstuck()
+            // repeatedly close to STALL_WINDOW. The winner's reclaim()
+            // safety valve (which refunds the escrow once 7d have elapsed)
+            // would then NEVER open, and the bidder's funds were trapped
+            // indefinitely — denial-of-service via perpetual timer reset.
+            //
+            // The fix: the first-stall timestamp is immutable. Every
+            // subsequent settleUnstuck call that hits the same buyer-fault
+            // branch emits AuctionStalled (so off-chain observers see the
+            // retry attempt and can alert on a sustained buyer-fault signal)
+            // but does NOT modify stalledAt. reclaim() opens at
+            // `firstStalledAt + STALL_WINDOW` regardless of how many
+            // failed-retry events the auction accumulates.
             emit AuctionStalled(id, winner, sel);
             return;
         }

@@ -42,7 +42,7 @@
       </span>
       <span class="text-white/40">{{$b.BidCount}} bid{{if ne $b.BidCount 1}}s{{end}}</span>
       <span class="{{if eq $i 0}}text-gold-200 font-extrabold{{else}}text-white/80{{end}}">
-        {{wei2flr $b.EffectiveWei}} <span class="text-[9px] text-white/40 font-bold uppercase tracking-wider">{{.NativeCurrency}}</span>
+        {{wei2flr $b.EffectiveWei}} <span class="text-[9px] text-white/40 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span>
       </span>
     </div>
     {{end}}
@@ -61,7 +61,7 @@
     {{range $.Bids}}
     <div class="flex justify-between text-xs py-2 px-3 rounded-lg bg-white/[0.02] border border-white/5">
       <span class="font-mono text-white/60">{{shortAddr .Bidder}}</span>
-      <span class="text-gold-200 font-extrabold">{{wei2flr .AmountWei}} <span class="text-[9px] text-gold-300/60 uppercase tracking-wider">{{.NativeCurrency}}</span></span>
+      <span class="text-gold-200 font-extrabold">{{wei2flr .AmountWei}} <span class="text-[9px] text-gold-300/60 uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
     </div>
     {{end}}
   </div>
@@ -71,9 +71,9 @@
 <!-- Live summary card (just the read-only bits) -->
 <div class="bg-gradient-to-br from-ink-900 to-ink-900/80 border border-violet-400/30 rounded-2xl p-5 mt-6 glow-violet">
   <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold">Top bid</p>
-  <p class="text-3xl font-black text-gold-200 mt-1">{{wei2flr .HighestBidWei}} <span class="text-base">{{.NativeCurrency}}</span></p>
+  <p class="text-3xl font-black text-gold-200 mt-1">{{wei2flr .HighestBidWei}} <span class="text-base">{{$.NativeCurrency}}</span></p>
   <div class="space-y-2 mt-3">
-    <div class="flex justify-between text-sm"><span class="text-white/40">Reserve</span><span class="text-white/80">{{wei2flr .ReservePriceWei}} {{.NativeCurrency}}</span></div>
+    <div class="flex justify-between text-sm"><span class="text-white/40">Reserve</span><span class="text-white/80">{{wei2flr .ReservePriceWei}} {{$.NativeCurrency}}</span></div>
     {{if .HighestBidder}}<div class="flex justify-between text-sm"><span class="text-white/40">Leading</span><span class="text-white/80 font-mono">{{shortAddr .HighestBidder}}</span></div>{{end}}
   </div>
 </div>
