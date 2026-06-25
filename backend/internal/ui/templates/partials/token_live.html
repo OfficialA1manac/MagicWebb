@@ -58,7 +58,7 @@
   <div class="flex items-center justify-between">
     <div>
       <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Current Price</p>
-      <p class="text-4xl font-black text-gold-200 mt-1">{{wei2flr .PriceWei}} <span class="text-lg">FLR</span></p>
+      <p class="text-4xl font-black text-gold-200 mt-1">{{wei2flr .PriceWei}} <span class="text-lg">{{.NativeCurrency}}</span></p>
     </div>
     <div class="w-12 h-12 rounded-xl bg-gold-500/15 flex items-center justify-center border border-gold-400/30">
       <span class="text-gold-200 text-2xl">⚐</span>
@@ -70,7 +70,7 @@
     <span>Expires <span class="text-white/80">{{.ExpiresAt.Format "Jan 2, 2006"}}</span></span>
   </div>
   <div class="mt-3 pt-3 border-t border-white/10">
-    <p class="text-[11px] text-white/60">Network fee: 1.5%; seller receives <span class="text-gold-200 font-bold">{{wei2flr (netOf .PriceWei)}} FLR (98.5%)</span> after the platform fee.</p>
+    <p class="text-[11px] text-white/60">Network fee: 1.5%; seller receives <span class="text-gold-200 font-bold">{{wei2flr (netOf .PriceWei)}} {{.NativeCurrency}} (98.5%)</span> after the platform fee.</p>
   </div>
 </div>
 {{end}}
@@ -126,7 +126,7 @@
         <p class="font-mono text-white text-sm font-bold">{{shortAddr .Bidder}}</p>
         <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2, 15:04"}}</p>
       </div>
-      <span class="text-lg font-black text-gold-200">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">FLR</span></span>
+      <span class="text-lg font-black text-gold-200">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{.NativeCurrency}}</span></span>
       <div class="flex gap-2 shrink-0">
         <button class="px-3 py-1.5 rounded-lg btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
                 @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>

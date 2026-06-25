@@ -76,8 +76,7 @@
     <!-- Bottom-right: top bid (gold gradient — money, loudest element) -->
     <div class="absolute bottom-3 right-3 px-2.5 py-1 rounded-lg bg-ink-1000/80 backdrop-blur border border-gold-300/40 glow-gold">
       <span class="text-[10px] font-extrabold text-gold-200/80 uppercase tracking-wider">Bid</span>
-      <span class="text-xs font-black text-gold-200 ml-1.5">{{wei2flr .HighestBidWei}}</span>
-      <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">FLR</span>
+      <span class="text-xs font-black text-gold-200 ml-1.5">{{wei2flr .HighestBidWei}}</span>        <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{.NativeCurrency}}</span>
     </div>
   </div>
 

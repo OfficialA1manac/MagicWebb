@@ -22,11 +22,11 @@
 <div class="grid grid-cols-3 gap-3 mb-8">
   <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
     <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">Floor</p>
-    <p class="text-2xl font-black bg-gradient-to-r from-gold-200 to-gold-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.FloorPriceWei}} FLR</p>
+    <p class="text-2xl font-black bg-gradient-to-r from-gold-200 to-gold-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.FloorPriceWei}} {{.NativeCurrency}}</p>
   </div>
   <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
     <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">24h Volume</p>
-    <p class="text-2xl font-black bg-gradient-to-r from-sky-200 to-sky-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.Volume24hWei}} FLR</p>
+    <p class="text-2xl font-black bg-gradient-to-r from-sky-200 to-sky-400 bg-clip-text text-transparent mt-1">{{wei2flr .Stats.Volume24hWei}} {{.NativeCurrency}}</p>
   </div>
   <div class="bg-ink-900 rounded-2xl p-5 border border-ink-700">
     <p class="text-[10px] text-ink-500 uppercase tracking-wider font-bold">Listed</p>

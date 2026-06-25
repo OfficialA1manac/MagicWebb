@@ -27,7 +27,7 @@
         </span>
         <span class="font-mono text-neutral-400 text-xs">{{shortAddr .Collection}} #{{.TokenID}}</span>
       </div>
-      <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} FLR</span>
+      <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} {{.NativeCurrency}}</span>
     </div>
     {{end}}
   </div>

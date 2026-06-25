@@ -6,13 +6,13 @@
   <div>
     <p class="text-amber-400 font-semibold text-sm">Action needed: withdraw your refund</p>
     <p class="text-neutral-400 text-xs mt-1">
-      {{wei2eth .PendingWei}} FLR is waiting in the auction contract — automatic delivery
+      {{wei2eth .PendingWei}} {{.NativeCurrency}} is waiting in the auction contract — automatic delivery
       to your address failed. One click returns it.
     </p>
   </div>
   <button @click="$store.wallet.withdrawRefund()"
           class="shrink-0 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold transition">
-    Withdraw {{wei2eth .PendingWei}} FLR
+    Withdraw {{wei2eth .PendingWei}} {{.NativeCurrency}}
   </button>
 </div>
 {{end}}

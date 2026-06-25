@@ -5,7 +5,7 @@
               hover:border-sky-300/40 hover:shadow-sky-glow transition">
     <span class="font-bold bg-gradient-to-r from-sky-300 via-violet-300 to-gold-300 bg-clip-text text-transparent">{{.Type}}</span>
     <span class="ml-2 font-mono text-ink-100">{{shortAddr .Collection}}</span>
-    <span class="ml-2 text-gold-300 font-bold">{{wei2flr .AmountWei}} FLR</span>
+    <span class="ml-2 text-gold-300 font-bold">{{wei2flr .AmountWei}} {{.NativeCurrency}}</span>
   </div>
   {{end}}
   {{if not .Activity}}<span class="text-ink-700">No recent activity</span>{{end}}

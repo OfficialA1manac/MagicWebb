@@ -120,7 +120,7 @@
         const why = isLegacy5pct
           ? ('current floor: 5% over the leader + 1 wei, or reserve if no leader, whichever is higher')
           : ('current floor: +1 wei over the leader, or reserve if no leader');
-        toast('Bid must be at least ' + this.fmtWei(this.minBidWei) + ' FLR (' + why + ').', 'error');
+        toast('Bid must be at least ' + this.fmtWei(this.minBidWei) + ' {{.NativeCurrency}} (' + why + ').', 'error');
         return;
       }
       $store.wallet.bid({{.AuctionID}}, this.parseBidWei(this.bidAmt).toString(), {{.EndsAt.Unix}});
@@ -192,8 +192,7 @@
       <div class="flex gap-2">
         <div class="relative flex-1">
           <input x-model="bidAmt" type="number" step="0.000001" min="0" placeholder="Enter bid amount"
-                 class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-300/50 focus:ring-1 focus:ring-violet-300/20 transition">
-          <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">FLR</span>
+                 class="w-full bg-ink-800 border border-white/10 rounded-xl px-4 py-3 text-sm text-white placeholder-white/30 focus:outline-none focus:border-violet-300/50 focus:ring-1 focus:ring-violet-300/20 transition">           <span class="absolute right-4 top-1/2 -translate-y-1/2 text-xs text-white/40 font-bold uppercase tracking-wider">{{.NativeCurrency}}</span>
         </div>
         <button @click="placeBid()"
                 class="px-5 py-3 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold text-sm transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97]">Bid</button>
@@ -201,9 +200,7 @@
       <p class="text-xs text-white/40 mt-2.5 leading-relaxed">
         Minimum bid is the higher of the previous top bid (with a <span class="text-violet-200 font-extrabold">{{if eq .MinIncrementBps 0}}+1 wei{{else}}{{printf "%.2f" (mulf .MinIncrementBps 0.01)}}% + 1 wei{{end}}</span> floor), the seller's reserve, or the highest active offer. Single input, single button.
       </p>
-      <p class="text-[11px] text-white/60 mt-1.5 leading-relaxed">
-        Current floor: <span class="text-violet-200 font-mono font-bold" x-text="fmtWei(minBidWei) + ' FLR'"></span>
-        <template x-if="BigInt(highestOfferWei||'0') > 0n"><span class="ml-2 text-gold-200">(an active offer of <span class="font-mono" x-text="fmtWei(highestOfferWei) + ' FLR'"></span> sets the floor)</span></template>
+      <p class="text-[11px] text-white/60 mt-1.5 leading-relaxed">         Current floor: <span class="text-violet-200 font-mono font-bold" x-text="fmtWei(minBidWei) + ' {{.NativeCurrency}}'"></span>         <template x-if="BigInt(highestOfferWei||'0') > 0n"><span class="ml-2 text-gold-200">(an active offer of <span class="font-mono" x-text="fmtWei(highestOfferWei) + ' {{.NativeCurrency}}'"></span> sets the floor)</span></template>
       </p>
     </div>
     {{end}}
