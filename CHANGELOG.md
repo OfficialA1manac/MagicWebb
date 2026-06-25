@@ -3,7 +3,78 @@
 All notable changes to MagicWebb — contracts, backend, frontend,
 docs — are tracked here. Versions follow the audit ledger cadence
 (`v19` = wallet.js audit, `v20` = Solidity audit, `v21` = indexer +
-DB + API + docs).
+DB + API + docs, `v22..v28` = iter-audit fixes rolled in from
+multiple rounds, `v29` = full-stack chain-id + gas-cap + chunk-abort
+hardening).
+
+## v29 — 2026-06-24 — Full-stack Round 4 (cross-layer)
+
+The **$75k+ full-stack audit** engagement surfaced five findings
+across chain / backend / frontend. Three fixed in this release;
+two deferred as LOW; one MEDIUM cosmetic pending.
+
+### Fixed (Round 4)
+
+- 🔴 **F-01 SIWE Chain ID binding (HIGH)** — wallet.js SIWE
+  template now signs `Chain ID: ${chainId}` line;
+  `cmd/server/main.go verifyHandler` parses `"Chain ID: 114"` and
+  rejects payloads whose chainId != `config.C.ChainID` (401 chain
+  id mismatch). Closes the cross-chain replay vector: a Coston2
+  signed payload no longer authenticates on a future mainnet
+  deploy, because `(message, signature, address)` differs at the
+  `Chain ID:` line and EIP-191 verify fails. The chain ID is
+  server-injected via `window.MW_NETWORK_ID = {{.ChainID}}` so a
+  FLR-pivot deploy (CHAIN_ID=14) re-skins without JS edits.
+- 🟠 **F-02 transfers-chunk abort (HIGH)** — `backend/internal/
+  indexer/runner.go processTransfers` now returns `err` on
+  `HeaderByNumber` failure instead of silently `continue`-ing.
+  Mirrors `processRange`'s abort-on-miss policy. Prevents
+  orphaned ownership events from being lost when a transient RPC
+  failure leaves a tracked-collection Transfer log without a
+  header in the current chunk — the chunk retries next tick.
+- 🟠 **F-03 Keeper gas cap (MEDIUM)** — `runner.go sendRaw`
+  clamps `feeCap` / `tipCap` to `KEEPER_MAX_FEE_CAP_GWEI` (default
+  100 gwei) / `KEEPER_MAX_TIP_CAP_GWEI` (default 5 gwei). New
+  `MaxFeeCapWei()` / `MaxTipCapWei()` helpers in `config.go`;
+  `.env.example` documents both. **EIP-1559 invariant
+  `feeCap >= tipCap` lifted** when clamping produced a mismatch
+  (logs warning) so the keeper never broadcasts an un-mineable
+  `DynamicFeeTx`.
+
+### Deferred (Round 4, non-blocking)
+
+- 🟡 **F-04** Indexer overlapping DB writes (advisory-lock belt)
+  — deferred as LOW; existing handlers are idempotent upserts.
+- 🟡 **F-05** wallet.js `window.ethereum` reference comments —
+  deferred as LOW; no live calls, only historical documentation.
+- 🟡 **cos-1** wallet.js `URI: ${origin}` line is informational
+  only — deferred as MEDIUM cosmetic; SIWEDomain is the actual
+  cross-site binding. Future pass: drop or add server-side parse.
+
+### Working tree state (v29)
+
+- 24 modified files: contracts + backend + frontend all at parite.
+- 2 untracked files: `claude-code-prompt-enhancer/`, `contracts/
+  AUDIT_REPORT.md`.
+- `git push` NOT executed per user directive; `origin/main` is the
+  source-of-truth that the user later chooses to publish when ready.
+- Build clean for backend (`go build ./internal/{config,indexer}/
+  ./...` PASS); tests pass for affected packages.
+
+### Phase 6 deliverables
+
+- `contracts/AUDIT_REPORT.md` — updated to v29 with Phase 4d
+  full-stack findings, before/after rationale, and cross-layer
+  verification commands.
+- `docs/DEPLOY_CHECKLIST.md` — pre-mainnet narrative-walk
+  (NEW, untracked).
+- `docs/IMMUTABILITY_TRANSITION.md` — the Coston2→mainnet
+  transition plan with multisig requirements, role renounce
+  script, and source-verification walk (NEW, untracked).
+- `docs/MONITORING.md` — post-launch operational runbook
+  (PushFailed events, pendingReturns sweep, keeper advisory-lock
+  health, FTSO/State-Connector status) (NEW, untracked).
+
 
 ## v21 — 2026-06-22 — Priority Stack unlock
 
