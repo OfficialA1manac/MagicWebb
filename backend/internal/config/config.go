@@ -4,6 +4,7 @@ package config
 
 import (
 	"fmt"
+	"math/big"
 	"os"
 	"strconv"
 	"strings"
@@ -18,9 +19,12 @@ type Config struct {
 	Env string // "development" | "production"
 
 	// Network
-	RPCURL  string   // primary RPC (back-compat / single endpoint)
-	RPCURLs []string // rotation set (RPC_URLS, comma-separated; falls back to [RPCURL])
-	ChainID uint64
+	RPCURL         string   // primary RPC (back-compat / single endpoint)
+	RPCURLs        []string // rotation set (RPC_URLS, comma-separated; falls back to [RPCURL])
+	ChainID        uint64
+	NetworkName    string // EIP-155 chain name (e.g. "Flare Coston2"); surfaced to UI + WC metadata
+	NativeCurrency string // EIP-155 native-currency symbol (e.g. "C2FLR"); rendered in user-facing labels
+	ExplorerURL    string // block-explorer base URL (e.g. https://coston2-explorer.flare.network)
 
 	// Contract addresses
 	MarketplaceAddr string
@@ -56,6 +60,13 @@ type Config struct {
 	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
 	KeeperKey string
 
+	// v29 audit F-03: gas-fee ceilings for the keeper. Public RPCs can spike
+	// their suggestions during network congestion; without a cap, a single
+	// keeper tx could drain the keeper wallet. 0 = no cap (NOT recommended).
+	// Defaults 100/5 gwei leave plenty of headroom on Coston2 and even mainnet.
+	MaxFeeCapGwei float64
+	MaxTipCapGwei float64
+
 	// Admin token for IndexerService.Reindex (leave empty to disable)
 	ServiceToken string
 
@@ -77,6 +88,21 @@ func Load() {
 		Env:     envOrDefault("ENV", "development"),
 		RPCURL:  required("RPC_URL"),
 		ChainID: requiredUint64("CHAIN_ID"),
+
+		// Chain-metadata block. Required by the UI for WalletConnect
+		// pairing (chains:[1]+optionalChains:[CHAIN_ID]+rpcMap:{CHAIN_ID:RPC_URL}),
+		// user-facing labels (toast summaries, ctaLabels, summary rows —
+		// wallet.js reads window.MW_NATIVE_CURRENCY/NETWORK_NAME), and
+		// explorer <a href="{{$.ExplorerURL}}/tx/..."> links. Defaults are
+		// Coston2-specific; a future mainnet promo just sets these in .env
+		// (NETWORK_NAME="Flare", NATIVE_CURRENCY="FLR", EXPLORER_URL=
+		// "https://flare-explorer.flare.network") and the entire frontend
+		// pivots without a redeploy. envOrDefault returns the .env-supplied
+		// value if non-empty, else the compile-time default — the deploy
+		// defaults are the FAILSAFE for misconfiguration.
+		NetworkName:    envOrDefault("NETWORK_NAME", "Flare Coston2"),
+		NativeCurrency: envOrDefault("NATIVE_CURRENCY", "C2FLR"),
+		ExplorerURL:    envOrDefault("EXPLORER_URL", "https://coston2-explorer.flare.network"),
 
 		MarketplaceAddr: required("MARKETPLACE_ADDR"),
 		AuctionAddr:     required("AUCTION_ADDR"),
@@ -102,7 +128,12 @@ func Load() {
 
 		PinataJWT: envOrDefault("PINATA_JWT", ""),
 
-		KeeperKey:    envOrDefault("KEEPER_KEY", ""),
+		KeeperKey: envOrDefault("KEEPER_KEY", ""),
+
+		// v29: ceiling on keeper gas pricing. 0 = unbounded (NOT recommended).
+		MaxFeeCapGwei: optFloat64("KEEPER_MAX_FEE_CAP_GWEI", 100),
+		MaxTipCapGwei: optFloat64("KEEPER_MAX_TIP_CAP_GWEI", 5),
+
 		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
@@ -191,6 +222,27 @@ func (c *Config) IsAdmin(addr string) bool {
 		}
 	}
 	return false
+}
+
+// MaxFeeCapWei returns the keeper's fee-cap ceiling in wei, or nil when the
+// ceiling is disabled (0). v29 audit F-03 — bounded by KEEPER_MAX_FEE_CAP_GWEI.
+func (c *Config) MaxFeeCapWei() *big.Int {
+	if c.MaxFeeCapGwei <= 0 {
+		return nil
+	}
+	// gwei → wei: 1 gwei = 1e9 wei. Use a fixed-point conversion through
+	// float64; the resulting wei value is far below any float precision
+	// concern at the 100-gwei magnitude this constant uses.
+	return new(big.Int).SetUint64(uint64(c.MaxFeeCapGwei * 1e9))
+}
+
+// MaxTipCapWei returns the keeper's tip-cap ceiling in wei, or nil when
+// disabled. v29 audit F-03 — bounded by KEEPER_MAX_TIP_CAP_GWEI.
+func (c *Config) MaxTipCapWei() *big.Int {
+	if c.MaxTipCapGwei <= 0 {
+		return nil
+	}
+	return new(big.Int).SetUint64(uint64(c.MaxTipCapGwei * 1e9))
 }
 
 func envOrDefault(key, def string) string {

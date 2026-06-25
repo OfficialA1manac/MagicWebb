@@ -322,17 +322,21 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
 			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
 			hcancel()
+			// v29 audit F-02: mirror processRange's abort-on-miss policy.
+			// The previous `continue` skipped the log AND let the chunk's
+			// SetIndexedBlock advance past the unindexed block — orphaned
+			// ownership events leaked into the next chain pull. Aborting
+			// the chunk keeps the cursor stalled until the RPC recovers;
+			// idempotent upserts replay on the next tick.
 			if herr != nil {
-				log.Warn().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
-					Msg("transfer: header lookup failed; skip log, watcher retries next tick")
-				continue
+				log.Error().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
+					Msg("transfer: header lookup failed; aborting chunk for retry on next tick")
+				return fmt.Errorf("transfer: header lookup failed for block %d: %w", l.BlockNumber, herr)
 			}
 			bt = h.Time
 			// Memoise so the next Transfer log in the same block
 			// within this chunk reuses the cached timestamp without
-			// another HeaderByNumber round-trip. A single 30-block
-			// chunk with N transfer-only blocks was firing N header
-			// fetches per block pre-memoization.
+			// another HeaderByNumber round-trip.
 			blockTimes[l.BlockNumber] = bt
 		}
 		if err := r.h.dispatch(ctx, l, bt); err != nil {
@@ -610,7 +614,34 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	if err != nil {
 		return common.Hash{}, err
 	}
+	// v29 audit F-03: clamp gas pricing to deploy-configured ceilings. A
+	// public RPC can spike gas suggestions during congestion; without a
+	// cap, a single keeper tx could drain the keeper wallet. Defaults
+	// (100 gwei fee / 5 gwei tip via env) leave plenty of headroom on
+	// Coston2 and even mainnet while preventing grief. log.Warn + clamp
+	// rather than abort: a clamped tx still gets included next block;
+	// aborting risks stuck auctions/offers.
 	feeCap := new(big.Int).Add(tipCap, new(big.Int).Mul(gasPrice, big.NewInt(2)))
+	if cap := r.cfg.MaxFeeCapWei(); cap != nil && feeCap.Cmp(cap) > 0 {
+		log.Warn().Str("requested_wei", feeCap.String()).Str("cap_wei", cap.String()).
+			Msg("keeper: feeCap above max; clamping")
+		feeCap = cap
+	}
+	if cap := r.cfg.MaxTipCapWei(); cap != nil && tipCap.Cmp(cap) > 0 {
+		log.Warn().Str("requested_wei", tipCap.String()).Str("cap_wei", cap.String()).
+			Msg("keeper: tipCap above max; clamping")
+		tipCap = cap
+	}
+	// v29 audit reviewer note: EIP-1559 invariant requires feeCap >= tipCap.
+	// If MaxFeeCapGwei < MaxTipCapGwei the two clamps above can produce
+	// feeCap < tipCap, leaving the tx un-mineable. Lift feeCap to tipCap when
+	// the invariant would otherwise break. We log a warning so misconfig is
+	// visible in keeper telemetry.
+	if feeCap.Cmp(tipCap) < 0 {
+		log.Warn().Str("feeCap", feeCap.String()).Str("tipCap", tipCap.String()).
+			Msg("keeper: feeCap < tipCap after clamp; lifting feeCap to tipCap")
+		feeCap = new(big.Int).Set(tipCap)
+	}
 	tx := types.NewTx(&types.DynamicFeeTx{
 		ChainID:   chainID,
 		Nonce:     nonce,

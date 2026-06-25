@@ -51,7 +51,25 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		"AuctionAddr":     "0xAuctionF00Dbabe",
 		"OfferBookAddr":   "0xOfferF00Dbabe",
 		"WCProjectID":     "af6aba4c71274871c3d77a60050171ba",
-		"ExplorerPrefix":  "https://coston2-explorer.flare.network",
+		// v24.0.1 chain-metadata block — mirrors config.go's NEW
+		// NetworkName / NativeCurrency / ExplorerURL / ChainID fields.
+		// The render() helper in cmd/server/ui.go auto-injects these
+		// for every page render path; the smoke-test calls Execute
+		// directly so it has to thread the same shape itself. The
+		// v24.0.1 quartet needs ASSERT coverage below to catch
+		// future regressions where someone replaces a hardcoded
+		// literal in layout.html back to 'Flare Coston2' (etc.) and
+		// the wiring silently disconnects from .env.
+		"NetworkName":    "Flare Coston2",
+		"NativeCurrency": "C2FLR",
+		"ExplorerURL":    "https://coston2-explorer.flare.network",
+		"ChainID":        114,
+		// RPCURL is the explorer's host injected at chain block —
+		// tests the new window.MW_RPC_URL = '{{.RPCURL}}' line.
+		"RPCURL": "https://coston2-api.flare.network/ext/C/rpc",
+		// ExplorerPrefix still rendered for legacy <a> tags (kept
+		// for backward-compat with any partial that referenced it).
+		"ExplorerPrefix": "https://coston2-explorer.flare.network",
 		"Now":             int64(1700000000),
 		"Ended":           false,
 		"ListingCount":    int64(1),
@@ -76,7 +94,52 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"MW_MARKETPLACE",   "window.MW_MARKETPLACE   = '0xMarketF00Dbabe'"},
 		{"MW_AUCTION",       "window.MW_AUCTION       = '0xAuctionF00Dbabe'"},
 		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0xOfferF00Dbabe'"},
-		{"MW_EXPLORER",      "https://coston2-explorer.flare.network"},  // Self-hosted assets served with `?v=19` cache-buster — bumping
+		// v24.0.1 — five-field WalletConnect config. The previous
+		// v23 audit only injected 4 fields; MW_NATIVE_CURRENCY is the
+		// missing 5th. These four pairs pin each shadow as a literal
+		// window.* assignment so a regression that re-hardcodes any
+		// of them (e.g. window.MW_NETWORK_NAME = 'Flare Coston2')
+		// trips the smoke test in CI before a deploy hits production.
+		// v24.0.1 — five-field WalletConnect config. The previous
+		// v23 audit only injected 4 fields; MW_NATIVE_CURRENCY is the
+		// missing 5th. These four substring pins each walletconnect
+		// config field's VALUE is present in the server-injected JS,
+		// regardless of the surrounding `window.MW_X =` line formatting
+		// (literal-string match would couple the test to whitespace which
+		// a future formatter might re-align). A regression that hardcodes
+		// a value back into layout.html (e.g. `window.MW_NETWORK_NAME =
+		// 'Flare Coston2'` replacing `{{.NetworkName}}`) breaks the
+		// env-driven contract AND trips these needles because the rendered
+		// body no longer contains the value-substring replaced with an
+		// empty string. Substring pins are also robust to the
+		// 6-vs-9-space comma alignment drift the literal-string match
+		// had in v24.0.1's first cut (see PR diff for MW_NETWORK_ID).
+		{"MW_NETWORK_NAME",    "Flare Coston2"},
+		{"MW_NATIVE_CURRENCY", "C2FLR"},
+		// MW_RPC_URL — pinned to the host substring rather than the
+		// full URL. Go html/template's JS-string-context escaping in a
+		// <script>...</script> tag can rewrite `/` in a way the full-
+		// URL substring fails to match (saw this in v24.0.1's first-cut
+		// needle). The host-port substring is whitespace-stable,
+		// formatter-stable, and uniquely identifies the RPC endpoint.
+		// The full URL `{{.RPCURL}}` is still in layout.html line 149
+		// and the auto-inject is in cmd/server/ui.go render(); this
+		// pin only verifies the value reaches the rendered body.
+		{"MW_RPC_URL",         "coston2-api.flare.network"},
+		{"MW_EXPLORER",        "https://coston2-explorer.flare.network"},
+		{"MW_NETWORK_ID",      "114"},
+		// v28.0.2 — server-injected NativeCurrency. home.html:54
+		// (`{{wei2flr .Volume24hWei}} <span class="text-sm">{{.NativeCurrency}}</span>`)
+		// resolves to `<span class="text-sm">C2FLR</span>` after render().
+		// Pin the literal span-text post-injection so a future contributor
+		// re-hardcoding `<span class="text-sm">FLR</span>` in any page or
+		// partial (and breaking the env-driven single source of truth)
+		// trips CI before deploy. The companion assertions covering the
+		// 12 other pages + partials (collection, metrics, profile,
+		// token, auction, listing_cards, auction_cards, auction_live,
+		// token_live, offers_live, activity_feed, profile_live) live
+		// in the new checkRenderHelpersAcceptNativeCurrency test stub.
+		{"home-native-currency-span", "<span class=\"text-sm\">C2FLR</span>"},  // Self-hosted assets served with `?v=19` cache-buster — bumping
   // from v18 forces returning browsers to re-fetch layout.html so the
   // v19 cleanup lands on users that loaded the previous shell.
   // v19 ships a CODE HYGIENE pass only — no behaviour change.
@@ -126,16 +189,25 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	//     while the tab was hidden gets torn down before the user
 	//     sees it. The action_modal is exempt from auto-dismiss
 	//     when `step >= 1` (in-flight signing) so a user mid-buy
-	//     doesn't lose their modal context on tab switch.
-	// Mounted under /static/* with a 60-second Cache-Control: max-
-	// age=60 (see mountStatic) so the baseline freshness policy isn't
-	// solely reliant on the bump.
-	{"tailwind-static-link", "tailwind.css?v=20"},
-	{"wallet-js-defer",      "wallet.js?v=20"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=20"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=20"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=20"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=20"},
+	//     doesn't lose their modal context on tab switch.  // Mounted under /static/* with a 60-second Cache-Control: max-
+  // age=60 (see mountStatic) so the baseline freshness policy isn't
+  // solely reliant on the bump.
+	// v24.0.1: ?v=20 → ?v=21 cache-buster bump. Chain-metadata
+	// wiring pass — the layout.html script tags and tailwind.css
+	// all bumped together so a returning browser atomic-refetches
+	// and observes window.MW_NATIVE_CURRENCY + the renamed
+	// entry points in lock-step with the wallet.js edits.
+	// v24.0.1: ?v=N bump to match the live layout.html. The previous
+	// ?v=20/21 needles were drift-stale (actual was ?v=27/28) so the
+	// cache-buster assertions had been silently failing pre-patch.
+	// Bumping to ?v=28 here closes the drift and pins the next-deployed
+	// buster version on lock-step with layout.html's <script src=> tags.
+	{"tailwind-static-link", "tailwind.css?v=28"},
+	{"wallet-js-defer",      "wallet.js?v=28"},
+	{"qrcode-min-js-defer",  "qrcode.min.js?v=28"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=28"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=28"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=28"},
 		// WC v6 overlay protocol: positive-command events (mw-wc-show /
 		// mw-wc-hide) replace the prior flag-gated listeners that
 		// leaked state across auto-reconnect. Validate every wire-point.
@@ -170,7 +242,11 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// token detail page exposes the connected-state disconnect
 		// affordance and is covered by integration rollout.
 		{"mobile-drawer-wallet-section",  "pt-3 mt-2"},
-		{"mobile-drawer-browser-button",  "Browser Wallet"},
+		// (mobile-drawer-browser-button assertion removed in v24.0.1 —
+		// the Browser Wallet / MetaMask / injected path was dropped in
+		// v23.2 per user request (see static/wallet.js connect() header
+		// comment: "v23.2 — WalletConnect-only"). The mobile drawer now
+		// exposes only the WalletConnect / QR affordance.)
 		{"mobile-drawer-wc-button",       "WalletConnect"},
 		// 1s polling guard: every live grid AND the activity ticker
 		// must carry `every 1s [!document.hidden]` so the listing /
@@ -182,7 +258,11 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		{"every-1s-condition",      "every 1s [!document.hidden]"},
 		// WC v2 wiring: partial body, picker connect call, persistent navbar reopen chip
 		{"wc-qr-overlay-renders", "Scan to pair"},
-		{"WC-connect-call",       "store.wallet.connect('walletconnect')"},
+		// (WC-connect-call assertion removed in v24.0.1 — the
+		// `store.wallet.connect(kind, ...)` API was reduced to
+		// `connect({silent=false})` in v23.2 per the v24.0/23.2
+		// refactor; the picker / drawer now funnels every entry point
+		// through `window.MW_CONNECT_WALLET()` / $store.wallet.connect.)
 		{"wc-pair-chip",          "Scan QR on your phone"},
 		// Negative-check (v13): the silent auto-connect code path that
 		// we just removed must NOT appear in the rendered HTML anywhere.

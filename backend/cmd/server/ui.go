@@ -42,13 +42,43 @@ func render(c *fiber.Ctx, name string, data any) error {
 		if _, present := m["WCProjectID"]; !present {
 			m["WCProjectID"] = config.C.WCProjectID
 		}
-		if _, present := m["ExplorerPrefix"]; !present {
-			// Explorer base URL for "View on explorer" links. Hardcoded
-			// per network (Coston2 today; switch off ChainID for future
-			// multi-chain). Injected here so templates can render `<a
-			// href="{{$.ExplorerPrefix}}/tx/{{.TxHash}}">` without needing
-			// a hardcoded URL in every page.
-			m["ExplorerPrefix"] = "https://coston2-explorer.flare.network"
+		// Chain-metadata block. The single source of truth (config.C)
+		// populates the per-render data map so layout.html + every
+		// page referencing MW_NETWORK_* / MW_NATIVE_CURRENCY /
+		// window.MW_RPC_URL gets the env-correct values without a
+		// redeploy. Templates can still override any of these fields
+		// by passing them in their own fiber.Map — the `if _, present:`
+		// guard respects caller-set values (same pattern as the
+		// contract addrs above).
+		//
+		// Currency is the v24.0+ WalletConnect config field that was
+		// missing: the user's WalletConnect v2 modal pairs the chain
+		// via chains:[1]+optionalChains:[CHAIN_ID]+rpcMap:{CHAIN_ID:RPC_URL},
+		// and the JS-side wallet.js uses NATIVE_CURRENCY + NETWORK_NAME
+		// everywhere a label says "FLR" or "Flare Network" so a future
+		// mainnet deploy only needs to swap .env vars.
+		//
+		// RPCURL auto-inject is required because layout.html line 149
+		// references `{{.RPCURL}}` — without it the zero-value fallback
+		// would inject `window.MW_RPC_URL = '';` on every live render,
+		// silently breaking the user error path that displays the
+		// connected chain's RPC URL. The smoke test passes by manual
+		// data-map setup; this auto-inject CLOSES the gap so the prod
+		// path mirrors the test path.
+		if _, present := m["RPCURL"]; !present {
+			m["RPCURL"] = config.C.RPCURL
+		}
+		if _, present := m["ExplorerURL"]; !present {
+			m["ExplorerURL"] = config.C.ExplorerURL
+		}
+		if _, present := m["NetworkName"]; !present {
+			m["NetworkName"] = config.C.NetworkName
+		}
+		if _, present := m["NativeCurrency"]; !present {
+			m["NativeCurrency"] = config.C.NativeCurrency
+		}
+		if _, present := m["ChainID"]; !present {
+			m["ChainID"] = config.C.ChainID
 		}
 	}
 	c.Set("Content-Type", "text/html; charset=utf-8")

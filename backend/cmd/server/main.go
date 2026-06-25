@@ -204,11 +204,18 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if d := config.C.SIWEDomain; d != "" && !strings.Contains(req.Message, d) {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
 		}
-		// Reject re-use of an identical signed message (anti-replay).
-		if !strings.Contains(req.Message, "Issued At:") && !strings.Contains(req.Message, "issuedAt") {
-			// Loose EIP-4361 shape check — accept either canonical SIWE or our
-			// legacy `\n` form. The strict SIWE verifier is enforced in
-			// auth.Verify for downstream JWT use.
+		// v29 audit F-01: bind the signature to the running chain. Without
+		// this, a Coston2-signed payload replays as valid on mainnet because
+		// the (message, signature, address) tuple is identical except for the
+		// chainId line. The wallet.js SIWE template now includes
+		// `Chain ID: N`; we require N == config.C.ChainID. Reject before
+		// EIP-191 so a forged-claim signature can't even burn signature-verify
+		// cycles.
+		if want := config.C.ChainID; want != 0 {
+			wantSubstr := fmt.Sprintf("Chain ID: %d", want)
+			if !strings.Contains(req.Message, wantSubstr) {
+				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "chain id mismatch"})
+			}
 		}
 		ok, err := verifyEIP191(req.Message, req.Signature, req.Address)
 		if err != nil || !ok {

@@ -33,9 +33,19 @@
 (function () {
 'use strict';
 
-const CHAIN_ID  = Number(window.MW_NETWORK_ID || 114);
-const RPC_URL   = window.MW_RPC_URL  || 'https://coston2-api.flare.network/ext/C/rpc';
-const EXPLORER  = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
+// ── Chain metadata (v24.0.1 — single source of truth = layout.html
+//     server injection from .env; the || fallbacks are the Coston2
+//     defaults so a misconfigured server still produces a renderable
+//     page rather than literal-empty labels). MW_NATIVE_CURRENCY is
+//     the missing WalletConnect config field that the v23.x pumped
+//     out as ' FLR' literals across 21 toast/ctaLabel/summary lines —
+//     this const consolidates them so a future mainnet deploy just
+//     sets NATIVE_CURRENCY=FLR in .env.
+const CHAIN_ID        = Number(window.MW_NETWORK_ID      || 114);
+const RPC_URL         = window.MW_RPC_URL               || 'https://coston2-api.flare.network/ext/C/rpc';
+const EXPLORER        = window.MW_EXPLORER              || 'https://coston2-explorer.flare.network';
+const NETWORK_NAME    = window.MW_NETWORK_NAME          || 'Flare Coston2';
+const NATIVE_CURRENCY = window.MW_NATIVE_CURRENCY       || 'C2FLR';
 
 /*
  * ── WalletConnect overlay protocol (v6 — positive command) ─────────────
@@ -243,7 +253,7 @@ function revertMessage(e) {
     ['WrongValue',      "Amount sent must equal the offer amount exactly."],
     ['WrongBidValue',   "Amount sent must equal the bid amount exactly."],
     ['WrongPrice',      "Amount sent must equal the listing price exactly."],
-    ['BelowMinPrice',   'Minimum is 0.01 FLR.'],
+    ['BelowMinPrice',   'Minimum is 0.01 ' + NATIVE_CURRENCY + '.'],
     ['BidTooLow',       'Your bid is below the minimum increment.'],
     ['NotApproved',     'Approve the contract to manage this NFT first.'],
     ['NotOwner',        "You don't hold this NFT."],
@@ -260,7 +270,7 @@ function revertMessage(e) {
     ['NotSettled',      'This auction has not settled yet.'],
     ['BidOverflow',     'Bid total exceeds the supported maximum.'],
     ['NothingToWithdraw','No pending refund to withdraw.'],
-    ['insufficient funds','Not enough FLR to cover the amount plus gas.'],
+    ['insufficient funds','Not enough ' + NATIVE_CURRENCY + ' to cover the amount plus gas.'],
     ['user rejected',   'You rejected the request.'],
     ['missing revert data','Transaction reverted on-chain. The item may have just sold or changed — refresh and retry.'],
   ];
@@ -811,7 +821,13 @@ window.addEventListener('alpine:init', () => {
           showQrModal: false,
           metadata: {
             name:    'MagicWebb',
-            description: 'Non-custodial NFT marketplace on Flare Network',
+            // Network name interpolated from server-injected NETWORK_NAME.
+            // The WalletConnect approval card already shows the chainId
+            // (e.g. "Flare Coston2") natively next to the app name, so we
+            // only need to surface the human-readable network name in the
+            // description — the redundant "(chain N)" parenthetical gets
+            // truncated on the modal's narrow width.
+            description: 'Non-custodial NFT marketplace on ' + NETWORK_NAME,
             url:     window.location.origin,
             icons:   [`${window.location.origin}/static/icon-512.png`],
           },
@@ -900,7 +916,16 @@ window.addEventListener('alpine:init', () => {
         const nonceRes = await fetch('/auth/nonce?address=' + this.address);
         if (!nonceRes.ok) throw new Error('/auth/nonce HTTP ' + nonceRes.status);
         const { nonce } = await nonceRes.json();
-        const message = `Sign in to MagicWebb\nAddress: ${this.address}\nNonce: ${nonce}`;
+        // v29 audit F-01: bind SIWE payload to (origin, chainId). Without
+        // these, a signature from Coston2 replays as valid on mainnet
+        // (same address+nonce tuple, only the chain differs), and a
+        // phishing site can reuse a signature captured on the legit
+        // domain. The server enforces both lines against its own config
+        // in verifyHandler; src includes a compound constraint so a
+        // future chain pivot is a single .env edit.
+        const origin = (typeof window !== 'undefined' && window.location && window.location.origin) || '';
+        const chainId = Number(window.MW_NETWORK_ID || 114);
+        const message = `Sign in to MagicWebb\nURI: ${origin}\nChain ID: ${chainId}\nAddress: ${this.address}\nNonce: ${nonce}`;
         const sig = await R(this.signer).signMessage(message);
         const verifyRes = await fetch('/auth/verify', {
           method:  'POST',
@@ -1071,12 +1096,12 @@ window.addEventListener('alpine:init', () => {
         title: 'Buy now',
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
-          { label: 'You pay',          value: fmtFLR(priceWei, 4) + ' FLR',  tone: 'sky' },
-          { label: 'Seller receives',  value: fmtFLR(netOfFee(priceWei).toString(), 4) + ' FLR (98.5%)', tone: 'gold' },
-          { label: 'Platform fee',     value: fmtFLR(feeOf(priceWei).toString(), 4) + ' FLR (1.5%)',    tone: '' },
+          { label: 'You pay',          value: fmtFLR(priceWei, 4) + ' ' + NATIVE_CURRENCY,  tone: 'sky' },
+          { label: 'Seller receives',  value: fmtFLR(netOfFee(priceWei).toString(), 4) + ' ' + NATIVE_CURRENCY + ' (98.5%)', tone: 'gold' },
+          { label: 'Platform fee',     value: fmtFLR(feeOf(priceWei).toString(), 4) + ' ' + NATIVE_CURRENCY + ' (1.5%)',    tone: '' },
           { label: 'Token',            value: fmtAddr(collection) + ' #' + tokenId, tone: 'violet' },
         ],
-        ctaLabel: `Buy for ${fmtFLR(priceWei, 4)} FLR`,
+        ctaLabel: 'Buy for ' + fmtFLR(priceWei, 4) + ' ' + NATIVE_CURRENCY,
         disclaimer: 'You pay the listed price. Seller receives 98.5% after the 1.5% platform fee at settlement.',
         run: ({ setStep, done, fail }) => this._executeBuy(collection, tokenId, seller, priceWei, { setStep, done, fail }),
       });
@@ -1148,7 +1173,7 @@ window.addEventListener('alpine:init', () => {
         done({
           txHash: tx.hash,
           title:  'Purchase confirmed',
-          body:   `Seller received ${fmtFLR(netOfFee(priceWei).toString())} FLR (1.5% fee deducted).`,
+          body:   'Seller received ' + fmtFLR(netOfFee(priceWei).toString()) + ' ' + NATIVE_CURRENCY + ' (1.5% fee deducted).',
         });
         window.dispatchEvent(new CustomEvent('mw-bought', {
           detail: { collection, tokenId, tx: tx.hash },
@@ -1166,12 +1191,12 @@ window.addEventListener('alpine:init', () => {
         title: 'List for sale',
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
-          { label: 'You list for',            value: fmtFLR(priceWei) + ' FLR', tone: 'sky' },
-          { label: 'You receive on sale',     value: fmtFLR(netOfFee(priceWei).toString()) + ' FLR (98.5%)', tone: 'gold' },
-          { label: 'Platform fee (on sale)',  value: fmtFLR(feeOf(priceWei).toString()) + ' FLR (1.5%)', tone: '' },
+          { label: 'You list for',            value: fmtFLR(priceWei) + ' ' + NATIVE_CURRENCY, tone: 'sky' },
+          { label: 'You receive on sale',     value: fmtFLR(netOfFee(priceWei).toString()) + ' ' + NATIVE_CURRENCY + ' (98.5%)', tone: 'gold' },
+          { label: 'Platform fee (on sale)',  value: fmtFLR(feeOf(priceWei).toString()) + ' ' + NATIVE_CURRENCY + ' (1.5%)', tone: '' },
           { label: 'Expires', value: new Date(expiresAt * 1000).toLocaleString(), tone: 'violet' },
         ],
-        ctaLabel: 'List for ' + fmtFLR(priceWei) + ' FLR',
+        ctaLabel: 'List for ' + fmtFLR(priceWei) + ' ' + NATIVE_CURRENCY,
         disclaimer: 'Listing is free. The platform fee is deducted from the seller on sale, not at listing time.',
         run: ({ setStep, done, fail }) => this._executeList(collection, tokenId, priceWei, expiresAt, standard, { setStep, done, fail }),
       });
@@ -1228,9 +1253,9 @@ window.addEventListener('alpine:init', () => {
         title: 'Create auction',
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
-          { label: 'Reserve',          value: fmtFLR(reserveWei || '0') + ' FLR', tone: 'sky' },
+          { label: 'Reserve',          value: fmtFLR(reserveWei || '0') + ' ' + NATIVE_CURRENCY, tone: 'sky' },
           { label: 'Min increment',    value: ((minIncBps || 500) / 100).toFixed(2) + '%'
-                                          + (minIncFlatWei && minIncFlatWei !== '0' ? ' + ' + fmtFLR(minIncFlatWei) + ' FLR' : ''),
+                                          + (minIncFlatWei && minIncFlatWei !== '0' ? ' + ' + fmtFLR(minIncFlatWei) + ' ' + NATIVE_CURRENCY : ''),
                                           tone: 'violet' },
           { label: 'Auction ends',     value: new Date(endsAt * 1000).toLocaleString(), tone: 'gold' },
           ...(willExtendHazard ? [{ label: 'Heads up', value: 'Within 3 min of end → anti-snipe extends by +3:00', tone: '' }] : []),
@@ -1278,12 +1303,12 @@ window.addEventListener('alpine:init', () => {
         title: willExtend ? 'Last-minute bid — extends 3 minutes' : 'Place a bid',
         subtitle: `Auction #${auctionId}`,
         summary: [
-          { label: 'Bid amount', value: fmtFLR(bidAmountWei) + ' FLR', tone: 'sky' },
+          { label: 'Bid amount', value: fmtFLR(bidAmountWei) + ' ' + NATIVE_CURRENCY, tone: 'sky' },
           ...(willExtend ? [{ label: 'Anti-snipe', value: '+3:00 (auction extends)', tone: 'violet' }] : []),
           { label: 'Escrow',     value: 'Adds to your cumulative total — free', tone: 'gold' },
           { label: 'Refund',     value: 'Top up to retake lead; pull after settle', tone: '' },
         ],
-        ctaLabel: `Bid ${fmtFLR(bidAmountWei)} FLR`,
+        ctaLabel: 'Bid ' + fmtFLR(bidAmountWei) + ' ' + NATIVE_CURRENCY,
         disclaimer: 'Bids accumulate. If you are outbid your escrow is preserved until settlement or withdraw.',
         run: ({ setStep, done, fail }) => this._executeBid(auctionId, bidAmountWei, { setStep, done, fail }),
       });
@@ -1378,14 +1403,14 @@ window.addEventListener('alpine:init', () => {
           return;
         }
         Alpine.store('modals').summary = [
-          { label: 'Refund amount', value: fmtFLR(pending.toString()) + ' FLR', tone: 'gold' },
+          { label: 'Refund amount', value: fmtFLR(pending.toString()) + ' ' + NATIVE_CURRENCY, tone: 'gold' },
           { label: 'To wallet',     value: fmtAddr(this.address), tone: 'sky' },
         ];
         setStep(1, 'Confirm withdrawal…');
         const tx = await contract.withdrawRefund();
         setStep(2, 'Waiting for confirmation…');
         await tx.wait();
-        done({ txHash: tx.hash, title: 'Refund withdrawn', body: `${fmtFLR(pending.toString())} FLR sent to your wallet.` });
+        done({ txHash: tx.hash, title: 'Refund withdrawn', body: fmtFLR(pending.toString()) + ' ' + NATIVE_CURRENCY + ' sent to your wallet.' });
       } catch (e) { fail(e); }
     },
 
@@ -1397,11 +1422,11 @@ window.addEventListener('alpine:init', () => {
         title: 'Make an offer',
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
-          { label: 'You escrow',  value: fmtFLR(principalWei) + ' FLR', tone: 'sky' },
+          { label: 'You escrow',  value: fmtFLR(principalWei) + ' ' + NATIVE_CURRENCY, tone: 'sky' },
           { label: 'Expires',     value: new Date(expiresAt * 1000).toLocaleString(), tone: 'violet' },
           { label: 'Refundable',  value: 'Fully — until accepted, rejected, or expired', tone: 'gold' },
         ],
-        ctaLabel: `Escrow ${fmtFLR(principalWei)} FLR`,
+        ctaLabel: 'Escrow ' + fmtFLR(principalWei) + ' ' + NATIVE_CURRENCY,
         disclaimer: 'Your escrow is fully refundable until the seller accepts. After expiry it returns automatically.',
         run: ({ setStep, done, fail }) => this._executeMakeOffer(collection, tokenId, principalWei, expiresAt, { setStep, done, fail }),
       });
@@ -1431,7 +1456,7 @@ window.addEventListener('alpine:init', () => {
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
           { label: 'Bidder',       value: fmtAddr(bidder), tone: 'sky' },
-          { label: 'You receive',  value: fmtFLR('0') + ' FLR (98.5% of offer)', tone: 'gold' },
+          { label: 'You receive',  value: fmtFLR('0') + ' ' + NATIVE_CURRENCY + ' (98.5% of offer)', tone: 'gold' },
           { label: 'NFT transfers',value: 'To bidder on confirmation', tone: 'violet' },
         ],
         ctaLabel: 'Accept — get paid',
