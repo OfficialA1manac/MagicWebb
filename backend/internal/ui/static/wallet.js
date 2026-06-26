@@ -832,27 +832,62 @@ window.addEventListener('alpine:init', () => {
       }
       this._raw.wc = R(wc);
 
-      wc.on('display_uri', (uri) => {
+      wc.on('display_uri', function(uri) {
         if (silent) return;
         if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
         try {
           console.log('[mw-wc-debug] _wcConnect: display_uri received');
         } catch (_) {}
-        // Show a persistent notification with the WC URI so the user
-        // can copy it into their wallet app (mobile or desktop).
-        // Create a small inline banner above the toast container.
+        // Build WC URI banner using DOM API (no innerHTML with inline
+        // onclick — those break due to HTML/JS escaping mismatch).
         try {
-          const existing = document.getElementById('wc-uri-banner');
+          var existing = document.getElementById('wc-uri-banner');
           if (existing) existing.remove();
-          const banner = document.createElement('div');
+          var banner = document.createElement('div');
           banner.id = 'wc-uri-banner';
           banner.className = 'fixed bottom-20 right-4 z-[60] max-w-sm bg-ink-900/95 border border-violet-400/40 rounded-2xl p-4 shadow-2xl glow-violet fade-in';
-          banner.innerHTML = '<div class="flex items-center gap-2.5 mb-2"><span class="text-violet-200 text-lg">⌬</span><span class="text-sm font-extrabold text-white">WalletConnect ready</span></div>'
-            + '<p class="text-xs text-white/70 mb-2.5">Open your mobile wallet app and choose WalletConnect, then paste the link below:</p>'
-            + '<div class="flex gap-2"><input id="wc-uri-input" readonly class="flex-1 bg-ink-800 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-white/70 truncate" value="' + uri.replace(/"/g, '&quot;') + '"></input>'
-            + '<button onclick="var i=document.getElementById(\'wc-uri-input\');i.select();navigator.clipboard.writeText(i.value).then(function(){var t=this;t.textContent=\'✓ Copied\';setTimeout(function(){t.textContent=\'Copy\'},2000);}.bind(this)).catch(function(){})" class="px-3 py-2 rounded-xl btn-sky text-ink-950 text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap shrink-0">Copy</button></div>'
-            + '<button onclick="this.parentElement.remove()" class="mt-2 text-[10px] text-white/40 hover:text-white transition">Dismiss</button>';
+
+          var header = document.createElement('div');
+          header.className = 'flex items-center gap-2.5 mb-2';
+          header.innerHTML = '<span class="text-violet-200 text-lg">⌬</span><span class="text-sm font-extrabold text-white">WalletConnect ready</span>';
+          banner.appendChild(header);
+
+          var instr = document.createElement('p');
+          instr.className = 'text-xs text-white/70 mb-2.5';
+          instr.textContent = 'Open your wallet app and paste the link below:';
+          banner.appendChild(instr);
+
+          var row = document.createElement('div');
+          row.className = 'flex gap-2';
+
+          var input = document.createElement('input');
+          input.id = 'wc-uri-input';
+          input.readOnly = true;
+          input.className = 'flex-1 bg-ink-800 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-white/70 truncate';
+          input.value = uri;
+          row.appendChild(input);
+
+          var copyBtn = document.createElement('button');
+          copyBtn.className = 'px-3 py-2 rounded-xl btn-sky text-ink-950 text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap shrink-0';
+          copyBtn.textContent = 'Copy';
+          copyBtn.onclick = function() {
+            var inp = document.getElementById('wc-uri-input');
+            if (!inp) return;
+            inp.select();
+            try { navigator.clipboard.writeText(inp.value); } catch (_) { document.execCommand('copy'); }
+            copyBtn.textContent = '\u2713 Copied';
+            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
+          };
+          row.appendChild(copyBtn);
+          banner.appendChild(row);
+
+          var dismissBtn = document.createElement('button');
+          dismissBtn.className = 'mt-2 text-[10px] text-white/40 hover:text-white transition';
+          dismissBtn.textContent = 'Dismiss';
+          dismissBtn.onclick = function() { try { banner.remove(); } catch (_) {} };
+          banner.appendChild(dismissBtn);
+
           document.body.appendChild(banner);
         } catch (_) {}
       });
