@@ -164,7 +164,12 @@ contract Marketplace is MarketplaceCore {
     // ── Cancel ────────────────────────────────────────────────────────────────
 
     /// @notice Cancel an unsold listing. Seller only.
-    function cancel(address coll, uint256 id) external {
+    /// @dev L-09 fix (v28 — Round 3): every state-changing external on the
+    ///      cores is nonReentrant. While this function has no external calls
+    ///      (only a storage delete + event), adding the modifier enforces
+    ///      the invariant consistently. ~2.3k gas overhead on cold entry,
+    ///      zero on re-entry (revert).
+    function cancel(address coll, uint256 id) external nonReentrant {
         Listing memory l = listings[coll][id][msg.sender];
         if (l.seller != msg.sender) revert NotOwner(); // seller == address(0) → not listed
         delete listings[coll][id][msg.sender];
