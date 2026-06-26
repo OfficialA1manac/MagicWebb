@@ -21,11 +21,47 @@ import (
 // and reattachSlice ([]any) share the same boundary without inner duplicates.
 const mantissaBound = 1 << 53
 
-// BuildMarketResponse is the SINGLE SOURCE OF TRUTH for /api/v1/metrics
-// (JSON) and /metrics (HTML page) responses. Both endpoints call into it
-// so:
+// MetricsService handles marketplace metrics, recent activity, and SSE counters.
+type MetricsService struct {
+	q *db.Q
+}
+
+// NewMetricsService creates a MetricsService.
+func NewMetricsService(q *db.Q) *MetricsService {
+	return &MetricsService{q: q}
+}
+
+// RegisterRoutes registers metrics and activity routes under the given router group.
+func (s *MetricsService) RegisterRoutes(api fiber.Router) {
+	api.Get("/metrics", s.handleMetrics)
+	api.Get("/activity", s.handleRecentActivity)
+}
+
+func (s *MetricsService) handleMetrics(c *fiber.Ctx) error {
+	return c.JSON(s.BuildResponse(c.Context()))
+}
+
+func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
+	limit := 50
+	if ls := c.Query("limit"); ls != "" {
+		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+	rows, err := s.q.GetRecentTransactions(c.Context(), limit)
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	return c.JSON(rows)
+}
+
+// BuildResponse is the SINGLE SOURCE OF TRUTH for /api/v1/metrics
+// (JSON) responses. It is also used by the UI render path so both the
+// on-page banner and the JSON consumers see the same shape.
 //
-//   - the on-page banner and the JSON consumers see the same shape;
 //   - the SSE saturation counters (DroppedTotal, SaturationStreak) are
 //     always present even when the metrics query races with a transient
 //     DB outage — the saturation panel renders correctly while the
@@ -34,21 +70,17 @@ const mantissaBound = 1 << 53
 //     so a future market field that happens to share that name cannot
 //     silently clobber it.
 //
-// Returns a fiber.Map the caller hands to c.JSON(...) or to ui.render(...).
 // Never returns an error: a degraded metrics path still answers 200 with
 // the SSE counters and the sentinel so the page is informative rather
 // than silently zero-rendered.
-func BuildMarketResponse(ctx context.Context, q *db.Q) fiber.Map {
+func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 	out := fiber.Map{
 		"sse_dropped_total":     sse.DroppedTotal.Load(),
 		"sse_saturation_streak": sse.SaturationStreak.Load(),
 	}
-	// Promoted sentinel value: customer-facing landing string only.
-	// The internal failure detail goes to log.Error so operators see
-	// the real cause without surfacing DB-driver wording to end-users.
 	const unavailableMsg = "metrics temporarily unavailable"
 
-	m, err := q.GetMarketMetrics(ctx)
+	m, err := s.q.GetMarketMetrics(ctx)
 	if err != nil {
 		log.Error().Err(err).Msg("metrics: GetMarketMetrics failed")
 		out["metrics_unavailable"] = unavailableMsg
@@ -74,39 +106,8 @@ func BuildMarketResponse(ctx context.Context, q *db.Q) fiber.Map {
 	for k, v := range flat {
 		out[k] = v
 	}
-	// Apply sentinel AFTER the flat merge so no future MarketMetric field
-	// with the same name silently overwrites the unavailable flag.
-	// Empty/missing keys aren't a concern; setting explicitly ensures
-	// downstream consumers can safely check `.metrics_unavailable` truthiness.
-	out["metrics_unavailable"] = "" // absent = available
+	out["metrics_unavailable"] = ""
 	return out
-}
-
-// marketMetrics serves /api/v1/metrics. Bridges into BuildMarketResponse
-// so JSON and HTML keep the same shape.
-func marketMetrics(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return c.JSON(BuildMarketResponse(c.Context(), q))
-	}
-}
-
-func recentActivity(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		limit := 50
-		if s := c.Query("limit"); s != "" {
-			if n, err := strconv.Atoi(s); err == nil && n > 0 {
-				if n > 200 {
-					n = 200
-				}
-				limit = n
-			}
-		}
-		rows, err := q.GetRecentTransactions(c.Context(), limit)
-		if err != nil {
-			return writeErr(c, fiber.StatusInternalServerError, "internal error")
-		}
-		return c.JSON(rows)
-	}
 }
 
 // reattachIntFields walks a map[string]any decoded from JSON and re-casts
@@ -114,14 +115,6 @@ func recentActivity(q *db.Q) fiber.Handler {
 // float64 mantissa precision boundary (lossless round-trip). Recurses into
 // nested maps AND slice-of-[]any so a struct with sub-structs OR nested
 // array fields gets the same protection.
-//
-// Boundary:
-//   - ±mantissaBound (±1<<53 = ±9007199254740992): exact integers.
-//   - NaN: math.Trunc(NaN)=NaN; NaN!=NaN -> falls through equality guard.
-//   - +Inf: math.Trunc(+Inf)=+Inf; +Inf==+Inf TRUE but +Inf<=mantissaBound
-//     is FALSE (IEEE 754: no finite bound satisfies Inf) -> stays as float64.
-//   - The market struct has int64 + string fields only (no *big.Int); the
-//     wei-string field stays as string and never touches the math path.
 func reattachIntFields(m map[string]any) {
 	for k, v := range m {
 		switch t := v.(type) {
@@ -140,8 +133,6 @@ func reattachIntFields(m map[string]any) {
 // reattachSlice handles the []any branch (and recursive [][]any /
 // []map[]any / mixed nested arrays) so a future market struct with
 // sub-array fields gets the same lossless float64->int64 reattach.
-// Without this, a 2D JSON array would silently keep its inner floats as
-// float64 even when they are integer-valued within mantissa range.
 func reattachSlice(s []any) {
 	for i, item := range s {
 		switch inner := item.(type) {

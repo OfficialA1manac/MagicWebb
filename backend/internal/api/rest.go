@@ -18,7 +18,6 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -225,32 +224,17 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
 	NewCollectionsService(q).RegisterRoutes(api)
+	NewMediaService(q, eth).RegisterRoutes(api)
+	NewWalletService(q).RegisterRoutes(api)
+	NewNotificationsService(q).RegisterRoutes(api, cfg)
+	NewProfilesService(q).RegisterRoutes(api, cfg)
+	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
+	NewSearchService(q).RegisterRoutes(api)
+	NewMetricsService(q).RegisterRoutes(api)
+	NewIndexerService(q).RegisterRoutes(api)
 
-	// Media routes.
-	api.Get("/media", mediaProxy(q))
-	api.Post("/img/retry", imageRetryNow(q, media.FetchBytes))
-	app.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
-
-	// Wallet NFT enumeration (picker source).
-	api.Get("/wallet/:addr/nfts", walletNFTs(q))
-
-	// Notifications (in-app, SSE-backed).
-	api.Get("/notifications", jwtMiddleware(cfg), listNotifications(q))
-	api.Post("/notifications/read", jwtMiddleware(cfg), markNotificationsRead(q))
-
-	// Profiles.
-	api.Get("/profile/:addr", getProfile(q))
-	api.Put("/profile/:addr", jwtMiddleware(cfg), putProfile(q))
-
-	// Trust & safety.
-	api.Post("/reports", jwtMiddleware(cfg), createReport(q))
-	api.Post("/admin/verify", jwtMiddleware(cfg), adminVerify(q, cfg))
-	api.Post("/admin/collections/verify", jwtMiddleware(cfg), adminVerifyCollection(q, cfg))
-
-	api.Get("/search", search(q))
-	api.Get("/metrics", marketMetrics(q))
-	api.Get("/activity", recentActivity(q))
-	api.Get("/indexer/status", indexerStatus(q))
+	// Image-by-hash route registered at app level (not namespaced under /api/v1).
+	app.Get(imagestore.PathPrefix+"/:sha256", NewMediaService(q, eth).HandleImageByHash())
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────

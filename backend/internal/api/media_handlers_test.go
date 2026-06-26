@@ -108,10 +108,11 @@ var expectedGetTokenMetaRegex = `SELECT COALESCE\(m\.name, t\.name, ''\), COALES
 func newRetryApp(t *testing.T, mock pgxmock.PgxPoolIface, fetch imageRetryFetcher) *fiber.App {
 	t.Helper()
 	app := fiber.New(fiber.Config{
-		// Disable startup banner / logger so test output stays clean.
 		DisableStartupMessage: true,
 	})
-	app.Post("/api/v1/img/retry", imageRetryNow(db.New(mock), fetch))
+	svc := NewMediaService(db.New(mock), nil)
+	svc.fetch = fetch
+	app.Post("/api/v1/img/retry", svc.handleRetry)
 	return app
 }
 

@@ -25,7 +25,8 @@ func TestSearch_BadInput(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			app := fiber.New()
-			app.Get("/api/v1/search", search(nil))
+			svc := NewSearchService(nil)
+			app.Get("/api/v1/search", svc.handleSearch)
 			req := httptest.NewRequest(http.MethodGet, tc.url, nil)
 			resp, err := app.Test(req)
 			require.NoError(t, err)

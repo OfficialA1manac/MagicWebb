@@ -1,0 +1,270 @@
+package api
+
+import (
+	"context"
+	"errors"
+	"math/big"
+	"strings"
+	"time"
+
+	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
+	"github.com/jackc/pgx/v5"
+)
+
+const maxInt64 = int64(1<<63 - 1)
+
+// MediaService handles media proxy, image retry, and image-by-hash operations.
+type MediaService struct {
+	q     *db.Q
+	eth   chain.Caller
+	fetch imageRetryFetcher
+}
+
+// imageRetryFetcher is the signature of media.FetchBytes.
+type imageRetryFetcher func(ctx context.Context, uri, tokenID string) ([]byte, error)
+
+// NewMediaService creates a MediaService.
+func NewMediaService(q *db.Q, eth chain.Caller) *MediaService {
+	return &MediaService{q: q, eth: eth, fetch: media.FetchBytes}
+}
+
+// RegisterRoutes registers all media-related routes.
+// The app-level /api/v1/img/:sha256 route is registered separately in Mount().
+func (s *MediaService) RegisterRoutes(api fiber.Router) {
+	api.Get("/media", s.handleProxy)
+	api.Post("/img/retry", s.handleRetry)
+}
+
+func (s *MediaService) handleProxy(c *fiber.Ctx) error {
+	raw := c.Query("url")
+	if raw == "" {
+		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
+	}
+	if h := imagestore.ExtractHash(raw); h != "" {
+		return s.imageByHash(c)
+	}
+	if !media.ProxyAllowed(raw) {
+		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
+	}
+	body, err := media.FetchBytes(c.Context(), raw, "")
+	if err != nil {
+		return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
+	}
+	ct, ok := media.SniffImage(body)
+	if !ok {
+		return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
+	}
+	c.Set("Content-Type", ct)
+	c.Set("Cache-Control", "public, max-age=86400")
+	return c.Send(body)
+}
+
+// HandleImageByHash returns a handler for /api/v1/img/:sha256 (registered at app level).
+func (s *MediaService) HandleImageByHash() fiber.Handler {
+	return s.imageByHash
+}
+
+func (s *MediaService) imageByHash(c *fiber.Ctx) error {
+	sha := c.Params("sha256")
+	if !imagestore.ValidateHash(sha) {
+		return writeErr(c, fiber.StatusBadRequest, "invalid sha256")
+	}
+	blob, err := s.q.GetImage(c.Context(), sha)
+	if err != nil {
+		if imagestore.IsNoRows(err) {
+			return writeErr(c, fiber.StatusNotFound, "blob not found")
+		}
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if imgMime, isImg := media.SniffImage(blob.Body); isImg {
+		c.Set("Content-Type", imgMime)
+	} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
+		c.Set("Content-Type", "application/json")
+	} else {
+		return writeErr(c, fiber.StatusUnsupportedMediaType, "blob unfit for serve")
+	}
+	c.Set("Cache-Control", "public, max-age=31536000, immutable")
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("X-Imagestore-Sha256", sha)
+	return c.Send(blob.Body)
+}
+
+func (s *MediaService) handleRetry(c *fiber.Ctx) error {
+	fetch := s.fetch
+	if fetch == nil {
+		fetch = media.FetchBytes
+	}
+	coll := strings.ToLower(strings.TrimSpace(c.Query("coll")))
+	tokenID := strings.TrimSpace(c.Query("id"))
+	if coll == "" || tokenID == "" {
+		return writeErr(c, fiber.StatusBadRequest, "coll and id query params required")
+	}
+
+	_, imageURI, err := s.q.GetTokenMeta(c.Context(), coll, tokenID)
+	if err != nil {
+		if imagestore.IsNoRows(err) || isNotFound(err) {
+			return writeErr(c, fiber.StatusNotFound, "token metadata not found")
+		}
+		log.Warn().Err(err).Str("coll", coll).Str("token", tokenID).Msg("image-retry: db read failed")
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	imageURI = strings.TrimSpace(imageURI)
+	if imageURI == "" {
+		return writeErr(c, fiber.StatusNotFound, "no image_uri on file")
+	}
+	if strings.HasPrefix(imageURI, imagestore.PathPrefix+"/") {
+		return c.JSON(fiber.Map{"status": "already_local", "image_uri": imageURI})
+	}
+	if !isRetriableUpstream(imageURI) {
+		return writeErr(c, fiber.StatusBadRequest, "image_uri is not an upstream URL")
+	}
+
+	body, ferr := fetch(c.Context(), imageURI, tokenID)
+	if ferr != nil {
+		log.Warn().Err(ferr).Str("coll", coll).Str("token", tokenID).Str("src", imageURI).
+			Msg("image-retry: upstream fetch failed")
+		return writeErr(c, fiber.StatusBadGateway, "upstream unavailable")
+	}
+	st, perr := imagestore.Put(c.Context(), s.q, media.SniffImage, imageURI, body)
+	if perr != nil {
+		log.Warn().Err(perr).Str("coll", coll).Str("token", tokenID).
+			Msg("image-retry: imagestore put failed")
+		return writeErr(c, fiber.StatusBadGateway, "self-host failed")
+	}
+	localPath := imagestore.PublicPath(st.Hash)
+	if uerr := s.q.UpdateImageURI(c.Context(), coll, tokenID, localPath); uerr != nil {
+		log.Warn().Err(uerr).Str("coll", coll).Str("token", tokenID).
+			Msg("image-retry: db update failed")
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	log.Info().Str("coll", coll).Str("token", tokenID).Str("hash", st.Hash).Str("prev", imageURI).
+		Msg("image-retry: self-hosted via user-triggered endpoint")
+	return c.JSON(fiber.Map{"status": "ok", "image_uri": localPath})
+}
+
+// isRetriableUpstream gates which URI schemes the retry endpoint will fetch.
+func isRetriableUpstream(uri string) bool {
+	return strings.HasPrefix(uri, "http://") ||
+		strings.HasPrefix(uri, "https://") ||
+		strings.HasPrefix(uri, "ipfs://")
+}
+
+// isClientGone reports whether err is just a torn-down request rather than a real DB failure.
+func isClientGone(err error) bool {
+	if errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if err == nil {
+		return false
+	}
+	if errors.Is(err, pgx.ErrTxClosed) {
+		return true
+	}
+	msg := err.Error()
+	return strings.Contains(msg, "use of closed network connection") ||
+		strings.Contains(msg, "broken pipe") ||
+		strings.Contains(msg, "connection reset by peer")
+}
+
+// verifySellerOnChain returns verified=true when RPC returned a definitive answer.
+func verifySellerOnChain(ctx context.Context, eth chain.Caller, collection, tokenID, seller string) (owns bool, standard string, amount int64, verified bool, err error) {
+	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	owner, err721 := chain.OwnerOf721(ctx, eth, collection, tokenID)
+	if err721 == nil {
+		if chain.SameAddr(owner, seller) {
+			return true, "erc721", 1, true, nil
+		}
+		return false, "erc721", 1, true, nil
+	}
+
+	bal, err1155 := chain.Balance1155(ctx, eth, collection, tokenID, seller)
+	if err1155 == nil {
+		if bal.Sign() > 0 {
+			return true, "erc1155", boundedPositiveAmount(bal), true, nil
+		}
+		return false, "erc1155", 0, true, nil
+	}
+	return false, "", 0, false, err721
+}
+
+func boundedPositiveAmount(v *big.Int) int64 {
+	if v == nil || v.Sign() <= 0 {
+		return 0
+	}
+	if !v.IsInt64() {
+		return maxInt64
+	}
+	n := v.Int64()
+	if n < 1 {
+		return 1
+	}
+	return n
+}
+
+// listingPreflightWithChain reports fillability and repairs stale nft_ownership rows.
+func listingPreflightWithChain(q *db.Q, eth chain.Caller) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		coll := strings.ToLower(c.Params("collection"))
+		tokenID := c.Params("id")
+		seller := strings.ToLower(c.Query("seller"))
+		if seller == "" {
+			return writeErr(c, fiber.StatusBadRequest, "seller query param required")
+		}
+		pf, err := q.ListingPreflight(c.Context(), coll, tokenID, seller)
+		if err != nil {
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+
+		if pf.Listed && !pf.Orphaned && eth != nil {
+			owns, std, amt, verified, verr := verifySellerOnChain(c.Context(), eth, coll, tokenID, seller)
+			if verr == nil && verified {
+				if owns {
+					if !pf.SellerOwns {
+						if werr := q.EnsureListingSellerOwnership(c.Context(), coll, tokenID, seller, std, amt); werr != nil {
+							if isClientGone(werr) {
+								log.Debug().Err(werr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+									Msg("listing-preflight: client gone before repair write")
+							} else {
+								log.Warn().Err(werr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+									Msg("listing-preflight: failed to repair seller-owns row; reporting stale db state")
+							}
+						} else {
+							pf.SellerOwns = true
+						}
+					}
+				} else {
+					if oerr := q.OrphanListing(c.Context(), coll, tokenID, seller); oerr != nil {
+						if isClientGone(oerr) {
+							log.Debug().Err(oerr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+								Msg("listing-preflight: client gone before orphan write")
+						} else {
+							log.Warn().Err(oerr).Str("coll", coll).Str("token", tokenID).Str("seller", seller).
+								Msg("listing-preflight: failed to orphan stale listing; reporting stale db state")
+						}
+					} else {
+						pf.Orphaned = true
+						pf.Listed = false
+						pf.SellerOwns = false
+					}
+				}
+			}
+		}
+
+		ok := pf.Listed && pf.SellerOwns && !pf.Orphaned
+		return c.JSON(fiber.Map{
+			"ok":          ok,
+			"listed":      pf.Listed,
+			"orphaned":    pf.Orphaned,
+			"seller_owns": pf.SellerOwns,
+			"price_wei":   pf.PriceWei,
+		})
+	}
+}

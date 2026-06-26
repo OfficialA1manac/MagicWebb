@@ -277,7 +277,7 @@ func uiMetrics(q *db.Q) fiber.Handler {
 		// shape as before, AND access `.metrics_unavailable` inside the
 		// with-scope so a single banner template shows the unavailable
 		// state on both surfaces.
-		metricsMap := api.BuildMarketResponse(c.Context(), q)
+		metricsMap := api.NewMetricsService(q).BuildResponse(c.Context())
 		activity, _ := q.GetRecentTransactions(c.Context(), 20)
 		return render(c, "pages/metrics.html", fiber.Map{
 			"Title":    "Metrics",
