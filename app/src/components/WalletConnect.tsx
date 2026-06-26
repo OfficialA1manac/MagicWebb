@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { WagmiProvider } from 'wagmi';
 import { createAppKit } from '@reown/appkit/react';
@@ -46,6 +46,35 @@ function WalletButton() {
 
   const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
   const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
+
+  // Sync wallet state to localStorage so the Go HTMX pages (/, /auctions,
+  // /token/:addr/:id, etc.) can read the connected address from
+  // localStorage.mw_addr / localStorage.mw_kind and show the saved-wallet pill
+  // or connected state. Without this bridge, navigating from an Astro page to
+  // a Go HTMX page shows the user as disconnected.
+  //
+  // useRef guard prevents wiping localStorage on initial mount (before wagmi
+  // restores the session): only clear localStorage on an explicit disconnect
+  // transition (was connected → now disconnected), never on first render.
+  const wasConnectedRef = useRef(false);
+  useEffect(() => {
+    if (isConnected && address) {
+      wasConnectedRef.current = true;
+      try {
+        localStorage.setItem('mw_addr', address.toLowerCase());
+        localStorage.setItem('mw_kind', 'walletconnect');
+      } catch (_) {}
+    } else if (wasConnectedRef.current && !isConnected) {
+      // Only clear on explicit disconnect (transition from connected → disconnected)
+      wasConnectedRef.current = false;
+      try {
+        localStorage.removeItem('mw_addr');
+        localStorage.removeItem('mw_kind');
+      } catch (_) {}
+    }
+    // Intentionally ignore the initial-render case (!wasConnected && !isConnected)
+    // to preserve any address saved by a previous session.
+  }, [isConnected, address]);
 
   if (!isConnected) {
     return (

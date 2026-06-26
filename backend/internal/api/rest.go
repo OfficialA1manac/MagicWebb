@@ -32,20 +32,14 @@ import (
 const (
 	cspHeader = "default-src 'self'; " +
 		// Self-hosted JS bundles (htmx/ethers/alpinejs/walletconnect-sdk)
-		// all live under /static, served same-origin. ZERO third-party
-		// script-src origins remain — the WalletConnect SDK was previously
-		// dynamically imported from esm.sh, but each "bundle" URL was a
-		// meta-import that the browser resolved into ~422 nested sub-fetches
-		// (/@msgpack/msgpack/...); any user whose network blocked even one
-		// of those transitive URLs saw "WalletConnect is unavailable" with
-		// zero requests in DevTools. v23.5 committed the bundled SDK to
-		// /static/wc-bundle.js (17 KB Rollup/Terser single-file drop) and
-		// wallet.js does a same-origin import() on click. website origin
-		// is the only remaining script-src surface. api.reown.com + WC
-		// relay wss:// channels stay in connect-src — those are the
-		// PAIRING/DISCOVERY traffic (project metadata + relay socket),
-		// not the SDK source. Without them the QR pairs but never
-		// completes.
+		// all live under /static, served same-origin. The self-hosted
+		// wc-bundle.js is the fallback; the Reown AppKit bridge
+		// (appkit-bridge.js) loads the official Reown SDK from esm.sh
+		// as an ES module — esm.sh is allow-listed in script-src for
+		// this single module import. All transitive imports resolve
+		// against esm.sh's origin, not the page origin, so a compromised
+		// esm.sh could inject JS — the self-hosted WC bundle is the
+		// fallback when esm.sh is unreachable.
 		// Alpine.js evaluates expressions via `new Function()` at runtime, so
 		// 'unsafe-eval' is required for any x-data / x-show / x-if to mount
 		// under CSP. The alternative (@alpinejs/csp) requires a maintained
@@ -60,49 +54,27 @@ const (
 		// IIFE. Both blocks contain only env-controlled values plus literal
 		// JS — Go's html/template auto-escapes the injected strings — so the
 		// 'unsafe-inline' tradeoff is the standard practical match for
-		// self-hosted Alpine + dynamic injection. Nonces per response are
-		// the strict pattern; we revisit when a richer threat model requires
-		// it.
-		// v23.5 — script-src no longer references esm.sh or cdn.jsdelivr.net.
-	// The WalletConnect SDK is fully self-hosted as
-	// /static/wc-bundle.js (17 KB, served same-origin, single Rollup
-	// bundle). Previously these CDN origins were allowlisted so the
-	// browser could fetch the SDK on dynamic import() — now they are
-	// unused. Removing them tightens the CSP surface for any future
-	// XSS attempts: an injected script that tries <script src="https://
-	// esm.sh/evil.js"> is blocked because esm.sh is no longer in
-	// script-src. Same-origin `self` + inline runtime-config + Alpine's
-	// unsafe-eval (required for x-data reactivity) are the only exec
-	// surfaces remaining. verify.walletconnect.com stays in frame-src
-	// below in case future in-iframe verification flows use it.
-	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+		// self-hosted Alpine + dynamic injection.
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-		"font-src 'self' https://fonts.gstatic.com; " +
+		"font-src 'self' https://fonts.gstatic.com https://fonts.reown.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
-		// v23.5 — connect-src: dropped esm.sh + cdn.jsdelivr.net + wss://*.esm.sh
-	// (no longer needed because the WC SDK is self-hosted). Kept:
-	//   * coston2-api.flare.network — chain RPC reads/writes
-	//   * ipfs.io / dweb.link / gateway.pinata.cloud — image fallback for
-	//     /api/v1/media proxy upstream
-	//   * api.reown.com — WalletConnect explorer API (wallet listing metadata)
-	//   * https://*.walletconnect.com + .org — WC verify endpoints + explorer-iframe
-	//   * wss://relay.walletconnect.com + .org / wss://*.walletconnect.{com,org} — WC pairing
-	//     relay (REQUIRED — drop these and the QR pairs but never completes)
-	// v31 CSP FIX: added *.walletconnect.org + relay.walletconnect.org because the
-	// Reown/WalletConnect SDK v2.23.9 migrated from .com to .org for relay and verify
-	// endpoints. Without these additions the browser CSP blocks the WS handshake and
-	// the frame, causing the "Connecting to WalletConnect…" overlay to spin forever.
-	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org; " +
-		// v23.5 — worker-src explicitly allowlisted so the WC SDK v2.x can
-	// spawn its in-process relay-crypto Web Worker (a blob worker built
-	// from the SDK source — see wallet-connect/sdk's KeyChainStorage).
-	// Without this directive the browser falls back to child-src →
-	// script-src → default-src, and while `script-src 'self'` happens to
-	// pass for in-thread WASM, blob workers (URL.createObjectURL) need an
-	// explicit `blob:` token. Belt-and-braces: future SDK versions may
-	// switch from SubtleCrypto to a fallback worker in older browsers.
+		// v24.1 — Reown AppKit CSP: AppKit (the Reown SDK used via appkit-bridge.js)
+		// needs access to its own config API, wallet SDK domains, and relay endpoints.
+		// The previous CSP blocked api.web3modal.org (project config) and
+		// cca-lite.coinbase.com (Coinbase Wallet SDK), which silently prevented
+		// the AppKit modal from initialising — users only saw the raw WC URI fallback.
+		//
+		// connect-src additions:
+		//   * api.web3modal.org — AppKit remote project config (required for init)
+		//   * cca-lite.coinbase.com — Coinbase Wallet SDK amp endpoint
+		//   * *.reown.com — Reown CDN / API (fonts, assets, future endpoints)
+		//   * rpc.walletconnect.com — WalletConnect RPC proxy
+	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://esm.sh https://api.web3modal.org https://cca-lite.coinbase.com https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org https://*.reown.com wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org; " +
+		// worker-src: blob workers needed by WalletConnect SDK crypto relay.
 	"worker-src 'self' blob:; " +
-	"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org; " +
+		// frame-src: WalletConnect + Reown verify iframes + explorer panel.
+	"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://*.reown.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
@@ -122,7 +94,11 @@ func securityHeaders() fiber.Handler {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("Referrer-Policy", referrerPolicy)
 		c.Set("Permissions-Policy", permissionsPolicy)
-		c.Set("Cross-Origin-Opener-Policy", "same-origin")
+		// Cross-Origin-Opener-Policy intentionally absent — "same-origin" breaks
+	// Coinbase Wallet SDK (which requires the header to NOT be same-origin)
+	// and interferes with WalletConnect's popup-based pairing flow.
+	// The CSP frame-ancestors 'none' + X-Frame-Options DENY already provide
+	// equivalent clickjacking protection without the COOP side-effects.
 		return c.Next()
 	}
 }

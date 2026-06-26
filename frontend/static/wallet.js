@@ -575,7 +575,40 @@ window.addEventListener('alpine:init', () => {
       this.setState('connecting');
       try {
         if (!WC_PROJECT_ID) throw new Error('WalletConnect is not configured on this server.');
-        const eip1193 = await this._wcConnect({ silent });
+
+        // ── AppKit bridge (Reown SDK modal with wallet options) ──
+        // When appkit-bridge.js loaded successfully from esm.sh, use the
+        // Reown AppKit modal (wallet list + QR + deep links) instead of the
+        // custom wc-overlay.js. Falls back to self-hosted WC bundle on any
+        // failure (CDN unreachable, user closes modal, init error).
+        let eip1193;
+        let usedAppKit = false;
+        if (!silent) {
+          const bridge = window.__MW_APPKIT__;
+          if (bridge && bridge.connect && bridge.ready) {
+            try {
+              const appKitReady = await bridge.ready;
+              if (appKitReady) {
+                eip1193 = await bridge.connect();
+                usedAppKit = true;
+              }
+            } catch (appKitErr) {
+              // User explicitly closed the AppKit modal — surface the
+              // rejection without falling through to another modal.
+              if (appKitErr && (appKitErr.code === 'MODAL_CLOSED' || appKitErr.code === 4001)) {
+                throw appKitErr;
+              }
+              // Init failure / CDN timeout / esm.sh unreachable — fall
+              // through to the self-hosted WC bundle silently.
+              try { console.warn('[mw] AppKit connect failed, falling back to self-hosted WC:', appKitErr.message || appKitErr); } catch (_) {}
+            }
+          }
+        }
+        // Fallback: self-hosted WalletConnect Ethereum Provider (wc-bundle.js)
+        if (!eip1193) {
+          eip1193 = await this._wcConnect({ silent });
+        }
+
         const provider = new ethers.BrowserProvider(eip1193);
         const accounts = await provider.send('eth_requestAccounts', []);
         if (!accounts?.length) throw new Error('No account authorized.');
@@ -671,13 +704,13 @@ window.addEventListener('alpine:init', () => {
         await this._authenticate();
         await this.refreshUnread();
         this.setState('connected');
-        // Close the WC QR overlay on successful connection so the user
-        // isn't left staring at a stale spinner or QR code. The overlay's
-        // state listener only closes on non-{connecting,connected} states
-        // (to avoid yanking the modal mid-pair), so we dispatch the
-        // explicit close command here.
+        // Close the pairing modal on successful connection.
+        // AppKit manages its own modal — only close the custom overlay
+        // when the self-hosted WC bundle was used.
         if (!silent) {
-          try { MW_WC_hide(); } catch (_) {}
+          if (!usedAppKit) {
+            try { MW_WC_hide(); } catch (_) {}
+          }
           toast('Connected via WalletConnect', 'success');
         }
       } catch (e) {
@@ -846,6 +879,8 @@ window.addEventListener('alpine:init', () => {
     },
 
     disconnect() {
+      // AppKit teardown — close the WC session from the Reown SDK side
+      try { window.__MW_APPKIT__?.disconnect?.(); } catch (_) {}
       try { this._raw.wc?.disconnect?.(); } catch (_) {}
       this._raw = { provider: null, signer: null, wc: null };
       this.address = null;

@@ -2,6 +2,13 @@
 FROM node:22-alpine AS astro-build
 WORKDIR /astro
 
+# Reown Project ID (shared with Go backend's WC_PROJECT_ID).
+# Injected at build time so Astro's import.meta.env.PUBLIC_REOWN_PROJECT_ID
+# is available in WalletConnect.tsx. Falls back to the same WC_PROJECT_ID
+# used by the Go backend (fly.toml passes it as a build arg).
+ARG REOWN_PROJECT_ID=af6aba4c71274871c3d77a60050171ba
+ENV PUBLIC_REOWN_PROJECT_ID=$REOWN_PROJECT_ID
+
 # Copy app directory (Astro + Svelte + React + AppKit)
 COPY app/package.json app/package-lock.json* ./
 

@@ -574,23 +574,88 @@ func mountStatic(app *fiber.App) {
 	}))
 }
 
-// mountAstro serves Astro-built pages from app/dist/ at the /app URL prefix.
+// mountAstro serves Astro-built pages from app/dist/ at the root URL prefix.
 // In dev mode the Astro dev server handles requests directly (with proxy from
 // :4321 to Go on :8080). In production, this route serves the pre-built static
 // output so all pages work without a separate Node process.
+//
+// The filesystem middleware serves Astro's index.html for /, Astro's
+// listings/index.html for /listings, etc. For paths where Astro doesn't
+// have a page (e.g. /auctions, /token/:addr/:id), the middleware passes
+// through to the Go HTMX route handlers below — so the Go backend pages
+// remain reachable while Astro takes over the pages it provides.
 //
 // ASTRO_DIST_DIR env var overrides the path (default "../app/dist" for dev;
 // in the Docker image the value is "/app/dist").
 func mountAstro(app *fiber.App) {
 	distPath := envOrDefault("ASTRO_DIST_DIR", "../app/dist")
-	log.Info().Str("path", distPath).Msg("mounting Astro static pages at /app/*")
-	app.Use("/app", filesystem.New(filesystem.Config{
-		Root:   http.Dir(distPath),
-		MaxAge: 3600,
-		// If Astro pages aren't at this path, the middleware passes through
-		// to the next handler (404) rather than crashing.
-		NotFoundFile: "",
-	}))
+	log.Info().Str("path", distPath).Msg("mounting Astro static pages at root /")
+
+	// Custom middleware: serves Astro-built files from distPath when they
+	// exist, otherwise calls c.Next() to pass through to the Go HTMX route
+	// handlers. Uses fiber.Ctx.SendFile (fasthttp-native) to avoid the
+	// net/http ↔ fasthttp type mismatch that http.FileServer would cause.
+	app.Use("/", func(c *fiber.Ctx) error {
+		path := c.Path()
+
+		// Skip filesystem stat on API, auth, static, SSE, partials, and
+		// health-check paths — those are served by dedicated route handlers.
+		if strings.HasPrefix(path, "/api/") ||
+			strings.HasPrefix(path, "/auth/") ||
+			strings.HasPrefix(path, "/static/") ||
+			strings.HasPrefix(path, "/partials/") ||
+			path == "/events" ||
+			path == "/healthz" ||
+			path == "/readyz" {
+			return c.Next()
+		}
+
+		// Normalise the path to a file path relative to the Astro dist dir.
+		rel := strings.TrimPrefix(path, "/")
+		if rel == "" {
+			rel = "index.html"
+		}
+
+		// Sanitise the relative path to prevent directory traversal.
+		// filepath.Join resolves ../ segments via filepath.Clean, so a
+		// malicious /../../../etc/passwd would escape distPath. We enforce
+		// that the resolved path stays under the Astro dist root.
+		cleanRel := filepath.Clean(rel)
+		fullPath := filepath.Join(distPath, cleanRel)
+		cleanDist := filepath.Clean(distPath)
+		if !strings.HasPrefix(fullPath, cleanDist+string(filepath.Separator)) && fullPath != cleanDist {
+			// Path escapes the dist directory — reject and pass through.
+			return c.Next()
+		}
+
+		// Try exact file match.
+		if info, err := os.Stat(fullPath); err == nil && !info.IsDir() {
+			// HTML pages get a short cache (5 min) so deploys surface quickly.
+			// Hashed JS/CSS assets (from Vite) get 1 year — they're immutable.
+			if strings.HasSuffix(fullPath, ".html") {
+				c.Set("Cache-Control", "public, max-age=300")
+			} else {
+				c.Set("Cache-Control", "public, max-age=31536000, immutable")
+			}
+			return c.SendFile(fullPath)
+		}
+
+		// Try directory index.html.
+		indexPath := filepath.Join(distPath, cleanRel, "index.html")
+		if _, err := os.Stat(indexPath); err == nil {
+			// Redirect /listings → /listings/ so relative asset paths resolve.
+			// Use 302 (temporary) so browsers don't cache the redirect — if
+			// the site architecture changes, users won't be stuck in a loop.
+			if !strings.HasSuffix(c.Path(), "/") {
+				return c.Redirect(c.Path()+"/", fiber.StatusFound)
+			}
+			c.Set("Cache-Control", "public, max-age=300")
+			return c.SendFile(indexPath)
+		}
+
+		// No Astro file for this path — pass through to Go HTMX routes.
+		return c.Next()
+	})
 }
 
 // envOrDefault reads an env var, returning the default if empty or unset.

@@ -3,6 +3,8 @@ primary_region = "iad"
 
 [build]
   dockerfile = "Dockerfile"
+  [build.args]
+    REOWN_PROJECT_ID = "af6aba4c71274871c3d77a60050171ba"
 
 # Non-secret config. WalletConnect project IDs are PUBLIC client identifiers
 # (used by the dApp at runtime to look up the pairing relay) — embedding
