@@ -30,7 +30,7 @@
        v23.5: bumped ?v=21 → ?v=22 to force the browser to re-fetch the
        static bundle in case any future deploy invalidates it; happens in
        lock-step with the wallet.js / wc-bundle.js buster bump below. -->
-  <link rel="stylesheet" href="/static/tailwind.css?v=31">
+  <link rel="stylesheet" href="/static/tailwind.css?v=33">
 
   <!-- ── Self-hosted JS libraries (htmx, ethers, alpinejs, walletconnect) ──
        Previously these were loaded from public CDNs with SHA-384 SRI
@@ -126,9 +126,9 @@
              window.MW_WC_URI + wallet store state, renders the QR
              from cache if both are non-idle, and otherwise opens the
              spinner so the user sees progress. -->
-  <script src="/static/htmx.min.js?v=31" defer></script>
-  <script src="/static/sse.js?v=31" defer></script>
-  <script src="/static/ethers.umd.min.js?v=31" defer></script>
+  <script src="/static/htmx.min.js?v=33" defer></script>
+  <script src="/static/sse.js?v=33" defer></script>
+  <script src="/static/ethers.umd.min.js?v=33" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
     // These globals are READ by wallet.js at alpine:init time. NEVER hardcode.
@@ -185,13 +185,18 @@
        the performance cost is real but is the cheapest mitigation against
        the entire "CDN-dependent SDK" failure class. Unique per release:
        the cache-buster `?v=23` is bumped in lock-step with wallet.js so
-       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=32" defer></script>
-      <!-- wc-overlay.js: WalletConnect pairing overlay (centered modal with loading/URI display).
+       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=33" defer></script>
+      <!-- qrcode.min.js: QR Code Generator for JavaScript — renders the WalletConnect URI
+           into a scannable QR code image. Loads BEFORE wc-overlay.js so the `qrcode` global
+           is available when MW_WC_showURI() generates the QR from the relay URI. The library
+           produces a data:image/gif;base64 URL — no canvas, no external API, no third-party. -->
+      <script src="/static/qrcode.min.js?v=33" defer></script>
+      <!-- wc-overlay.js: WalletConnect pairing overlay (centered modal with QR code display).
            Must load BEFORE wallet.js so the MW_WC_show/MW_WC_showURI/MW_WC_hide functions
            are available when wallet.js calls them during the connect() flow. -->
-      <script src="/static/wc-overlay.js?v=32" defer></script>
-      <script src="/static/wallet.js?v=32" defer></script>
-  <script src="/static/cdn.min.js?v=32" defer></script>
+      <script src="/static/wc-overlay.js?v=33" defer></script>
+      <script src="/static/wallet.js?v=33" defer></script>
+  <script src="/static/cdn.min.js?v=33" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }
