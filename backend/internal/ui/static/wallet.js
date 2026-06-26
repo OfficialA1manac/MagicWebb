@@ -846,10 +846,9 @@ window.addEventListener('alpine:init', () => {
         await wc.connect();
       } catch (e) {
         try { wc.disconnect(); } catch (_) {}
-        // Tell the overlay to dismiss so the user isn't stranded on a
-        // frozen spinner after a cancelled / failed pairing.
+        // Reown's built-in modal auto-dismisses on error.
         if (!silent) {
-          try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+          // overlay auto-closes; no manual event needed
         }
         throw e;
       }
@@ -866,11 +865,7 @@ window.addEventListener('alpine:init', () => {
       localStorage.removeItem('mw_addr');
       localStorage.removeItem('mw_jwt');
       localStorage.removeItem('mw_kind');
-      // Always tell the overlay to release if it had been open. The
-      // overlay's mw-wallet-state listener will ALSO auto-close when
-      // state leaves {connecting, connected} but a programmatic dispatch
-      // is the belt vs. any future state-event timing regression.
-      try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+      // Reown's built-in modal auto-resets on disconnect.
     },
 
     async _switchChain() {
@@ -1773,37 +1768,13 @@ function MW_HIDE_ALL() {
       try { if (d.open)      d.open      = false; } catch (_) {}
     }
   }
-  // 2. WC QR overlay (event-bus driven, no nav-scope tie).
-  try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
-  // 3. NFT picker.
+  // 2. NFT picker.
   try { window.dispatchEvent(new CustomEvent('mw-nft-picker-hide')); } catch (_) {}
-  // 4. Action modal — only when NOT in the middle of a wallet signing
-  //    confirmation. The store's dismiss() callback is the canonical
-  //    path; we guard with step < 1 explicitly so an in-flight buy
-  //    (step >= 1) is NEVER touched (the user can't cancel a
-  //    signed tx from the server anyway, but dismissing the modal
-  //    mid-flight leaves them with no UI feedback for the tx).
+  // 3. CSS-level DOM poke — force-hide the NFT picker modal root so a
+  //    wedged x-transition cannot hold it onscreen.
   try {
-    const m = typeof Alpine !== 'undefined' && Alpine.store && Alpine.store('modals');
-    if (m && m.open && typeof m.step === 'number' && m.step < 1) {
-      m.dismiss();
-    }
-  } catch (_) {}
-  // 5. CSS-level DOM poke: any modal-root that has `style="display:none"`
-  //    already at init gets stamped now via inline style override so a
-  //    wedged `x-transition` cannot hold the dropdown onscreen even
-  //    if every reactive flag is correctly false. Belt vs. the known
-  //    "Alpine transition freezing on tab-hide" race.
-  try {
-    const ids = ['wc-modal-root', 'nft-picker-modal-root', 'mw-modal-killer'];
-    for (const id of ids) {
-      const el = document.getElementById(id);
-      if (el) el.style.display = 'none';
-    }
-    // The action modal's root div is unnamed in action_modal.html
-    // (wrapped in <template x-if="true">) — pattern-match its class.
-    const actionRoot = document.querySelector('div.fixed.inset-0.z-\\[70\\]');
-    if (actionRoot) actionRoot.style.display = 'none';
+    const root = document.getElementById('nft-picker-modal-root');
+    if (root) root.style.display = 'none';
   } catch (_) {}
 }
 window.MW_HIDE_ALL = MW_HIDE_ALL;

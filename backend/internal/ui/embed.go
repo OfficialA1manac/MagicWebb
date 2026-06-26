@@ -201,8 +201,6 @@ var partialPaths = []string{
 	"partials/auction_cards.html",
 	"partials/activity_feed.html",
 	"partials/nft_picker.html",
-	"partials/action_modal.html",
-	"partials/wc_qr_overlay.html",
 	// Live-region partials — each mirrors the (re-rendered) inner content of
 	// a detail page so htmx can swap *only* the dynamic region every 1s
 	// without re-rendering navbar / footer / wallet picker / WC overlay.
