@@ -78,7 +78,7 @@
           {{with .Listing}}
           <button class="w-full py-4 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-base transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
                   @click="$store.wallet.buy('{{.Collection}}', '{{.TokenID}}', '{{lower .Seller}}', '{{.PriceWei}}')">
-            <span>Buy Now</span><span class="text-base">→</span><span>{{wei2flr .PriceWei}} {{.NativeCurrency}}</span>
+            <span>Buy Now</span><span class="text-base">→</span><span>{{wei2flr .PriceWei}} {{$.NativeCurrency}}</span>
           </button>
           <template x-if="isSeller">
             <button class="w-full py-2.5 rounded-xl border border-gold-400/30 hover:bg-gold-500/10 text-gold-200 text-sm font-bold transition"

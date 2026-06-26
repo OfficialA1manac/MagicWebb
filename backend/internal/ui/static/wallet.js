@@ -677,7 +677,8 @@ window.addEventListener('alpine:init', () => {
         // (to avoid yanking the modal mid-pair), so we dispatch the
         // explicit close command here.
         if (!silent) {
-          // Reown AppKit modal auto-closes on connect; no hide event needed.
+          // Remove the WC URI banner on successful connection.
+          try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
           toast('Connected via WalletConnect', 'success');
         }
       } catch (e) {
@@ -812,7 +813,7 @@ window.addEventListener('alpine:init', () => {
             [1]: 'https://ethereum-rpc.publicnode.com',
             [CHAIN_ID]: RPC_URL,
           },
-          showQrModal: true,
+          showQrModal: false,
           metadata: {
             name:    'MagicWebb',
             description: 'Non-custodial NFT marketplace on ' + NETWORK_NAME,
@@ -832,13 +833,27 @@ window.addEventListener('alpine:init', () => {
       this._raw.wc = R(wc);
 
       wc.on('display_uri', (uri) => {
-        // Reown AppKit built-in modal renders the QR automatically.
-        // Cache the URI for diagnostics only.
         if (silent) return;
         if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
         try {
           console.log('[mw-wc-debug] _wcConnect: display_uri received');
+        } catch (_) {}
+        // Show a persistent notification with the WC URI so the user
+        // can copy it into their wallet app (mobile or desktop).
+        // Create a small inline banner above the toast container.
+        try {
+          const existing = document.getElementById('wc-uri-banner');
+          if (existing) existing.remove();
+          const banner = document.createElement('div');
+          banner.id = 'wc-uri-banner';
+          banner.className = 'fixed bottom-20 right-4 z-[60] max-w-sm bg-ink-900/95 border border-violet-400/40 rounded-2xl p-4 shadow-2xl glow-violet fade-in';
+          banner.innerHTML = '<div class="flex items-center gap-2.5 mb-2"><span class="text-violet-200 text-lg">⌬</span><span class="text-sm font-extrabold text-white">WalletConnect ready</span></div>'
+            + '<p class="text-xs text-white/70 mb-2.5">Open your mobile wallet app and choose WalletConnect, then paste the link below:</p>'
+            + '<div class="flex gap-2"><input id="wc-uri-input" readonly class="flex-1 bg-ink-800 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-white/70 truncate" value="' + uri.replace(/"/g, '&quot;') + '"></input>'
+            + '<button onclick="var i=document.getElementById(\'wc-uri-input\');i.select();navigator.clipboard.writeText(i.value).then(function(){var t=this;t.textContent=\'✓ Copied\';setTimeout(function(){t.textContent=\'Copy\'},2000);}.bind(this)).catch(function(){})" class="px-3 py-2 rounded-xl btn-sky text-ink-950 text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap shrink-0">Copy</button></div>'
+            + '<button onclick="this.parentElement.remove()" class="mt-2 text-[10px] text-white/40 hover:text-white transition">Dismiss</button>';
+          document.body.appendChild(banner);
         } catch (_) {}
       });
 
@@ -846,9 +861,9 @@ window.addEventListener('alpine:init', () => {
         await wc.connect();
       } catch (e) {
         try { wc.disconnect(); } catch (_) {}
-        // Reown's built-in modal auto-dismisses on error.
         if (!silent) {
-          // overlay auto-closes; no manual event needed
+          // Remove the WC URI banner on connection error.
+          try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
         }
         throw e;
       }
@@ -865,7 +880,7 @@ window.addEventListener('alpine:init', () => {
       localStorage.removeItem('mw_addr');
       localStorage.removeItem('mw_jwt');
       localStorage.removeItem('mw_kind');
-      // Reown's built-in modal auto-resets on disconnect.
+      try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
     },
 
     async _switchChain() {
