@@ -9,7 +9,7 @@ import (
 	"github.com/yuin/goldmark"
 	"github.com/yuin/goldmark/extension"
 
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/ui"
+	"github.com/OfficialA1manac/MagicWebb/frontend"
 )
 
 // docEntry describes one in-app document. Markdown sources are embedded in
@@ -53,7 +53,7 @@ func renderDoc(d docEntry) (template.HTML, error) {
 	if h, ok := docHTMLCache.Load(d.Slug); ok {
 		return h.(template.HTML), nil
 	}
-	src, err := ui.FS.ReadFile("docs/" + d.File)
+	src, err := frontend.FS.ReadFile("docs/" + d.File)
 	if err != nil {
 		return "", err
 	}

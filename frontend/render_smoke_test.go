@@ -15,7 +15,7 @@
 // signal-to-noise: it covers the highest-leverage regression class
 // (WC + contract wiring) with one fully-specified data map and zero
 // flakiness.
-package ui
+package frontend
 
 import (
 	"bytes"
@@ -38,6 +38,7 @@ import (
 // after the next deploy, when users on a clean browser cache see
 // nothing.
 //go:embed static/tailwind.css
+var _ = func() bool { return true }() // ensure embed is used
 var tailwindCSS string
 
 func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {

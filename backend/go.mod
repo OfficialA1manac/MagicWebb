@@ -3,6 +3,7 @@ module github.com/OfficialA1manac/MagicWebb/backend
 go 1.25.0
 
 require (
+	github.com/OfficialA1manac/MagicWebb/frontend v0.0.0
 	github.com/ethereum/go-ethereum v1.17.0
 	github.com/gofiber/fiber/v2 v2.52.13
 	github.com/google/uuid v1.6.0
@@ -62,3 +63,5 @@ require (
 	golang.org/x/text v0.35.0 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )
+
+replace github.com/OfficialA1manac/MagicWebb/frontend => ../frontend

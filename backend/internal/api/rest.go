@@ -220,31 +220,16 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
-	api.Get("/listings", listListings(q))
-	api.Get("/listings/:collection/:id/preflight", listingPreflightWithChain(q, eth))
-	api.Get("/listings/:collection/:id", getListing(q))
+	// Domain-specific route registrations.
+	NewListingsService(q, eth).RegisterRoutes(api)
+	NewAuctionsService(q).RegisterRoutes(api)
+	NewOffersService(q).RegisterRoutes(api)
+	NewCollectionsService(q).RegisterRoutes(api)
+
+	// Media routes.
 	api.Get("/media", mediaProxy(q))
-	// User-triggered immediate self-host of an upstream image. The slow-path
-	// retry worker (indexer.runImageRetryWorker) does the same work on a
-	// 60-min cadence; this endpoint just runs it synchronously on click.
-	// POST is the right verb because the call writes to nft_metadata and
-	// nft_tokens; idempotent (repeat clicks land on the same /api/v1/img/
-	// path). Auth not required — the per-IP rate limiter in api group caps
-	// abuse.
 	api.Post("/img/retry", imageRetryNow(q, media.FetchBytes))
 	app.Get(imagestore.PathPrefix+"/:sha256", imageByHash(q))
-	api.Get("/collections", listCollections(q))
-	api.Get("/collections/:address/traits", collectionTraits(q))
-	api.Get("/collections/:address", getCollection(q))
-	api.Get("/trending", getTrending(q))
-
-	api.Get("/auctions", listAuctions(q))
-	api.Get("/auctions/:id", getAuction(q))
-	api.Get("/auctions/:id/bids", getAuctionBids(q))
-	api.Get("/server-time", serverTime())
-
-	api.Get("/offers", listOffers(q))
-	api.Get("/offers/:collection/:id/position", offerPosition(q))
 
 	// Wallet NFT enumeration (picker source).
 	api.Get("/wallet/:addr/nfts", walletNFTs(q))

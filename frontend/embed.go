@@ -1,5 +1,5 @@
-// Package ui holds embedded templates and static assets.
-package ui
+// Package frontend holds embedded templates and static assets.
+package frontend
 
 import (
 	"embed"
@@ -9,12 +9,10 @@ import (
 	"strconv"
 	"strings"
 	"time"
-
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
 var (
-	strconvI = strconv.Itoa
+	strconvI    = strconv.Itoa
 	formatFloat = func(f *big.Float, decimals int) string {
 		return f.Text('f', decimals)
 	}
@@ -23,7 +21,9 @@ var (
 //go:embed all:templates all:static all:docs
 var FS embed.FS
 
-var funcMap = template.FuncMap{
+// baseFuncMap is the template function map without the mediaURL function
+// (which is injected by Init() to avoid a circular module dependency).
+var baseFuncMap = template.FuncMap{
 	// wei2flr converts a wei decimal string to a human-readable FLR string
 	// with adaptive precision. The old padding-to-18-chars approach dropped
 	// the leading "0" for sub-wei values (1 wei → ".0000") and silently
@@ -71,52 +71,52 @@ var funcMap = template.FuncMap{
 		flr := new(big.Float).SetPrec(64).Quo(bf, big.NewFloat(1e18))
 		return formatFloat(flr, 4)
 	},
-// mulf multiplies a numeric value (int or float64) by a float64 and renders
-// it as a decimal string with adaptive precision. Drives template-side
-// "bps → percent" conversions on auction detail (min increment %). Pure
-// arithmetic — no wei scale, no half-up rounding (Go's strconv uses the
-// shortest-round representation, good enough for a UI percentage).
-"mulf": func(v any, factor float64) string {
-	var x float64
-	switch t := v.(type) {
-	case int:
-		x = float64(t)
-	case int64:
-		x = float64(t)
-	case float64:
-		x = t
-	case string:
-		if f, err := strconv.ParseFloat(t, 64); err == nil {
-			x = f
+	// mulf multiplies a numeric value (int or float64) by a float64 and renders
+	// it as a decimal string with adaptive precision. Drives template-side
+	// "bps → percent" conversions on auction detail (min increment %). Pure
+	// arithmetic — no wei scale, no half-up rounding (Go's strconv uses the
+	// shortest-round representation, good enough for a UI percentage).
+	"mulf": func(v any, factor float64) string {
+		var x float64
+		switch t := v.(type) {
+		case int:
+			x = float64(t)
+		case int64:
+			x = float64(t)
+		case float64:
+			x = t
+		case string:
+			if f, err := strconv.ParseFloat(t, 64); err == nil {
+				x = f
+			}
+		default:
+			x = 0
 		}
-	default:
-		x = 0
-	}
-	r := x * factor
-	// Drop trailing zeros for a clean display: 5.00 → "5", 5.10 → "5.1".
-	s := strconv.FormatFloat(r, 'f', -1, 64)
-	return s
-},
-// subf returns (wei_a − wei_b) as a decimal-string wei value. The two
-// arguments are wei decimal strings (PriceWei − NetOf(PriceWei) → the 1.5%
-// fee line). BigFloat arithmetic so we never lose precision at the wei
-// scale. Go-template funcMap cannot introspect nested arg types, so we
-// accept strings here — caller-side just passes `{{subf .PriceWei (netOf
-// .PriceWei)}}`.
-"subf": func(aWei, bWei string) string {
-	ai, okA := new(big.Int).SetString(aWei, 10)
-	bi, okB := new(big.Int).SetString(bWei, 10)
-	if !okA || !okB {
-		return "0"
-	}
-	r := new(big.Int).Sub(ai, bi)
-	return r.String()
-},
-// netOf returns the seller-pays net of a wei string: full price minus the
-// immutable 1.5% platform fee, in wei (decimal string). Kept in template
-// helpers so the price→rendered fee math lives in one place (the math
-// itself is also encoded in the contract — they MUST stay equal).
-"netOf": func(priceWei string) string {
+		r := x * factor
+		// Drop trailing zeros for a clean display: 5.00 → "5", 5.10 → "5.1".
+		s := strconv.FormatFloat(r, 'f', -1, 64)
+		return s
+	},
+	// subf returns (wei_a − wei_b) as a decimal-string wei value. The two
+	// arguments are wei decimal strings (PriceWei − NetOf(PriceWei) → the 1.5%
+	// fee line). BigFloat arithmetic so we never lose precision at the wei
+	// scale. Go-template funcMap cannot introspect nested arg types, so we
+	// accept strings here — caller-side just passes `{{subf .PriceWei (netOf
+	// .PriceWei)}}`.
+	"subf": func(aWei, bWei string) string {
+		ai, okA := new(big.Int).SetString(aWei, 10)
+		bi, okB := new(big.Int).SetString(bWei, 10)
+		if !okA || !okB {
+			return "0"
+		}
+		r := new(big.Int).Sub(ai, bi)
+		return r.String()
+	},
+	// netOf returns the seller-pays net of a wei string: full price minus the
+	// immutable 1.5% platform fee, in wei (decimal string). Kept in template
+	// helpers so the price→rendered fee math lives in one place (the math
+	// itself is also encoded in the contract — they MUST stay equal).
+	"netOf": func(priceWei string) string {
 		if priceWei == "" || priceWei == "0" {
 			return "0"
 		}
@@ -173,7 +173,6 @@ var funcMap = template.FuncMap{
 	"unix": func(t time.Time) int64 {
 		return t.Unix()
 	},
-	"mediaURL": media.ProxyURL,
 	// isUpstream reports whether a stored image_uri is an http(s)/(ipfs)
 	// URL we still need to self-host — drives the user-triggerable retry
 	// banner. Empty / local /api/v1/img/<sha> values are NOT upstream (the
@@ -186,24 +185,16 @@ var funcMap = template.FuncMap{
 	},
 }
 
+// Templates maps page/partial keys to parsed template sets.
+var Templates map[string]*template.Template
+
 // partialPaths lists every partial HTML fragment that's loaded into BOTH
-// the full-page templates AND standalone for HTMX partial swaps. Adding a
-// new page-level partial here is the only step required to make it
-// available on every page (it's included from layout.html via
-// {{template "partials/<name>.html" .}}).
-//
-// 5-color layout breaks into logical slices — grid fragments (cards) are
-// reusable across pages; live-region wrappers (token_live / etc.) are
-// page-mirror partials so a per-page detail panel can re-render on SSE
-// OR every-1s polling via htmx without the layout roundtrip.
+// the full-page templates AND standalone for HTMX partial swaps.
 var partialPaths = []string{
 	"partials/listing_cards.html",
 	"partials/auction_cards.html",
 	"partials/activity_feed.html",
 	"partials/nft_picker.html",
-	// Live-region partials — each mirrors the (re-rendered) inner content of
-	// a detail page so htmx can swap *only* the dynamic region every 1s
-	// without re-rendering navbar / footer / wallet picker / WC overlay.
 	"partials/token_live.html",
 	"partials/auction_live.html",
 	"partials/offers_live.html",
@@ -224,26 +215,27 @@ var pagePaths = []string{
 	"pages/docs.html",
 }
 
-// Templates maps page/partial keys to parsed template sets.
-var Templates map[string]*template.Template
-
-func init() {
+// Init parses and stores the template set. The mediaURLFn parameter provides
+// the template function for resolving media URLs; it is injected at startup
+// by the backend to avoid a circular module dependency.
+func Init(mediaURLFn func(string) string) {
 	sub, err := fs.Sub(FS, "templates")
 	if err != nil {
-		panic("ui: templates sub: " + err.Error())
+		panic("frontend: templates sub: " + err.Error())
 	}
+
+	// Build the full funcMap by supplementing baseFuncMap with mediaURL.
+	funcMap := make(template.FuncMap, len(baseFuncMap)+1)
+	for k, v := range baseFuncMap {
+		funcMap[k] = v
+	}
+	funcMap["mediaURL"] = mediaURLFn
 
 	Templates = make(map[string]*template.Template)
 
 	// Per-page sets: layout + page + all partials
 	// Option("missingkey=zero") makes missing template variables render
-	// as zero-valued strings/numbers/booleans rather than `<no value>`,
-	// which keeps the static render smoke (`internal/ui/render_smoke_test.go`)
-	// from tripping on sparse dummy data while still surfacing real
-	// parse-time errors (EOF in an unclosed directive, references to
-	// undefined template names). Parse and execute use different code
-	// paths in html/template, so this does NOT mask EOF panics — those
-	// still fire at parse time before any rendering.
+	// as zero-valued strings/numbers/booleans rather than `<no value>`.
 	for _, page := range pagePaths {
 		files := make([]string, 0, 2+len(partialPaths))
 		files = append(files, "layout.html", page)

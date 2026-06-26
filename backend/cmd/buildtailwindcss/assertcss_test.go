@@ -52,7 +52,7 @@ func cssPath(t *testing.T) string {
 	if !ok {
 		t.Fatal("runtime.Caller(0) failed; cannot resolve artefact path")
 	}
-	p := filepath.Join(filepath.Dir(thisFile), "..", "..", "internal", "ui", "static", "tailwind.css")
+	p := filepath.Join(filepath.Dir(thisFile), "..", "..", "..", "frontend", "static", "tailwind.css")
 	abs, err := filepath.Abs(p)
 	if err != nil {
 		t.Fatalf("filepath.Abs(%q): %v", p, err)

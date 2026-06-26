@@ -39,22 +39,6 @@ func walletNFTs(q *db.Q) fiber.Handler {
 	}
 }
 
-// ── Collection trait values (listing filters) ─────────────────────────────
-
-func collectionTraits(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		coll := strings.ToLower(c.Params("address"))
-		m, err := q.ListTraitValues(c.Context(), coll)
-		if err != nil {
-			return writeErr(c, fiber.StatusInternalServerError, "internal error")
-		}
-		if m == nil {
-			m = map[string][]string{}
-		}
-		return c.JSON(m)
-	}
-}
-
 // ── Notifications ──────────────────────────────────────────────────────────
 
 func listNotifications(q *db.Q) fiber.Handler {

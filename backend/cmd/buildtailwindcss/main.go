@@ -1,5 +1,5 @@
 // Command buildtailwindcss produces the static `tailwind.css` that
-// backend/internal/ui/templates/layout.html loads instead of the JIT
+// frontend/templates/layout.html loads instead of the JIT
 // compiler (https://cdn.tailwindcss.com). The JIT script was a multi-MB
 // runtime tailwind-loader evaluating CSS rules in every browser, AND
 // introduced an XSS surface if cdn.tailwindcss.com were ever compromised.
@@ -11,8 +11,8 @@
 //	go run ./cmd/buildtailwindcss
 //
 // Run before first deploy and any time:
-//   - a Tailwind config field changes (internal/ui/tailwind.config.cjs)
-//   - a template's class list changes (internal/ui/templates/**/*.html)
+//   - a Tailwind config field changes (../frontend/tailwind.config.cjs)
+//   - a template's class list changes (../frontend/templates/**/*.html)
 //
 // The output CSS is committed to git so prod never needs to invoke the
 // JIT compiler at runtime.
@@ -37,7 +37,7 @@ import (
 )
 
 // Pinned to a stable Tailwind release. Bump in lockstep with
-// internal/ui/tailwind.config.cjs content if features used by the
+// ../frontend/tailwind.config.cjs content if features used by the
 // project require a newer minor.
 const tailwindVersion = "v3.4.10"
 
@@ -205,9 +205,9 @@ func main() {
 	if err != nil {
 		log.Fatalf("download Tailwind CLI: %v", err)
 	}
-	configPath := filepath.Join(root, "internal", "ui", "tailwind.config.cjs")
-	templatesRoot := filepath.Join(root, "internal", "ui", "templates")
-	outputCSS := filepath.Join(root, "internal", "ui", "static", "tailwind.css")
+	configPath := filepath.Join(root, "..", "frontend", "tailwind.config.cjs")
+	templatesRoot := filepath.Join(root, "..", "frontend", "templates")
+	outputCSS := filepath.Join(root, "..", "frontend", "static", "tailwind.css")
 	contentGlob := templatesRoot + "/**/*.html"
 
 	if _, err := os.Stat(configPath); err != nil {
@@ -218,7 +218,7 @@ func main() {
 	// would pass; CLI is documented at https://tailwindcss.com/docs/installation.
 	args := []string{
 		"-c", configPath,
-		"-i", filepath.Join(root, "internal", "ui", "static", "tailwind.src.css"),
+		"-i", filepath.Join(root, "..", "frontend", "static", "tailwind.src.css"),
 		"-o", outputCSS,
 		"--content", contentGlob,
 		"--minify",

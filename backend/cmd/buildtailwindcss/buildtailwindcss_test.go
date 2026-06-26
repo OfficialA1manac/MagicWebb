@@ -41,7 +41,7 @@ func TestRepoRootReachesGomod(t *testing.T) {
 func TestOutputPathIsUnderStaticFS(t *testing.T) {
 	// Run repoRoot() via the test (it must walk to go.mod).
 	root := repoRoot()
-	want := filepath.Join(root, "internal", "ui", "static", "tailwind.css")
+	want := filepath.Join(root, "..", "frontend", "static", "tailwind.css")
 	got := filepath.Clean(filepath.Join(root, "internal", "ui", "static", "tailwind.css"))
 	if got != want {
 		t.Fatalf("output path construction drifted: got %q want %q", got, want)
@@ -54,7 +54,7 @@ func TestOutputPathIsUnderStaticFS(t *testing.T) {
 // render but classes like `flex` go unstyled.
 func TestContentGlobTemplates(t *testing.T) {
 	root := repoRoot()
-	glob := filepath.Join(root, "internal", "ui", "templates") + "/**/*.html"
+	glob := filepath.Join(root, "..", "frontend", "templates") + "/**/*.html"
 	if _, err := filepath.Match(glob, ""); err != nil {
 		t.Fatalf("glob invalid: %v", err)
 	}

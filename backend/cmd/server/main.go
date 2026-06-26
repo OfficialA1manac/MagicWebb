@@ -27,10 +27,12 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+	"github.com/OfficialA1manac/MagicWebb/frontend"
 )
 
 func main() {
@@ -376,6 +378,10 @@ func verifyEIP191(message, sigHex, address string) (bool, error) {
 // ── UI (HTMX pages + static) ──────────────────────────────────────────────────
 
 func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
+	// Initialize frontend templates with media URL function.
+	// Must happen before any template rendering.
+	frontend.Init(media.ProxyURL)
+
 	// Static files from embedded FS
 	mountStatic(app)
 

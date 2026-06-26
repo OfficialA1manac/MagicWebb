@@ -17,7 +17,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/ui"
+	"github.com/OfficialA1manac/MagicWebb/frontend"
 )
 
 // render executes the named template, injecting the contract addresses and
@@ -25,7 +25,7 @@ import (
 // the single source of truth so a redeploy can never strand the frontend on
 // stale hardcoded addresses.
 func render(c *fiber.Ctx, name string, data any) error {
-	t, ok := ui.Templates[name]
+	t, ok := frontend.Templates[name]
 	if !ok {
 		return c.Status(fiber.StatusInternalServerError).SendString("template not found: " + name)
 	}
@@ -552,9 +552,9 @@ func atoi64(s string) (int64, error) {
 }
 
 func staticFS() http.FileSystem {
-	sub, err := fs.Sub(ui.FS, "static")
+	sub, err := fs.Sub(frontend.FS, "static")
 	if err != nil {
-		panic("ui: static sub: " + err.Error())
+		panic("frontend: static sub: " + err.Error())
 	}
 	return http.FS(sub)
 }
