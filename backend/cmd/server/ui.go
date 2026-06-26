@@ -5,6 +5,7 @@ import (
 	"fmt"
 	"io/fs"
 	"net/http"
+	"os"
 	"path/filepath"
 	"strings"
 	"time"
@@ -571,4 +572,31 @@ func mountStatic(app *fiber.App) {
 		Root:   staticFS(),
 		MaxAge: 60,
 	}))
+}
+
+// mountAstro serves Astro-built pages from app/dist/ at the /app URL prefix.
+// In dev mode the Astro dev server handles requests directly (with proxy from
+// :4321 to Go on :8080). In production, this route serves the pre-built static
+// output so all pages work without a separate Node process.
+//
+// ASTRO_DIST_DIR env var overrides the path (default "../app/dist" for dev;
+// in the Docker image the value is "/app/dist").
+func mountAstro(app *fiber.App) {
+	distPath := envOrDefault("ASTRO_DIST_DIR", "../app/dist")
+	log.Info().Str("path", distPath).Msg("mounting Astro static pages at /app/*")
+	app.Use("/app", filesystem.New(filesystem.Config{
+		Root:   http.Dir(distPath),
+		MaxAge: 3600,
+		// If Astro pages aren't at this path, the middleware passes through
+		// to the next handler (404) rather than crashing.
+		NotFoundFile: "",
+	}))
+}
+
+// envOrDefault reads an env var, returning the default if empty or unset.
+func envOrDefault(key, def string) string {
+	if v := os.Getenv(key); v != "" {
+		return v
+	}
+	return def
 }

@@ -1,0 +1,94 @@
+---
+import NFTGrid from '../components/NFTGrid.svelte';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>Listings — MagicWebb NFT Marketplace</title>
+    <meta name="description" content="Browse active NFT listings on MagicWebb — buy and sell NFTs on Flare Network" />
+    <meta name="theme-color" content="#0f172a" />
+
+    <meta property="og:title" content="Listings — MagicWebb NFT Marketplace" />
+    <meta property="og:description" content="Browse active NFT listings on MagicWebb" />
+    <meta property="og:type" content="website" />
+
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <style>
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; }
+      body { min-height: 100vh; }
+
+      body::before {
+        content: '';
+        position: fixed;
+        inset: 0;
+        background:
+          radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
+          radial-gradient(ellipse 50% 30% at 80% 80%, rgba(99, 102, 241, 0.1), transparent);
+        pointer-events: none;
+        z-index: 0;
+      }
+
+      .layout { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
+
+      nav {
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 1rem 1.5rem;
+        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
+        backdrop-filter: blur(12px);
+        background: rgba(15, 23, 42, 0.8);
+      }
+
+      .logo {
+        font-size: 1.25rem;
+        font-weight: 700;
+        background: linear-gradient(135deg, #8b5cf6, #6366f1, #a78bfa);
+        -webkit-background-clip: text;
+        -webkit-text-fill-color: transparent;
+        background-clip: text;
+      }
+
+      .nav-links { display: flex; gap: 1.5rem; align-items: center; }
+      .nav-links a {
+        color: #94a3b8;
+        font-size: 0.875rem;
+        font-weight: 500;
+        transition: color 0.2s;
+      }
+      .nav-links a:hover { color: #e2e8f0; }
+      .nav-links a.active { color: #a78bfa; }
+
+      main { flex: 1; }
+    </style>
+  </head>
+  <body>
+    <div class="layout">
+      <nav>
+        <span class="logo">MagicWebb</span>
+        <div class="nav-links">
+          <a href="/">Home</a>
+          <a href="/listings" class="active">Listings</a>
+        </div>
+      </nav>
+
+      <main>
+        <!-- NFTGrid is a Svelte component that fetches from /api/v1/listings
+             and renders NFTCard items in a responsive grid.
+             client:load = hydrate immediately on page load. -->
+        <NFTGrid client:load />
+      </main>
+
+      <footer style="padding: 1.5rem; text-align: center; color: #475569; font-size: 0.8125rem; border-top: 1px solid rgba(148, 163, 184, 0.1);">
+        MagicWebb &mdash; Decentralized NFT Marketplace on Flare Network
+      </footer>
+    </div>
+  </body>
+</html>

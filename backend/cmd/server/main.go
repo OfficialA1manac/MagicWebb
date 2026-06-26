@@ -385,6 +385,11 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	// Static files from embedded FS
 	mountStatic(app)
 
+	// Astro-built Svelte/React pages from app/dist/ at /app/* URL prefix.
+	// Set ASTRO_DIST_DIR env var to the build output path (defaults to
+	// "../app/dist" for dev; use "/app/dist" in the Docker image).
+	mountAstro(app)
+
 	// HTMX pages — server-rendered HTML
 	app.Get("/", uiHome(q))
 	app.Get("/listings", uiListings(q))
