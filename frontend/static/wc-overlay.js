@@ -1,0 +1,197 @@
+/* ── WalletConnect pairing overlay (self-contained, no Alpine dependency).
+ *
+ * Shows a full-screen centered modal immediately on connect click (loading
+ * state), then transitions to display the WalletConnect URI when the SDK
+ * emits `display_uri`. Uses the Reown/WalletConnect SDK directly via the
+ * `display_uri` event — no custom wallet logic, just a clean UI over the
+ * standard SDK pairing flow.
+ *
+ * Exposes:
+ *   MW_WC_show()      — show overlay with loading spinner
+ *   MW_WC_showURI(u)  — transition to URI display
+ *   MW_WC_hide()      — tear down overlay
+ *
+ * Each call creates a fresh overlay. Stale overlays are removed before
+ * creating a new one. No Alpine, no reactive state, no event bus.
+ */
+
+(function () {
+'use strict';
+
+var _overlay = null;
+
+function createOverlay() {
+  // Remove any stale overlay.
+  if (_overlay) { try { document.body.removeChild(_overlay); } catch (_) {} _overlay = null; }
+
+  // Remove the legacy wc-uri-banner if it exists (cleanup from prior deploys).
+  var oldBanner = document.getElementById('wc-uri-banner');
+  if (oldBanner) { try { oldBanner.remove(); } catch (_) {} }
+
+  var overlay = document.createElement('div');
+  overlay.id = 'wc-pairing-overlay';
+  // Full-screen dimmed backdrop + centered card.
+  overlay.style.cssText = 'position:fixed;inset:0;z-index:9999;display:flex;align-items:center;justify-content:center;background:rgba(5,5,10,0.92);backdrop-filter:blur(8px);-webkit-backdrop-filter:blur(8px);opacity:0;transition:opacity 0.25s ease;';
+
+  var card = document.createElement('div');
+  card.style.cssText = 'position:relative;width:90%;max-width:440px;background:rgba(10,10,16,0.98);border:1px solid rgba(167,139,250,0.3);border-radius:24px;padding:36px 28px 28px;box-shadow:0 0 60px -12px rgba(167,139,250,0.25);text-align:center;';
+
+  // ── Loading state (shown immediately) ──
+  var body = document.createElement('div');
+  body.id = 'wc-overlay-body';
+
+  var spinner = document.createElement('div');
+  spinner.id = 'wc-overlay-spinner';
+  spinner.style.cssText = 'display:flex;flex-direction:column;align-items:center;gap:20px;';
+  spinner.innerHTML = '<div style="width:48px;height:48px;border:4px solid rgba(167,139,250,0.2);border-top-color:#a78bfa;border-radius:50%;animation:wc-spin 0.8s linear infinite;"></div>'
+    + '<p style="margin:0;color:rgba(255,255,255,0.7);font-size:14px;font-weight:600;font-family:sans-serif;">Connecting to WalletConnect…</p>';
+  body.appendChild(spinner);
+
+  // ── URI state (hidden until display_uri fires) ──
+  var uriBlock = document.createElement('div');
+  uriBlock.id = 'wc-overlay-uri';
+  uriBlock.style.cssText = 'display:none;flex-direction:column;align-items:center;gap:16px;';
+
+  var icon = document.createElement('div');
+  icon.style.cssText = 'width:56px;height:56px;border-radius:16px;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;font-size:28px;box-shadow:0 0 24px -4px rgba(167,139,250,0.4);';
+  icon.textContent = '⌬';
+  uriBlock.appendChild(icon);
+
+  var heading = document.createElement('p');
+  heading.style.cssText = 'margin:0;color:#fff;font-size:16px;font-weight:800;font-family:sans-serif;';
+  heading.textContent = 'Scan with your wallet app';
+  uriBlock.appendChild(heading);
+
+  var instructions = document.createElement('p');
+  instructions.style.cssText = 'margin:0;color:rgba(255,255,255,0.5);font-size:12px;font-weight:500;font-family:sans-serif;max-width:320px;line-height:1.4;';
+  instructions.textContent = 'Open your wallet app (MetaMask, Trust, Rainbow, or any WalletConnect-compatible wallet) and scan the QR or paste the link below.';
+  uriBlock.appendChild(instructions);
+
+  // URI input row
+  var uriRow = document.createElement('div');
+  uriRow.style.cssText = 'display:flex;gap:8px;width:100%;max-width:380px;';
+
+  var uriInput = document.createElement('input');
+  uriInput.id = 'wc-overlay-uri-input';
+  uriInput.readOnly = true;
+  uriInput.style.cssText = 'flex:1;background:rgba(15,15,22,0.9);border:1px solid rgba(255,255,255,0.1);border-radius:12px;padding:12px 14px;color:rgba(255,255,255,0.7);font-size:11px;font-family:monospace;outline:none;';
+  uriInput.placeholder = 'Waiting for URI…';
+  uriRow.appendChild(uriInput);
+
+  var copyBtn = document.createElement('button');
+  copyBtn.id = 'wc-overlay-copy-btn';
+  copyBtn.style.cssText = 'padding:12px 20px;border:none;border-radius:12px;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-size:12px;font-weight:800;font-family:sans-serif;cursor:pointer;text-transform:uppercase;letter-spacing:0.5px;transition:opacity 0.2s;white-space:nowrap;';
+  copyBtn.textContent = 'Copy';
+  copyBtn.onmouseover = function () { copyBtn.style.opacity = '0.9'; };
+  copyBtn.onmouseout = function () { copyBtn.style.opacity = '1'; };
+  copyBtn.onclick = function () {
+    var inp = document.getElementById('wc-overlay-uri-input');
+    if (!inp || !inp.value) return;
+    inp.select();
+    try { navigator.clipboard.writeText(inp.value); } catch (_) { try { document.execCommand('copy'); } catch (_) {} }
+    copyBtn.textContent = '✓ Copied';
+    copyBtn.style.background = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
+    copyBtn.style.color = '#fff';
+    setTimeout(function () {
+      copyBtn.textContent = 'Copy';
+      copyBtn.style.background = 'linear-gradient(135deg,#7dd3fc,#0ea5e9)';
+      copyBtn.style.color = '#09090b';
+    }, 2000);
+  };
+  uriRow.appendChild(copyBtn);
+  uriBlock.appendChild(uriRow);
+
+  // Deep-link button (mobile wallets)
+  var deepLink = document.createElement('a');
+  deepLink.id = 'wc-overlay-deeplink';
+  deepLink.style.cssText = 'display:none;margin-top:4px;padding:10px 24px;border-radius:12px;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.25);color:#a78bfa;font-size:12px;font-weight:700;font-family:sans-serif;text-decoration:none;transition:background 0.2s;';
+  deepLink.textContent = 'Open in wallet →';
+  deepLink.onmouseover = function () { deepLink.style.background = 'rgba(167,139,250,0.2)'; };
+  deepLink.onmouseout = function () { deepLink.style.background = 'rgba(167,139,250,0.12)'; };
+  deepLink.target = '_blank';
+  deepLink.rel = 'noopener noreferrer';
+  uriBlock.appendChild(deepLink);
+
+  // Dismiss button
+  var dismissBtn = document.createElement('button');
+  dismissBtn.style.cssText = 'margin-top:8px;padding:8px 16px;border:none;border-radius:8px;background:transparent;color:rgba(255,255,255,0.35);font-size:11px;font-weight:600;font-family:sans-serif;cursor:pointer;transition:color 0.2s;';
+  dismissBtn.textContent = 'Cancel';
+  dismissBtn.onmouseover = function () { dismissBtn.style.color = 'rgba(255,255,255,0.7)'; };
+  dismissBtn.onmouseout = function () { dismissBtn.style.color = 'rgba(255,255,255,0.35)'; };
+  dismissBtn.onclick = function () { MW_WC_hide(); };
+  uriBlock.appendChild(dismissBtn);
+
+  body.appendChild(uriBlock);
+  card.appendChild(body);
+  overlay.appendChild(card);
+  document.body.appendChild(overlay);
+
+  // Trigger fade-in on next frame.
+  requestAnimationFrame(function () { overlay.style.opacity = '1'; });
+
+  _overlay = overlay;
+}
+
+// Spin animation keyframe (injected once).
+(function () {
+  if (document.getElementById('wc-overlay-style')) return;
+  var style = document.createElement('style');
+  style.id = 'wc-overlay-style';
+  style.textContent = '@keyframes wc-spin { to { transform: rotate(360deg); } }';
+  document.head.appendChild(style);
+})();
+
+window.MW_WC_show = function () {
+  createOverlay();
+  // Ensure loading state is visible.
+  var spinner = document.getElementById('wc-overlay-spinner');
+  var uriBlock = document.getElementById('wc-overlay-uri');
+  if (spinner) spinner.style.display = 'flex';
+  if (uriBlock) uriBlock.style.display = 'none';
+};
+
+window.MW_WC_showURI = function (uri) {
+  // Ensure overlay exists first.
+  if (!_overlay) {
+    createOverlay();
+  }
+  var spinner = document.getElementById('wc-overlay-spinner');
+  var uriBlock = document.getElementById('wc-overlay-uri');
+  var input = document.getElementById('wc-overlay-uri-input');
+  var deep = document.getElementById('wc-overlay-deeplink');
+
+  if (spinner) spinner.style.display = 'none';
+  if (uriBlock) uriBlock.style.display = 'flex';
+
+  if (input) {
+    input.value = uri;
+    // Select all text for easy copy.
+    try { input.select(); } catch (_) {}
+  }
+
+  // Set deep-link for mobile wallets.
+  if (deep && uri) {
+    // WC v2 deep link format: when a wallet app has registered a custom scheme,
+    // the standard `wc:` URI can be used as a universal link. The most common
+    // pattern is the `&redirectUrl=` parameter appended by the wallet side.
+    // Just passing the raw `wc:` URI works with most mobile wallets via their
+    // custom URL scheme interceptors.
+    deep.href = uri.indexOf('wc:') === 0 ? uri : ('https://walletconnect.com/wc?uri=' + encodeURIComponent(uri));
+    deep.style.display = 'inline-block';
+  } else if (deep) {
+    deep.style.display = 'none';
+  }
+};
+
+window.MW_WC_hide = function () {
+  if (_overlay) {
+    var o = _overlay;
+    o.style.opacity = '0';
+    setTimeout(function () {
+      try { if (o.parentNode) o.parentNode.removeChild(o); } catch (_) {}
+      if (_overlay === o) _overlay = null;
+    }, 250);
+  }
+};
+
+})();

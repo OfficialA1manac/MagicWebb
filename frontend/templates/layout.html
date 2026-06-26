@@ -185,8 +185,13 @@
        the performance cost is real but is the cheapest mitigation against
        the entire "CDN-dependent SDK" failure class. Unique per release:
        the cache-buster `?v=23` is bumped in lock-step with wallet.js so
-       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=31" defer></script>      <script src="/static/wallet.js?v=31" defer></script>
-  <script src="/static/cdn.min.js?v=31" defer></script>
+       atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=32" defer></script>
+      <!-- wc-overlay.js: WalletConnect pairing overlay (centered modal with loading/URI display).
+           Must load BEFORE wallet.js so the MW_WC_show/MW_WC_showURI/MW_WC_hide functions
+           are available when wallet.js calls them during the connect() flow. -->
+      <script src="/static/wc-overlay.js?v=32" defer></script>
+      <script src="/static/wallet.js?v=32" defer></script>
+  <script src="/static/cdn.min.js?v=32" defer></script>
   <style>
     [x-cloak]{display:none !important;}
     body { font-family: 'Inter', system-ui, sans-serif; background: #09090b; color: #fafafa; -webkit-font-smoothing: antialiased; }

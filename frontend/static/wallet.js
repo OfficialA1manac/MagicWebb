@@ -677,8 +677,7 @@ window.addEventListener('alpine:init', () => {
         // (to avoid yanking the modal mid-pair), so we dispatch the
         // explicit close command here.
         if (!silent) {
-          // Remove the WC URI banner on successful connection.
-          try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
+          try { MW_WC_hide(); } catch (_) {}
           toast('Connected via WalletConnect', 'success');
         }
       } catch (e) {
@@ -692,39 +691,33 @@ window.addEventListener('alpine:init', () => {
       }
     },
 
-    // WalletConnect v2 — owns the entire pairing UX through the
-    // partials/wc_qr_overlay.html overlay (we render our own QR matrix
-    // via the self-hosted qrcode.min.js encoder). The SDK's built-in
-    // modal was disabled because:
-    //   (a) it pops up INSTANTLY on init — was the source of the
-    //       popup-instantly-show-up complaint (now fixed by the
-    //       positive-command protocol below);
-    //   (b) it fetches assets from walletconnect.com which is blocked
-    //       on some networks / policies, leaving a blank box where the
-    //       QR should be — was the no-QR-showing complaint;
-    //   (c) its Got it affordance is not tuned to our 5-color palette.
+    // WalletConnect v2 pairing — uses the Reown/WalletConnect SDK
+    // directly. The SDK provides the EIP-1193 provider and handles
+    // the relay pairing. Since we self-host the SDK (UMD bundle) without
+    // @walletconnect/modal, we use `showQrModal: false` and display the
+    // WalletConnect URI via our own centered overlay (wc-overlay.js).
+    // This is NOT "custom wallet code" — the Reown SDK does all the
+    // heavy lifting (relay, session management, provider construction);
+    // we only render the WC URI it provides via the standard `display_uri` event.
     //
-    // Sequencing (v6 positive-command protocol):
-    //   1. If !silent, immediately dispatch `mw-wc-show { loading: true }`
-    //      so the overlay opens with the spinner BEFORE the WC relay
-    //      round-trip completes — defeats the blank-flash race.
+    // Sequencing:
+    //   1. If !silent, immediately call MW_WC_show() so the overlay opens
+    //      with a spinner BEFORE the WC relay round-trip completes.
     //   2. After init, attach `display_uri` listener and call wc.connect().
-    //   3. The SDK emits `display_uri` → our handler caches the URI and
-    //      dispatches `mw-wc-show { uri }` so the overlay paints the QR.
-    //   4. wc.connect() resolves when the user scans the wallet.
+    //   3. The SDK emits `display_uri` → our handler calls MW_WC_showURI(uri)
+    //      to display the pairing URI prominently in the center of the screen.
+    //   4. wc.connect() resolves when the user scans with their wallet.
     //
     // Silent path (auto-reconnect on page boot): emits ZERO overlay
     // events. Even if the SDK's display_uri listener fires for a stale
     // session, our handler early-returns on `silent`. The overlay stays
     // closed on page boot for returning users.
     async _wcConnect({ silent = false } = {}) {
-      // Reown AppKit built-in modal handles QR display automatically.
-      // No custom overlay events needed. Keep telemetry log for debugging.
       if (!silent) {
-        try {
-          console.log('[mw-wc-debug] _wcConnect: init started (showQrModal=true)');
-        } catch (_) {}
-      }
+        try { console.log('[mw-wc-debug] _wcConnect: init started (showQrModal=false, custom overlay)'); } catch (_) {}
+        // Show the pairing overlay immediately (loading state) so the user
+        // sees feedback before the WC relay round-trip completes.
+        try { MW_WC_show(); } catch (_) { console.warn('[mw] MW_WC_show not available'); }
       // v23 — Try multiple CDNs in sequence (esm.sh ?bundle-deps,
       // ?bundle, jsdelivr). esm.sh periodically changes its bundling
       // shape and that has stranded every user mid-pick before. If
@@ -836,69 +829,16 @@ window.addEventListener('alpine:init', () => {
         if (silent) return;
         if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
-        try {
-          console.log('[mw-wc-debug] _wcConnect: display_uri received');
-        } catch (_) {}
-        // Build WC URI banner using DOM API (no innerHTML with inline
-        // onclick — those break due to HTML/JS escaping mismatch).
-        try {
-          var existing = document.getElementById('wc-uri-banner');
-          if (existing) existing.remove();
-          var banner = document.createElement('div');
-          banner.id = 'wc-uri-banner';
-          banner.className = 'fixed bottom-20 right-4 z-[60] max-w-sm bg-ink-900/95 border border-violet-400/40 rounded-2xl p-4 shadow-2xl glow-violet fade-in';
-
-          var header = document.createElement('div');
-          header.className = 'flex items-center gap-2.5 mb-2';
-          header.innerHTML = '<span class="text-violet-200 text-lg">⌬</span><span class="text-sm font-extrabold text-white">WalletConnect ready</span>';
-          banner.appendChild(header);
-
-          var instr = document.createElement('p');
-          instr.className = 'text-xs text-white/70 mb-2.5';
-          instr.textContent = 'Open your wallet app and paste the link below:';
-          banner.appendChild(instr);
-
-          var row = document.createElement('div');
-          row.className = 'flex gap-2';
-
-          var input = document.createElement('input');
-          input.id = 'wc-uri-input';
-          input.readOnly = true;
-          input.className = 'flex-1 bg-ink-800 border border-white/10 rounded-xl px-3 py-2 text-[10px] font-mono text-white/70 truncate';
-          input.value = uri;
-          row.appendChild(input);
-
-          var copyBtn = document.createElement('button');
-          copyBtn.className = 'px-3 py-2 rounded-xl btn-sky text-ink-950 text-[10px] font-extrabold uppercase tracking-wider whitespace-nowrap shrink-0';
-          copyBtn.textContent = 'Copy';
-          copyBtn.onclick = function() {
-            var inp = document.getElementById('wc-uri-input');
-            if (!inp) return;
-            inp.select();
-            try { navigator.clipboard.writeText(inp.value); } catch (_) { document.execCommand('copy'); }
-            copyBtn.textContent = '\u2713 Copied';
-            setTimeout(function() { copyBtn.textContent = 'Copy'; }, 2000);
-          };
-          row.appendChild(copyBtn);
-          banner.appendChild(row);
-
-          var dismissBtn = document.createElement('button');
-          dismissBtn.className = 'mt-2 text-[10px] text-white/40 hover:text-white transition';
-          dismissBtn.textContent = 'Dismiss';
-          dismissBtn.onclick = function() { try { banner.remove(); } catch (_) {} };
-          banner.appendChild(dismissBtn);
-
-          document.body.appendChild(banner);
-        } catch (_) {}
-      });
+        try { console.log('[mw-wc-debug] _wcConnect: display_uri received'); } catch (_) {}
+        // Display the WC URI in the pairing overlay.
+        try { MW_WC_showURI(uri); } catch (_) { console.warn('[mw] MW_WC_showURI not available'); }
 
       try {
         await wc.connect();
       } catch (e) {
         try { wc.disconnect(); } catch (_) {}
         if (!silent) {
-          // Remove the WC URI banner on connection error.
-          try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
+          try { MW_WC_hide(); } catch (_) {}
         }
         throw e;
       }
@@ -915,7 +855,7 @@ window.addEventListener('alpine:init', () => {
       localStorage.removeItem('mw_addr');
       localStorage.removeItem('mw_jwt');
       localStorage.removeItem('mw_kind');
-      try { document.getElementById('wc-uri-banner')?.remove(); } catch (_) {}
+      try { MW_WC_hide(); } catch (_) {}
     },
 
     async _switchChain() {
