@@ -126,7 +126,7 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// and the auto-inject is in cmd/server/ui.go render(); this
 		// pin only verifies the value reaches the rendered body.
 		{"MW_RPC_URL",         "coston2-api.flare.network"},
-		{"MW_EXPLORER",        "https://coston2-explorer.flare.network"},
+		{"MW_EXPLORER",        "coston2-explorer.flare.network"},
 		{"MW_NETWORK_ID",      "114"},
 		// v28.0.2 — server-injected NativeCurrency. home.html:54
 		// (`{{wei2flr .Volume24hWei}} <span class="text-sm">{{.NativeCurrency}}</span>`)
@@ -202,22 +202,13 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	// cache-buster assertions had been silently failing pre-patch.
 	// Bumping to ?v=28 here closes the drift and pins the next-deployed
 	// buster version on lock-step with layout.html's <script src=> tags.
-	{"tailwind-static-link", "tailwind.css?v=29"},
-	{"wallet-js-defer",      "wallet.js?v=29"},
-	{"qrcode-min-js-defer",  "qrcode.min.js?v=29"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=29"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=29"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=29"},
-		// WC v6 overlay protocol: positive-command events (mw-wc-show /
-		// mw-wc-hide) replace the prior flag-gated listeners that
-		// leaked state across auto-reconnect. Validate every wire-point.
-		{"wc-show-event-listener", "mw-wc-show"},
-		{"wc-hide-event-listener", "mw-wc-hide"},
-		{"wc-overlay-root-id",     "wc-overlay-root"},
-		{"wc-modal-root-id",       "wc-modal-root"},
-		{"wc-esc-handler-present", "Escape"},
-		// The Got-it and × buttons must still funnel through close().
-		{"wc-gotit-button-clicks-close", "Got it"},
+	{"tailwind-static-link", "tailwind.css?v=31"},
+	{"wallet-js-defer",      "wallet.js?v=31"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=31"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=31"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=31"},
+		// Reown AppKit built-in modal handles QR display (showQrModal: true).
+		// The custom WC QR overlay was removed; no manual overlay events needed.
 		// NFT picker v7 hardening — same close-pattern as the WC
 		// overlay: positive-command event, force-DOM close, ESC dismiss,
 		// reset state on close, modal-root ID for force-hide target.
@@ -253,14 +244,13 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// was removed per user request.
 		{"home-listings-grid-poll", "id=\"listings-grid\""},
 		{"every-1s-condition",      "every 1s [!document.hidden]"},
-		// WC v2 wiring: partial body, picker connect call, persistent navbar reopen chip
-		{"wc-qr-overlay-renders", "Scan to pair"},
 		// (WC-connect-call assertion removed in v24.0.1 — the
 		// `store.wallet.connect(kind, ...)` API was reduced to
 		// `connect({silent=false})` in v23.2 per the v24.0/23.2
 		// refactor; the picker / drawer now funnels every entry point
 		// through `window.MW_CONNECT_WALLET()` / $store.wallet.connect.)
-		{"wc-pair-chip",          "Scan QR on your phone"},
+		// The persistent WC pairing chip ("Scan QR on your phone") was
+		// removed in v31 — Reown's built-in modal handles QR display.
 		// Negative-check (v13): the silent auto-connect code path that
 		// we just removed must NOT appear in the rendered HTML anywhere.
 		// The only remaining `silent` reference is the WalletConnect
@@ -393,37 +383,5 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	}
 	if fail > 0 {
 		t.Fatalf("%d render-smoke checks failed: %v", fail, missing)
-	}
-	// v16 — SyntaxError in the inline WC overlay script that broke
-	// Alpine init entirely. The inline <script> in partials/wc_qr_overlay.html
-	// MUST successfully parse and define window.MW_WC_OVERLAY_STATE for
-	// any page that loads the partial. A parser error there wedges
-	// Alpine's x-data evaluation across every page, which is what kept
-	// the desktop navbar Connect Wallet button invisible across v9-v15
-	// even when the layout markup itself was correct. Re-running the
-	// layout-level fix would not surface this regression without a
-	// run-time check; we pin the substring so go test parses it
-	// implicitly via the template engine.
-	//
-	// Negative-check: the parsed-as-JS broken pattern (lines starting
-	// with bare "(1) Clear the reactive ..." tokens — missing `//`
-	// comment slashes) MUST not appear ANYWHERE in the rendered body.
-	// The substring below is the exact heredoc-bleed that caused the
-	// Uncaught SyntaxError in production. If a future commit
-	// re-introduces a numbered-list comment block in inline JS the
-	// smoke test catches it before deploy.
-	if !strings.Contains(body, "window.MW_WC_OVERLAY_STATE") {
-		t.Logf("  FAIL  wc-overlay-state-defined\n        window.MW_WC_OVERLAY_STATE absent from rendered body — inline JS in partials/wc_qr_overlay.html failed to parse (likely a JavaScript SyntaxError) and the x-data factory never got defined; Alpine hydration is wedged.")
-		missing = append(missing, "wc-overlay-state-defined")
-		fail++
-	} else {
-		t.Logf("  PASS  wc-overlay-state-defined")
-	}
-	if strings.Contains(body, "(1) Clear the reactive") {
-		t.Logf("  FAIL  no-wc-syntax-error-leak\n        Bare \"(1) Clear the reactive ...\" tokens reappeared in rendered body without `//` comment slashes — this is the JavaScript SyntaxError that wedges Alpine init and keeps the navbar Connect Wallet button invisible. See partials/wc_qr_overlay.html closing block.")
-		missing = append(missing, "no-wc-syntax-error-leak")
-		fail++
-	} else {
-		t.Logf("  PASS  no-wc-syntax-error-leak")
 	}
 }

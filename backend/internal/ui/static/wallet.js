@@ -677,7 +677,7 @@ window.addEventListener('alpine:init', () => {
         // (to avoid yanking the modal mid-pair), so we dispatch the
         // explicit close command here.
         if (!silent) {
-          try { window.dispatchEvent(new CustomEvent('mw-wc-hide')); } catch (_) {}
+          // Reown AppKit modal auto-closes on connect; no hide event needed.
           toast('Connected via WalletConnect', 'success');
         }
       } catch (e) {
@@ -717,21 +717,11 @@ window.addEventListener('alpine:init', () => {
     // session, our handler early-returns on `silent`. The overlay stays
     // closed on page boot for returning users.
     async _wcConnect({ silent = false } = {}) {
-      // (1) User-initiated only: open with spinner BEFORE init awaits.
+      // Reown AppKit built-in modal handles QR display automatically.
+      // No custom overlay events needed. Keep telemetry log for debugging.
       if (!silent) {
         try {
-          // v23.7 telemetry — surface in dev console so future browser-use
-          // captures the dispatch path. The v23.5/v23.6 silent-fail mode
-          // (click did nothing, no console errors) was diagnosed by adding
-          // these logs after-the-fact. Keep them LIGHTWEIGHT and behind
-          // `console.log` so production logs aren't polluted.
-          console.log('[mw-wc-debug] _wcConnect: dispatching mw-wc-show {loading:true}');
-          window.dispatchEvent(new CustomEvent('mw-wc-show', {
-            detail: { loading: true },
-          }));
-          // No-op alias for any debug-only listener still watching the
-          // legacy event name.
-          window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
+          console.log('[mw-wc-debug] _wcConnect: init started (showQrModal=true)');
         } catch (_) {}
       }
       // v23 — Try multiple CDNs in sequence (esm.sh ?bundle-deps,
@@ -822,7 +812,7 @@ window.addEventListener('alpine:init', () => {
             [1]: 'https://ethereum-rpc.publicnode.com',
             [CHAIN_ID]: RPC_URL,
           },
-          showQrModal: false,
+          showQrModal: true,
           metadata: {
             name:    'MagicWebb',
             description: 'Non-custodial NFT marketplace on ' + NETWORK_NAME,
@@ -842,20 +832,13 @@ window.addEventListener('alpine:init', () => {
       this._raw.wc = R(wc);
 
       wc.on('display_uri', (uri) => {
-        // Positive-command protocol: silent path emits ZERO overlay
-        // events; user-initiated path emits `mw-wc-show { uri }` so
-        // the overlay can paint the QR.
+        // Reown AppKit built-in modal renders the QR automatically.
+        // Cache the URI for diagnostics only.
         if (silent) return;
         if (typeof uri !== 'string' || !uri.startsWith('wc:')) return;
         window.MW_WC_URI = uri;
         try {
-          // v23.7 telemetry — surface in dev console so future browser-use
-          // captures the dispatch path (the v23.6 silent-fail mode was
-          // diagnosed by adding this log).
-          console.log('[mw-wc-debug] _wcConnect: display_uri received, dispatching mw-wc-show {uri}');
-          window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { uri } }));
-          // Legacy alias for any downstream listener still keyed on it.
-          window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: uri }));
+          console.log('[mw-wc-debug] _wcConnect: display_uri received');
         } catch (_) {}
       });
 
@@ -1051,35 +1034,61 @@ window.addEventListener('alpine:init', () => {
           return { ok: false, error: 'no-wallet' };
         }
         const provider = await resolveProvider(this);
-        // Execute the action directly — no confirmation popup.
-        // The modal is used only for progress + result display.
-        const modals = Alpine.store('modals');
-        const result = await modals.open({
-          userInitiated: true,
-          kind: opts.kind,
-          icon: opts.icon,
-          title: opts.title,
-          subtitle: opts.subtitle,
-          summary: opts.summary || [],
-          disclaimer: opts.disclaimer || '',
-          ctaLabel: opts.ctaLabel,
-          run: async ({ setStep, done, fail }) => {
-            try {
-              await opts.fn({
-                signer:   R(signer),
-                provider: R(provider),
-                setStep, done, fail,
+
+        // Execute directly with toast feedback — no confirmation popup.
+        // The wallet's native prompt IS the confirmation.
+        toast('Waiting for your wallet...', 'info');
+
+        return await new Promise((resolve) => {
+          let settled = false;
+
+          try {
+            const promise = opts.fn({
+              signer: R(signer),
+              provider: R(provider),
+              setStep: (n, label) => {
+                if (!settled && label) toast(label, 'info');
+              },
+              done: (detail = {}) => {
+                if (settled) return;
+                settled = true;
+                const title = detail.title || 'Done!';
+                setTimeout(() => toast(title, 'success'), 200);
+                window.dispatchEvent(new CustomEvent('mw-modal-done', {
+                  detail: { action: opts.kind, txHash: detail.txHash || '' },
+                }));
+                resolve({ ok: true, txHash: detail.txHash });
+              },
+              fail: (e) => {
+                if (settled) return;
+                settled = true;
+                const body = revertMessage(e);
+                setTimeout(() => toast(body || 'Action failed', 'error'), 200);
+                window.dispatchEvent(new CustomEvent('mw-modal-failed', {
+                  detail: { action: opts.kind, error: body },
+                }));
+                resolve({ ok: false, error: body });
+              },
+            });
+
+            // Handle async fn that doesn't call done/fail (belt-and-braces).
+            if (promise && typeof promise.then === 'function') {
+              promise.catch((e) => {
+                if (settled) return;
+                settled = true;
+                const body = revertMessage(e);
+                setTimeout(() => toast(body || 'Action failed', 'error'), 200);
+                resolve({ ok: false, error: body });
               });
-            } catch (e) {
-              fail(e);
             }
-          },
+          } catch (e) {
+            if (settled) return;
+            settled = true;
+            const body = revertMessage(e);
+            setTimeout(() => toast(body || 'Action failed', 'error'), 200);
+            resolve({ ok: false, error: body });
+          }
         });
-        if (result === null) {
-          toast('Action could not start — please try again.', 'error');
-          return { ok: false, error: 'modal-timeout' };
-        }
-        return result;
       } finally {
         this.busy = false;
       }
@@ -1817,25 +1826,10 @@ if (typeof document !== 'undefined') {
 }
 
 
-// persistent Scan-QR-on-your-phone chip in the navbar. Idempotent:
-// if window.MW_WC_URI is cached from a prior display_uri emission,
-// dispatch mw-wc-show carrying that URI so the overlay rehydrates the
-// same QR. Otherwise dispatch mw-wc-show { loading: true } so the
-// overlay shows the spinner (a fresh _wcConnect should be in flight).
-// Only meaningful when a WalletConnect pairing session is currently in
-// flight; dispatching it outside that context would be a no-op.
+// Reown AppKit built-in modal handles QR display and wallet selection.
+// MW_WC_OPEN_OVERLAY is kept as a no-op bridge for legacy references.
 function MW_WC_OPEN_OVERLAY() {
-  try {
-    if (window.MW_WC_URI && typeof window.MW_WC_URI === 'string'
-        && window.MW_WC_URI.startsWith('wc:')) {
-      window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { uri: window.MW_WC_URI } }));
-      // Legacy alias.
-      window.dispatchEvent(new CustomEvent('mw-wc-uri', { detail: window.MW_WC_URI }));
-    } else {
-      window.dispatchEvent(new CustomEvent('mw-wc-show', { detail: { loading: true } }));
-      window.dispatchEvent(new CustomEvent('mw-wc-connecting'));
-    }
-  } catch (_) {}
+  // Reown's built-in modal is already visible when connecting.
 }
 window.MW_WC_OPEN_OVERLAY = MW_WC_OPEN_OVERLAY;
 
