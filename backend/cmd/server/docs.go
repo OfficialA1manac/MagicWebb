@@ -30,6 +30,7 @@ var docRegistry = []docEntry{
 	{"user-guide", "USER_GUIDE.md", "User Guide", "Listing, bidding, offers, and withdrawals — step by step.", "violet", "🧭"},
 	{"faq", "FAQ.md", "FAQ", "Quick answers: fees, refunds, wallets, and safety.", "amber", "💡"},
 	{"token-hooks", "TOKEN_HOOKS.md", "Token Architecture", "Future token integration points anchored in the manager contract.", "rose", "🔗"},
+	{"api", "API.md", "API Reference", "Complete REST API documentation — endpoints, auth, schemas, and examples.", "cyan", "🔌"},
 }
 
 var (
@@ -77,7 +78,18 @@ func uiDocsIndex() fiber.Handler {
 
 func uiDoc() fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		d, ok := findDoc(c.Params("slug"))
+		slug := c.Params("slug")
+		// Serve the raw OpenAPI YAML spec for tool consumption.
+		if slug == "api.yaml" {
+			yaml, err := frontend.FS.ReadFile("docs/api.yaml")
+			if err != nil {
+				return c.Status(fiber.StatusNotFound).SendString("not found")
+			}
+			c.Set("Content-Type", "text/yaml; charset=utf-8")
+			c.Set("Access-Control-Allow-Origin", "*")
+			return c.Send(yaml)
+		}
+		d, ok := findDoc(slug)
 		if !ok {
 			return c.Status(fiber.StatusNotFound).SendString("doc not found")
 		}

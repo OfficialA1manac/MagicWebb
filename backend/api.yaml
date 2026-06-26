@@ -1,0 +1,1120 @@
+openapi: "3.0.3"
+info:
+  title: MagicWebb API
+  version: "1.0.0"
+  description: |
+    MagicWebb is a decentralized NFT marketplace on Flare Coston2.
+    All `/api/v1/*` routes are rate-limited (60 req/min per IP).
+    Routes marked 🔒 require a valid SIWE JWT (Bearer token or `mw_s_*` cookie).
+
+servers:
+  - url: https://magicwebb.fly.dev
+    description: Production (Flare Coston2 testnet)
+  - url: http://localhost:8080
+    description: Local development
+
+paths:
+  # ── Health / Readiness ──────────────────────────────────────────────
+  /healthz:
+    get:
+      summary: Liveness probe
+      description: Probes DB + RPC. Used by Fly.io machine replacement.
+      tags: [Infrastructure]
+      responses:
+        "200":
+          description: Healthy
+          headers:
+            X-MW-Build-SHA:
+              schema: { type: string }
+              description: Git SHA the binary was compiled from
+        "503":
+          description: Unhealthy (db or rpc failure)
+          content:
+            text/plain:
+              schema: { type: string, example: "db unhealthy" }
+
+  /readyz:
+    get:
+      summary: Readiness probe
+      description: DB-only ping. Does NOT check RPC health.
+      tags: [Infrastructure]
+      responses:
+        "200":
+          description: Ready
+        "503":
+          description: DB unhealthy
+          content:
+            text/plain:
+              schema: { type: string, example: "db unhealthy" }
+
+  # ── SSE Events ──────────────────────────────────────────────────────
+  /events:
+    get:
+      summary: Server-Sent Events stream
+      description: |
+        Real-time event stream for bids, listings, offers, and notifications.
+        Subscribes the client to the SSE broadcaster until disconnect.
+      tags: [Infrastructure]
+      responses:
+        "200":
+          description: SSE stream (text/event-stream)
+          content:
+            text/event-stream:
+              schema:
+                type: string
+                description: SSE formatted events (data: JSON\n\n)
+        "503":
+          description: Too many subscribers
+
+  # ── Listings ────────────────────────────────────────────────────────
+  /api/v1/listings:
+    get:
+      summary: List active listings
+      description: |
+        Returns active, non-orphaned, non-expired listings.
+        Filterable by collection and seller. Results include denormalized
+        token name, image URI, and collection verified status.
+      tags: [Listings]
+      parameters:
+        - name: collection
+          in: query
+          schema: { type: string, example: "0x1e9ab57e6147ad7a6c2aa7f64d61bcb10ca12a7c" }
+          description: Filter by collection address
+        - name: seller
+          in: query
+          schema: { type: string, example: "0xabcd...1234" }
+          description: Filter by seller address
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+          description: Max results (clamped to 1-200)
+      responses:
+        "200":
+          description: Array of listing rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ListingRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/listings/{collection}/{id}:
+    get:
+      summary: Get single listing
+      tags: [Listings]
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string, example: "0x..." }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, example: "1" }
+          description: Token ID (decimal)
+      responses:
+        "200":
+          description: Listing row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ListingRow"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/listings/{collection}/{id}/preflight:
+    get:
+      summary: Listing preflight check
+      description: |
+        Verifies fillability and repairs stale nft_ownership rows via
+        on-chain RPC call when the DB projection is stale.
+      tags: [Listings]
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+        - name: seller
+          in: query
+          required: true
+          schema: { type: string, example: "0x..." }
+          description: Seller address to verify
+      responses:
+        "200":
+          description: Preflight result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  ok:          { type: boolean, description: "Listing is fillable" }
+                  listed:      { type: boolean }
+                  orphaned:    { type: boolean }
+                  seller_owns: { type: boolean }
+                  price_wei:   { type: string, description: "Price in wei (decimal string)" }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Auctions ────────────────────────────────────────────────────────
+  /api/v1/auctions:
+    get:
+      summary: List auctions
+      description: Filterable by collection and status.
+      tags: [Auctions]
+      parameters:
+        - name: collection
+          in: query
+          schema: { type: string }
+        - name: status
+          in: query
+          schema: { type: string, enum: [active, settled, cancelled], example: "active" }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Array of auction rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/AuctionRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auctions/{id}:
+    get:
+      summary: Get single auction
+      tags: [Auctions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer, example: 42 }
+      responses:
+        "200":
+          description: Auction row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/AuctionRow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/auctions/{id}/bids:
+    get:
+      summary: Get bids for auction
+      tags: [Auctions]
+      parameters:
+        - name: id
+          in: path
+          required: true
+          schema: { type: integer }
+      responses:
+        "200":
+          description: Array of bids (newest first)
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/BidRow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/server-time:
+    get:
+      summary: Server time
+      description: Current server Unix time in milliseconds.
+      tags: [Auctions]
+      responses:
+        "200":
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  unix_ms:
+                    type: integer
+                    example: 1718200000000
+
+  # ── Offers ──────────────────────────────────────────────────────────
+  /api/v1/offers:
+    get:
+      summary: List offers
+      description: Filterable by collection, token, bidder, owner, and status.
+      tags: [Offers]
+      parameters:
+        - name: collection
+          in: query
+          schema: { type: string }
+        - name: token_id
+          in: query
+          schema: { type: string }
+        - name: bidder
+          in: query
+          schema: { type: string }
+        - name: owner
+          in: query
+          schema: { type: string }
+          description: Filter offers on tokens owned by this address
+        - name: status
+          in: query
+          schema: { type: string, enum: [pending, accepted, cancelled, expired] }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Array of offer rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OfferRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/offers/{collection}/{id}/position:
+    get:
+      summary: Get aggregated offer positions for a token
+      description: |
+        Returns all pending offers on a token with aggregated stats
+        (count, highest, total_wei). Results are sorted principal DESC.
+      tags: [Offers]
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string }
+          description: Token ID
+      responses:
+        "200":
+          description: Aggregated position
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  collection: { type: string }
+                  token_id:   { type: string }
+                  positions:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/OfferRow"
+                  count:      { type: integer }
+                  highest:    { type: string, description: "Highest offer amount (wei)" }
+                  total_wei:  { type: string, description: "Total offer principal (wei)" }
+                  truncated:
+                    type: boolean
+                    description: "True when >= 200 offers (result capped)"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Collections ─────────────────────────────────────────────────────
+  /api/v1/collections:
+    get:
+      summary: List tracked collections
+      tags: [Collections]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Array of collection rows
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/CollectionRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/collections/{address}:
+    get:
+      summary: Get collection detail with stats
+      description: Returns collection metadata + floor price, 24h volume, and listed count.
+      tags: [Collections]
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { type: string, example: "0x..." }
+      responses:
+        "200":
+          description: Collection detail with computed stats
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/collections/{address}/traits:
+    get:
+      summary: List trait values for collection
+      description: Returns trait_type → [value, ...] map for filter building.
+      tags: [Collections]
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Trait map
+          content:
+            application/json:
+              schema:
+                type: object
+                additionalProperties:
+                  type: array
+                  items: { type: string }
+              example:
+                Background: ["Red", "Blue", "Gold"]
+                Fur: ["Striped", "Spotted"]
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/trending:
+    get:
+      summary: Trending collections
+      tags: [Collections]
+      parameters:
+        - name: window
+          in: query
+          schema: { type: string, default: "24h", example: "7d" }
+          description: Time window (e.g. 24h, 7d, 30d)
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Array of trending scores
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/TrendingScore"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Media ───────────────────────────────────────────────────────────
+  /api/v1/media:
+    get:
+      summary: Media proxy
+      description: |
+        Proxies external NFT images through same-origin with SSRF guards.
+        Accepts http/https/ipfs URLs. When the URL is a local blob path,
+        short-circuits to /api/v1/img/:sha256.
+      tags: [Media]
+      parameters:
+        - name: url
+          in: query
+          required: true
+          schema: { type: string, example: "https://ipfs.io/ipfs/QmABC..." }
+      responses:
+        "200":
+          description: Image bytes with correct Content-Type
+          headers:
+            Cache-Control: { schema: { type: string, example: "public, max-age=86400" } }
+        "400":
+          description: Invalid or disallowed URL
+          content: { text/plain: { schema: { type: string } } }
+        "502":
+          description: Upstream unavailable
+
+  /api/v1/img/{sha256}:
+    get:
+      summary: Get self-hosted image blob by SHA-256 hash
+      description: |
+        Returns the stored image (or JSON metadata blob) by its content hash.
+        Cache header is 1 year (immutable) since identical hash = identical bytes.
+      tags: [Media]
+      parameters:
+        - name: sha256
+          in: path
+          required: true
+          schema: { type: string, pattern: "^[a-f0-9]{64}$" }
+      responses:
+        "200":
+          description: Image/JSON blob
+          headers:
+            Cache-Control: { schema: { type: string, example: "public, max-age=31536000, immutable" } }
+            X-Imagestore-Sha256: { schema: { type: string } }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Blob not found
+        "415":
+          description: Unsupported media type
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/img/retry:
+    post:
+      summary: Trigger image self-hosting retry
+      description: |
+        Forces immediate fetch and self-host of a token's image from its
+        upstream URL. Idempotent — returns "already_local" if already cached.
+        Not JWT-protected; rate-limited by the api group (60 req/min/IP).
+      tags: [Media]
+      parameters:
+        - name: coll
+          in: query
+          required: true
+          schema: { type: string, example: "0x..." }
+          description: Collection address
+        - name: id
+          in: query
+          required: true
+          schema: { type: string, example: "1" }
+          description: Token ID
+      responses:
+        "200":
+          description: Retry result
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  status:
+                    type: string
+                    enum: [ok, already_local]
+                  image_uri:
+                    type: string
+                    example: "/api/v1/img/abc123def..."
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "404":
+          description: Token metadata not found or no image_uri
+        "502":
+          description: Upstream or self-host failed
+
+  # ── Wallet ──────────────────────────────────────────────────────────
+  /api/v1/wallet/{addr}/nfts:
+    get:
+      summary: List NFTs owned by address
+      description: Returns all ERC-721 and ERC-1155 tokens owned by address, newest first.
+      tags: [Wallet]
+      parameters:
+        - name: addr
+          in: path
+          required: true
+          schema: { type: string, example: "0x..." }
+      responses:
+        "200":
+          description: Array of owned NFTs
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/OwnedNFT"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Notifications (🔒 JWT) ──────────────────────────────────────────
+  /api/v1/notifications:
+    get:
+      summary: List notifications 🔒
+      description: Returns in-app notifications for the authenticated user, with unread count.
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Notifications with unread count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  notifications:
+                    type: array
+                    items:
+                      $ref: "#/components/schemas/NotificationRow"
+                  unread:
+                    type: integer
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/notifications/read:
+    post:
+      summary: Mark notifications read 🔒
+      tags: [Notifications]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      responses:
+        "204":
+          description: All notifications marked as read
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Profiles ────────────────────────────────────────────────────────
+  /api/v1/profile/{addr}:
+    get:
+      summary: Get profile (public)
+      tags: [Profiles]
+      parameters:
+        - name: addr
+          in: path
+          required: true
+          schema: { type: string }
+      responses:
+        "200":
+          description: Profile row
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+    put:
+      summary: Update profile 🔒
+      description: Updates display name, bio, avatar, banner, Twitter, and website URLs.
+      tags: [Profiles]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      parameters:
+        - name: addr
+          in: path
+          required: true
+          schema: { type: string }
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              properties:
+                display_name: { type: string, maxLength: 64 }
+                bio:          { type: string, maxLength: 500 }
+                avatar_uri:   { type: string, format: uri, description: "http/https only" }
+                banner_uri:   { type: string, format: uri, description: "http/https only" }
+                twitter:      { type: string }
+                website:      { type: string, format: uri, description: "http/https only" }
+      responses:
+        "200":
+          description: Updated profile
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ProfileRow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Cannot edit another profile
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Admin / Trust & Safety (🔒 JWT) ─────────────────────────────────
+  /api/v1/reports:
+    post:
+      summary: Create report 🔒
+      description: Report a listing, collection, or user for moderation review.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [target_type, target_id, reason]
+              properties:
+                target_type: { type: string, example: "listing" }
+                target_id:   { type: string }
+                reason:      { type: string }
+                detail:      { type: string, maxLength: 1000 }
+      responses:
+        "201":
+          description: Report created
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/admin/verify:
+    post:
+      summary: Verify user profile 🔒
+      description: Admin-only. Grants or revokes the verified badge on a user profile.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, verified]
+              properties:
+                address:  { type: string }
+                verified: { type: boolean }
+      responses:
+        "200":
+          description: Verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  address:  { type: string }
+                  verified: { type: boolean }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Admin only
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/admin/collections/verify:
+    post:
+      summary: Verify collection 🔒
+      description: Admin-only. Grants or revokes the verified badge on a collection.
+      tags: [Admin]
+      security:
+        - BearerAuth: []
+        - CookieAuth: []
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, verified]
+              properties:
+                address:  { type: string }
+                verified: { type: boolean }
+      responses:
+        "200":
+          description: Collection verification status
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  collection: { type: string }
+                  verified:   { type: boolean }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "403":
+          description: Admin only
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Search ──────────────────────────────────────────────────────────
+  /api/v1/search:
+    get:
+      summary: Full-text search
+      description: |
+        Searches tokens and collections using Postgres full-text search.
+        Requires minimum 2 characters. Returns NFT and collection results
+        merged alphabetically by name.
+      tags: [Search]
+      parameters:
+        - name: q
+          in: query
+          required: true
+          schema: { type: string, minLength: 2 }
+          description: Search query (min 2 chars)
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 100, default: 20 }
+      responses:
+        "200":
+          description: Search results
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/SearchResult"
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Metrics ─────────────────────────────────────────────────────────
+  /api/v1/metrics:
+    get:
+      summary: Market metrics
+      description: |
+        Aggregate marketplace statistics. Includes SSE broadcast health
+        counters. DB failures return "metrics temporarily unavailable"
+        sentinel instead of 500, so the metrics page stays informative.
+      tags: [Metrics]
+      responses:
+        "200":
+          description: Market metrics + SSE counters
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalActiveListings:  { type: integer }
+                  totalSales:           { type: integer }
+                  grossVolumeWei:       { type: string, description: "Gross volume (wei)" }
+                  totalAuctions:        { type: integer }
+                  sse_dropped_total:    { type: integer, description: "SSE events dropped due to saturation" }
+                  sse_saturation_streak: { type: integer, description: "Consecutive saturated intervals" }
+                  metrics_unavailable:  { type: string, description: "Empty when healthy" }
+
+  /api/v1/activity:
+    get:
+      summary: Recent marketplace activity
+      description: |
+        Returns recent Listed, Sold, AuctionCreated, and BidPlaced events
+        across all collections, newest first.
+      tags: [Metrics]
+      parameters:
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
+      responses:
+        "200":
+          description: Activity feed
+          content:
+            application/json:
+              schema:
+                type: array
+                items:
+                  $ref: "#/components/schemas/ActivityRow"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Indexer ─────────────────────────────────────────────────────────
+  /api/v1/indexer/status:
+    get:
+      summary: Indexer status
+      description: Returns the current indexed block and event counts.
+      tags: [Indexer]
+      responses:
+        "200":
+          description: Indexer state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  indexed_block: { type: integer, description: "Last indexed block number" }
+                  total_events:  { type: integer, description: "Total events processed" }
+                  last_1h_events: { type: integer, description: "Events in last hour" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  # ── Auth (SIWE) ─────────────────────────────────────────────────────
+  /auth/nonce:
+    get:
+      summary: Get SIWE nonce
+      description: |
+        Returns a cryptographically random nonce for SIWE authentication.
+        Rate-limited to 20 req/min per IP. An existing unexpired nonce
+        returns 409 (Conflict).
+      tags: [Auth]
+      parameters:
+        - name: address
+          in: query
+          required: true
+          schema: { type: string, example: "0x..." }
+          description: Wallet address (lowercase hex)
+      responses:
+        "200":
+          description: Nonce
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  nonce: { type: string, example: "a1b2c3d4e5f6a7b8" }
+        "400":
+          description: Missing or invalid address
+        "409":
+          description: Nonce already issued and unexpired
+        "429":
+          description: Rate limited
+
+  /auth/verify:
+    post:
+      summary: Verify SIWE signature
+      description: |
+        Verifies an EIP-191/EIP-4361 signed message and issues a JWT.
+        Sets an HttpOnly session cookie (`mw_s_<addr>`) and returns the
+        token in the response body.
+      tags: [Auth]
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              type: object
+              required: [address, message, signature]
+              properties:
+                address:   { type: string }
+                message:   { type: string, description: "EIP-4361 SIWE message including nonce" }
+                signature: { type: string, description: "EIP-191 hex signature (65 bytes, 132 hex chars)" }
+      responses:
+        "200":
+          description: JWT token issued
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  token:   { type: string, description: "JWT (Bearer token)" }
+                  address: { type: string }
+        "400":
+          $ref: "#/components/responses/BadRequest"
+        "401":
+          description: Nonce not found, expired, domain mismatch, chain ID mismatch, or signature verification failed
+        "429":
+          description: Rate limited
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+components:
+  securitySchemes:
+    BearerAuth:
+      type: http
+      scheme: bearer
+      description: SIWE JWT via Authorization: Bearer <token>
+    CookieAuth:
+      type: apiKey
+      in: cookie
+      name: mw_s_*
+      description: HttpOnly session cookie set after SIWE login
+
+  responses:
+    BadRequest:
+      description: Bad request
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    Unauthorized:
+      description: Missing or invalid JWT
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "missing token" }
+    NotFound:
+      description: Resource not found
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string }
+    InternalError:
+      description: Internal server error
+      content:
+        application/json:
+          schema:
+            type: object
+            properties:
+              error: { type: string, example: "internal error" }
+
+  schemas:
+    # ── Listings ──────────────────────────────────────────────────────
+    ListingRow:
+      type: object
+      properties:
+        Collection:            { type: string, description: "Note: Go field name (no json tag)" }
+        TokenID:               { type: string }
+        Seller:                { type: string }
+        PriceWei:              { type: string }
+        Amount:                { type: integer }
+        Standard:              { type: string, enum: [erc721, erc1155] }
+        ExpiresAt:             { type: string, format: date-time }
+        ListedAt:              { type: string, format: date-time }
+        TxHash:                { type: string }
+        Name:                  { type: string }
+        ImageURI:              { type: string }
+        TotalSupply:           { type: integer }
+        CollectionVerified:    { type: boolean }
+
+    # ── Auctions ──────────────────────────────────────────────────────
+    AuctionRow:
+      type: object
+      properties:
+        AuctionID:           { type: integer }
+        Collection:          { type: string }
+        TokenID:             { type: string }
+        Seller:              { type: string }
+        Standard:            { type: string, enum: [erc721, erc1155] }
+        ReservePriceWei:     { type: string }
+        HighestBidWei:       { type: string }
+        HighestBidder:       { type: string }
+        MinIncrementBps:     { type: integer }
+        StartsAt:            { type: string, format: date-time }
+        EndsAt:              { type: string, format: date-time }
+        Status:              { type: string, enum: [active, settled, cancelled] }
+        CreateTx:            { type: string }
+        Name:                { type: string }
+        ImageURI:            { type: string }
+
+    BidRow:
+      type: object
+      properties:
+        bidder:    { type: string }
+        amount_wei: { type: string }
+        tx_hash:   { type: string }
+        placed_at: { type: string, format: date-time }
+
+    # ── Offers ────────────────────────────────────────────────────────
+    OfferRow:
+      type: object
+      properties:
+        OfferID:    { type: string }
+        Bidder:     { type: string }
+        Collection: { type: string }
+        TokenID:    { type: string }
+        AmountWei:  { type: string, description: "Principal wei (excludes fee)" }
+        FeeWei:     { type: string }
+        Units:      { type: integer }
+        Standard:   { type: string, enum: [erc721, erc1155] }
+        ExpiresAt:  { type: string, format: date-time }
+        Status:     { type: string, enum: [pending, accepted, cancelled, expired] }
+        MakeTx:     { type: string }
+        CreatedAt:  { type: string, format: date-time }
+
+    # ── Collections ───────────────────────────────────────────────────
+    CollectionRow:
+      type: object
+      properties:
+        Address:     { type: string, description: "Note: Go field name (no json tag)" }
+        Name:        { type: string }
+        Symbol:      { type: string }
+        Standard:    { type: string, enum: [erc721, erc1155] }
+        DeployBlock: { type: integer }
+        Verified:    { type: boolean }
+
+    CollectionDetail:
+      type: object
+      allOf:
+        - $ref: "#/components/schemas/CollectionRow"
+        - type: object
+          properties:
+            floor_price_wei:  { type: string }
+            volume_24h_wei:   { type: string }
+            listed_count:     { type: integer }
+
+    TrendingScore:
+      type: object
+      properties:
+        Collection: { type: string, description: "Note: Go field name (no json tag)" }
+        Window:     { type: string }
+        Score:      { type: number, format: double }
+        Views:      { type: integer }
+        Bids:       { type: integer }
+        VolumeWei:  { type: string, description: "Volume in wei (note: Go field name)" }
+
+    # ── Wallet ────────────────────────────────────────────────────────
+    OwnedNFT:
+      type: object
+      properties:
+        collection: { type: string }
+        token_id:   { type: string }
+        units:      { type: string }
+        standard:   { type: string, enum: [erc721, erc1155] }
+        name:       { type: string }
+        image_uri:  { type: string }
+
+    # ── Notifications ─────────────────────────────────────────────────
+    NotificationRow:
+      type: object
+      properties:
+        id:         { type: integer }
+        kind:       { type: string }
+        title:      { type: string }
+        body:       { type: string }
+        link:       { type: string }
+        read:       { type: boolean }
+        created_at: { type: string, format: date-time }
+
+    # ── Profile ───────────────────────────────────────────────────────
+    ProfileRow:
+      type: object
+      properties:
+        address:      { type: string }
+        display_name: { type: string }
+        bio:          { type: string }
+        avatar_uri:   { type: string }
+        banner_uri:   { type: string }
+        twitter:      { type: string }
+        website:      { type: string }
+        verified:     { type: boolean }
+
+    # ── Search ────────────────────────────────────────────────────────
+    SearchResult:
+      type: object
+      properties:
+        kind:       { type: string, enum: [nft, collection] }
+        collection: { type: string }
+        token_id:   { type: string }
+        name:       { type: string }
+        image_uri:  { type: string }
+
+    # ── Activity ──────────────────────────────────────────────────────
+    ActivityRow:
+      type: object
+      properties:
+        type:       { type: string, enum: [Listed, Sold, AuctionCreated, BidPlaced] }
+        collection: { type: string }
+        tokenId:    { type: string }
+        amountWei:  { type: string }
+        timestamp:  { type: string, format: date-time }
+        txHash:     { type: string }

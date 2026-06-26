@@ -715,9 +715,8 @@ window.addEventListener('alpine:init', () => {
     async _wcConnect({ silent = false } = {}) {
       if (!silent) {
         try { console.log('[mw-wc-debug] _wcConnect: init started (showQrModal=false, custom overlay)'); } catch (_) {}
-        // Show the pairing overlay immediately (loading state) so the user
-        // sees feedback before the WC relay round-trip completes.
         try { MW_WC_show(); } catch (_) { console.warn('[mw] MW_WC_show not available'); }
+      }
       // v23 — Try multiple CDNs in sequence (esm.sh ?bundle-deps,
       // ?bundle, jsdelivr). esm.sh periodically changes its bundling
       // shape and that has stranded every user mid-pick before. If
@@ -832,6 +831,7 @@ window.addEventListener('alpine:init', () => {
         try { console.log('[mw-wc-debug] _wcConnect: display_uri received'); } catch (_) {}
         // Display the WC URI in the pairing overlay.
         try { MW_WC_showURI(uri); } catch (_) { console.warn('[mw] MW_WC_showURI not available'); }
+      });
 
       try {
         await wc.connect();

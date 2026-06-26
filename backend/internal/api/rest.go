@@ -224,7 +224,8 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
 	NewCollectionsService(q).RegisterRoutes(api)
-	NewMediaService(q, eth).RegisterRoutes(api)
+	ms := NewMediaService(q, eth)
+	ms.RegisterRoutes(api)
 	NewWalletService(q).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
 	NewProfilesService(q).RegisterRoutes(api, cfg)
@@ -234,7 +235,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewIndexerService(q).RegisterRoutes(api)
 
 	// Image-by-hash route registered at app level (not namespaced under /api/v1).
-	app.Get(imagestore.PathPrefix+"/:sha256", NewMediaService(q, eth).HandleImageByHash())
+	app.Get(imagestore.PathPrefix+"/:sha256", ms.HandleImageByHash())
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────
