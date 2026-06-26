@@ -85,10 +85,14 @@ const (
 	//   * ipfs.io / dweb.link / gateway.pinata.cloud — image fallback for
 	//     /api/v1/media proxy upstream
 	//   * api.reown.com — WalletConnect explorer API (wallet listing metadata)
-	//   * https://*.walletconnect.com — WC verify endpoints + explorer-iframe
-	//   * wss://relay.walletconnect.com / wss://*.walletconnect.com — WC pairing
+	//   * https://*.walletconnect.com + .org — WC verify endpoints + explorer-iframe
+	//   * wss://relay.walletconnect.com + .org / wss://*.walletconnect.{com,org} — WC pairing
 	//     relay (REQUIRED — drop these and the QR pairs but never completes)
-	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com wss://relay.walletconnect.com wss://*.walletconnect.com; " +
+	// v31 CSP FIX: added *.walletconnect.org + relay.walletconnect.org because the
+	// Reown/WalletConnect SDK v2.23.9 migrated from .com to .org for relay and verify
+	// endpoints. Without these additions the browser CSP blocks the WS handshake and
+	// the frame, causing the "Connecting to WalletConnect…" overlay to spin forever.
+	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org; " +
 		// v23.5 — worker-src explicitly allowlisted so the WC SDK v2.x can
 	// spawn its in-process relay-crypto Web Worker (a blob worker built
 	// from the SDK source — see wallet-connect/sdk's KeyChainStorage).
@@ -98,7 +102,7 @@ const (
 	// explicit `blob:` token. Belt-and-braces: future SDK versions may
 	// switch from SubtleCrypto to a fallback worker in older browsers.
 	"worker-src 'self' blob:; " +
-	"frame-src 'self' https://*.walletconnect.com https://verify.walletconnect.com; " +
+	"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'"
