@@ -37,7 +37,7 @@
       <span class="font-mono text-neutral-400">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</span>
     </div>
     <div class="flex items-center gap-4">
-      <span class="text-white">{{wei2eth .AmountWei}} {{.NativeCurrency}}</span>
+      <span class="text-white">{{wei2eth .AmountWei}} {{$.NativeCurrency}}</span>
       <span class="text-neutral-600 text-xs">{{.Timestamp.Format "Jan 2 15:04"}}</span>
     </div>
   </div>
