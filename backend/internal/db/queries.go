@@ -864,6 +864,78 @@ func (q *Q) IncrementTokenViews(ctx context.Context, collection, tokenID string)
 	return err
 }
 
+// TokenActivityRow is one event in a single token's on-chain history.
+type TokenActivityRow struct {
+	Type       string
+	AmountWei  string
+	FromAddr   string
+	ToAddr     string
+	Timestamp  time.Time
+	TxHash     string
+}
+
+// GetTokenActivity returns the on-chain activity for one token across sales
+// and bids (offer-level activity). Orders newest first, capped at 30 rows.
+// Used by /token/:addr/:id to show the token's transaction history.
+func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string) ([]TokenActivityRow, error) {
+	rows, err := q.pool.Query(ctx, `
+		SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash
+		  FROM sales WHERE collection=$1 AND token_id=$2
+		UNION ALL
+		SELECT CASE WHEN status='accepted' THEN 'OfferAccepted'
+		            WHEN status='cancelled' THEN 'OfferCancelled'
+		            ELSE 'OfferMade' END,
+		       principal_wei::text, bidder, '', created_at, COALESCE(make_tx,'')
+		  FROM offers WHERE collection=$1 AND token_id=$2
+		UNION ALL
+		SELECT 'BidPlaced', b.amount_wei::text, b.bidder, '', b.placed_at, b.tx_hash
+		  FROM bids b JOIN auctions a ON a.auction_id=b.auction_id
+		 WHERE a.collection=$1 AND a.token_id=$2
+		ORDER BY ts DESC LIMIT 30
+	`, collection, tokenID)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TokenActivityRow
+	for rows.Next() {
+		var r TokenActivityRow
+		if err := rows.Scan(&r.Type, &r.AmountWei, &r.FromAddr, &r.ToAddr, &r.Timestamp, &r.TxHash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetTokenFullMetadata returns the on-chain metadata for a single token
+// with ALL fields (not just name+image). Drives the token detail page.
+func (q *Q) GetTokenFullMetadata(ctx context.Context, collection, tokenID string) (name, description, imageURI, animationURI, metadataURI string, fetchedAt time.Time, err error) {
+	err = q.pool.QueryRow(ctx,
+		`SELECT COALESCE(m.name, t.name, ''),
+		        COALESCE(m.description, ''),
+		        COALESCE(m.image_uri, t.image_uri, ''),
+		        COALESCE(m.animation_uri, ''),
+		        COALESCE(m.metadata_uri, ''),
+		        COALESCE(m.fetched_at, now())
+		 FROM nft_tokens t
+		 LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
+		 WHERE t.collection=$1 AND t.token_id=$2`, collection, tokenID).
+		Scan(&name, &description, &imageURI, &animationURI, &metadataURI, &fetchedAt)
+	if err == pgx.ErrNoRows {
+		// Try nft_metadata-only fallback (token may not be in nft_tokens yet)
+		err = q.pool.QueryRow(ctx,
+			`SELECT COALESCE(name,''), COALESCE(description,''), COALESCE(image_uri,''),
+			        COALESCE(animation_uri,''), COALESCE(metadata_uri,''), COALESCE(fetched_at,now())
+			 FROM nft_metadata WHERE collection=$1 AND token_id=$2`,
+			collection, tokenID).Scan(&name, &description, &imageURI, &animationURI, &metadataURI, &fetchedAt)
+		if err == pgx.ErrNoRows {
+			return "", "", "", "", "", time.Time{}, nil
+		}
+	}
+	return name, description, imageURI, animationURI, metadataURI, fetchedAt, err
+}
+
 // GetTokenAttributes returns the on-chain traits for one token. Drives the
 // Attributes grid on /token/:addr/:id. Order matches storage (by trait_type
 // then value) so the layout is stable across reloads.

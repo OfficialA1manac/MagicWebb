@@ -248,6 +248,10 @@ func uiToken(q *db.Q) fiber.Handler {
 		id := c.Params("id")
 		m := tokenPageData(c.Context(), q, addr, id)
 		m["Title"] = "Token #" + id
+		// Increment view count once per page load (NOT on every 1s partial refresh —
+		// that's why this is in uiToken, not in tokenPageData which partialToken
+		// also calls).
+		_ = q.IncrementTokenViews(c.Context(), addr, id)
 		return render(c, "pages/token.html", m)
 	}
 }
@@ -364,6 +368,8 @@ func tokenPageData(ctx context.Context, q *db.Q, addr, id string) fiber.Map {
 		Limit:      20,
 	})
 	traits, _ := q.GetTokenAttributes(ctx, addr, id)
+	activity, _ := q.GetTokenActivity(ctx, addr, id)
+	_, description, _, animationURI, metadataURI, fetchedAt, _ := q.GetTokenFullMetadata(ctx, addr, id)
 	return fiber.Map{
 		"Listing":            listing,
 		"Offers":             offers,
@@ -373,13 +379,13 @@ func tokenPageData(ctx context.Context, q *db.Q, addr, id string) fiber.Map {
 		"TokenName":          tokenName,
 		"TokenImageURI":      tokenImage,
 		"Traits":             traits,
+		"Activity":           activity,
+		"Description":        description,
+		"AnimationURI":       animationURI,
+		"MetadataURI":        metadataURI,
+		"FetchedAt":          fetchedAt,
 		"Contract":           addr,
 		"TokenID":            id,
-		// Description placeholder: when an upgraded indexer stores a
-		// description column, surface it here. Today the field is empty
-		// so the about-card is hidden — keeping the wiring in place
-		// means a future migration needs no template change.
-		"Description": "",
 	}
 }
 

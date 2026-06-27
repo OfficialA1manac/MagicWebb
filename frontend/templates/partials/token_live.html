@@ -1,40 +1,137 @@
 {{define "partials/token_live.html"}}
 <!-- Pure data region for /token/:addr/:id. NO x-data here — Alpine
      bindings on the page template (parent) persist across the innerHTML
-     htmx swap. This partial only carries read-only HTML: image, traits,
-     metadata table, offers list. Interactive buttons (accept/reject) use
-     @click directives that Alpine.initTree re-processes after swap. -->
-{{$img := ""}}{{$name := ""}}
+     htmx swap. This partial only carries read-only HTML: flip-card image,
+     traits, metadata, activity feed, offers list. Interactive buttons
+     (accept/reject/toggle-flip) use @click directives that
+     Alpine.initTree re-processes after swap. -->
+{{$img := ""}}{{$name := ""}}{{$desc := .Description}}{{$anim := .AnimationURI}}{{$metaURI := .MetadataURI}}{{$fetched := .FetchedAt}}
 {{with .Listing}}{{$img = .ImageURI}}{{$name = .Name}}{{end}}
 {{if not $img}}{{$img = .TokenImageURI}}{{end}}
 {{if not $name}}{{$name = .TokenName}}{{end}}
 
-<!-- Image card -->
-<div class="bg-ink-900 rounded-2xl overflow-hidden border border-white/10 glow-sky">
-  {{if $img}}
-  <div class="relative group">
-    <img src="{{mediaURL $img}}" alt="Token #{{.TokenID}}" class="w-full aspect-square object-cover"
-         onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
-    <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden mw-img-fallback shimmer">🖼</div>
-    <div class="absolute top-4 left-4 flex flex-col gap-1.5">
-      {{if .Standard}}
-      <span class="px-2 py-1 rounded-md bg-ink-1000/80 backdrop-blur border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
-      {{end}}
-      {{if .CollectionVerified}}
-      <span class="px-2 py-1 rounded-md bg-violet-500/20 backdrop-blur border border-violet-300/40 text-[10px] font-extrabold uppercase tracking-wider text-violet-200 flex items-center gap-1 glow-violet">
-        <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-        Verified
-      </span>
+<!-- ═══ Flip Card: front = NFT image, back = metadata detail ═══ -->
+<div class="group perspective-[1200px]">
+  <div x-data="{ flipped: false }"
+       :class="flipped ? '[transform:rotateY(180deg)]' : ''"
+       class="relative w-full aspect-square transition-transform duration-700 ease-[cubic-bezier(0.4,0,0.2,1)] [transform-style:preserve-3d] cursor-pointer"
+       @click="flipped = !flipped">
+
+    <!-- ── FRONT face ───────────────────────────────────────────────── -->
+    <div class="absolute inset-0 [backface-visibility:hidden] rounded-2xl overflow-hidden border border-white/10 bg-ink-900 glow-sky">
+      {{if $img}}
+      <div class="relative h-full">
+        <img src="{{mediaURL $img}}" alt="{{$name}}" class="w-full h-full object-cover"
+             onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+        <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden mw-img-fallback shimmer">🖼</div>
+        <!-- Top-left badges -->
+        <div class="absolute top-4 left-4 flex flex-col gap-1.5">
+          {{if .Standard}}
+          <span class="px-2 py-1 rounded-md bg-ink-1000/80 backdrop-blur border border-white/20 text-[10px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
+          {{end}}
+          {{if .CollectionVerified}}
+          <span class="px-2 py-1 rounded-md bg-violet-500/20 backdrop-blur border border-violet-300/40 text-[10px] font-extrabold uppercase tracking-wider text-violet-200 flex items-center gap-1 glow-violet">
+            <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+            Verified
+          </span>
+          {{end}}
+        </div>
+        <!-- Bottom hint -->
+        <div class="absolute bottom-3 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-full bg-ink-1000/70 backdrop-blur border border-white/10 text-[10px] text-white/50 font-bold uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          Click to flip · details →
+        </div>
+        <!-- Error retry button -->
+        <button onclick="MW_RETRY_IMAGE('{{.Contract}}','{{.TokenID}}',event)" class="hidden mw-img-fallback absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-xl bg-ink-1000/85 border border-sky-300/40 backdrop-blur text-[11px] text-sky-200 hover:text-white font-extrabold uppercase tracking-wider glow-sky">⚠ retry image ingest</button>
+      </div>
+      {{else}}
+      <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>
       {{end}}
     </div>
-    <button onclick="MW_RETRY_IMAGE('{{.Contract}}','{{.TokenID}}',event)" class="hidden mw-img-fallback absolute bottom-4 left-1/2 -translate-x-1/2 px-3 py-1.5 rounded-xl bg-ink-1000/85 border border-sky-300/40 backdrop-blur text-[11px] text-sky-200 hover:text-white font-extrabold uppercase tracking-wider glow-sky">⚠ retry image ingest</button>
+
+    <!-- ── BACK face (metadata detail) ───────────────────────────────── -->
+    <div class="absolute inset-0 [backface-visibility:hidden] [transform:rotateY(180deg)] rounded-2xl overflow-y-auto border border-white/10 bg-gradient-to-br from-ink-950 via-ink-900 to-ink-950 p-5 flex flex-col gap-4">
+      <!-- Close hint -->
+      <div class="flex items-center justify-between">
+        <h3 class="text-sm font-extrabold text-white flex items-center gap-2">
+          <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200 text-xs">⌘</span>
+          {{if $name}}{{$name}}{{else}}#{{.TokenID}}{{end}}
+        </h3>
+        <span class="text-[10px] text-white/30 font-bold uppercase tracking-wider">Click to flip back · ✕</span>
+      </div>
+
+      <!-- Description -->
+      {{if $desc}}
+      <div>
+        <p class="text-[10px] uppercase tracking-wider font-extrabold text-white/40 mb-1.5">About</p>
+        <p class="text-sm text-white/80 leading-relaxed line-clamp-5">{{$desc}}</p>
+      </div>
+      {{end}}
+
+      <!-- Token details table -->
+      <div class="divide-y divide-white/5 bg-white/[0.02] rounded-xl border border-white/5 overflow-hidden">
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Collection</span>
+          <a href="/collection/{{.Contract}}" class="text-xs font-mono text-sky-200 hover:text-sky-100 transition">{{shortAddr .Contract}}</a>
+        </div>
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Token ID</span>
+          <span class="text-xs font-mono text-white">#{{.TokenID}}</span>
+        </div>
+        {{if .Standard}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Standard</span>
+          <span class="text-[10px] px-2 py-0.5 rounded-md bg-violet-500/15 border border-violet-400/30 text-violet-200 font-extrabold uppercase tracking-wider">{{.Standard}}</span>
+        </div>
+        {{end}}
+        {{if .Owner}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Owner</span>
+          <span class="text-xs font-mono text-white">{{shortAddr .Owner}}</span>
+        </div>
+        {{end}}
+        {{if $anim}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Animation</span>
+          <a href="{{$anim}}" target="_blank" rel="noopener" class="text-xs text-sky-200 hover:text-sky-100 transition truncate max-w-[180px]">{{$anim}}</a>
+        </div>
+        {{end}}
+        {{if $metaURI}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Metadata</span>
+          <a href="{{$metaURI}}" target="_blank" rel="noopener" class="text-xs text-sky-200 hover:text-sky-100 transition truncate max-w-[200px]">View on-chain ↗</a>
+        </div>
+        {{end}}
+        {{if not $fetched.IsZero}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Indexed</span>
+          <span class="text-xs text-white/50">{{$fetched.Format "Jan 2, 2006 15:04 UTC"}}</span>
+        </div>
+        {{end}}
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Traits</span>
+          <span class="text-xs font-extrabold text-violet-200">{{len .Traits}}</span>
+        </div>
+        <div class="flex items-center justify-between px-3 py-2.5">
+          <span class="text-[10px] text-white/40 font-bold uppercase tracking-wider">Active offers</span>
+          <span class="text-xs font-extrabold text-gold-200">{{len .Offers}}</span>
+        </div>
+      </div>
+    </div>
   </div>
-  {{else}}
-  <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl shimmer">🖼</div>
-  {{end}}
 </div>
 
-<!-- Traits -->
+<!-- ═══ Description (if present) ═══ -->
+{{if $desc}}
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
+  <h2 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2">
+    <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">⌘</span>
+    About
+  </h2>
+  <p class="text-sm text-white/70 leading-relaxed whitespace-pre-line">{{$desc}}</p>
+</div>
+{{end}}
+
+<!-- ═══ Traits grid ═══ -->
 {{if .Traits}}
 <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
   <h2 class="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
@@ -43,16 +140,20 @@
   </h2>
   <div class="grid grid-cols-2 lg:grid-cols-3 gap-3">
     {{range .Traits}}
-    <div class="bg-gradient-to-br from-violet-500/10 to-white/[0.02] rounded-xl p-3 border border-violet-400/20">
-      <p class="text-[10px] uppercase tracking-wider font-extrabold text-violet-200">{{.Type}}</p>
-      <p class="text-sm text-white font-extrabold mt-1 truncate">{{.Value}}</p>
+    <div class="bg-gradient-to-br from-violet-500/10 to-white/[0.02] rounded-xl p-3.5 border border-violet-400/20 hover:border-violet-300/40 transition-all duration-200 group/trait">
+      <p class="text-[10px] uppercase tracking-wider font-extrabold text-violet-200/70 group-hover/trait:text-violet-100 transition-colors">{{.Type}}</p>
+      <p class="text-sm text-white font-extrabold mt-1 truncate group-hover/trait:text-white transition-colors">{{.Value}}</p>
+      <!-- Rarity bar (placeholder: shows trait presence) -->
+      <div class="mt-2 h-1 rounded-full bg-white/5 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-violet-500/60 to-sky-400/60" style="width: {{if gt (len .Value) 10}}75{{else if gt (len .Value) 5}}50{{else}}35{{end}}%"></div>
+      </div>
     </div>
     {{end}}
   </div>
 </div>
 {{end}}
 
-<!-- Current listing price card (rendered here so live updates show new price) -->
+<!-- ═══ Current listing price card ═══ -->
 {{with .Listing}}
 <div class="bg-gradient-to-br from-ink-900 to-ink-900/80 border border-gold-400/30 rounded-2xl p-5 glow-gold backdrop-blur">
   <div class="flex items-center justify-between">
@@ -75,7 +176,43 @@
 </div>
 {{end}}
 
-<!-- Details -->
+<!-- ═══ Activity history ═══ -->
+{{if .Activity}}
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-5">
+  <h2 class="text-sm font-extrabold text-white mb-4 flex items-center gap-2">
+    <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">↗</span>
+    Activity <span class="text-xs text-white/40 font-normal">({{len .Activity}} events)</span>
+  </h2>
+  <div class="space-y-2">
+    {{range .Activity}}
+    <div class="flex items-center gap-3 px-3 py-2.5 rounded-xl hover:bg-white/[0.03] transition border border-transparent hover:border-white/5">
+      <!-- Type badge -->
+      <span class="shrink-0 px-2 py-1 rounded-md text-[10px] font-extrabold uppercase tracking-wider
+        {{if eq .Type "Sold"}}bg-sky-500/15 text-sky-200 border border-sky-400/30{{end}}
+        {{if eq .Type "BidPlaced"}}bg-violet-500/15 text-violet-200 border border-violet-400/30{{end}}
+        {{if eq .Type "OfferMade"}}bg-gold-500/15 text-gold-200 border border-gold-400/30{{end}}
+        {{if eq .Type "OfferAccepted"}}bg-emerald-500/15 text-emerald-200 border border-emerald-400/30{{end}}
+        {{if eq .Type "OfferCancelled"}}bg-white/5 text-white/40 border border-white/10{{end}}
+      ">{{.Type}}</span>
+      <!-- Details -->
+      <div class="min-w-0 flex-1">
+        <div class="flex items-center gap-2 text-xs">
+          {{if .AmountWei}}<span class="font-extrabold text-gold-200">{{wei2flr .AmountWei}} {{$.NativeCurrency}}</span>{{end}}
+          {{if .FromAddr}}<span class="text-white/40 text-[10px]">from</span> <span class="font-mono text-white/70 text-[11px]">{{shortAddr .FromAddr}}</span>{{end}}
+          {{if .ToAddr}}<span class="text-white/40 text-[10px]">to</span> <span class="font-mono text-white/70 text-[11px]">{{shortAddr .ToAddr}}</span>{{end}}
+        </div>
+        <p class="text-[10px] text-white/30 mt-0.5">{{.Timestamp.Format "Jan 2, 2006 15:04 UTC"}}</p>
+      </div>
+      {{if .TxHash}}
+      <a href="{{$.ExplorerURL}}/tx/{{.TxHash}}" target="_blank" rel="noopener" class="shrink-0 text-[10px] text-sky-200/50 hover:text-sky-200 transition font-mono">txn ↗</a>
+      {{end}}
+    </div>
+    {{end}}
+  </div>
+</div>
+{{end}}
+
+<!-- ═══ Details summary ═══ -->
 <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 p-6">
   <h2 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2">
     <span class="w-7 h-7 rounded-lg bg-sky-500/15 border border-sky-500/30 flex items-center justify-center text-sky-200">⌘</span>
@@ -108,11 +245,22 @@
       <span class="text-sm font-mono text-white">{{shortAddr .Owner}}</span>
     </div>
     {{end}}
+    {{if $desc}}
+    <div class="flex items-center justify-between py-2.5">
+      <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Description</span>
+      <span class="text-xs text-white/50">✓ indexed</span>
+    </div>
+    {{end}}
+    {{if not $fetched.IsZero}}
+    <div class="flex items-center justify-between py-2.5">
+      <span class="text-xs text-white/40 font-bold uppercase tracking-wider">Metadata fetched</span>
+      <span class="text-xs text-white/50">{{$fetched.Format "Jan 2, 2006"}}</span>
+    </div>
+    {{end}}
   </div>
 </div>
 
-<!-- Offers list (owner can accept/reject from this list). The @click
-     handlers re-bind on each swap via Alpine.initTree hook on the page. -->
+<!-- ═══ Offers list ═══ -->
 {{if .Offers}}
 <div class="bg-ink-900/80 backdrop-blur border border-white/10 rounded-2xl p-5">
   <h3 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2">
