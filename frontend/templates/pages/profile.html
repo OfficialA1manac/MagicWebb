@@ -5,14 +5,14 @@
 <div class="mb-6 rounded-xl border border-amber-500/40 bg-amber-500/10 p-4 flex items-center justify-between gap-4">
   <div>
     <p class="text-amber-400 font-semibold text-sm">Action needed: withdraw your refund</p>
-    <p class="text-neutral-400 text-xs mt-1">
-      {{wei2eth .PendingWei}} {{.NativeCurrency}} is waiting in the auction contract — automatic delivery
+    <p class="text-white/40 text-xs mt-1">
+      {{wei2flr .PendingWei}} {{.NativeCurrency}} is waiting in the auction contract — automatic delivery
       to your address failed. One click returns it.
     </p>
   </div>
   <button @click="$store.wallet.withdrawRefund()"
-          class="shrink-0 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-black text-sm font-bold transition">
-    Withdraw {{wei2eth .PendingWei}} {{.NativeCurrency}}
+          class="shrink-0 px-4 py-2 rounded-lg bg-amber-500 hover:bg-amber-400 text-ink-950 text-sm font-bold transition">
+    Withdraw {{wei2flr .PendingWei}} {{.NativeCurrency}}
   </button>
 </div>
 {{end}}
@@ -30,73 +30,266 @@
          display_name: this.p.display_name, bio: this.p.bio, avatar_uri: this.p.avatar_uri,
          twitter: this.p.twitter, website: this.p.website }); }
      }" class="mb-8">
-  <div class="flex items-start justify-between gap-4">
+  <div class="flex flex-wrap items-start justify-between gap-4">
     <div class="flex items-center gap-4 min-w-0">
-      <div class="w-14 h-14 rounded-full bg-neutral-800 flex items-center justify-center text-2xl overflow-hidden">
+      <div class="w-16 h-16 rounded-2xl bg-ink-800 flex items-center justify-center text-2xl overflow-hidden border border-white/10 shrink-0">
         <template x-if="p.avatar_uri"><img :src="p.avatar_uri" class="w-full h-full object-cover"></template>
         <template x-if="!p.avatar_uri"><span>👤</span></template>
       </div>
       <div class="min-w-0">
-        <div class="flex items-center gap-2">
-          <h1 class="text-xl font-bold text-white truncate" x-text="p.display_name || '{{shortAddr .Addr}}'"></h1>
+        <div class="flex items-center gap-2 flex-wrap">
+          <h1 class="text-xl font-extrabold text-white truncate" x-text="p.display_name || '{{shortAddr .Addr}}'"></h1>
           <span x-show="p.verified" x-cloak title="Verified"
-                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 text-emerald-400 text-xs font-semibold">✔ Verified</span>
+                class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 text-violet-200 text-xs font-extrabold border border-violet-400/30">✔ Verified</span>
         </div>
-        <p class="text-xs text-neutral-500 font-mono break-all">{{.Addr}}</p>
-        <p class="text-sm text-neutral-500 mt-1">{{len .Listings}} active listing{{if ne (len .Listings) 1}}s{{end}}</p>
-        <p x-show="p.bio" x-cloak class="text-sm text-neutral-400 mt-2" x-text="p.bio"></p>
+        <p class="text-xs text-white/40 font-mono break-all">{{.Addr}}</p>
+        <p x-show="p.bio" x-cloak class="text-sm text-white/60 mt-2 max-w-lg" x-text="p.bio"></p>
+        {{if .NFTs}}<p class="text-xs text-sky-200 mt-1 font-bold">{{len .NFTs}} NFT{{if gt (len .NFTs) 1}}s{{end}} in wallet</p>{{end}}
       </div>
     </div>
-    <div class="flex items-center gap-2 shrink-0">
+    <div class="flex items-center gap-2 shrink-0 flex-wrap">
       <template x-if="isMe">
-        <button @click="editing = !editing" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Edit Profile</button>
+        <button @click="editing = !editing" class="px-4 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-sm font-extrabold transition glow-sky shadow-md shadow-sky-500/30">Edit Profile</button>
       </template>
       <template x-if="!isMe">
         <button @click="$store.wallet.report('user', '{{lower .Addr}}', 'reported from profile')"
-                class="px-3 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-400 text-sm font-semibold transition">⚑ Report</button>
+                class="px-3 py-2 rounded-xl bg-ink-800 hover:bg-ink-700 text-white/60 text-sm font-bold transition border border-white/10">⚑ Report</button>
       </template>
-      <a href="/offers?addr={{.Addr}}" class="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-semibold transition">View Offers</a>
+      <a href="/offers?addr={{.Addr}}" class="px-4 py-2 rounded-xl bg-ink-800 hover:bg-ink-700 text-white text-sm font-bold transition border border-white/10">View Offers</a>
     </div>
   </div>
 
-  <div x-show="editing" x-cloak class="mt-4 bg-neutral-900 rounded-2xl p-5 space-y-3">
+  <div x-show="editing" x-cloak class="mt-4 bg-ink-900/80 backdrop-blur rounded-2xl p-5 space-y-3 border border-white/10">
     <div class="grid sm:grid-cols-2 gap-3">
-      <input x-model="p.display_name" maxlength="64" placeholder="Display name" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
-      <input x-model="p.avatar_uri" placeholder="Avatar URL" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
-      <input x-model="p.twitter" placeholder="Twitter / X handle" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
-      <input x-model="p.website" placeholder="Website" class="bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
+      <input x-model="p.display_name" maxlength="64" placeholder="Display name" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition">
+      <input x-model="p.avatar_uri" placeholder="Avatar URL" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition">
+      <input x-model="p.twitter" placeholder="Twitter / X handle" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition">
+      <input x-model="p.website" placeholder="Website" class="bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition">
     </div>
-    <textarea x-model="p.bio" maxlength="500" rows="3" placeholder="Bio" class="w-full bg-neutral-800 border border-neutral-700 rounded-lg px-3 py-2 text-sm text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500"></textarea>
+    <textarea x-model="p.bio" maxlength="500" rows="3" placeholder="Bio" class="w-full bg-ink-800 border border-white/10 rounded-xl px-3 py-2.5 text-sm text-white placeholder-white/30 focus:outline-none focus:border-sky-300/50 focus:ring-1 focus:ring-sky-300/30 transition"></textarea>
     <div class="flex gap-2">
-      <button @click="save()" class="px-4 py-2 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black text-sm font-bold transition">Save</button>
-      <button @click="editing = false" class="px-4 py-2 rounded-lg bg-neutral-800 hover:bg-neutral-700 text-neutral-300 text-sm font-semibold transition">Cancel</button>
+      <button @click="save()" class="px-4 py-2 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-sm font-extrabold transition glow-sky">Save</button>
+      <button @click="editing = false" class="px-4 py-2 rounded-xl bg-ink-800 hover:bg-ink-700 text-white/60 text-sm font-bold transition border border-white/10">Cancel</button>
     </div>
   </div>
 </div>
 
-<!-- Tab pills + Alpine x-data live OUTSIDE the swapped region so
-     the active tab persists across refreshes; the partial renders
-     both panes with `x-show` and Alpine.initTree re-applies x-show
-     on the new children after each htmx swap. -->
-<div x-data="{tab: 'listings'}">
-  <div class="flex gap-2 mb-6 border-b border-white/10">
+<!-- User metrics cards -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-3 mb-8">
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 border border-sky-400/30">
+    <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold mb-1">Active Listings</p>
+    <p class="text-2xl font-black text-sky-200">{{len .Listings}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 border border-violet-400/30">
+    <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold mb-1">Auctions</p>
+    <p class="text-2xl font-black text-violet-200">{{len .Auctions}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 border border-gold-400/30">
+    <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold mb-1">Offers Sent</p>
+    <p class="text-2xl font-black text-gold-200">{{len .OffersSent}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-4 border border-white/20">
+    <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold mb-1">Offers Received</p>
+    <p class="text-2xl font-black text-white">{{len .OffersReceived}}</p>
+  </div>
+</div>
+
+<!-- Platform-wide metrics (global) -->
+{{with .Metrics}}
+<div class="bg-ink-900/60 backdrop-blur rounded-2xl p-4 border border-white/10 mb-8">
+  <h3 class="text-xs font-extrabold text-white/40 uppercase tracking-wider mb-3">Platform Metrics</h3>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-3">
+    <div>
+      <p class="text-[10px] text-white/30 uppercase tracking-wider font-bold">Total Listings</p>
+      <p class="text-lg font-black text-white">{{.TotalActiveListings}}</p>
+    </div>
+    <div>
+      <p class="text-[10px] text-white/30 uppercase tracking-wider font-bold">Total Sales</p>
+      <p class="text-lg font-black text-gold-200">{{.TotalSales}}</p>
+    </div>
+    <div>
+      <p class="text-[10px] text-white/30 uppercase tracking-wider font-bold">Total Auctions</p>
+      <p class="text-lg font-black text-violet-200">{{.TotalAuctions}}</p>
+    </div>
+    <div>
+      <p class="text-[10px] text-white/30 uppercase tracking-wider font-bold">Gross Volume</p>
+      <p class="text-lg font-black text-white">{{wei2flr .GrossVolumeWei}} <span class="text-xs text-white/40">{{$.NativeCurrency}}</span></p>
+    </div>
+  </div>
+</div>
+{{end}}
+
+<!-- Tab pills + Alpine x-data for tabbed content -->
+<div x-data="{tab: 'nfts'}">
+  <div class="flex gap-2 mb-6 border-b border-white/10 overflow-x-auto">
+    <button @click="tab='nfts'"
+            :class="tab==='nfts' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
+            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider whitespace-nowrap">
+      NFTs ({{len .NFTs}})
+    </button>
     <button @click="tab='listings'"
-            :class="tab==='listings' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
-            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
+            :class="tab==='listings' ? 'text-gold-200 border-gold-300 bg-gold-500/10' : 'text-white/40 border-transparent hover:text-white'"
+            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider whitespace-nowrap">
       Listings ({{len .Listings}})
     </button>
+    <button @click="tab='auctions'"
+            :class="tab==='auctions' ? 'text-violet-200 border-violet-300 bg-violet-500/10' : 'text-white/40 border-transparent hover:text-white'"
+            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider whitespace-nowrap">
+      Auctions ({{len .Auctions}})
+    </button>
+    <button @click="tab='offers'"
+            :class="tab==='offers' ? 'text-gold-200 border-gold-300 bg-gold-500/10' : 'text-white/40 border-transparent hover:text-white'"
+            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider whitespace-nowrap">
+      Offers
+    </button>
     <button @click="tab='activity'"
-            :class="tab==='activity' ? 'text-violet-200 border-violet-300 bg-violet-500/10' : 'text-white/40 border-transparent hover:text-white'"
-            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">
+            :class="tab==='activity' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
+            class="px-4 py-3 text-xs font-extrabold border-b-2 transition uppercase tracking-wider whitespace-nowrap">
       Activity
     </button>
   </div>
 
-  <div hx-get="/partials/profile/{{lower .Addr}}"
-       hx-trigger="sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
-       hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
-  {{template "partials/profile_live.html" .}}
+  <!-- NFTs tab: show all NFTs in user's wallet -->
+  <div x-show="tab==='nfts'" x-cloak>
+    {{if .NFTs}}
+    <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+      {{range .NFTs}}
+      <a href="/token/{{.Collection}}/{{.TokenID}}"
+         class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10 hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300 hover:-translate-y-1">
+        <div class="aspect-square bg-ink-800 flex items-center justify-center overflow-hidden">
+          {{if .ImageURI}}
+          <img src="{{mediaURL .ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
+               loading="lazy"
+               class="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+               onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+          <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-4xl">🖼</div>
+          {{else}}
+          <div class="text-4xl text-white/20">🖼</div>
+          {{end}}
+          {{if .Standard}}
+          <span class="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
+          {{end}}
+        </div>
+        <div class="p-3">
+          <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
+          <p class="text-xs font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
+        </div>
+      </a>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+      <p class="text-white/40 text-lg mb-2">🖼</p>
+      <p class="text-white/40">No NFTs found in this wallet for tracked collections.</p>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Listings tab -->
+  <div x-show="tab==='listings'" x-cloak>
+    {{if .Listings}}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {{template "partials/listing_cards.html" .}}
+    </div>
+    {{else}}
+    <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+      <p class="text-white/40">No active listings.</p>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Auctions tab -->
+  <div x-show="tab==='auctions'" x-cloak>
+    {{if .Auctions}}
+    <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+      {{template "partials/auction_cards.html" .}}
+    </div>
+    {{else}}
+    <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+      <p class="text-white/40">No auctions.</p>
+    </div>
+    {{end}}
+  </div>
+
+  <!-- Offers tab -->
+  <div x-show="tab==='offers'" x-cloak>
+    <div class="mb-6">
+      <h4 class="text-sm font-extrabold text-white/60 uppercase tracking-wider mb-3">Sent ({{len .OffersSent}})</h4>
+      {{if .OffersSent}}
+      <div class="space-y-2">
+        {{range .OffersSent}}
+        <div class="bg-ink-900/80 backdrop-blur rounded-xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-gold-300/40 transition">
+          <div class="min-w-0 flex-1">
+            <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-gold-200 transition truncate block">
+              {{shortAddr .Collection}} #{{.TokenID}}
+            </a>
+            <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+          </div>
+          <span class="text-lg font-black text-gold-200 flex items-baseline gap-1 shrink-0">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="text-white/40 text-sm py-4">No offers sent yet.</p>
+      {{end}}
+    </div>
+    <div>
+      <h4 class="text-sm font-extrabold text-white/60 uppercase tracking-wider mb-3">Received ({{len .OffersReceived}})</h4>
+      {{if .OffersReceived}}
+      <div class="space-y-2">
+        {{range .OffersReceived}}
+        <div class="bg-ink-900/80 backdrop-blur rounded-xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-sky-300/40 transition">
+          <div class="min-w-0 flex-1">
+            <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-sky-200 transition truncate block">
+              {{shortAddr .Collection}} #{{.TokenID}}
+            </a>
+            <p class="text-xs text-white/40 mt-1">From <span class="font-mono text-white/80">{{shortAddr .Bidder}}</span> · Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+          </div>
+          <div class="flex items-center gap-3 shrink-0">
+            <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
+            {{if eq .Status "pending"}}
+            <button class="px-3 py-1.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
+                    @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
+            {{end}}
+          </div>
+        </div>
+        {{end}}
+      </div>
+      {{else}}
+      <p class="text-white/40 text-sm py-4">No offers received yet.</p>
+      {{end}}
+    </div>
+  </div>
+
+  <!-- Activity tab -->
+  <div x-show="tab==='activity'" x-cloak>
+    {{if .Activity}}
+    <div class="space-y-2">
+      {{range .Activity}}
+      <div class="bg-ink-900/80 backdrop-blur rounded-xl px-4 py-3 flex items-center justify-between text-sm border border-white/10 hover:border-white/20 transition group">
+        <div class="flex items-center gap-3">
+          <span class="px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider
+            {{if eq .Type "Sold"}}bg-gold-500/15 text-gold-200 border border-gold-400/30
+            {{else if eq .Type "Listed"}}bg-sky-500/15 text-sky-200 border border-sky-400/30
+            {{else if eq .Type "BidPlaced"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+            {{else if eq .Type "AuctionCreated"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+            {{else}}bg-white/5 text-white/60 border border-white/10{{end}}">
+            {{.Type}}
+          </span>
+          <span class="font-mono text-white/60 text-xs">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</span>
+        </div>
+        <div class="flex items-center gap-4">
+          <span class="text-gold-200 font-extrabold text-sm">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/60">{{$.NativeCurrency}}</span></span>
+          <span class="text-white/30 text-xs font-mono">{{.Timestamp.Format "Jan 2 15:04"}}</span>
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+      <p class="text-white/40">No recent activity.</p>
+    </div>
+    {{end}}
   </div>
 </div>
 {{end}}

@@ -31,6 +31,7 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 	f := db.ListingsFilter{
 		Collection: c.Query("collection"),
 		Seller:     c.Query("seller"),
+		Sort:       c.Query("sort", "recent"),
 	}
 	if lim := c.Query("limit"); lim != "" {
 		if n, err := strconv.Atoi(lim); err == nil {

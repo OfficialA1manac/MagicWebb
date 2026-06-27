@@ -155,6 +155,7 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
         <a href="/offers" class={`nav-offers ${isActive('/offers')}`}>Offers</a>
         <a href="/search" class={isActive('/search') ? 'active' : ''}>Search</a>
         <a href="/metrics" class={isActive('/metrics') ? 'active' : ''}>Metrics</a>
+        <a href="/profile" class={isActive('/profile') ? 'active' : ''}>Profile</a>
         <a href="/docs" class={isActive('/docs') ? 'active' : ''}>Docs</a>
       </div>
       <div class="nav-right">
@@ -175,7 +176,7 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
 
     <div id="mobile-menu" class="mobile-menu">
       <a href="/">Home</a><a href="/listings">Listings</a><a href="/auctions">Auctions</a>
-      <a href="/offers">Offers</a><a href="/search">Search</a><a href="/metrics">Metrics</a><a href="/docs">Docs</a>
+      <a href="/offers">Offers</a><a href="/search">Search</a><a href="/metrics">Metrics</a><a href="/profile">Profile</a><a href="/docs">Docs</a>
       <div class="mobile-wallet-section">
         <div class="mobile-section-label">Wallet</div>
         <div id="mobile-wallet-disconnected" style="display:none;">

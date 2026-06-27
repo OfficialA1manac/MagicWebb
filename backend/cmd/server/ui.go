@@ -460,11 +460,27 @@ func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
 	// "Withdraw required": sweeper-verified pendingReturns balance — the
 	// rare case where the contract's automatic refund push failed.
 	pendingWei, _ := q.GetVerifiedPendingWithdrawal(ctx, addr)
+	// User's auctions (as seller)
+	auctions, _ := q.ListAuctions(ctx, db.AuctionsFilter{Seller: addr, Limit: 20})
+	// User's offers (sent)
+	offersSent, _ := q.ListOffers(ctx, db.OffersFilter{Bidder: addr, Limit: 20})
+	// User's offers (received — tokens they own that have pending offers)
+	offersReceived, _ := q.ListOffers(ctx, db.OffersFilter{Owner: addr, Limit: 20})
+	// User's NFTs in wallet
+	nfts, _ := q.WalletNFTs(ctx, addr)
+	// Platform-wide metrics
+	metrics, _ := q.GetMarketMetrics(ctx)
 	return fiber.Map{
-		"Addr":       addr,
-		"Listings":   listings,
-		"Activity":   activity,
-		"PendingWei": pendingWei,
+		"Addr":           addr,
+		"Listings":       listings,
+		"Activity":       activity,
+		"PendingWei":     pendingWei,
+		"Auctions":       auctions,
+		"OffersSent":     offersSent,
+		"OffersReceived": offersReceived,
+		"NFTs":           nfts,
+		"Metrics":        metrics,
+		"Now":            time.Now().Unix(),
 	}
 }
 

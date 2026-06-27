@@ -1,91 +1,156 @@
 {{define "partials/listing_cards.html"}}
 {{range .Listings}}
-<!-- Single listing card. 5-color palette allocation per element:
+<!-- Single listing card with 3D flip animation. 5-color palette allocation per element:
        image -> black bg / white text fallback
        price badge -> GOLD gradient (money)
        verified badge -> PURPLE/VIOLET
        live indicator -> SKY BLUE
        standard pill -> muted white-on-glass (informational)
-       traits peek -> PURPLE chip (categorical metadata)
 
-     v34: Restructured so interactive controls (retry, buy) are NOT
-     descendants of the <a> link, per HTML spec (interactive content
-     must not be nested inside an <a> element). The image + collection
-     name remain clickable via the <a>; the buy button sits at the same
-     level as the <a> as a sibling <div>. -->
-<div
-   class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10
-          hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300 hover:-translate-y-1 will-change-transform">
+     v35: Added 3D flip animation. Clicking the card flips it to show
+     metadata (collection, token ID, price, seller) and the buy button
+     on the back face. Clicking again (or clicking the × close button)
+     flips it back to the front image view. The flip is a pure CSS
+     transform with perspective — no JavaScript animation needed. -->
+<div x-data="{ flipped: false }"
+   class="group relative bg-transparent rounded-2xl will-change-transform"
+   style="perspective:1000px;min-height:360px;">
 
-  <!-- Clickable link: image + badges (NOT including buy/retry buttons) -->
-  <a href="/token/{{.Collection}}/{{.TokenID}}" class="block">
-  <div class="relative aspect-square overflow-hidden bg-ink-800">
-    {{if .ImageURI}}
-    <img src="{{mediaURL .ImageURI}}"
-         alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
-         loading="lazy"
-         class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
-         onerror="this.style.display='none';Array.from(this.closest('.group').querySelectorAll('.mw-img-fallback, .mw-img-retry')).forEach(function(el){el.classList.remove('hidden')})">
-    <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
-    {{else}}
-    <div class="absolute inset-0 flex flex-col items-center justify-center text-white/40">
-      <div class="text-5xl shimmer">🖼</div>
-      <div class="text-[11px] mt-2 text-white/40">loading image…</div>
-    </div>
-    {{end}}
+  <!-- Flip inner — rotates on x-data.flipped toggle -->
+  <div class="relative w-full h-full transition-transform duration-500 ease-[cubic-bezier(0.4,0,0.2,1)]"
+       style="transform-style:preserve-3d;"
+       :style="flipped ? 'transform:rotateY(180deg)' : 'transform:rotateY(0deg)'">
 
-    <!-- Top-left badges: verified (violet/purple) + standard (white-on-glass) -->
-    <div class="absolute top-3 left-3 flex flex-col gap-1.5">
-      {{if .CollectionVerified}}
-      <div class="w-7 h-7 rounded-full bg-violet-500/20 border border-violet-300/40 flex items-center justify-center backdrop-blur glow-violet" title="Verified collection">
-        <svg class="w-3.5 h-3.5 text-violet-200" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+    <!-- ══════ FRONT FACE ══════ -->
+    <div class="absolute inset-0 bg-ink-900 rounded-2xl overflow-hidden border border-white/10
+                hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300"
+         style="backface-visibility:hidden;">
+
+      <!-- Clickable image area (flips card on click instead of navigating) -->
+      <button @click="flipped = !flipped" class="block w-full text-left cursor-pointer" aria-label="View details">
+      <div class="relative aspect-square overflow-hidden bg-ink-800">
+        {{if .ImageURI}}
+        <img src="{{mediaURL .ImageURI}}"
+             alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
+             loading="lazy"
+             class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
+             onerror="this.style.display='none';Array.from(this.closest('.group').querySelectorAll('.mw-img-fallback, .mw-img-retry')).forEach(function(el){el.classList.remove('hidden')})">
+        <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
+        {{else}}
+        <div class="absolute inset-0 flex flex-col items-center justify-center text-white/40">
+          <div class="text-5xl shimmer">🖼</div>
+          <div class="text-[11px] mt-2 text-white/40">loading image…</div>
+        </div>
+        {{end}}
+
+        <!-- Top-left badges -->
+        <div class="absolute top-3 left-3 flex flex-col gap-1.5">
+          {{if .CollectionVerified}}
+          <div class="w-7 h-7 rounded-full bg-violet-500/20 border border-violet-300/40 flex items-center justify-center backdrop-blur glow-violet" title="Verified collection">
+            <svg class="w-3.5 h-3.5 text-violet-200" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+          </div>
+          {{end}}
+          {{if .Standard}}
+          <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white backdrop-blur" title="Token standard">{{.Standard}}</span>
+          {{end}}
+        </div>
+
+        <!-- Top-right: price -->
+        <div class="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-ink-1000/70 backdrop-blur border border-gold-300/40 glow-gold">
+          <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>          <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{$.NativeCurrency}}</span>
+        </div>
+
+        <!-- Bottom-right: "Tap to flip" hint -->
+        <div class="absolute bottom-3 right-3 px-2 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-sky-300/30 text-[9px] font-bold text-sky-200 uppercase tracking-wider opacity-0 group-hover:opacity-100 transition-opacity duration-300">
+          Details ↻
+        </div>
       </div>
-      {{end}}
-      {{if .Standard}}
-      <span class="px-2 py-0.5 rounded-md bg-white/10 border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white backdrop-blur" title="Token standard">{{.Standard}}</span>
-      {{end}}
-    </div>
-
-    <!-- Top-right: price (gold gradient) — the loudest element on the card. -->
-    <div class="absolute top-3 right-3 px-3 py-1.5 rounded-xl bg-ink-1000/70 backdrop-blur border border-gold-300/40 glow-gold">
-      <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>        <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{$.NativeCurrency}}</span>
-    </div>
-
-    <!-- Bottom-right freshness badge -->
-    <div class="absolute bottom-3 right-3 px-2 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-sky-300/30 text-[9px] font-bold text-sky-200 uppercase tracking-wider">
-      Listed
-    </div>
-  </div>
-  </a>
-
-  <!-- Retry button (sibling to <a>, not nested inside it).
-       Shown by the onerror handler on the <img> above via .mw-img-retry class. -->
-  {{if .ImageURI}}
-  <div class="hidden mw-img-retry">
-    <div class="flex items-end p-3">
-      <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
-        ⚠ Image unavailable
-        <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="pointer-events-auto ml-2 underline text-sky-200 hover:text-white">retry ingest</button>
-      </div>
-    </div>
-  </div>
-  {{end}}
-
-  <!-- Card body: title + meta row (NOT wrapped in <a>) -->
-  <div class="p-4 border-t border-white/5 bg-ink-900">
-    <a href="/token/{{.Collection}}/{{.TokenID}}" class="block">
-    <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
-    <p class="text-sm font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
-    </a>
-    <div class="flex flex-wrap gap-1 mt-2 min-h-[14px]">
-    </div>
-    <div class="flex items-center justify-between mt-3">
-      <span class="text-[10px] text-white/40 font-mono font-bold">{{if .TotalSupply}}{{shortNumber .TotalSupply}} minted{{else}}&nbsp;{{end}}</span>
-      <button
-        class="px-4 py-1.5 rounded-lg btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.96]"
-        @click.prevent.stop="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{.Seller}}', price: '{{.PriceWei}}'})">
-        Buy
       </button>
+
+      <!-- Retry button (sibling to button, shown by onerror) -->
+      {{if .ImageURI}}
+      <div class="hidden mw-img-retry">
+        <div class="flex items-end p-3">
+          <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
+            ⚠ Image unavailable
+            <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="pointer-events-auto ml-2 underline text-sky-200 hover:text-white">retry ingest</button>
+          </div>
+        </div>
+      </div>
+      {{end}}
+
+      <!-- Card body: title + meta row -->
+      <div class="p-4 border-t border-white/5 bg-ink-900">
+        <button @click="flipped = !flipped" class="block w-full text-left cursor-pointer">
+        <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
+        <p class="text-sm font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
+        </button>
+        <div class="flex items-center justify-between mt-3">
+          <span class="text-[10px] text-white/40 font-mono font-bold">{{if .TotalSupply}}{{shortNumber .TotalSupply}} minted{{else}}&nbsp;{{end}}</span>
+          <button @click="flipped = !flipped"
+            class="px-3 py-1 rounded-lg bg-white/5 border border-white/10 text-white/60 text-xs font-bold hover:bg-white/10 transition">
+            Details
+          </button>
+        </div>
+      </div>
+    </div>
+
+    <!-- ══════ BACK FACE (metadata + buy button) ══════ -->
+    <div class="absolute inset-0 bg-ink-900 rounded-2xl overflow-hidden border border-sky-300/50 shadow-sky-glow p-5 flex flex-col justify-between"
+         style="backface-visibility:hidden;transform:rotateY(180deg);">
+
+      <!-- Close button (top-right) -->
+      <button @click="flipped = false"
+              class="absolute top-3 right-3 w-8 h-8 rounded-full bg-ink-800 border border-white/10 flex items-center justify-center text-white/60 hover:text-white hover:bg-ink-700 transition z-10"
+              aria-label="Close details">×</button>
+
+      <!-- Metadata section -->
+      <div class="space-y-3">
+        <div class="flex items-center gap-2">
+          {{if .CollectionVerified}}
+          <span class="w-5 h-5 rounded-full bg-violet-500/20 border border-violet-300/40 flex items-center justify-center" title="Verified">
+            <svg class="w-3 h-3 text-violet-200" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
+          </span>
+          {{end}}
+          <p class="text-sm font-extrabold text-white">{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}</p>
+        </div>
+        
+        <div class="space-y-2 text-sm">
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-white/40 text-xs font-bold uppercase tracking-wider">Collection</span>
+            <span class="font-mono text-white/80 text-xs">{{shortAddr .Collection}}</span>
+          </div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-white/40 text-xs font-bold uppercase tracking-wider">Token ID</span>
+            <span class="font-mono text-white/80 text-xs">#{{.TokenID}}</span>
+          </div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-white/40 text-xs font-bold uppercase tracking-wider">Standard</span>
+            <span class="px-2 py-0.5 rounded-md bg-white/5 border border-white/10 text-[10px] font-extrabold text-white uppercase">{{if .Standard}}{{.Standard}}{{else}}ERC-721{{end}}</span>
+          </div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-white/40 text-xs font-bold uppercase tracking-wider">Seller</span>
+            <span class="font-mono text-white/80 text-xs">{{shortAddr .Seller}}</span>
+          </div>
+          <div class="flex justify-between items-center py-1.5 border-b border-white/5">
+            <span class="text-white/40 text-xs font-bold uppercase tracking-wider">Price</span>
+            <span class="font-extrabold text-gold-200">{{wei2flr .PriceWei}} <span class="text-[10px] text-gold-300/80">{{$.NativeCurrency}}</span></span>
+          </div>
+        </div>
+      </div>
+
+      <!-- Action buttons at bottom -->
+      <div class="space-y-2 pt-3">
+        <a href="/token/{{.Collection}}/{{.TokenID}}"
+           class="block w-full text-center px-4 py-2.5 rounded-xl bg-white/5 border border-white/10 text-white text-sm font-bold hover:bg-white/10 transition">
+          View Full Details →
+        </a>
+        <button
+          class="w-full px-4 py-2.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-sm font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
+          @click.prevent.stop="$dispatch('buy', {collection: '{{.Collection}}', tokenId: '{{.TokenID}}', seller: '{{.Seller}}', price: '{{.PriceWei}}'})">
+          Buy for {{wei2flr .PriceWei}} {{$.NativeCurrency}}
+        </button>
+      </div>
     </div>
   </div>
 </div>

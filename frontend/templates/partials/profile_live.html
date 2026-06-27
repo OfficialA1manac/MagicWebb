@@ -1,38 +1,143 @@
 {{define "partials/profile_live.html"}}
-<!-- Live listings + activity region — pane contents only. Alpine x-data
-     on the parent page owns `tab`, and we re-init it after swap via the
-     page-level hx-on hook so x-show continues to gate the active pane. -->
+<!-- NFTs tab -->
+<div x-show="tab==='nfts'" x-cloak>
+  {{if .NFTs}}
+  <div class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-5 gap-4">
+    {{range .NFTs}}
+    <a href="/token/{{.Collection}}/{{.TokenID}}"
+       class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10 hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300 hover:-translate-y-1">
+      <div class="aspect-square bg-ink-800 flex items-center justify-center overflow-hidden">
+        {{if .ImageURI}}
+        <img src="{{mediaURL .ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
+             loading="lazy"
+             class="w-full h-full object-cover group-hover:scale-105 transition duration-500"
+             onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+        <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-4xl">🖼</div>
+        {{else}}
+        <div class="text-4xl text-white/20">🖼</div>
+        {{end}}
+        {{if .Standard}}
+        <span class="absolute top-2 left-2 px-1.5 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-white/20 text-[9px] font-extrabold uppercase tracking-wider text-white">{{.Standard}}</span>
+        {{end}}
+      </div>
+      <div class="p-3">
+        <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
+        <p class="text-xs font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
+      </div>
+    </a>
+    {{end}}
+  </div>
+  {{else}}
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No NFTs found in this wallet for tracked collections.</p>
+  </div>
+  {{end}}
+</div>
+
+<!-- Listings tab -->
 <div x-show="tab==='listings'" x-cloak>
   {{if .Listings}}
   <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
     {{template "partials/listing_cards.html" .}}
   </div>
   {{else}}
-  <p class="text-neutral-600 text-center py-16">No active listings.</p>
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No active listings.</p>
+  </div>
   {{end}}
 </div>
 
+<!-- Auctions tab -->
+<div x-show="tab==='auctions'" x-cloak>
+  {{if .Auctions}}
+  <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
+    {{template "partials/auction_cards.html" .}}
+  </div>
+  {{else}}
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No auctions.</p>
+  </div>
+  {{end}}
+</div>
+
+<!-- Offers tab -->
+<div x-show="tab==='offers'" x-cloak>
+  <div class="mb-6">
+    <h4 class="text-xs font-extrabold text-white/60 uppercase tracking-wider mb-3">Sent ({{len .OffersSent}})</h4>
+    {{if .OffersSent}}
+    <div class="space-y-2">
+      {{range .OffersSent}}
+      <div class="bg-ink-900/80 backdrop-blur rounded-xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-gold-300/40 transition">
+        <div class="min-w-0 flex-1">
+          <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-gold-200 transition truncate block">
+            {{shortAddr .Collection}} #{{.TokenID}}
+          </a>
+          <p class="text-xs text-white/40 mt-1">Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+        </div>
+        <span class="text-lg font-black text-gold-200 flex items-baseline gap-1 shrink-0">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="text-white/40 text-sm py-4">No offers sent yet.</p>
+    {{end}}
+  </div>
+  <div>
+    <h4 class="text-xs font-extrabold text-white/60 uppercase tracking-wider mb-3">Received ({{len .OffersReceived}})</h4>
+    {{if .OffersReceived}}
+    <div class="space-y-2">
+      {{range .OffersReceived}}
+      <div class="bg-ink-900/80 backdrop-blur rounded-xl p-4 flex items-center justify-between gap-4 border border-white/10 hover:border-sky-300/40 transition">
+        <div class="min-w-0 flex-1">
+          <a href="/token/{{.Collection}}/{{.TokenID}}" class="text-sm font-semibold text-white font-mono hover:text-sky-200 transition truncate block">
+            {{shortAddr .Collection}} #{{.TokenID}}
+          </a>
+          <p class="text-xs text-white/40 mt-1">From <span class="font-mono text-white/80">{{shortAddr .Bidder}}</span> · Expires {{.ExpiresAt.Format "Jan 2 15:04"}} · <span class="px-1.5 py-0.5 rounded bg-white/5 text-[10px] font-bold uppercase tracking-wider">{{.Status}}</span></p>
+        </div>
+        <div class="flex items-center gap-3 shrink-0">
+          <span class="text-lg font-black text-gold-200 flex items-baseline gap-1">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
+          {{if eq .Status "pending"}}
+          <button class="px-3 py-1.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
+                  @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
+          {{end}}
+        </div>
+      </div>
+      {{end}}
+    </div>
+    {{else}}
+    <p class="text-white/40 text-sm py-4">No offers received yet.</p>
+    {{end}}
+  </div>
+</div>
+
+<!-- Activity tab -->
 <div x-show="tab==='activity'" x-cloak>
   {{if .Activity}}
   <div class="space-y-2">
     {{range .Activity}}
-    <div class="bg-neutral-900 rounded-xl px-4 py-3 flex items-center justify-between text-sm">
+    <div class="bg-ink-900/80 backdrop-blur rounded-xl px-4 py-3 flex items-center justify-between text-sm border border-white/10 hover:border-white/20 transition group">
       <div class="flex items-center gap-3">
-        <span class="px-2 py-0.5 rounded text-xs font-semibold bg-neutral-800
-          {{if eq .Type "Listed"}}text-blue-400
-          {{else if eq .Type "Sold"}}text-emerald-400
-          {{else if eq .Type "BidPlaced"}}text-yellow-400
-          {{else}}text-neutral-400{{end}}">
+        <span class="px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider
+          {{if eq .Type "Sold"}}bg-gold-500/15 text-gold-200 border border-gold-400/30
+          {{else if eq .Type "Listed"}}bg-sky-500/15 text-sky-200 border border-sky-400/30
+          {{else if eq .Type "BidPlaced"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+          {{else if eq .Type "AuctionCreated"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+          {{else}}bg-white/5 text-white/60 border border-white/10{{end}}">
           {{.Type}}
         </span>
-        <span class="font-mono text-neutral-400 text-xs">{{shortAddr .Collection}} #{{.TokenID}}</span>
+        <span class="font-mono text-white/60 text-xs">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</span>
       </div>
-      <span class="text-emerald-400 font-bold">{{wei2eth .AmountWei}} {{$.NativeCurrency}}</span>
+      <div class="flex items-center gap-4">
+        <span class="text-gold-200 font-extrabold text-sm">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/60">{{$.NativeCurrency}}</span></span>
+        <span class="text-white/30 text-xs font-mono">{{.Timestamp.Format "Jan 2 15:04"}}</span>
+      </div>
     </div>
     {{end}}
   </div>
   {{else}}
-  <p class="text-neutral-600 text-center py-16">No recent activity.</p>
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-16 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No recent activity.</p>
+  </div>
   {{end}}
 </div>
 {{end}}

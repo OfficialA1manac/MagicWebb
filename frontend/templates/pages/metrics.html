@@ -1,48 +1,218 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<h1 class="text-2xl font-bold text-neutral-200 mb-8">Market Metrics</h1>
+<div id="metrics-page" class="mb-8">
+  <h1 class="text-3xl md:text-4xl font-extrabold tracking-tight text-white flex items-center gap-3">
+    <span class="w-11 h-11 rounded-2xl btn-sky flex items-center justify-center text-ink-950 glow-sky">▦</span>
+    Market Metrics
+  </h1>
+  <p class="text-sm text-white/40 mt-1">Real-time marketplace statistics and activity.</p>
+</div>
 
 {{with .Metrics}}
 {{if .metrics_unavailable}}
-<div class="bg-red-500/15 border border-red-400/40 rounded-xl px-4 py-3 mb-6 text-sm text-red-200">
-  Market metrics temporarily unavailable. Reload to retry.
-</div>
-{{end}}
-<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
-  <div class="bg-neutral-900 rounded-xl p-4">
-    <p class="text-xs text-neutral-500 mb-1">Active Listings</p>
-    <p class="text-2xl font-bold text-white">{{.totalActiveListings}}</p>
-  </div>
-  <div class="bg-neutral-900 rounded-xl p-4">
-    <p class="text-xs text-neutral-500 mb-1">Total Sales</p>
-    <p class="text-2xl font-bold text-white">{{.totalSales}}</p>
-  </div>
-  <div class="bg-neutral-900 rounded-xl p-4">
-    <p class="text-xs text-neutral-500 mb-1">Gross Volume</p>
-    <p class="text-2xl font-bold text-emerald-400">{{wei2eth .grossVolumeWei}} {{.NativeCurrency}}</p>
-  </div>
-  <div class="bg-neutral-900 rounded-xl p-4">
-    <p class="text-xs text-neutral-500 mb-1">Total Auctions</p>
-    <p class="text-2xl font-bold text-white">{{.totalAuctions}}</p>
-  </div>
+<div class="bg-red-500/10 border border-red-400/30 rounded-xl px-4 py-3 mb-6 text-sm text-red-200 flex items-center gap-2">
+  <span>⚠</span> Market metrics temporarily unavailable. Reload to retry.
 </div>
 {{end}}
 
-<h2 class="text-lg font-semibold text-neutral-300 mb-4">Recent Activity</h2>
+<!-- Key stat cards — 4-panel grid with 5-color accents -->
+<div class="grid grid-cols-2 md:grid-cols-4 gap-4 mb-10">
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 border border-sky-400/30 hover:border-sky-300/50 hover:shadow-sky-glow transition group">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="w-8 h-8 rounded-lg bg-sky-500/15 flex items-center justify-center text-sky-300 text-sm">✦</span>
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Active Listings</p>
+    </div>
+    <p class="text-3xl font-black text-white tracking-tight" id="metric-listings">{{.totalActiveListings}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 border border-gold-400/30 hover:border-gold-300/50 hover:shadow-gold-glow transition group">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="w-8 h-8 rounded-lg bg-gold-500/15 flex items-center justify-center text-gold-300 text-sm">⚐</span>
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Total Sales</p>
+    </div>
+    <p class="text-3xl font-black text-gold-200 tracking-tight" id="metric-sales">{{.totalSales}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 border border-violet-400/30 hover:border-violet-300/50 hover:shadow-violet-glow transition group">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="w-8 h-8 rounded-lg bg-violet-500/15 flex items-center justify-center text-violet-300 text-sm">♕</span>
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Total Auctions</p>
+    </div>
+    <p class="text-3xl font-black text-violet-200 tracking-tight" id="metric-auctions">{{.totalAuctions}}</p>
+  </div>
+  <div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 border border-white/20 hover:border-white/40 transition group">
+    <div class="flex items-center gap-2 mb-3">
+      <span class="w-8 h-8 rounded-lg bg-white/10 flex items-center justify-center text-white text-sm">⬡</span>
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-extrabold">Gross Volume</p>
+    </div>
+    <p class="text-3xl font-black text-white tracking-tight" id="metric-volume">{{wei2flr .grossVolumeWei}} <span class="text-sm font-bold text-white/40">{{$.NativeCurrency}}</span></p>
+  </div>
+</div>
+
+<!-- Visual bar chart: listings / sales / auctions / volume comparison -->
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl p-6 border border-white/10 mb-10">
+  <h3 class="text-sm font-extrabold text-white/60 uppercase tracking-wider mb-5 flex items-center gap-2">
+    <span class="w-5 h-5 rounded bg-sky-500/20 flex items-center justify-center text-sky-300 text-[10px]">▤</span>
+    Marketplace Overview
+  </h3>
+  <div class="grid grid-cols-4 gap-4 items-end" style="height:200px">
+    <!-- Listings bar -->
+    <div class="flex flex-col items-center gap-2 h-full justify-end">
+      <span class="text-xs font-extrabold text-white" id="bar-listings-val">{{.totalActiveListings}}</span>
+      <div class="w-full max-w-[80px] rounded-t-xl bg-gradient-to-t from-sky-500/80 to-sky-300/60 transition-all duration-700 ease-out"
+           id="bar-listings"
+           style="height:0%"></div>
+      <span class="text-[9px] text-white/40 uppercase tracking-wider font-bold">Listings</span>
+    </div>
+    <!-- Sales bar -->
+    <div class="flex flex-col items-center gap-2 h-full justify-end">
+      <span class="text-xs font-extrabold text-gold-200" id="bar-sales-val">{{.totalSales}}</span>
+      <div class="w-full max-w-[80px] rounded-t-xl bg-gradient-to-t from-gold-500/80 to-gold-300/60 transition-all duration-700 ease-out"
+           id="bar-sales"
+           style="height:0%"></div>
+      <span class="text-[9px] text-white/40 uppercase tracking-wider font-bold">Sales</span>
+    </div>
+    <!-- Auctions bar -->
+    <div class="flex flex-col items-center gap-2 h-full justify-end">
+      <span class="text-xs font-extrabold text-violet-200" id="bar-auctions-val">{{.totalAuctions}}</span>
+      <div class="w-full max-w-[80px] rounded-t-xl bg-gradient-to-t from-violet-500/80 to-violet-300/60 transition-all duration-700 ease-out"
+           id="bar-auctions"
+           style="height:0%"></div>
+      <span class="text-[9px] text-white/40 uppercase tracking-wider font-bold">Auctions</span>
+    </div>
+    <!-- Volume bar (scaled) -->
+    <div class="flex flex-col items-center gap-2 h-full justify-end">
+      <span class="text-xs font-extrabold text-white" id="bar-volume-val">{{wei2flr .grossVolumeWei}}</span>
+      <div class="w-full max-w-[80px] rounded-t-xl bg-gradient-to-t from-white/60 to-white/30 transition-all duration-700 ease-out"
+           id="bar-volume"
+           style="height:0%"></div>
+      <span class="text-[9px] text-white/40 uppercase tracking-wider font-bold">Volume</span>
+    </div>
+  </div>
+</div>
+
+<!-- SSE saturation gauge (when metrics are available) -->
+{{if not .metrics_unavailable}}
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl p-5 border border-white/10 mb-10">
+  <h3 class="text-sm font-extrabold text-white/60 uppercase tracking-wider mb-4 flex items-center gap-2">
+    <span class="w-5 h-5 rounded bg-violet-500/20 flex items-center justify-center text-violet-300 text-[10px]">⚡</span>
+    SSE Connection Health
+  </h3>
+  <div class="grid grid-cols-2 gap-4">
+    <div class="bg-ink-800/60 rounded-xl p-4">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2">Dropped Events</p>
+      <p class="text-2xl font-black {{if gt .sse_dropped_total 0}}text-violet-200{{else}}text-white/60{{end}}" id="sse-dropped">{{.sse_dropped_total}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-sky-400 to-violet-400 transition-all duration-500"
+             id="sse-dropped-bar"
+             style="width:0%"></div>
+      </div>
+    </div>
+    <div class="bg-ink-800/60 rounded-xl p-4">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2">Saturation Streak</p>
+      <p class="text-2xl font-black {{if gt .sse_saturation_streak 0}}text-gold-200{{else}}text-white/60{{end}}" id="sse-streak">{{.sse_saturation_streak}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-gold-400 to-gold-500 transition-all duration-500"
+             id="sse-streak-bar"
+             style="width:0%"></div>
+      </div>
+    </div>
+  </div>
+</div>
+{{end}}
+{{end}}
+
+<!-- Recent Activity feed — styled with 5-color palette -->
+<h2 class="text-xl font-extrabold text-white flex items-center gap-2 mb-4">
+  <span class="w-9 h-9 rounded-xl btn-violet flex items-center justify-center text-white glow-violet text-sm">↗</span>
+  Recent Activity
+</h2>
 <div class="space-y-2">
   {{range .Activity}}
-  <div class="bg-neutral-900 rounded-xl px-4 py-3 flex items-center justify-between text-sm">
+  <div class="bg-ink-900/80 backdrop-blur rounded-xl px-4 py-3 flex items-center justify-between text-sm border border-white/10 hover:border-white/20 transition group">
     <div class="flex items-center gap-3">
-      <span class="text-emerald-400 font-medium w-28">{{.Type}}</span>
-      <span class="font-mono text-neutral-400">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</span>
+      <span class="px-2 py-1 rounded-lg text-[10px] font-extrabold uppercase tracking-wider
+        {{if eq .Type "Sold"}}bg-gold-500/15 text-gold-200 border border-gold-400/30
+        {{else if eq .Type "Listed"}}bg-sky-500/15 text-sky-200 border border-sky-400/30
+        {{else if eq .Type "BidPlaced"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+        {{else if eq .Type "AuctionCreated"}}bg-violet-500/15 text-violet-200 border border-violet-400/30
+        {{else}}bg-white/5 text-white/60 border border-white/10{{end}}">
+        {{.Type}}
+      </span>
+      <span class="font-mono text-white/60 text-xs">{{shortAddr .Collection}}{{if .TokenID}} #{{.TokenID}}{{end}}</span>
     </div>
     <div class="flex items-center gap-4">
-      <span class="text-white">{{wei2eth .AmountWei}} {{$.NativeCurrency}}</span>
-      <span class="text-neutral-600 text-xs">{{.Timestamp.Format "Jan 2 15:04"}}</span>
+      <span class="text-gold-200 font-extrabold text-sm">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/60">{{$.NativeCurrency}}</span></span>
+      <span class="text-white/30 text-xs font-mono">{{.Timestamp.Format "Jan 2 15:04"}}</span>
     </div>
   </div>
   {{else}}
-  <p class="text-neutral-600 text-center py-8">No activity yet.</p>
+  <div class="bg-ink-900/40 rounded-2xl px-6 py-12 text-center border border-dashed border-white/10">
+    <p class="text-white/40">No activity yet.</p>
+  </div>
   {{end}}
 </div>
+
+<!-- Animate bars on page load -->
+<script>
+  (function() {
+    function animateBars() {
+      var bars = {
+        'bar-listings': document.getElementById('metric-listings'),
+        'bar-sales': document.getElementById('metric-sales'),
+        'bar-auctions': document.getElementById('metric-auctions')
+      };
+      var maxVal = 1;
+      var vals = {};
+      for (var id in bars) {
+        var el = bars[id];
+        if (!el) continue;
+        var v = parseInt(el.textContent) || 0;
+        vals[id] = v;
+        if (v > maxVal) maxVal = v;
+      }
+      // Volume bar — parse from text
+      var volEl = document.getElementById('metric-volume');
+      var volVal = 1;
+      if (volEl) {
+        var txt = volEl.textContent || '';
+        var m = txt.match(/[\d.]+/);
+        if (m) volVal = parseFloat(m[0]) || 1;
+      }
+      vals['bar-volume'] = volVal;
+      if (volVal > maxVal) maxVal = volVal;
+      
+      for (var id in vals) {
+        var bar = document.getElementById(id);
+        if (!bar) continue;
+        var pct = maxVal > 0 ? (vals[id] / maxVal * 100) : 0;
+        if (pct < 4 && vals[id] > 0) pct = 4;
+        setTimeout(function(el, p) {
+          el.style.height = p + '%';
+        }, 100, bar, pct);
+      }
+      
+      // SSE bars
+      var droppedEl = document.getElementById('sse-dropped');
+      var droppedBar = document.getElementById('sse-dropped-bar');
+      if (droppedEl && droppedBar) {
+        var d = parseInt(droppedEl.textContent) || 0;
+        setTimeout(function() { droppedBar.style.width = Math.min(d * 10, 100) + '%'; }, 300);
+      }
+      var streakEl = document.getElementById('sse-streak');
+      var streakBar = document.getElementById('sse-streak-bar');
+      if (streakEl && streakBar) {
+        var s = parseInt(streakEl.textContent) || 0;
+        setTimeout(function() { streakBar.style.width = Math.min(s * 5, 100) + '%'; }, 300);
+      }
+    }
+    if (document.readyState === 'loading') {
+      document.addEventListener('DOMContentLoaded', animateBars);
+    } else {
+      animateBars();
+    }
+    // Re-animate on HTMX swap (if the page uses live updates)
+    document.body.addEventListener('htmx:afterSwap', function(e) {
+      if (e.detail.target && e.detail.target.closest('#metrics-page')) animateBars();
+    });
+  })();
+</script>
 {{end}}

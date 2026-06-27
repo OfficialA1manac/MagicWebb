@@ -1644,32 +1644,23 @@ window.addEventListener('alpine:init', () => {
 
   });
 
-  // ── Hydrate the "saved wallet" hint on page load (v13 — NO auto-reconnect).
-  // Previously we auto-connected silently here, which popped MetaMask on
-  // every page load — that was the source of the recurring complaint:
-  // "Tries to connect to my MetaMask wallet automatically I need that
-  // fixed". The contract is now:
-  //   • We DO NOT call connect() here under any circumstances.
-  //   • We surface savedAddress + savedKind + jwt to the reactive store
-  //     so the navbar can render a "Saved wallet 0x1234…abcd [Reconnect] [×]"
-  //     pill in DISPLAY state. The user must click Reconnect to actually
-  //     re-establish the session.
-  //   • The pill collapses to nothing on a clean browser (no localStorage).
-  //   • The pill disappears on a successful reconnect (reconnectSaved()
-  //     clears savedAddress once the live session matches it).
-  // The JWT is read but NEVER trusts the user must still attest via sign-in
-  // for any state-changing endpoint — JWTs are TS-signed and the server
-  // validates every request. The bell + notifications can keep reading
-  // (unauth reads return 401, the badge falls back to 0 unread).
-  // v23.2 — WalletConnect-only. The previous default of 'injected'
-  // propagated the legacy MetaMask-pair kind, which the user-facing
-  // saved-wallet pill AND the silent reconnect branch both gated on.
-  // Default to '' (the empty string) so old browsers with addr-but-no-kind
-  // records would have hasSavedWallet=false at load — the Connect Wallet
-  // button is the only entry point. Returning users who had paired via
-  // MetaMask (savedKind='injected') are migrated: their session kind is
-  // overwritten on the next successful WC pair, and until then the saved
-  // pill is hidden (UX consistency with the WC-only contract).
+  // ── Hydrate saved wallet + auto-reconnect on page load ──
+  // v35: restored silent auto-reconnect when a saved address exists.
+  // The previous v13-v34 behaviour (NO auto-reconnect, manual Reconnect pill)
+  // stranded users who connected on Astro pages (/home, /listings via wagmi/AppKit)
+  // and then navigated to HTMX pages (/auctions, /offers, /metrics). The saved
+  // pill was visible but required an explicit click, creating the perception
+  // that the wallet "disconnected" or the "button doesn't work".
+  //
+  // New contract:
+  //   • Hydrate savedAddress/savedKind immediately so the pill renders instantly.
+  //   • After a short delay (300ms), silently attempt reconnect via AppKit if
+  //     available, falling back to self-hosted WC bundle.
+  //   • On success the saved pill collapses and the connected pill appears.
+  //   • On failure the saved pill stays visible with Reconnect/Forget buttons.
+  //   • The silent reconnect does NOT open any modal — the AppKit bridge's
+  //     connect() skips modal for silent=true, and the self-hosted WC path
+  //     uses the existing silent codepath in _wcConnect().
   try {
     const addr = localStorage.getItem('mw_addr');
     const kind = localStorage.getItem('mw_kind') || '';
@@ -1677,6 +1668,27 @@ window.addEventListener('alpine:init', () => {
       const w = Alpine.store('wallet');
       w.savedAddress = addr;
       w.savedKind    = kind;
+      // Auto-reconnect silently after a short delay so the page renders first
+      // and the saved pill is visible as a loading indicator.
+      if (kind === 'walletconnect') {
+        setTimeout(() => {
+          try {
+            const w2 = Alpine.store('wallet');
+            if (w2 && w2.savedAddress && !w2.connected) {
+              // Try silent reconnect — uses AppKit if available, falls back to WC bundle.
+              // Both paths respect the silent flag (no modal shown).
+              w2.connect({ silent: true }).then(() => {
+                if (w2.connected && w2.address === addr) {
+                  w2.savedAddress = null;
+                  w2.savedKind = null;
+                }
+              }).catch(() => {
+                // Silent reconnect failed — saved pill stays visible for manual reconnect.
+              });
+            }
+          } catch (_) {}
+        }, 300);
+      }
     }
   } catch (_) {}
 });

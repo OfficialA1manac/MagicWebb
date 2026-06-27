@@ -480,6 +480,7 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 
 type AuctionsFilter struct {
 	Collection string
+	Seller     string
 	Status     string // "active" | "settled" | "cancelled" | "" = all
 	Limit      int
 }
@@ -493,6 +494,10 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 	if f.Collection != "" {
 		args = append(args, f.Collection)
 		where += fmt.Sprintf(" AND a.collection=$%d", len(args))
+	}
+	if f.Seller != "" {
+		args = append(args, f.Seller)
+		where += fmt.Sprintf(" AND a.seller=$%d", len(args))
 	}
 	if f.Status != "" {
 		args = append(args, f.Status)
