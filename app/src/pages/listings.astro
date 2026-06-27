@@ -18,10 +18,11 @@ import NFTGrid from '../components/NFTGrid.svelte';
         <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Fixed-price sales across every tracked collection.</p>
       </div>
       <div style="display:flex;gap:0.75rem;align-items:center;">
-        <a href="/listings?action=list" id="list-nft-btn" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.625rem 1.25rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 22px -6px rgba(56,189,248,0.45),0 4px 12px -4px rgba(14,165,233,0.3);cursor:pointer;"
-           title="Go to listings page to use the NFT picker">
+        <span id="listing-count-badge" class="count-badge" style="padding:0.375rem 0.75rem;border-radius:2rem;background:rgba(125,211,252,0.1);border:1px solid rgba(125,211,252,0.2);color:#7dd3fc;font-size:0.75rem;font-weight:700;">— active</span>
+        <button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" id="list-nft-btn" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.625rem 1.25rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 22px -6px rgba(56,189,248,0.45),0 4px 12px -4px rgba(14,165,233,0.3);cursor:pointer;border:none;font-family:inherit;"
+           title="Connect your wallet to list an NFT">
           <span style="font-size:1rem;line-height:1;">＋</span> List an NFT
-        </a>
+        </button>
         <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">← Back home</a>
       </div>
     </div>

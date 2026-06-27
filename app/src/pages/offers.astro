@@ -1,0 +1,140 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Offers" description="Your buy and sell offers on MagicWebb NFT Marketplace" activeNav="/offers">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <!-- Header -->
+    <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:2rem;">
+      <div>
+        <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+          <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(251,191,36,0.5);">⚐</span>
+          Offers
+        </h1>
+        <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Your buy and sell offers, escrow status, and refund windows.</p>
+      </div>
+      <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">← Back home</a>
+    </div>
+
+    <!-- Connect prompt (when no address in URL) -->
+    <div id="connect-prompt" style="display:none;padding:3rem;text-align:center;border-radius:1.25rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);margin-bottom:2rem;">
+      <div style="width:3.5rem;height:3.5rem;border-radius:1rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:#09090b;font-size:1.5rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">⌬</div>
+      <p style="color:rgba(255,255,255,0.5);margin-bottom:1rem;">Connect your wallet to view your offers</p>
+      <div id="connect-prompt-btn"></div>
+    </div>
+
+    <!-- Tab bar -->
+    <div id="offers-tab-bar" style="display:none;">
+      <div style="display:flex;gap:0.5rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);">
+        <button data-tab="received" class="offers-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;font-family:inherit;">Received (<span id="count-received">0</span>)</button>
+        <button data-tab="sent" class="offers-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;font-family:inherit;">Sent (<span id="count-sent">0</span>)</button>
+      </div>
+      <div id="offers-tab-content"></div>
+    </div>
+
+    <!-- Loading -->
+    <div id="offers-loading" class="shimmer" style="display:flex;flex-direction:column;gap:0.75rem;">
+      <div class="skel-line" style="height:3rem;border-radius:0.75rem;"></div>
+      <div class="skel-line" style="height:3rem;border-radius:0.75rem;"></div>
+      <div class="skel-line" style="height:3rem;border-radius:0.75rem;"></div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+
+      var addr = new URLSearchParams(window.location.search).get('addr') || '';
+      if (!addr) {
+        try { addr = localStorage.getItem('mw_addr') || ''; } catch(_) {}
+      }
+
+      var loading = document.getElementById('offers-loading');
+      var prompt = document.getElementById('connect-prompt');
+      var tabBar = document.getElementById('offers-tab-bar');
+
+      if (!addr) {
+        if (loading) loading.style.display = 'none';
+        if (prompt) prompt.style.display = 'block';
+        return;
+      }
+
+      var received = [];
+      var sent = [];
+
+      (async function(){
+        try {
+          var res = await fetch('/api/v1/offers?addr='+addr+'&limit=50');
+          if (!res.ok) throw new Error('HTTP '+res.status);
+
+          // The API returns flat or grouped — try both shapes
+          var data = await res.json();
+          if (Array.isArray(data)) {
+            // Separate by bidder vs owner
+            received = data.filter(function(o){return (o.owner||'').toLowerCase()===addr.toLowerCase()||o.bidder.toLowerCase()!==addr.toLowerCase();});
+            sent = data.filter(function(o){return o.bidder.toLowerCase()===addr.toLowerCase();});
+          } else {
+            received = data.received || [];
+            sent = data.sent || [];
+          }
+
+          if (loading) loading.style.display = 'none';
+          if (prompt) prompt.style.display = 'none';
+          if (tabBar) tabBar.style.display = 'block';
+
+          document.getElementById('count-received').textContent = received.length;
+          document.getElementById('count-sent').textContent = sent.length;
+
+          function renderTab(id) {
+            var tc = document.getElementById('offers-tab-content');
+            if (!tc) return;
+            var items = id==='received' ? received : sent;
+            if (!items.length) {
+              tc.innerHTML = '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No '+id+' offers</div>';
+              return;
+            }
+            tc.innerHTML = '<div style="display:flex;flex-direction:column;gap:0.75rem;">'+items.map(function(o){
+              return '<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid '+(id==='received'?'rgba(125,211,252,0.12)':'rgba(252,211,77,0.12)')+';transition:all 0.2s;">'+
+                '<div style="min-width:0;flex:1;">'+
+                  '<p style="font-size:0.875rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p>'+
+                  '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">'+(id==='sent'?'To: ':'From: ')+esc(shortAddr(id==='sent'?(o.owner||o.seller||''):o.bidder))+' · '+esc(o.status||'pending')+'</p>'+
+                '</div>'+
+                '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
+              '</a>';
+            }).join('')+'</div>';
+          }
+
+          // Tab clicks
+          tabBar.querySelectorAll('.offers-tab').forEach(function(btn){
+            btn.addEventListener('click', function(){
+              tabBar.querySelectorAll('.offers-tab').forEach(function(b){b.style.color='rgba(255,255,255,0.35)';b.style.borderBottomColor='transparent';});
+              var color = btn.dataset.tab==='received'?'#7dd3fc':'#fcd34d';
+              btn.style.color = color;
+              btn.style.borderBottomColor = color;
+              renderTab(btn.dataset.tab);
+            });
+          });
+
+          // Default: received tab
+          var first = tabBar.querySelector('.offers-tab');
+          if (first) first.click();
+
+        } catch(e) {
+          if (loading) loading.style.display = 'none';
+          if (tabBar) tabBar.innerHTML = '<div style="padding:3rem;text-align:center;color:#fca5a5;">⚠ Could not load offers — '+esc(e.message)+'</div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>

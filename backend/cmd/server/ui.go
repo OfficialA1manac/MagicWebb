@@ -632,6 +632,12 @@ func mountAstro(app *fiber.App) {
 			return c.Next()
 		}
 
+		// Bare /profile is handled by uiProfileRedirect (JWT-based
+		// redirect). Skip Astro so the route handler fires.
+		if path == "/profile" {
+			return c.Next()
+		}
+
 		// Normalise the path to a file path relative to the Astro dist dir.
 		rel := strings.TrimPrefix(path, "/")
 		if rel == "" {
@@ -675,6 +681,22 @@ func mountAstro(app *fiber.App) {
 			return c.SendFile(indexPath)
 		}
 
+		// Catch-all: Astro pages that use client-side URL parsing.
+		// /token/* → token/index.html (JS parses addr + id from pathname)
+		if strings.HasPrefix(cleanRel, "token/") {
+			if idxPath := filepath.Join(distPath, "token", "index.html"); fileExists(idxPath) {
+				c.Set("Cache-Control", "public, max-age=300")
+				return c.SendFile(idxPath)
+			}
+		}
+		// /profile/:addr → profile/index.html (JS parses addr from pathname)
+		if strings.HasPrefix(cleanRel, "profile/") && cleanRel != "profile" {
+			if idxPath := filepath.Join(distPath, "profile", "index.html"); fileExists(idxPath) {
+				c.Set("Cache-Control", "public, max-age=300")
+				return c.SendFile(idxPath)
+			}
+		}
+
 		// No Astro file for this path — pass through to Go HTMX routes.
 		return c.Next()
 	})
@@ -686,4 +708,10 @@ func envOrDefault(key, def string) string {
 		return v
 	}
 	return def
+}
+
+// fileExists returns true if the path is a regular file (not a directory).
+func fileExists(path string) bool {
+	info, err := os.Stat(path)
+	return err == nil && !info.IsDir()
 }

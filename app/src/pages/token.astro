@@ -1,0 +1,153 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Token" description="NFT detail — buy, sell, auction, and offer" activeNav="/">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section id="token-page" style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <!-- Loading state -->
+    <div class="shimmer" style="display:flex;flex-direction:column;gap:1.5rem;">
+      <div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
+        <div style="aspect-ratio:1;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+        <div>
+          <div class="skel-line w-60" style="height:1.5rem;margin-bottom:0.75rem;"></div>
+          <div class="skel-line w-80" style="height:1rem;margin-bottom:0.5rem;"></div>
+          <div class="skel-line w-40" style="height:1rem;margin-bottom:1rem;"></div>
+          <div class="skel-line w-50" style="height:2.5rem;border-radius:0.75rem;"></div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .w-60{width:60%;}.w-80{width:80%;}.w-40{width:40%;}.w-50{width:50%;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
+    .flip-card{perspective:1200px;}
+    .flip-card-inner{transition:transform 0.7s cubic-bezier(0.4,0,0.2,1);transform-style:preserve-3d;position:relative;}
+    .flip-card.flipped .flip-card-inner{transform:rotateY(180deg);}
+    .flip-card-front,.flip-card-back{backface-visibility:hidden;position:absolute;inset:0;border-radius:1.25rem;overflow:hidden;}
+    .flip-card-front{z-index:2;}
+    .flip-card-back{transform:rotateY(180deg);background:rgba(15,15,19,0.95);border:1px solid rgba(255,255,255,0.08);overflow-y:auto;}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w,d){d=d||4;try{return(Number(BigInt(w||'0'))/1e18).toFixed(d);}catch(_){return'0.0000';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+
+      // Parse /token/:addr/:id from URL
+      var parts = window.location.pathname.replace(/^\/token\//,'').split('/');
+      var coll = parts[0]||'';
+      var tid = parts[1]||'';
+      if (!coll || !tid) {
+        document.getElementById('token-page').innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid token URL</div>';
+        return;
+      }
+
+      (async function(){
+        var root = document.getElementById('token-page');
+        try {
+          // Increment view counter (fire-and-forget POST)
+          fetch('/api/v1/token/'+coll+'/'+tid+'/view', {method:'POST'}).catch(function(){});
+
+          var listingRes = await fetch('/api/v1/listings/'+coll+'/'+tid);
+          var listing = null;
+          if (listingRes.ok) { try { listing = await listingRes.json(); } catch(_) {} }
+
+          var [metaRes, traitRes, actRes, offerRes] = await Promise.all([
+            fetch('/api/v1/collections/'+coll).catch(function(){return null;}),
+            fetch('/api/v1/collections/'+coll+'/traits').catch(function(){return null;}),
+            fetch('/api/v1/activity?collection='+coll+'&token='+tid+'&limit=15').catch(function(){return null;}),
+            fetch('/api/v1/offers?collection='+coll+'&tokenId='+tid+'&limit=10').catch(function(){return null;})
+          ]);
+
+          var col = metaRes && metaRes.ok ? (await metaRes.json()) : null;
+          var traits = traitRes && traitRes.ok ? (await traitRes.json()) : {};
+          var activity = actRes && actRes.ok ? (await actRes.json()) : [];
+          var offers = offerRes && offerRes.ok ? (await offerRes.json()) : [];
+
+          var name = (listing && listing.name) || (col && col.name ? col.name+' #'+tid : '#'+tid);
+          var img = listing && listing.image_uri ? '/api/v1/media?url='+encodeURIComponent(listing.image_uri) : '';
+          var price = listing && listing.price_wei ? weiToFLR(listing.price_wei) : null;
+          var seller = listing && listing.seller || '';
+          var standard = (listing && listing.standard) || (col && col.standard) || 'erc721';
+          var verified = col && col.verified;
+
+          root.innerHTML =
+            '<div class="reveal" style="display:grid;grid-template-columns:1fr;gap:2rem;">' +
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start;">' +
+                '<div class="flip-card" id="flip-card" style="aspect-ratio:1;cursor:pointer;position:relative;" onclick="this.classList.toggle(\'flipped\')">' +
+                  '<div class="flip-card-inner" style="width:100%;height:100%;">' +
+                    '<div class="flip-card-front" style="background:rgba(9,9,11,0.8);display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.08);">' +
+                      (img ? '<img src="'+esc(img)+'" alt="'+esc(name)+'" style="width:100%;height:100%;object-fit:cover;" onerror="var p=this.parentElement;this.remove();var s=document.createElement(\'span\');s.style.cssText=\'font-size:4rem;color:rgba(255,255,255,0.06)\';s.textContent=\'🖼\';p.appendChild(s);">' : '<span style="font-size:4rem;color:rgba(255,255,255,0.06);">🖼</span>') +
+                      '<div style="position:absolute;bottom:0.75rem;left:0;right:0;text-align:center;pointer-events:none;">' +
+                        '<span style="padding:0.375rem 1rem;border-radius:2rem;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);color:rgba(255,255,255,0.6);font-size:0.6875rem;font-weight:600;">Click to flip →</span>' +
+                      '</div>' +
+                    '</div>' +
+                    '<div class="flip-card-back" style="padding:1.5rem;display:flex;flex-direction:column;gap:0.75rem;">' +
+                      '<h3 style="font-size:1.125rem;font-weight:800;color:#fafafa;margin-bottom:0.5rem;">'+esc(name)+'</h3>' +
+                      '<div style="flex:1;overflow-y:auto;">' +
+                        '<div style="margin-bottom:1rem;">' +
+                          '<p style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Collection</p>' +
+                          '<p style="font-size:0.8125rem;color:#7dd3fc;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p>' +
+                        '</div>' +
+                        '<div style="margin-bottom:1rem;">' +
+                          '<p style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Token ID</p>' +
+                          '<p style="font-size:0.8125rem;color:#fafafa;font-family:JetBrains Mono,monospace;">#'+esc(tid)+'</p>' +
+                        '</div>' +
+                        '<div style="margin-bottom:1rem;">' +
+                          '<p style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Standard</p>' +
+                          '<p style="font-size:0.8125rem;color:#fcd34d;font-weight:700;text-transform:uppercase;">'+esc(standard)+'</p>' +
+                        '</div>' +
+                        (Object.keys(traits).length ? '<div style="margin-bottom:1rem;"><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Traits</p><div style="display:flex;flex-wrap:wrap;gap:0.375rem;">'+Object.entries(traits).map(function(e){return'<span style="padding:0.25rem 0.625rem;border-radius:2rem;background:rgba(167,139,250,0.1);border:1px solid rgba(167,139,250,0.2);font-size:0.625rem;color:#c4b5fd;">'+esc(e[0])+': '+esc(e[1])+'</span>';}).join('')+'</div></div>' : '') +
+                        '<div style="margin-bottom:1rem;">' +
+                          '<p style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Contract</p>' +
+                          '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.4);font-family:JetBrains Mono,monospace;word-break:break-all;">'+esc(coll)+'</p>' +
+                        '</div>' +
+                      '</div>' +
+                      (price ? '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:0.75rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:0.6875rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;">Price</span><span style="font-size:1.125rem;font-weight:900;color:#fde68a;">'+esc(price)+' <span style="font-size:0.6875rem;opacity:0.6;">C2FLR</span></span></div>' : '') +
+                      '<div style="text-align:center;margin-top:0.5rem;"><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);">Click to flip back →</span></div>' +
+                    '</div>' +
+                  '</div>' +
+                '</div>' +
+                '<div>' +
+                  '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">' +
+                    '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;">'+esc(name)+'</h1>' +
+                    (verified ? '<span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.625rem;font-weight:800;">✓ Verified</span>' : '') +
+                  '</div>' +
+                  '<p style="font-size:0.8125rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-bottom:1rem;">'+esc(shortAddr(coll))+' · #'+esc(tid)+'</p>' +
+                  (price ? '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.2);margin-bottom:1rem;">' +
+                    '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">' +
+                      '<span style="font-size:0.625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">Listed for sale</span>' +
+                      '<span style="font-size:0.625rem;color:#fcd34d;font-weight:700;">'+esc(standard)+'</span>' +
+                    '</div>' +
+                    '<div style="font-size:2rem;font-weight:900;color:#fde68a;margin-bottom:0.25rem;">'+esc(price)+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></div>' +
+                    '<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:1rem;"><span>Seller: '+esc(shortAddr(seller))+'</span></div>' +
+                    '<button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="width:100%;padding:0.75rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.9375rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);transition:all 0.2s;font-family:inherit;">Buy Now for '+esc(price)+' C2FLR</button>' +
+                  '</div>' : '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);margin-bottom:1rem;text-align:center;color:rgba(255,255,255,0.25);">Not currently listed for sale</div>') +
+                  '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">' +
+                    '<a href="/listings?action=list" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(56,189,248,0.4);">List for Sale</a>' +
+                    '<a href="/listings?action=auction" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(167,139,250,0.4);">Start Auction</a>' +
+                    '<a href="/offers?collection='+coll+'&token='+tid+'" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(251,191,36,0.4);">Make Offer</a>' +
+                  '</div>' +
+                '</div>' +
+              '</div>' +
+              '<div>' +
+                '<h2 style="font-size:1.125rem;font-weight:800;color:#fafafa;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;"><span style="width:1.5rem;height:1.5rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.75rem;">↗</span> Activity</h2>' +
+                (Array.isArray(activity) && activity.length ? '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+activity.map(function(a){var c={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa',OfferMade:'#fcd34d',OfferAccepted:'#7dd3fc',OfferCancelled:'rgba(255,255,255,0.4)'}[a.type]||'rgba(255,255,255,0.4)';return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.04);"><div style="display:flex;align-items:center;gap:0.5rem;"><span style="padding:0.125rem 0.375rem;border-radius:0.25rem;background:rgba(255,255,255,0.04);font-size:0.5625rem;font-weight:700;text-transform:uppercase;color:'+c+';">'+esc(a.type)+'</span><span style="font-size:0.6875rem;color:rgba(255,255,255,0.35);">'+timeAgo(a.timestamp||a.occurred_at)+'</span></div><span style="font-size:0.75rem;font-weight:700;color:#fcd34d;">'+weiToFLR(a.amountWei||'0')+' C2FLR</span></div>';}).join('')+'</div>' : '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.15);">No activity yet</div>') +
+              '</div>' +
+            '</div>';
+
+        } catch(e) {
+          if (root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load token &mdash; '+esc(e.message||'')+'</div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>

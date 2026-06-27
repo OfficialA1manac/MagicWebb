@@ -25,6 +25,7 @@ func (s *ListingsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/listings", s.handleList)
 	api.Get("/listings/:collection/:id/preflight", s.handlePreflight)
 	api.Get("/listings/:collection/:id", s.handleGet)
+	api.Post("/token/:collection/:id/view", s.handleTokenView)
 }
 
 func (s *ListingsService) handleList(c *fiber.Ctx) error {
@@ -68,4 +69,13 @@ func (s *ListingsService) handleGet(c *fiber.Ctx) error {
 
 func (s *ListingsService) handlePreflight(c *fiber.Ctx) error {
 	return listingPreflightWithChain(s.q, s.eth)(c)
+}
+
+// handleTokenView increments the view counter for a token (fire-and-forget).
+// This is a lightweight POST — no auth required, no response body beyond 204.
+func (s *ListingsService) handleTokenView(c *fiber.Ctx) error {
+	collection := c.Params("collection")
+	id := c.Params("id")
+	_ = s.q.IncrementTokenViews(c.Context(), collection, id)
+	return c.SendStatus(fiber.StatusNoContent)
 }

@@ -1,0 +1,241 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Profile" description="Your MagicWebb profile" activeNav="/profile">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div id="profile-root">
+      <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);">
+        <div style="width:4rem;height:4rem;border-radius:1rem;background:rgba(255,255,255,0.04);flex-shrink:0;"></div>
+        <div style="flex:1;">
+          <div class="skel-line" style="width:40%;height:1rem;margin-bottom:0.5rem;"></div>
+          <div class="skel-line" style="width:60%;height:0.75rem;"></div>
+        </div>
+      </div>
+      <div class="shimmer" style="display:flex;gap:0.5rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);padding-bottom:0.75rem;">
+        <div class="skel-line" style="width:5rem;height:2rem;border-radius:0.5rem;"></div>
+        <div class="skel-line" style="width:5rem;height:2rem;border-radius:0.5rem;"></div>
+        <div class="skel-line" style="width:5rem;height:2rem;border-radius:0.5rem;"></div>
+        <div class="skel-line" style="width:5rem;height:2rem;border-radius:0.5rem;"></div>
+        <div class="skel-line" style="width:5rem;height:2rem;border-radius:0.5rem;"></div>
+      </div>
+      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">
+        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.4;}50%{opacity:0.8;}100%{opacity:0.4;}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+
+      // Parse address from URL path or localStorage
+      var addr = (function(){
+        var p = window.location.pathname.replace('/profile/','').replace('/profile','');
+        if (p && p.length === 42 && p.slice(0,2)==='0x') return p;
+        try { return localStorage.getItem('mw_addr') || ''; } catch(_) { return ''; }
+      })();
+
+      var root = document.getElementById('profile-root');
+      if (!root || !addr) {
+        if (root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><div style="font-size:3rem;margin-bottom:1rem;">⌬</div><p style="font-size:1.25rem;margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and activity</p></div>';
+        return;
+      }
+
+      (async function(){
+        try {
+          // Fetch ALL data sources in parallel
+          var [pRes, nftRes, listRes, aucRes, offRes, metRes, actRes] = await Promise.allSettled([
+            fetch('/api/v1/profile/'+addr),
+            fetch('/api/v1/wallet/'+addr+'/nfts'),
+            fetch('/api/v1/listings?seller='+addr+'&limit=24'),
+            fetch('/api/v1/auctions?seller='+addr+'&limit=20'),
+            fetch('/api/v1/offers?addr='+addr+'&limit=50'),
+            fetch('/api/v1/metrics'),
+            fetch('/api/v1/activity?address='+addr+'&limit=20')
+          ]);
+
+          function ok(r){return r.status==='fulfilled' && r.value && r.value.ok;}
+          function json(r){try{return r.value.json();}catch(_){return null;}}
+
+          var profile    = ok(pRes)   ? await json(pRes)   : null;
+          var nfts       = ok(nftRes) ? await json(nftRes) : [];
+          var listings   = ok(listRes)? await json(listRes) : [];
+          var auctions   = ok(aucRes) ? await json(aucRes) : [];
+          var offersAll  = ok(offRes) ? await json(offRes) : [];
+          var metrics    = ok(metRes) ? await json(metRes) : {};
+          var activity   = ok(actRes) ? await json(actRes) : [];
+
+          // Split offers into sent/received
+          var offersList = Array.isArray(offersAll) ? offersAll : (offersAll.sent || offersAll.received ? offersAll : []);
+          var offersSent = [], offersReceived = [];
+          if (Array.isArray(offersList)) {
+            offersSent     = offersList.filter(function(o){return (o.bidder||'').toLowerCase()===addr.toLowerCase();});
+            offersReceived = offersList.filter(function(o){return (o.bidder||'').toLowerCase()!==addr.toLowerCase();});
+          } else {
+            offersSent     = offersAll.sent || [];
+            offersReceived = offersAll.received || [];
+          }
+
+          // Profile data (basic fields from the API)
+          var displayName = (profile && profile.display_name) || shortAddr(addr);
+          var bio         = (profile && profile.bio) || '';
+          var avatar      = (profile && profile.avatar_uri) || '';
+          var verified    = profile && profile.verified;
+
+          // Tabs
+          var tabs = [
+            {id:'nfts',     label:'NFTs ('+(Array.isArray(nfts)?nfts.length:0)+')',     color:'#7dd3fc'},
+            {id:'listings', label:'Listings ('+(Array.isArray(listings)?listings.length:0)+')', color:'#fcd34d'},
+            {id:'auctions', label:'Auctions ('+(Array.isArray(auctions)?auctions.length:0)+')', color:'#a78bfa'},
+            {id:'offers',   label:'Offers ('+(offersSent.length+offersReceived.length)+')', color:'#fcd34d'},
+            {id:'activity', label:'Activity ('+(Array.isArray(activity)?activity.length:0)+')', color:'#7dd3fc'}
+          ];
+
+          function imgTag(src, fallback){
+            if(!src)return'<span style="font-size:3rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
+            return'<img src="'+esc(src)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';"><span style="display:none;align-items:center;justify-content:center;position:absolute;inset:0;font-size:3rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
+          }
+
+          function renderCards(items, type){
+            if(!items||!items.length)return'<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No items</div>';
+            var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">';
+            items.forEach(function(it){
+              var coll=it.collection||''; var tid=it.token_id||it.tokenID||'';
+              var nm=it.name||('#'+tid);
+              if(type==='nft'){
+                h+='<a href="/token/'+esc(coll)+'/'+esc(tid)+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
+                h+='<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">';
+                var src=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri):'';
+                h+=imgTag(src,'🖼');
+                h+='</div>';
+                h+='<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p></div></a>';
+              }else if(type==='listing'){
+                var price=weiToFLR(it.price_wei||'0');
+                h+='<a href="/token/'+esc(coll)+'/'+esc(tid)+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
+                h+='<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">';
+                var src2=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri):'';
+                h+=imgTag(src2,'🖼');
+                h+='<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">C2FLR</span></div>';
+                h+='</div>';
+                h+='<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p></div></a>';
+              }
+            });
+            h+='</div>';
+            return h;
+          }
+
+          // Platform metrics
+          var mListings = metrics.listing_count || metrics.totalActiveListings || 0;
+          var mSales    = metrics.sales_count  || metrics.totalSales         || 0;
+          var mAuctions = metrics.auction_count|| metrics.totalAuctions     || 0;
+          var mVolWei   = metrics.grossVolumeWei|| metrics.volume_all       || '0';
+
+          root.innerHTML =
+            '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.5rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);">' +
+              '<div style="width:4rem;height:4rem;border-radius:1rem;overflow:hidden;flex-shrink:0;border:1px solid rgba(255,255,255,0.08);position:relative;display:flex;align-items:center;justify-content:center;background:rgba(9,9,11,0.5);">'+
+                (avatar?'<img src="'+esc(avatar)+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+
+                '<span style="display:'+(avatar?'none':'flex')+';align-items:center;justify-content:center;width:100%;height:100%;font-size:2rem;">👤</span>'+
+              '</div>' +
+              '<div style="flex:1;min-width:0;">' +
+                '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">' +
+                  '<h1 style="font-size:1.5rem;font-weight:800;color:#fafafa;">'+esc(displayName)+'</h1>' +
+                  (verified ? '<span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.6875rem;font-weight:800;">✓ Verified</span>' : '') +
+                '</div>' +
+                '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(addr)+'</p>' +
+                (bio ? '<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;">'+esc(bio)+'</p>' : '') +
+                (nfts && nfts.length ? '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:600;">'+nfts.length+' NFT'+(nfts.length>1?'s':'')+' in wallet</p>' : '') +
+              '</div>' +
+              '<a href="/offers?addr='+addr+'" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>' +
+            '</div>' +
+            // Stats row
+            '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.75rem;margin-bottom:1.5rem;">' +
+              '<div style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.2);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.25rem;">Active Listings</p><p style="font-size:1.5rem;font-weight:900;color:#7dd3fc;line-height:1;">'+(Array.isArray(listings)?listings.length:0)+'</p></div>' +
+              '<div style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.6);border:1px solid rgba(167,139,250,0.2);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.25rem;">Auctions</p><p style="font-size:1.5rem;font-weight:900;color:#a78bfa;line-height:1;">'+(Array.isArray(auctions)?auctions.length:0)+'</p></div>' +
+              '<div style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.6);border:1px solid rgba(252,211,77,0.2);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.25rem;">Offers Sent</p><p style="font-size:1.5rem;font-weight:900;color:#fcd34d;line-height:1;">'+offersSent.length+'</p></div>' +
+              '<div style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.1);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.25rem;">Offers Received</p><p style="font-size:1.5rem;font-weight:900;color:#fafafa;line-height:1;">'+offersReceived.length+'</p></div>' +
+            '</div>' +
+            // Platform metrics
+            '<div style="padding:1.25rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.06);margin-bottom:1.5rem;">'+
+              '<h3 style="font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:0.75rem;">Platform Metrics</h3>'+
+              '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(120px,1fr));gap:0.75rem;">'+
+                '<div><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Total Listings</p><p style="font-size:1.25rem;font-weight:800;color:#fafafa;">'+mListings+'</p></div>'+
+                '<div><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Total Sales</p><p style="font-size:1.25rem;font-weight:800;color:#fcd34d;">'+mSales+'</p></div>'+
+                '<div><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Total Auctions</p><p style="font-size:1.25rem;font-weight:800;color:#a78bfa;">'+mAuctions+'</p></div>'+
+                '<div><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Gross Volume</p><p style="font-size:1.25rem;font-weight:800;color:#fafafa;">'+weiToFLR(mVolWei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></p></div>'+
+              '</div>'+
+            '</div>' +
+            // Tab bar
+            '<div id="tab-bar" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">' +
+              tabs.map(function(t){return '<button data-tab="'+t.id+'" class="profile-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap;font-family:inherit;">'+t.label+'</button>';}).join('') +
+            '</div><div id="tab-content"></div>';
+
+          function renderTab(id) {
+            var tc = document.getElementById('tab-content');
+            if (!tc) return;
+            switch (id) {
+              case 'nfts':     tc.innerHTML = renderCards(Array.isArray(nfts)?nfts:[], 'nft'); break;
+              case 'listings': tc.innerHTML = renderCards(Array.isArray(listings)?listings:[], 'listing'); break;
+              case 'auctions':
+                var aList = Array.isArray(auctions)?auctions:[];
+                if (!aList.length) { tc.innerHTML = '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No auctions</div>'; break; }
+                tc.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">'+aList.map(function(a){return'<a href="/auction/'+a.auction_id+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:1rem;padding:1rem;transition:all 0.2s;"><p style="font-size:0.75rem;font-weight:700;color:#fafafa;">Auction #'+a.auction_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.35);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(shortAddr(a.collection))+' #'+a.token_id+'</p><div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;"><span style="font-size:0.625rem;padding:0.125rem 0.5rem;border-radius:1rem;background:rgba(167,139,250,0.12);color:#c4b5fd;font-weight:700;text-transform:uppercase;">'+esc(a.status)+'</span><span style="font-size:0.75rem;font-weight:700;color:#a78bfa;">→</span></div></a>';}).join('')+'</div>';
+                break;
+              case 'offers':
+                var ohtml = '';
+                if (offersSent.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.5rem;">'+offersSent.map(function(o){return'<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></a>';}).join('')+'</div>'; }
+                if (offersReceived.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Received ('+offersReceived.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;">'+offersReceived.map(function(o){return'<div style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.15);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">From '+esc(shortAddr(o.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></div>';}).join('')+'</div>'; }
+                tc.innerHTML = ohtml || '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No offers yet</div>';
+                break;
+              case 'activity':
+                var aList2 = Array.isArray(activity)?activity:[];
+                if (!aList2.length) { tc.innerHTML = '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No recent activity</div>'; break; }
+                tc.innerHTML = '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+aList2.map(function(a){var c={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa'}[a.type]||'rgba(255,255,255,0.4)';return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="padding:0.125rem 0.5rem;border-radius:0.375rem;background:rgba(255,255,255,0.05);font-size:0.625rem;font-weight:700;text-transform:uppercase;color:'+c+';">'+esc(a.type)+'</span><span style="font-size:0.75rem;color:rgba(255,255,255,0.5);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(a.collection||''))+(a.token_id?' #'+a.token_id:'')+'</span></div><div style="display:flex;align-items:center;gap:1rem;"><span style="font-size:0.8125rem;font-weight:700;color:#fcd34d;">'+weiToFLR(a.amount_wei||a.amountWei||'0')+'</span><span style="font-size:0.6875rem;color:rgba(255,255,255,0.2);">'+timeAgo(a.timestamp||a.occurred_at||a.placed_at)+'</span></div></div>';}).join('')+'</div>';
+                break;
+            }
+          }
+
+          var tabBar = document.getElementById('tab-bar');
+          if (tabBar) {
+            tabBar.querySelectorAll('.profile-tab').forEach(function(btn){
+              btn.addEventListener('click', function(){
+                tabBar.querySelectorAll('.profile-tab').forEach(function(b){b.style.color='rgba(255,255,255,0.35)';b.style.borderBottomColor='transparent';});
+                var t = tabs.find(function(t){return t.id===btn.dataset.tab;});
+                var color = t?t.color:'#7dd3fc';
+                btn.style.color = color;
+                btn.style.borderBottomColor = color;
+                renderTab(btn.dataset.tab);
+              });
+            });
+            var firstTab = tabBar.querySelector('.profile-tab');
+            if (firstTab) { firstTab.click(); }
+          }
+
+          // 3D tilt on listing cards
+          setTimeout(function(){
+            document.addEventListener('mouseover',function(e){var c=e.target.closest('.tilt-card');if(!c)return;var r=c.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,cx=r.width/2,cy=r.height/2;c.style.transform='perspective(1000px) rotateX('+((y-cy)/cy*-6)+'deg) rotateY('+((x-cx)/cx*6)+'deg) scale3d(1.02,1.02,1.02)';c.style.boxShadow='0 20px 60px rgba(139,92,246,0.2)';c.style.borderColor='rgba(167,139,250,0.4)';});
+            document.addEventListener('mouseout',function(e){var c=e.target.closest('.tilt-card');if(!c)return;if(c.contains(e.relatedTarget))return;c.style.transform='';c.style.boxShadow='';c.style.borderColor='';});
+          }, 500);
+
+        } catch(e) {
+          if (root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Could not load profile &mdash; '+esc(e.message||'')+'<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>

@@ -1,0 +1,183 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Market Metrics" description="Real-time MagicWebb marketplace statistics — listings, sales, auctions, volume" activeNav="/metrics">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <!-- Header -->
+    <div class="reveal" style="margin-bottom:2rem;">
+      <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+        <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">▦</span>
+        Market Metrics
+      </h1>
+      <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Real-time marketplace statistics and activity.</p>
+    </div>
+
+    <!-- Loading -->
+    <div id="metrics-loading" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2rem;">
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
+    </div>
+
+    <!-- Metrics grid (populated by JS) -->
+    <div id="metrics-grid"></div>
+
+    <!-- Bar chart -->
+    <div id="chart-section" style="margin-bottom:2rem;"></div>
+
+    <!-- Recent activity -->
+    <h2 class="reveal" style="font-size:1.25rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
+      <span style="width:2rem;height:2rem;border-radius:0.625rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.875rem;box-shadow:0 0 14px -3px rgba(167,139,250,0.4);">↗</span>
+      Recent Activity
+    </h2>
+    <div id="activity-feed" class="reveal">
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.2);">Loading activity…</div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .w-60{width:60%;}.w-40{width:40%;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
+    .bar-animate{transition:height 0.8s cubic-bezier(0.34,1.56,0.64,1);}
+    .count-pop{animation:count-pop 0.5s cubic-bezier(0.34,1.56,0.64,1);}
+    @keyframes count-pop{0%{transform:scale(1);}50%{transform:scale(1.12);}100%{transform:scale(1);}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(2);}catch(_){return'0.00';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+
+      (async function(){
+        var loadingEl = document.getElementById('metrics-loading');
+        var metricsGrid = document.getElementById('metrics-grid');
+        var chartSection = document.getElementById('chart-section');
+        var activityFeed = document.getElementById('activity-feed');
+
+        try {
+          // Fetch metrics
+          var mRes = await fetch('/api/v1/metrics');
+          if (!mRes.ok) throw new Error('HTTP '+mRes.status);
+          var m = await mRes.json();
+
+          // Hide loading
+          if (loadingEl) loadingEl.style.display = 'none';
+
+          // Stat cards
+          var listings = m.listing_count || m.totalActiveListings || 0;
+          var sales = m.sales_count || m.totalSales || 0;
+          var auctions = m.auction_count || m.totalAuctions || 0;
+          var volume = m.grossVolumeWei || m.volume_all || '0';
+          var volFLR = weiToFLR(volume);
+
+          if (metricsGrid) {
+            metricsGrid.innerHTML =
+              '<div class="reveal" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:1rem;margin-bottom:2rem;">' +
+                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(56,189,248,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(14,165,233,0.15);display:flex;align-items:center;justify-content:center;color:#7dd3fc;font-size:0.875rem;">✦</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Active Listings</span></div>' +
+                  '<span id="val-listings" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fafafa;line-height:1;">'+listings+'</span>' +
+                '</div>' +
+                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;color:#fcd34d;font-size:0.875rem;">⚐</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Sales</span></div>' +
+                  '<span id="val-sales" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fcd34d;line-height:1;">'+sales+'</span>' +
+                '</div>' +
+                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(167,139,250,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(124,58,237,0.15);display:flex;align-items:center;justify-content:center;color:#a78bfa;font-size:0.875rem;">♕</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Auctions</span></div>' +
+                  '<span id="val-auctions" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#a78bfa;line-height:1;">'+auctions+'</span>' +
+                '</div>' +
+                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(255,255,255,0.12);transition:all 0.3s;backdrop-filter:blur(8px);">' +
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.875rem;">⬡</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Gross Volume</span></div>' +
+                  '<span id="val-volume" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fafafa;line-height:1;">'+esc(volFLR)+' <span style="font-size:0.875rem;font-weight:600;opacity:0.4;">C2FLR</span></span>' +
+                '</div>' +
+              '</div>';
+          }
+
+          // Bar chart
+          var maxVal = Math.max(listings, sales, auctions, parseFloat(volFLR)||1, 1);
+          if (chartSection) {
+            chartSection.innerHTML =
+              '<div class="reveal" style="padding:2rem;border-radius:1.125rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);margin-bottom:2rem;">' +
+                '<h3 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:1.5rem;display:flex;align-items:center;gap:0.5rem;"><span style="display:inline-block;width:0.5rem;height:0.5rem;border-radius:0.125rem;background:#7dd3fc;"></span> Marketplace Overview</h3>' +
+                '<div style="display:grid;grid-template-columns:repeat(4,1fr);gap:1rem;align-items:end;height:220px;">' +
+                  // Listings bar
+                  '<div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;height:100%;justify-content:flex-end;">' +
+                    '<span style="font-size:0.6875rem;font-weight:700;color:#7dd3fc;">'+listings+'</span>' +
+                    '<div class="bar-animate" id="bar-listings" style="width:100%;max-width:80px;border-radius:0.5rem 0.5rem 0 0;background:linear-gradient(to top,rgba(14,165,233,0.7),rgba(125,211,252,0.5));height:0%;"></div>' +
+                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Listings</span>' +
+                  '</div>' +
+                  // Sales bar
+                  '<div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;height:100%;justify-content:flex-end;">' +
+                    '<span style="font-size:0.6875rem;font-weight:700;color:#fcd34d;">'+sales+'</span>' +
+                    '<div class="bar-animate" id="bar-sales" style="width:100%;max-width:80px;border-radius:0.5rem 0.5rem 0 0;background:linear-gradient(to top,rgba(245,158,11,0.7),rgba(252,211,77,0.5));height:0%;"></div>' +
+                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Sales</span>' +
+                  '</div>' +
+                  // Auctions bar
+                  '<div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;height:100%;justify-content:flex-end;">' +
+                    '<span style="font-size:0.6875rem;font-weight:700;color:#a78bfa;">'+auctions+'</span>' +
+                    '<div class="bar-animate" id="bar-auctions" style="width:100%;max-width:80px;border-radius:0.5rem 0.5rem 0 0;background:linear-gradient(to top,rgba(124,58,237,0.7),rgba(167,139,250,0.5));height:0%;"></div>' +
+                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Auctions</span>' +
+                  '</div>' +
+                  // Volume bar
+                  '<div style="display:flex;flex-direction:column;align-items:center;gap:0.5rem;height:100%;justify-content:flex-end;">' +
+                    '<span style="font-size:0.6875rem;font-weight:700;color:#fafafa;">'+esc(volFLR)+'</span>' +
+                    '<div class="bar-animate" id="bar-volume" style="width:100%;max-width:80px;border-radius:0.5rem 0.5rem 0 0;background:linear-gradient(to top,rgba(255,255,255,0.5),rgba(255,255,255,0.2));height:0%;"></div>' +
+                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Volume</span>' +
+                  '</div>' +
+                '</div>' +
+              '</div>';
+
+            // Animate bars after render
+            setTimeout(function(){
+              ['bar-listings','bar-sales','bar-auctions'].forEach(function(id){
+                var bar = document.getElementById(id);
+                if (!bar) return;
+                var val = id==='bar-listings'?listings:id==='bar-sales'?sales:auctions;
+                var pct = maxVal>0?(val/maxVal*100):0;
+                if (pct<3&&val>0) pct=3;
+                setTimeout(function(b,p){b.style.height=p+'%';},100,bar,pct);
+              });
+              var volBar = document.getElementById('bar-volume');
+              if (volBar) {
+                var v = parseFloat(volFLR)||0; var pct = maxVal>0?(v/maxVal*100):0; if(pct<3&&v>0)pct=3;
+                setTimeout(function(){volBar.style.height=pct+'%';},100);
+              }
+            },200);
+          }
+
+          // Recent activity
+          try {
+            var aRes = await fetch('/api/v1/activity?limit=15');
+            if (aRes.ok && activityFeed) {
+              var activity = await aRes.json();
+              if (!Array.isArray(activity) || !activity.length) {
+                activityFeed.innerHTML = '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);">No activity yet</div>';
+              } else {
+                activityFeed.innerHTML = '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+activity.map(function(a){var tc2={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa'}[a.type]||'rgba(255,255,255,0.4)';return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.05);transition:border-color 0.2s;"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="padding:0.125rem 0.5rem;border-radius:0.375rem;background:rgba(255,255,255,0.04);font-size:0.625rem;font-weight:700;text-transform:uppercase;color:'+tc2+';">'+esc(a.type)+'</span><span style="font-size:0.75rem;color:rgba(255,255,255,0.45);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(a.collection||''))+(a.tokenId?' #'+a.tokenId:'')+'</span></div><span style="font-size:0.8125rem;font-weight:700;color:#fcd34d;">'+weiToFLR(a.amountWei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span></div>';}).join('')+'</div>';
+              }
+            }
+          } catch(_) {}
+
+          // SSE live refresh
+          try {
+            var sse = new EventSource('/events');
+            sse.addEventListener('listing-updated', function(){location.reload();});
+            sse.addEventListener('auction-updated', function(){location.reload();});
+            sse.addEventListener('activity', function(){location.reload();});
+          } catch(_) {}
+
+        } catch(e) {
+          if (loadingEl) loadingEl.style.display = 'none';
+          if (metricsGrid) metricsGrid.innerHTML = '<div style="padding:2rem;text-align:center;color:#fca5a5;">⚠ Could not load metrics — '+esc(e.message)+'</div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>
