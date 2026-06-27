@@ -632,9 +632,9 @@ func mountAstro(app *fiber.App) {
 			return c.Next()
 		}
 
-		// Bare /profile is handled by uiProfileRedirect (JWT-based
-		// redirect). Skip Astro so the route handler fires.
-		if path == "/profile" {
+		// Bare /profile and /profile/ are handled by uiProfileRedirect
+		// (JWT-based redirect). Normalise so both forms skip Astro.
+		if path == "/profile" || path == "/profile/" {
 			return c.Next()
 		}
 

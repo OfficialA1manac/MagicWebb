@@ -105,7 +105,7 @@ import WalletConnect from '../components/WalletConnect';
             tc.innerHTML = '<div style="display:flex;flex-direction:column;gap:0.75rem;">'+items.map(function(o){
               return '<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid '+(id==='received'?'rgba(125,211,252,0.12)':'rgba(252,211,77,0.12)')+';transition:all 0.2s;">'+
                 '<div style="min-width:0;flex:1;">'+
-                  '<p style="font-size:0.875rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p>'+
+                  '<p style="font-size:0.875rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+esc(o.token_id)+'</p>'+
                   '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">'+esc(shortAddr(o.bidder))+' · '+esc(o.status||'pending')+'</p>'+
                 '</div>'+
                 '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
@@ -130,7 +130,8 @@ import WalletConnect from '../components/WalletConnect';
 
         } catch(e) {
           if (loading) loading.style.display = 'none';
-          if (tabBar) tabBar.innerHTML = '<div style="padding:3rem;text-align:center;color:#fca5a5;">⚠ Could not load offers — '+esc(e.message)+'</div>';
+          if (prompt) prompt.style.display = 'none';
+          if (tabBar) { tabBar.style.display = 'block'; tabBar.innerHTML = '<div style="padding:3rem;text-align:center;color:#fca5a5;">⚠ Could not load offers — '+esc(e.message)+'</div>'; }
         }
       })();
     })();

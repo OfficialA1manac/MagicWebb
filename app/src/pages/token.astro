@@ -37,34 +37,43 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-      function weiToFLR(w,d){d=d||4;try{return(Number(BigInt(w||'0'))/1e18).toFixed(d);}catch(_){return'0.0000';}}
+      function weiToFLR(w,d){d=d||4;try{var bi=BigInt(w||'0');var div=BigInt(10)**BigInt(18);var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
 
+      // Validate hex address (0x + 40 hex)
+      function isEthAddr(s){
+        if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
+        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        return true;
+      }
       // Parse /token/:addr/:id from URL
       var parts = window.location.pathname.replace(/^\/token\//,'').split('/');
       var coll = parts[0]||'';
       var tid = parts[1]||'';
-      if (!coll || !tid) {
+      if (!isEthAddr(coll) || !tid) {
         document.getElementById('token-page').innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid token URL</div>';
         return;
       }
+      var encColl = encodeURIComponent(coll);
+      var encTid = encodeURIComponent(tid);
 
       (async function(){
         var root = document.getElementById('token-page');
         try {
           // Increment view counter (fire-and-forget POST)
-          fetch('/api/v1/token/'+coll+'/'+tid+'/view', {method:'POST'}).catch(function(){});
+          fetch('/api/v1/token/'+encColl+'/'+encTid+'/view', {method:'POST'}).catch(function(){});
 
-          var listingRes = await fetch('/api/v1/listings/'+coll+'/'+tid);
+          var listingRes = await fetch('/api/v1/listings/'+encColl+'/'+encTid);
           var listing = null;
           if (listingRes.ok) { try { listing = await listingRes.json(); } catch(_) {} }
 
+          var qs = new URLSearchParams({collection:coll,token_id:tid});
           var [metaRes, traitRes, actRes, offerRes] = await Promise.all([
-            fetch('/api/v1/collections/'+coll).catch(function(){return null;}),
-            fetch('/api/v1/collections/'+coll+'/traits').catch(function(){return null;}),
-            fetch('/api/v1/activity?collection='+coll+'&token='+tid+'&limit=15').catch(function(){return null;}),
-            fetch('/api/v1/offers?collection='+coll+'&tokenId='+tid+'&limit=10').catch(function(){return null;})
+            fetch('/api/v1/collections/'+encColl).catch(function(){return null;}),
+            fetch('/api/v1/collections/'+encColl+'/traits').catch(function(){return null;}),
+            fetch('/api/v1/activity?'+qs.toString()+'&limit=15').catch(function(){return null;}),
+            fetch('/api/v1/offers?collection='+encColl+'&token_id='+encTid+'&limit=10').catch(function(){return null;})
           ]);
 
           var col = metaRes && metaRes.ok ? (await metaRes.json()) : null;
@@ -82,12 +91,12 @@ import WalletConnect from '../components/WalletConnect';
           root.innerHTML =
             '<div class="reveal" style="display:grid;grid-template-columns:1fr;gap:2rem;">' +
               '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start;">' +
-                '<div class="flip-card" id="flip-card" style="aspect-ratio:1;cursor:pointer;position:relative;" onclick="this.classList.toggle(\'flipped\')">' +
+                '<button class="flip-card" id="flip-card" style="aspect-ratio:1;cursor:pointer;position:relative;border:none;padding:0;background:transparent;width:100%;display:block;" onclick="this.classList.toggle(\'flipped\')" onkeydown="if(event.key===\'Enter\'||event.key===\' \'){event.preventDefault();this.classList.toggle(\'flipped\');}" aria-label="Flip card to view metadata">' +
                   '<div class="flip-card-inner" style="width:100%;height:100%;">' +
                     '<div class="flip-card-front" style="background:rgba(9,9,11,0.8);display:flex;align-items:center;justify-content:center;border:1px solid rgba(255,255,255,0.08);">' +
                       (img ? '<img src="'+esc(img)+'" alt="'+esc(name)+'" style="width:100%;height:100%;object-fit:cover;" onerror="var p=this.parentElement;this.remove();var s=document.createElement(\'span\');s.style.cssText=\'font-size:4rem;color:rgba(255,255,255,0.06)\';s.textContent=\'🖼\';p.appendChild(s);">' : '<span style="font-size:4rem;color:rgba(255,255,255,0.06);">🖼</span>') +
                       '<div style="position:absolute;bottom:0.75rem;left:0;right:0;text-align:center;pointer-events:none;">' +
-                        '<span style="padding:0.375rem 1rem;border-radius:2rem;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);color:rgba(255,255,255,0.6);font-size:0.6875rem;font-weight:600;">Click to flip →</span>' +
+                        '<span style="padding:0.375rem 1rem;border-radius:2rem;background:rgba(0,0,0,0.6);backdrop-filter:blur(8px);color:rgba(255,255,255,0.6);font-size:0.6875rem;font-weight:600;">Click or Enter to flip →</span>' +
                       '</div>' +
                     '</div>' +
                     '<div class="flip-card-back" style="padding:1.5rem;display:flex;flex-direction:column;gap:0.75rem;">' +
@@ -112,10 +121,10 @@ import WalletConnect from '../components/WalletConnect';
                         '</div>' +
                       '</div>' +
                       (price ? '<div style="border-top:1px solid rgba(255,255,255,0.06);padding-top:0.75rem;display:flex;align-items:center;justify-content:space-between;"><span style="font-size:0.6875rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;">Price</span><span style="font-size:1.125rem;font-weight:900;color:#fde68a;">'+esc(price)+' <span style="font-size:0.6875rem;opacity:0.6;">C2FLR</span></span></div>' : '') +
-                      '<div style="text-align:center;margin-top:0.5rem;"><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);">Click to flip back →</span></div>' +
+                      '<div style="text-align:center;margin-top:0.5rem;"><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);">Click or press Enter to flip back →</span></div>' +
                     '</div>' +
                   '</div>' +
-                '</div>' +
+                '</button>' +
                 '<div>' +
                   '<div style="display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;margin-bottom:0.75rem;">' +
                     '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;">'+esc(name)+'</h1>' +
@@ -129,12 +138,12 @@ import WalletConnect from '../components/WalletConnect';
                     '</div>' +
                     '<div style="font-size:2rem;font-weight:900;color:#fde68a;margin-bottom:0.25rem;">'+esc(price)+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></div>' +
                     '<div style="display:flex;align-items:center;gap:0.5rem;font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:1rem;"><span>Seller: '+esc(shortAddr(seller))+'</span></div>' +
-                    '<button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="width:100%;padding:0.75rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.9375rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);transition:all 0.2s;font-family:inherit;">Buy Now for '+esc(price)+' C2FLR</button>' +
+                    '<button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="width:100%;padding:0.75rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.9375rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);transition:all 0.2s;font-family:inherit;">Connect to Buy &mdash; '+esc(price)+' C2FLR</button>' +
                   '</div>' : '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);margin-bottom:1rem;text-align:center;color:rgba(255,255,255,0.25);">Not currently listed for sale</div>') +
                   '<div style="display:flex;gap:0.5rem;flex-wrap:wrap;">' +
                     '<a href="/listings?action=list" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(56,189,248,0.4);">List for Sale</a>' +
                     '<a href="/listings?action=auction" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(167,139,250,0.4);">Start Auction</a>' +
-                    '<a href="/offers?collection='+coll+'&token='+tid+'" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(251,191,36,0.4);">Make Offer</a>' +
+                    '<a href="/offers?collection='+encColl+'&token='+encTid+'" style="padding:0.625rem 1.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 16px -3px rgba(251,191,36,0.4);">Make Offer</a>' +
                   '</div>' +
                 '</div>' +
               '</div>' +

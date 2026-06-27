@@ -44,52 +44,64 @@ import WalletConnect from '../components/WalletConnect';
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
 
-      // Parse address from URL path or localStorage
+      // Validate hex address strictly (0x + 40 hex chars)
+      function isEthAddr(s){
+        if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
+        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        return true;
+      }
+      // Parse address from URL path or localStorage (validated)
       var addr = (function(){
         var p = window.location.pathname.replace('/profile/','').replace('/profile','');
-        if (p && p.length === 42 && p.slice(0,2)==='0x') return p;
-        try { return localStorage.getItem('mw_addr') || ''; } catch(_) { return ''; }
+        if (isEthAddr(p)) return p;
+        try { var s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s : ''; } catch(_) { return ''; }
       })();
 
       var root = document.getElementById('profile-root');
-      if (!root || !addr) {
-        if (root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><div style="font-size:3rem;margin-bottom:1rem;">⌬</div><p style="font-size:1.25rem;margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and activity</p></div>';
+      if (!root) return;
+      if (!addr) {
+        root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><div style="font-size:3rem;margin-bottom:1rem;">⌬</div><p style="font-size:1.25rem;margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and activity</p></div>';
+        // Listen for wallet-connect to re-render
+        window.addEventListener('mw_wallet_connected', function(){ location.reload(); });
         return;
       }
+      var encAddr = encodeURIComponent(addr);
 
       (async function(){
         try {
           // Fetch ALL data sources in parallel
           var [pRes, nftRes, listRes, aucRes, offRes, metRes, actRes] = await Promise.allSettled([
-            fetch('/api/v1/profile/'+addr),
-            fetch('/api/v1/wallet/'+addr+'/nfts'),
-            fetch('/api/v1/listings?seller='+addr+'&limit=24'),
-            fetch('/api/v1/auctions?seller='+addr+'&limit=20'),
+            fetch('/api/v1/profile/'+encAddr),
+            fetch('/api/v1/wallet/'+encAddr+'/nfts'),
+            fetch('/api/v1/listings?seller='+encAddr+'&limit=24'),
+            fetch('/api/v1/auctions?seller='+encAddr+'&limit=20'),
             // Offers fetched as two separate calls below (bidder + owner params)
             fetch('/api/v1/metrics'),
-            fetch('/api/v1/activity?address='+addr+'&limit=20')
+            fetch('/api/v1/activity?address='+encAddr+'&limit=20')
           ]);
 
           // Separate offers fetches by direction (API uses bidder= and owner= params)
           var [offSentRes, offRecvRes] = await Promise.allSettled([
-            fetch('/api/v1/offers?bidder='+addr+'&limit=50'),
-            fetch('/api/v1/offers?owner='+addr+'&limit=50')
+            fetch('/api/v1/offers?bidder='+encAddr+'&limit=50'),
+            fetch('/api/v1/offers?owner='+encAddr+'&limit=50')
           ]);
 
           function ok(r){return r.status==='fulfilled' && r.value && r.value.ok;}
-          function json(r){try{return r.value.json();}catch(_){return null;}}
+          async function safeJson(r){try{return await r.value.json();}catch(_){return null;}}
 
-          var profile    = ok(pRes)   ? await json(pRes)   : null;
-          var nfts       = ok(nftRes) ? await json(nftRes) : [];
-          var listings   = ok(listRes)? await json(listRes) : [];
-          var auctions   = ok(aucRes) ? await json(aucRes) : [];
+          var profile    = ok(pRes)   ? (await safeJson(pRes)   || null) : null;
+          var nfts       = ok(nftRes) ? (await safeJson(nftRes) || [])  : [];
+          var listings   = ok(listRes)? (await safeJson(listRes)|| [])  : [];
+          var auctions   = ok(aucRes) ? (await safeJson(aucRes)|| [])  : [];
           // Offers from separate bidder/owner queries
-          var offersSentRaw     = ok({status:'fulfilled',value:offSentRes.value}) ? offSentRes.value.ok ? await offSentRes.value.json() : [] : [];
-          var offersReceivedRaw = ok({status:'fulfilled',value:offRecvRes.value}) ? offRecvRes.value.ok ? await offRecvRes.value.json() : [] : [];
+          var offSR = offSentRes.status==='fulfilled' && offSentRes.value;
+          var offersSentRaw = offSR && offSR.ok ? (await offSR.json().catch(function(){return [];})) : [];
+          var offRR = offRecvRes.status==='fulfilled' && offRecvRes.value;
+          var offersReceivedRaw = offRR && offRR.ok ? (await offRR.json().catch(function(){return [];})) : [];
           if (!Array.isArray(offersSentRaw)) offersSentRaw = [];
           if (!Array.isArray(offersReceivedRaw)) offersReceivedRaw = [];
-          var metrics    = ok(metRes) ? await json(metRes) : {};
-          var activity   = ok(actRes) ? await json(actRes) : [];
+          var metrics    = ok(metRes) ? (await safeJson(metRes)|| {})  : {};
+          var activity   = ok(actRes) ? (await safeJson(actRes)|| [])  : [];
 
           var offersSent = offersSentRaw;
           var offersReceived = offersReceivedRaw;
@@ -119,17 +131,18 @@ import WalletConnect from '../components/WalletConnect';
             var h='<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">';
             items.forEach(function(it){
               var coll=it.collection||''; var tid=it.token_id||it.tokenID||'';
-              var nm=it.name||('#'+tid);
+              var nm=it.name||('#'+esc(tid));
+              var encColl=encodeURIComponent(coll); var encTid=encodeURIComponent(tid);
               if(type==='nft'){
-                h+='<a href="/token/'+esc(coll)+'/'+esc(tid)+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
+                h+='<a href="/token/'+encColl+'/'+encTid+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
                 h+='<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">';
                 var src=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri):'';
                 h+=imgTag(src,'🖼');
                 h+='</div>';
-                h+='<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p></div></a>';
+                h+='<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">'+nm+'</p></div></a>';
               }else if(type==='listing'){
                 var price=weiToFLR(it.price_wei||'0');
-                h+='<a href="/token/'+esc(coll)+'/'+esc(tid)+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
+                h+='<a href="/token/'+encColl+'/'+encTid+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">';
                 h+='<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">';
                 var src2=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri):'';
                 h+=imgTag(src2,'🖼');
@@ -163,7 +176,7 @@ import WalletConnect from '../components/WalletConnect';
                 (bio ? '<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;">'+esc(bio)+'</p>' : '') +
                 (nfts && nfts.length ? '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:600;">'+nfts.length+' NFT'+(nfts.length>1?'s':'')+' in wallet</p>' : '') +
               '</div>' +
-              '<a href="/offers?addr='+addr+'" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>' +
+              '<a href="/offers?addr='+encAddr+'" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>' +
             '</div>' +
             // Stats row
             '<div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(130px,1fr));gap:0.75rem;margin-bottom:1.5rem;">' +
@@ -196,12 +209,12 @@ import WalletConnect from '../components/WalletConnect';
               case 'auctions':
                 var aList = Array.isArray(auctions)?auctions:[];
                 if (!aList.length) { tc.innerHTML = '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No auctions</div>'; break; }
-                tc.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">'+aList.map(function(a){return'<a href="/auction/'+a.auction_id+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:1rem;padding:1rem;transition:all 0.2s;"><p style="font-size:0.75rem;font-weight:700;color:#fafafa;">Auction #'+a.auction_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.35);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(shortAddr(a.collection))+' #'+a.token_id+'</p><div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;"><span style="font-size:0.625rem;padding:0.125rem 0.5rem;border-radius:1rem;background:rgba(167,139,250,0.12);color:#c4b5fd;font-weight:700;text-transform:uppercase;">'+esc(a.status)+'</span><span style="font-size:0.75rem;font-weight:700;color:#a78bfa;">→</span></div></a>';}).join('')+'</div>';
+                tc.innerHTML = '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">'+aList.map(function(a){return'<a href="/auction/'+encodeURIComponent(String(a.auction_id))+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:1rem;padding:1rem;transition:all 0.2s;"><p style="font-size:0.75rem;font-weight:700;color:#fafafa;">Auction #'+esc(String(a.auction_id))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.35);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(shortAddr(a.collection))+' #'+esc(a.token_id)+'</p><div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;"><span style="font-size:0.625rem;padding:0.125rem 0.5rem;border-radius:1rem;background:rgba(167,139,250,0.12);color:#c4b5fd;font-weight:700;text-transform:uppercase;">'+esc(a.status)+'</span><span style="font-size:0.75rem;font-weight:700;color:#a78bfa;">→</span></div></a>';}).join('')+'</div>';
                 break;
               case 'offers':
                 var ohtml = '';
-                if (offersSent.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.5rem;">'+offersSent.map(function(o){return'<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></a>';}).join('')+'</div>'; }
-                if (offersReceived.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Received ('+offersReceived.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;">'+offersReceived.map(function(o){return'<div style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.15);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">From '+esc(shortAddr(o.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></div>';}).join('')+'</div>'; }
+                if (offersSent.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.5rem;">'+offersSent.map(function(o){return'<a href="/token/'+encodeURIComponent(o.collection)+'/'+encodeURIComponent(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+esc(o.token_id)+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></a>';}).join('')+'</div>'; }
+                if (offersReceived.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Received ('+offersReceived.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;">'+offersReceived.map(function(o){return'<div style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.15);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">From '+esc(shortAddr(o.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(shortAddr(o.collection))+' #'+esc(o.token_id)+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></div>';}).join('')+'</div>'; }
                 tc.innerHTML = ohtml || '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No offers yet</div>';
                 break;
               case 'activity':
