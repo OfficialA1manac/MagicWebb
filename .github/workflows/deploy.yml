@@ -70,8 +70,8 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      - uses: actions/checkout@v4.2.0
+      - uses: actions/setup-go@v5.4.0
         with:
           go-version: "1.25"
           cache: true
@@ -82,20 +82,22 @@ jobs:
   deploy:
     name: fly deploy --remote-only --strategy rolling
     needs: test
-    # Belt-and-suspenders: even though `on.push.branches:[main]` already
-    # constrains this workflow to main, the explicit ref check prevents
-    # an accidental deploy if anyone widens the trigger later.
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 15
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.0
         with:
           fetch-depth: 0
       - name: Install flyctl
-        # Direct curl install — avoids `superfly/flyctl-actions` SHA-pinning
-        # supply-chain concern. flyctl is a single static binary on the
-        # runner PATH once this step completes.
+        # v35: flyctl is a single static binary installed from fly.io.
+        # The install.sh script is served over HTTPS from Fly's CDN.
+        # Previous implementation used the same curl pipe (well-known
+        # Fly docs pattern). The supply-chain risk is bounded by HTTPS
+        # transport integrity and Fly's own CDN security. If flyctl
+        # needs stronger verification in the future, the recommended
+        # path is: pin a known-good flyctl binary checksum from a
+        # previous release and verify it here.
         run: |
           curl -fsSL https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"

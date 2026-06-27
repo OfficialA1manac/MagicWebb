@@ -6,13 +6,20 @@ on:
   pull_request:
     branches: [main]
 
+# v35: explicit least-privilege permissions — only contents:read needed
+# for checkout; drops the default write scope on GITHUB_TOKEN.
+permissions:
+  contents: read
+
 jobs:
   backend:
     name: Backend (Go)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-go@v5
+      # v35: pinned to full semver tags (immutable git references) instead
+      # of mutable major-version tags (@v4). Dependabot will bump these.
+      - uses: actions/checkout@v4.2.0
+      - uses: actions/setup-go@v5.4.0
         with:
           go-version: "1.25"
           cache: true
@@ -31,11 +38,11 @@ jobs:
     name: Contracts (Foundry)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.0
         with:
           submodules: recursive
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@v1.2.0
       - name: Build
         working-directory: contracts
         run: forge build --sizes
@@ -47,13 +54,13 @@ jobs:
     name: Contracts (Slither)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.0
         with:
           submodules: recursive
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1
+        uses: foundry-rs/foundry-toolchain@v1.2.0
       - name: Slither static analysis
-        uses: crytic/slither-action@v0
+        uses: crytic/slither-action@v0.4.0
         with:
           target: contracts/
           slither-config: contracts/slither.config.json
@@ -63,10 +70,10 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v4.2.0
         with:
           fetch-depth: 0
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2
+        uses: gitleaks/gitleaks-action@v2.5.0
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"

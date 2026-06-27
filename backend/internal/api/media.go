@@ -14,6 +14,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/jackc/pgx/v5"
 )
 
@@ -23,6 +24,7 @@ const maxInt64 = int64(1<<63 - 1)
 type MediaService struct {
 	q     *db.Q
 	eth   chain.Caller
+	rl    *ratelimit.Limiter // v35: per-IP rate limit on image-retry endpoint
 	fetch imageRetryFetcher
 }
 
@@ -30,8 +32,8 @@ type MediaService struct {
 type imageRetryFetcher func(ctx context.Context, uri, tokenID string) ([]byte, error)
 
 // NewMediaService creates a MediaService.
-func NewMediaService(q *db.Q, eth chain.Caller) *MediaService {
-	return &MediaService{q: q, eth: eth, fetch: media.FetchBytes}
+func NewMediaService(q *db.Q, eth chain.Caller, rl *ratelimit.Limiter) *MediaService {
+	return &MediaService{q: q, eth: eth, rl: rl, fetch: media.FetchBytes}
 }
 
 // RegisterRoutes registers all media-related routes.
@@ -127,6 +129,18 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 }
 
 func (s *MediaService) handleRetry(c *fiber.Ctx) error {
+	// v35: tighter per-IP rate limit (10 req/min) for the image-retry endpoint.
+	// This endpoint triggers outbound HTTP fetches to upstream image URIs —
+	// a single IP hammering it could exhaust the RPC pool or saturate the
+	// upstream gateway. The SSRF guards (ProxyAllowedContext, safeDialContext)
+	// remain unchanged; this rate limit is a defence-in-depth addition.
+	if s.rl != nil {
+		ip := ClientIP(c)
+		if !s.rl.Allow("img-retry:"+ip, 10, time.Minute) {
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
+		}
+	}
+
 	fetch := s.fetch
 	if fetch == nil {
 		fetch = media.FetchBytes

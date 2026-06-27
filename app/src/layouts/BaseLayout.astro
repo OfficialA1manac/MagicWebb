@@ -204,6 +204,9 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
 
       // ── Notification bell ──
       (function(){if(typeof window==='undefined')return;var unread=0;
+        // v35: esc() helper applied consistently at every dynamic render point
+        // where API-sourced data reaches innerHTML. Escapes & < > " to prevent
+        // XSS via malicious notification titles, links, or profile data.
         function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
         function updBadge(){var b=document.getElementById('notif-badge');if(!b)return;if(unread>0){b.style.display='flex';b.textContent=unread>99?'99+':unread;}else{b.style.display='none';}}
         async function load(){var l=document.getElementById('notif-list');if(!l)return;var j=localStorage.getItem('mw_jwt');if(!j){l.innerHTML='<div class=\"notif-empty\">Connect your wallet for notifications</div>';return;}try{var r=await fetch('/api/v1/notifications?limit=20',{headers:{'Authorization':'Bearer '+j}});if(!r.ok)throw new Error('HTTP '+r.status);var d=await r.json();var items=d.notifications||[];unread=d.unread||0;updBadge();if(!items.length){l.innerHTML='<div class=\"notif-empty\">All caught up</div>';return;}l.innerHTML=items.map(function(n){var h=n.link||'#';if(!/^(https?:\/\/|\/|#)/.test(h))h='#';return '<a href=\"'+esc(h)+'\" rel=\"noopener\"><div class=\"notif-title\">'+esc(n.title)+'</div><div class=\"notif-body\">'+esc(n.body)+'</div></a>';}).join('');}catch(_){l.innerHTML='<div class=\"notif-empty\">Could not load notifications</div>';}}

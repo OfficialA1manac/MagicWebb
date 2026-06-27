@@ -110,7 +110,7 @@ func newRetryApp(t *testing.T, mock pgxmock.PgxPoolIface, fetch imageRetryFetche
 	app := fiber.New(fiber.Config{
 		DisableStartupMessage: true,
 	})
-	svc := NewMediaService(db.New(mock), nil)
+	svc := NewMediaService(db.New(mock), nil, nil)
 	svc.fetch = fetch
 	app.Post("/api/v1/img/retry", svc.handleRetry)
 	return app

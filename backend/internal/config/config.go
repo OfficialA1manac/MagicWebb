@@ -3,12 +3,15 @@
 package config
 
 import (
+	"encoding/hex"
 	"fmt"
 	"math/big"
 	"os"
 	"strconv"
 	"strings"
 	"time"
+
+	"github.com/ethereum/go-ethereum/crypto"
 )
 
 // C is the global config loaded once at startup via Load().
@@ -188,6 +191,78 @@ func Load() {
 		fmt.Fprintln(os.Stderr, "FATAL: JWT_SECRET must be at least 32 characters")
 		os.Exit(1)
 	}
+
+	// v35: KEEPER_KEY validation — when set, parse as ECDSA private key.
+	// An invalid key silently disabled the keeper subsystem before; now
+	// it fails fast with a clear error so operators catch typos at startup.
+	if C.KeeperKey != "" {
+		pkBytes, err := hex.DecodeString(strings.TrimPrefix(C.KeeperKey, "0x"))
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: KEEPER_KEY is not valid hex\n")
+			os.Exit(1)
+		}
+		if _, err := crypto.ToECDSA(pkBytes); err != nil {
+			fmt.Fprintf(os.Stderr, "FATAL: KEEPER_KEY is not a valid ECDSA private key: %v\n", err)
+			os.Exit(1)
+		}
+	}
+
+	// v35: SERVICE_TOKEN minimum length — consistent with JWT_SECRET ≥32.
+	if C.ServiceToken != "" && len(C.ServiceToken) < 32 {
+		fmt.Fprintf(os.Stderr, "FATAL: SERVICE_TOKEN must be at least 32 characters when set\n")
+		os.Exit(1)
+	}
+
+	// v35: ADMIN_ALLOWLIST entry validation. Each entry must be a well-formed
+	// Ethereum address; malformed entries produce a clear startup failure.
+	for _, addr := range C.AdminAllowlist {
+		if !isValidEthAddr(addr) {
+			fmt.Fprintf(os.Stderr, "FATAL: ADMIN_ALLOWLIST contains invalid address: %q\n", addr)
+			os.Exit(1)
+		}
+	}
+
+	// v35: production guard — empty ADMIN_ALLOWLIST in production is a
+	// misconfiguration (no admin can verify collections or manage the platform).
+	if C.Env == "production" && len(C.AdminAllowlist) == 0 {
+		fmt.Fprintln(os.Stderr, "WARN: ADMIN_ALLOWLIST is empty in production; no admin can verify collections or manage the platform")
+	}
+
+	// v35: contract address validation — MARKETPLACE_ADDR, AUCTION_ADDR,
+	// OFFERBOOK_ADDR must be well-formed Ethereum addresses. Previously
+	// they were only lowercased; a typo in .env would deploy a broken site.
+	for _, pair := range [][2]string{
+		{"MARKETPLACE_ADDR", C.MarketplaceAddr},
+		{"AUCTION_ADDR", C.AuctionAddr},
+		{"OFFERBOOK_ADDR", C.OfferBookAddr},
+	} {
+		if !isValidEthAddr(pair[1]) {
+			fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
+			os.Exit(1)
+		}
+	}
+
+	// v35: production SIWE guard — SIWE_DOMAIN=localhost in production
+	// means wallet sign-ins will fail because the signed message domain
+	// won't match. Fail fast to prevent broken sign-in in production.
+	if C.Env == "production" && C.SIWEDomain == "localhost" {
+		fmt.Fprintln(os.Stderr, "FATAL: SIWE_DOMAIN is still 'localhost' in production; set it to your public domain (e.g. magicwebb.fly.dev)")
+		os.Exit(1)
+	}
+}
+
+// isValidEthAddr validates a lowercase Ethereum address: 0x + 40 lowercase hex chars.
+func isValidEthAddr(s string) bool {
+	if len(s) != 42 || s[:2] != "0x" {
+		return false
+	}
+	for i := 2; i < len(s); i++ {
+		c := s[i]
+		if !((c >= '0' && c <= '9') || (c >= 'a' && c <= 'f')) {
+			return false
+		}
+	}
+	return true
 }
 
 func required(key string) string {
@@ -286,6 +361,11 @@ func optUint64(key string, def uint64) uint64 {
 	}
 	n, err := strconv.ParseUint(v, 10, 64)
 	if err != nil {
+		// v35: log a clear warning on parse errors instead of silently
+		// returning the default. GETLOGS_BLOCK_CAP is safety-critical —
+		// a misconfigured cap silently falling back to 30 could mask
+		// a production misconfiguration that leaves the indexer stuck.
+		fmt.Fprintf(os.Stderr, "WARN: %s=%q is not a valid uint64 (using default %d): %v\n", key, v, def, err)
 		return def
 	}
 	return n
@@ -298,6 +378,8 @@ func optFloat64(key string, def float64) float64 {
 	}
 	f, err := strconv.ParseFloat(v, 64)
 	if err != nil {
+		// v35: log a clear warning on parse errors (see optUint64).
+		fmt.Fprintf(os.Stderr, "WARN: %s=%q is not a valid float64 (using default %f): %v\n", key, v, def, err)
 		return def
 	}
 	return f

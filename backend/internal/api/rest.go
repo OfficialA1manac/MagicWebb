@@ -6,6 +6,8 @@ import (
 	"context"
 	"encoding/json"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -93,11 +95,18 @@ func securityHeaders() fiber.Handler {
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("Referrer-Policy", referrerPolicy)
 		c.Set("Permissions-Policy", permissionsPolicy)
-		// Cross-Origin-Opener-Policy intentionally absent — "same-origin" breaks
-	// Coinbase Wallet SDK (which requires the header to NOT be same-origin)
-	// and interferes with WalletConnect's popup-based pairing flow.
-	// The CSP frame-ancestors 'none' + X-Frame-Options DENY already provide
-	// equivalent clickjacking protection without the COOP side-effects.
+		// Cross-Origin-Opener-Policy: "same-origin-allow-popups" is the
+	// wallet-safe value. "same-origin" breaks Coinbase Wallet SDK +
+	// WalletConnect popup flows; omitting COOP entirely works but leaks
+	// the opener relationship to cross-origin navigations. This value
+	// isolates the browsing context from cross-origin openers while
+	// still allowing the wallet popup window to access its opener.
+	c.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+	// Cross-Origin-Resource-Policy: "same-origin" prevents cross-origin
+	// documents from embedding our resources (images, scripts, styles).
+	// The CSP frame-ancestors 'none' already blocks framing, but CORP
+	// adds a defence-in-depth layer at the resource-fetch level.
+	c.Set("Cross-Origin-Resource-Policy", "same-origin")
 		return c.Next()
 	}
 }
@@ -113,7 +122,9 @@ func securityHeaders() fiber.Handler {
 var MWServerBuildSHA = "unknown"
 
 // Mount registers all REST + SSE routes on the Fiber app.
-func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller) {
+// serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
+// endpoint reads it under the rate-limited api group.
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64) {
 	app.Use(securityHeaders())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL, cfg.Env),
@@ -203,7 +214,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
 	NewCollectionsService(q).RegisterRoutes(api)
-	ms := NewMediaService(q, eth)
+	ms := NewMediaService(q, eth, rl)
 	ms.RegisterRoutes(api)
 	NewWalletService(q).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
@@ -217,6 +228,13 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// rateLimitMiddleware applied to the api router — the old app-level
 	// registration bypassed rate limiting entirely.
 	api.Get("/img/:sha256", ms.HandleImageByHash())
+
+	// Server-time endpoint (used by auction countdown timers). Moved
+	// from mountUI's bare app.Get into the rate-limited api group so
+	// it inherits rateLimitMiddleware (60 req/min per IP).
+	api.Get("/server-time", func(c *fiber.Ctx) error {
+		return c.JSON(fiber.Map{"unix_ms": atomic.LoadInt64(serverTimeMs)})
+	})
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────
@@ -292,14 +310,16 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if !rl.Allow(clientIP(c), 60, time.Minute) {
+		if !rl.Allow(ClientIP(c), 60, time.Minute) {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
 		return c.Next()
 	}
 }
 
-// clientIP returns the real client IP for rate limiting.
+// ClientIP returns the real client IP for rate limiting.
+// Exported so cmd/server/main.go auth handlers can use the same trust-hierarchy-
+// aware resolution as the rate limiter, instead of calling c.IP() directly.
 //
 // Trust hierarchy (top wins):
 //   1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header;
@@ -314,7 +334,7 @@ func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 //   4. fasthttp's RemoteAddr — last-resort so the bucket key isn't blank.
 //
 // Audit: `clientIpSpoof` 🟠 P1.
-func clientIP(c *fiber.Ctx) string {
+func ClientIP(c *fiber.Ctx) string {
 	if v := strings.TrimSpace(c.Get("Fly-Client-IP")); v != "" {
 		return v
 	}
@@ -442,10 +462,31 @@ func bodyDecode(c *fiber.Ctx, v any) error {
 
 // ── SSE handler ───────────────────────────────────────────────────────────────
 
+// ssePerIPLimit is the maximum concurrent SSE connections per IP.
+// /events serves only public market data (listings, auctions, offers,
+// activity) — no auth, no PII — but a single IP holding thousands of
+// connections can exhaust the 10k subscriber pool. Capping at 20 per IP
+// leaves plenty of headroom for legitimate browser tabs while preventing
+// a single actor from dominating the pool.
+const ssePerIPLimit = 20
+
+// sseConns tracks active SSE connections per IP. Writes happen on
+// subscribe/cancel (low frequency — at most one per tab open/close).
+// sync.Map chosen over RWMutex+map because subscribe is called during
+// request setup (not in the stream-write hot path) and the map grows
+// slowly (one entry per unique IP).
+var sseConns sync.Map // IP string → *int64
+
 // sseHandler streams events from a Broadcaster to the browser. The /events
 // route is the live update channel for bids, listings, offers, auction
 // tick-downs, and notifications — every page subscribes to it as a
 // background EventSource.
+//
+// Per-IP connection cap (v35): before subscribing, increments an atomic
+// counter keyed on ClientIP. Returns 429 if the IP exceeds ssePerIPLimit.
+// Decrements on cancel/disconnect so the slot is released when the tab
+// closes. The cap prevents a single IP from exhausting the global 10k
+// subscriber pool.
 //
 // Cleanup contract (the fix this revision introduces):
 //   • `cancel()` is deferred INSIDE the SetBodyStreamWriter callback, not
@@ -477,13 +518,32 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 		c.Set("Connection", "keep-alive")
 		c.Set("X-Accel-Buffering", "no")
 
+		// Per-IP concurrent connection cap. The increment happens here
+		// (pre-stream), but the DEFERMENT is INSIDE the stream callback —
+		// the outer handler returns nil immediately after SetBodyStreamWriter,
+		// so a defer here would fire before the stream is active.
+		ip := ClientIP(c)
+		raw, _ := sseConns.LoadOrStore(ip, new(int64))
+		cnt := raw.(*int64)
+		if n := atomic.AddInt64(cnt, 1); n > ssePerIPLimit {
+			atomic.AddInt64(cnt, -1)
+			return c.Status(fiber.StatusTooManyRequests).SendString("too many connections from this IP")
+		}
+
 		ch, cancel, ok := bcast.Subscribe()
 		if !ok {
+			atomic.AddInt64(cnt, -1)
 			return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
 		}
 
 		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
 			defer cancel()
+			// Decrement the per-IP counter when the stream ends (client
+			// disconnect, TCP close, or broadcaster cancel). This is
+			// INSIDE the stream callback, not the outer handler, because
+			// the outer handler returns nil immediately (before the
+			// stream is active) — a defer there would fire instantly.
+			defer atomic.AddInt64(cnt, -1)
 
 			// Keepalive cadence: short enough to detect dead connections
 			// within ~30s, long enough not to spam clients with empty

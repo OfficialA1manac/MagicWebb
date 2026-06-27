@@ -12,7 +12,6 @@ import (
 	"os/signal"
 	"strconv"
 	"strings"
-	"sync/atomic"
 	"syscall"
 	"time"
 
@@ -116,7 +115,7 @@ func main() {
 	})
 
 	// Mount all REST + SSE routes
-	api.Mount(app, q, bcast, rl, &config.C, eth)
+	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs)
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))
@@ -171,7 +170,7 @@ type tokenResp struct {
 
 func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ip := c.IP()
+		ip := api.ClientIP(c)
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
@@ -199,7 +198,7 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 
 func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		ip := c.IP()
+		ip := api.ClientIP(c)
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
@@ -446,8 +445,6 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/partials/offers", partialOffers(q))
 	app.Get("/partials/profile/:addr", partialProfile(q))
 
-	// Server-time (used by auction countdown)
-	app.Get("/api/v1/server-time", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"unix_ms": atomic.LoadInt64(serverTimeMs)})
-	})
+	// v35: /api/v1/server-time moved to the rate-limited api group in rest.go.
+	// Previously registered on the bare app, bypassing rateLimitMiddleware entirely.
 }
