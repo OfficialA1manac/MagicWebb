@@ -1,0 +1,107 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Collection" description="NFT Collection detail on MagicWebb" activeNav="/">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section id="collection-page" style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:2rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);">
+      <div style="width:4rem;height:4rem;border-radius:1rem;background:rgba(255,255,255,0.04);flex-shrink:0;"></div>
+      <div style="flex:1;"><div class="skel-line" style="width:40%;height:1.25rem;margin-bottom:0.5rem;"></div><div class="skel-line" style="width:60%;height:0.75rem;"></div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;">
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);"><div class="skel-line w-50" style="height:0.75rem;margin-bottom:0.5rem;"></div><div class="skel-line w-30" style="height:1.5rem;"></div></div>
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);"><div class="skel-line w-50" style="height:0.75rem;margin-bottom:0.5rem;"></div><div class="skel-line w-30" style="height:1.5rem;"></div></div>
+      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);"><div class="skel-line w-50" style="height:0.75rem;margin-bottom:0.5rem;"></div><div class="skel-line w-30" style="height:1.5rem;"></div></div>
+    </div>
+    <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);"></div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .w-50{width:50%;}.w-30{width:30%;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(2);}catch(_){return'0.00';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+
+      var addr = window.location.pathname.replace('/collection/','').replace('/collection','');
+      var root = document.getElementById('collection-page');
+      if (!addr || addr.length<10) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid collection address</div>'; return; }
+
+      (async function(){
+        try {
+          var [colRes, listRes] = await Promise.all([
+            fetch('/api/v1/collections/'+addr),
+            fetch('/api/v1/listings?collection='+addr+'&limit=48')
+          ]);
+          var col = colRes.ok ? (await colRes.json()) : null;
+          var listings = listRes.ok ? (await listRes.json()) : [];
+
+          var name = (col&&col.name)||shortAddr(addr);
+          var standard = (col&&col.standard)||'erc721';
+          var verified = col&&col.verified;
+          var sym = col&&col.symbol||'';
+
+          var floor = '0', vol24 = '0', listedCount = Array.isArray(listings)?listings.length:0;
+          if (Array.isArray(listings)&&listings.length) {
+            var prices = listings.map(function(l){try{return Number(BigInt(l.price_wei||'0'));}catch(_){return Infinity;}}).filter(function(p){return !isNaN(p)&&p>0;});
+            if(prices.length){floor=weiToFLR(String(Math.min.apply(null,prices)));}
+            var tot=listings.reduce(function(s,l){try{return s+Number(BigInt(l.price_wei||'0'));}catch(_){return s;}},0);
+            vol24=weiToFLR(String(tot));
+          }
+
+          root.innerHTML =
+            '<div class="reveal">'+
+              '<div style="display:flex;align-items:flex-start;gap:1rem;margin-bottom:2rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);">'+
+                '<div style="width:4rem;height:4rem;border-radius:1rem;background:linear-gradient(135deg,rgba(125,211,252,0.2),rgba(14,165,233,0.1));display:flex;align-items:center;justify-content:center;font-size:2rem;border:1px solid rgba(125,211,252,0.25);flex-shrink:0;">🗂</div>'+
+                '<div style="flex:1;min-width:0;">'+
+                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+esc(name)+(verified?' <span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.625rem;font-weight:800;">✓ Verified</span>':'')+'</h1>'+
+                  '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(addr)+' · '+esc(standard.toUpperCase())+(sym?' · '+esc(sym):'')+'</p>'+
+                '</div>'+
+              '</div>'+
+              '<div style="display:grid;grid-template-columns:repeat(3,1fr);gap:1rem;margin-bottom:2rem;">'+
+                '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid rgba(252,211,77,0.2);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.375rem;">Floor</p><p style="font-size:1.5rem;font-weight:900;color:#fde68a;">'+esc(floor)+' <span style="font-size:0.75rem;opacity:0.6;">C2FLR</span></p></div>'+
+                '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.2);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.375rem;">Total Listed Value</p><p style="font-size:1.5rem;font-weight:900;color:#7dd3fc;">'+esc(vol24)+' <span style="font-size:0.75rem;opacity:0.6;">C2FLR</span></p></div>'+
+                '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.08);"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.375rem;">Listed</p><p style="font-size:1.5rem;font-weight:900;color:#fafafa;">'+listedCount+'</p></div>'+
+              '</div>'+
+              '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'+
+                '<h2 style="font-size:1.125rem;font-weight:800;color:#fafafa;">Listings</h2>'+
+                '<span style="font-size:0.75rem;color:rgba(255,255,255,0.3);">'+listedCount+' item'+(listedCount!==1?'s':'')+'</span>'+
+              '</div>'+
+              (!Array.isArray(listings)||!listings.length
+                ? '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No active listings in this collection</div>'
+                : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">'+listings.map(function(l){
+                    var price=weiToFLR(l.price_wei||'0',4);
+                    var nm=l.name||('#'+l.token_id);
+                    var img=l.image_uri?'/api/v1/media?url='+encodeURIComponent(l.image_uri):'';
+                    var tid=l.token_id||'';
+                    return '<a href="/token/'+esc(l.collection)+'/'+esc(tid)+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
+                      '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
+                        (img?'<img src="'+esc(img)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+
+                        '<span style="display:'+(img?'none':'flex')+';align-items:center;justify-content:center;font-size:3rem;color:rgba(255,255,255,0.08);">🖼</span>'+
+                        '<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">C2FLR</span></div>'+
+                      '</div>'+
+                      '<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(l.collection))+'</p><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p></div>'+
+                    '</a>';
+                  }).join('')+'</div>')+
+            '</div>';
+        } catch(e) {
+          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load collection &mdash; '+esc(e.message||'')+'<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>

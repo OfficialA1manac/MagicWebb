@@ -45,12 +45,12 @@ func (q *Q) SetIndexedBlock(ctx context.Context, chainID int, block uint64) erro
 // ── Collections ───────────────────────────────────────────────────────────
 
 type CollectionRow struct {
-	Address     string
-	Name        string
-	Symbol      string
-	Standard    string // "erc721" | "erc1155"
-	DeployBlock uint64
-	Verified    bool // curation badge (admin-set)
+	Address     string `json:"address"`
+	Name        string `json:"name"`
+	Symbol      string `json:"symbol"`
+	Standard    string `json:"standard"` // "erc721" | "erc1155"
+	DeployBlock uint64 `json:"deploy_block"`
+	Verified    bool   `json:"verified"` // curation badge (admin-set)
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
@@ -177,9 +177,9 @@ func (q *Q) TotalVolume24hWei(ctx context.Context) (string, error) {
 
 // CollectionStats is the surface the /collection/:addr page renders.
 type CollectionStats struct {
-	FloorPriceWei string // lowest active listing price (wei); "0" when empty
-	Volume24hWei  string // sums of sales price_wei in last 24h (wei); "0" empty
-	ListedCount   int64  // count of active listings
+	FloorPriceWei string `json:"floor_price_wei"` // lowest active listing price (wei); "0" when empty
+	Volume24hWei  string `json:"volume_24h_wei"`  // sums of sales price_wei in last 24h (wei); "0" empty
+	ListedCount   int64  `json:"listed_count"`    // count of active listings
 }
 
 // GetCollectionStats fills all three counters in a single round-trip-ish via
@@ -255,21 +255,21 @@ func CapWeiLimit(n, def, max int) int {
 // ── Listings ──────────────────────────────────────────────────────────────
 
 type ListingRow struct {
-	Collection string
-	TokenID    string // decimal uint256
-	Seller     string
-	PriceWei   string
-	Amount     int64
-	Standard   string
-	ExpiresAt  time.Time
-	ListedAt   time.Time
-	TxHash     string
+	Collection string    `json:"collection"`
+	TokenID    string    `json:"token_id"` // decimal uint256
+	Seller     string    `json:"seller"`
+	PriceWei   string    `json:"price_wei"`
+	Amount     int64     `json:"amount"`
+	Standard   string    `json:"standard"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	ListedAt   time.Time `json:"listed_at"`
+	TxHash     string    `json:"tx_hash"`
 	// Denormalised from nft_tokens (may be empty)
-	Name        string
-	ImageURI    string
-	TotalSupply int64 // collection-level total supply (0 when unindexed)
+	Name        string `json:"name"`
+	ImageURI    string `json:"image_uri"`
+	TotalSupply int64  `json:"total_supply"` // collection-level total supply (0 when unindexed)
 	// Denormalised from collections
-	CollectionVerified bool
+	CollectionVerified bool `json:"collection_verified"`
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -388,21 +388,21 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 // ── Auctions ──────────────────────────────────────────────────────────────
 
 type AuctionRow struct {
-	AuctionID       int64
-	Collection      string
-	TokenID         string
-	Seller          string
-	Standard        string
-	ReservePriceWei string
-	HighestBidWei   string
-	HighestBidder   string
-	MinIncrementBps int
-	StartsAt        time.Time
-	EndsAt          time.Time
-	Status          string
-	CreateTx        string
-	Name            string
-	ImageURI        string
+	AuctionID       int64     `json:"auction_id"`
+	Collection      string    `json:"collection"`
+	TokenID         string    `json:"token_id"`
+	Seller          string    `json:"seller"`
+	Standard        string    `json:"standard"`
+	ReservePriceWei string    `json:"reserve_price_wei"`
+	HighestBidWei   string    `json:"highest_bid_wei"`
+	HighestBidder   string    `json:"highest_bidder"`
+	MinIncrementBps int       `json:"min_increment_bps"`
+	StartsAt        time.Time `json:"starts_at"`
+	EndsAt          time.Time `json:"ends_at"`
+	Status          string    `json:"status"`
+	CreateTx        string    `json:"create_tx"`
+	Name            string    `json:"name"`
+	ImageURI        string    `json:"image_uri"`
 }
 
 // auctionSelectCols is the canonical SELECT projection for an AuctionRow.
@@ -743,10 +743,10 @@ func (q *Q) GetCollectionViews(ctx context.Context, collection string) (int64, e
 
 // CollectionStatsRow is one collection's aggregate inputs to the trending score.
 type CollectionStatsRow struct {
-	Collection string
-	Views      int64
-	Bids       int64
-	VolumeWei  *big.Int
+	Collection string   `json:"collection"`
+	Views      int64    `json:"views"`
+	Bids       int64    `json:"bids"`
+	VolumeWei  *big.Int `json:"volume_wei"`
 }
 
 // GetCollectionStatsSince returns views/bids/volume for every collection in one
@@ -787,12 +787,12 @@ func (q *Q) GetCollectionStatsSince(ctx context.Context, since time.Time, limit 
 // ── Trending scores ───────────────────────────────────────────────────────
 
 type TrendingScore struct {
-	Collection string
-	Window     string
-	Score      float64
-	Views      int64
-	Bids       int64
-	VolumeWei  *big.Int
+	Collection string   `json:"collection"`
+	Window     string   `json:"window"`
+	Score      float64  `json:"score"`
+	Views      int64    `json:"views"`
+	Bids       int64    `json:"bids"`
+	VolumeWei  *big.Int `json:"volume_wei"`
 }
 
 func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
@@ -866,12 +866,12 @@ func (q *Q) IncrementTokenViews(ctx context.Context, collection, tokenID string)
 
 // TokenActivityRow is one event in a single token's on-chain history.
 type TokenActivityRow struct {
-	Type       string
-	AmountWei  string
-	FromAddr   string
-	ToAddr     string
-	Timestamp  time.Time
-	TxHash     string
+	Type      string    `json:"type"`
+	AmountWei string    `json:"amount_wei"`
+	FromAddr  string    `json:"from_addr"`
+	ToAddr    string    `json:"to_addr"`
+	Timestamp time.Time `json:"timestamp"`
+	TxHash    string    `json:"tx_hash"`
 }
 
 // GetTokenActivity returns the on-chain activity for one token across sales
@@ -963,18 +963,18 @@ func (q *Q) GetTokenAttributes(ctx context.Context, collection, tokenID string) 
 // ── Offers ────────────────────────────────────────────────────────────────
 
 type OfferRow struct {
-	OfferID    string
-	Bidder     string
-	Collection string
-	TokenID    string
-	AmountWei  string // principal_wei: cumulative escrowed principal (fee excluded)
-	FeeWei     string
-	Units      int64
-	Standard   string
-	ExpiresAt  time.Time
-	Status     string
-	MakeTx     string
-	CreatedAt  time.Time
+	OfferID    string    `json:"offer_id"`
+	Bidder     string    `json:"bidder"`
+	Collection string    `json:"collection"`
+	TokenID    string    `json:"token_id"`
+	AmountWei  string    `json:"amount_wei"` // principal_wei: cumulative escrowed principal (fee excluded)
+	FeeWei     string    `json:"fee_wei"`
+	Units      int64     `json:"units"`
+	Standard   string    `json:"standard"`
+	ExpiresAt  time.Time `json:"expires_at"`
+	Status     string    `json:"status"`
+	MakeTx     string    `json:"make_tx"`
+	CreatedAt  time.Time `json:"created_at"`
 }
 
 type OffersFilter struct {

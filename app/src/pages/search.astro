@@ -1,0 +1,88 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Search" description="Search NFTs and collections on MagicWebb" activeNav="/search">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section id="search-page" style="max-width:48rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div class="reveal" style="margin-bottom:2rem;">
+      <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;margin-bottom:1.5rem;">
+        <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">⌕</span>
+        Search
+      </h1>
+      <div style="display:flex;gap:0.75rem;">
+        <input id="search-input" type="text" placeholder="Search NFTs and collections…" style="flex:1;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.1);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;">
+        <button id="search-btn" style="padding:0.75rem 1.5rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);font-family:inherit;transition:all 0.2s;">Search</button>
+      </div>
+    </div>
+    <div id="search-results">
+      <p style="color:rgba(255,255,255,0.25);text-align:center;padding:3rem 0;">Start typing to search</p>
+    </div>
+  </section>
+
+  <style>
+    @keyframes spin{to{transform:rotate(360deg);}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
+
+      var input = document.getElementById('search-input');
+      var btn = document.getElementById('search-btn');
+      var results = document.getElementById('search-results');
+      var searching = false;
+
+      // Pre-fill from URL query param
+      var qp = new URLSearchParams(window.location.search);
+      var q = qp.get('q')||'';
+      if (input && q) { input.value = q; doSearch(); }
+
+      function doSearch(){
+        var q = input.value.trim();
+        if (!q||q.length<2||searching) return;
+        searching = true;
+        if(results) results.innerHTML = '<p style="text-align:center;padding:3rem 0;color:rgba(255,255,255,0.2);">Searching…</p>';
+        fetch('/api/v1/search?q='+encodeURIComponent(q))
+          .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
+          .then(function(data){
+            var items = Array.isArray(data) ? data : [];
+            if (!items.length) { if(results)results.innerHTML = '<p style="text-align:center;padding:4rem 0;color:rgba(255,255,255,0.2);">No results found</p>'; searching=false; return; }
+            if(results) results.innerHTML =
+              '<p style="font-size:0.8125rem;color:rgba(255,255,255,0.4);margin-bottom:1rem;">'+items.length+' results for "<span style="color:#7dd3fc;font-weight:700;">'+esc(q)+'</span>"</p>'+
+              '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">'+items.map(function(r){
+                var href = r.kind==='nft' ? '/token/'+r.collection+'/'+r.token_id : '/collection/'+r.collection;
+                var label = r.kind==='nft' ? 'NFT' : 'Collection';
+                var name = r.name||shortAddr(r.collection);
+                var img = r.image_uri ? '/api/v1/media?url='+encodeURIComponent(r.image_uri) : '';
+                return '<a href="'+href+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
+                  '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
+                    (img?'<img src="'+esc(img)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+
+                    '<span style="display:'+(img?'none':'flex')+';align-items:center;justify-content:center;font-size:2.5rem;color:rgba(255,255,255,0.08);">'+(r.kind==='nft'?'🖼':'🗂')+'</span>'+
+                  '</div>'+
+                  '<div style="padding:0.75rem;">'+
+                    '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;">'+label+'</p>'+
+                    '<p style="font-size:0.8125rem;font-weight:700;color:#fafafa;margin-top:0.1875rem;">'+esc(name)+'</p>'+
+                  '</div>'+
+                '</a>';
+              }).join('')+'</div>';
+            searching=false;
+          })
+          .catch(function(e){
+            if(results) results.innerHTML = '<p style="text-align:center;padding:3rem;color:#fca5a5;">Search error &mdash; '+esc(e.message||'')+'</p>';
+            searching=false;
+          });
+      }
+
+      if(btn) btn.addEventListener('click',doSearch);
+      if(input) {
+        input.addEventListener('keydown',function(e){if(e.key==='Enter')doSearch();});
+        input.focus();
+      }
+    })();
+  </script>
+</BaseLayout>

@@ -683,17 +683,22 @@ func mountAstro(app *fiber.App) {
 
 		// Catch-all: Astro pages that use client-side URL parsing.
 		// /token/* → token/index.html (JS parses addr + id from pathname)
-		if strings.HasPrefix(cleanRel, "token/") {
-			if idxPath := filepath.Join(distPath, "token", "index.html"); fileExists(idxPath) {
-				c.Set("Cache-Control", "public, max-age=300")
-				return c.SendFile(idxPath)
-			}
-		}
 		// /profile/:addr → profile/index.html (JS parses addr from pathname)
-		if strings.HasPrefix(cleanRel, "profile/") && cleanRel != "profile" {
-			if idxPath := filepath.Join(distPath, "profile", "index.html"); fileExists(idxPath) {
-				c.Set("Cache-Control", "public, max-age=300")
-				return c.SendFile(idxPath)
+		// /auction/:id → auction/index.html (JS parses id from pathname)
+		// /collection/:addr → collection/index.html (JS parses addr from pathname)
+		var catchAlls = []struct{ prefix, dir string }{
+			{"token/", "token"},
+			{"profile/", "profile"},
+			{"auction/", "auction"},
+			{"collection/", "collection"},
+			{"search", "search"},
+		}
+		for _, ca := range catchAlls {
+			if strings.HasPrefix(cleanRel, ca.prefix) && cleanRel != ca.dir {
+				if idxPath := filepath.Join(distPath, ca.dir, "index.html"); fileExists(idxPath) {
+					c.Set("Cache-Control", "public, max-age=300")
+					return c.SendFile(idxPath)
+				}
 			}
 		}
 

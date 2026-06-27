@@ -75,19 +75,17 @@ import WalletConnect from '../components/WalletConnect';
 
       (async function(){
         try {
-          var res = await fetch('/api/v1/offers?addr='+addr+'&limit=50');
-          if (!res.ok) throw new Error('HTTP '+res.status);
+          // OfferRow has no "owner" field — the REST API separates sent vs received via query params.
+          // fetch both sides in parallel
+          var [sentRes, recvRes] = await Promise.all([
+            fetch('/api/v1/offers?bidder='+addr+'&limit=50'),
+            fetch('/api/v1/offers?owner='+addr+'&limit=50')
+          ]);
 
-          // The API returns flat or grouped — try both shapes
-          var data = await res.json();
-          if (Array.isArray(data)) {
-            // Separate by bidder vs owner
-            received = data.filter(function(o){return (o.owner||'').toLowerCase()===addr.toLowerCase()||o.bidder.toLowerCase()!==addr.toLowerCase();});
-            sent = data.filter(function(o){return o.bidder.toLowerCase()===addr.toLowerCase();});
-          } else {
-            received = data.received || [];
-            sent = data.sent || [];
-          }
+          sent   = sentRes.ok ? (await sentRes.json()) : [];
+          received = recvRes.ok ? (await recvRes.json()) : [];
+          if (!Array.isArray(sent)) sent = [];
+          if (!Array.isArray(received)) received = [];
 
           if (loading) loading.style.display = 'none';
           if (prompt) prompt.style.display = 'none';
@@ -108,9 +106,9 @@ import WalletConnect from '../components/WalletConnect';
               return '<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid '+(id==='received'?'rgba(125,211,252,0.12)':'rgba(252,211,77,0.12)')+';transition:all 0.2s;">'+
                 '<div style="min-width:0;flex:1;">'+
                   '<p style="font-size:0.875rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p>'+
-                  '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">'+(id==='sent'?'To: ':'From: ')+esc(shortAddr(id==='sent'?(o.owner||o.seller||''):o.bidder))+' · '+esc(o.status||'pending')+'</p>'+
+                  '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">'+esc(shortAddr(o.bidder))+' · '+esc(o.status||'pending')+'</p>'+
                 '</div>'+
-                '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
+                '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
               '</a>';
             }).join('')+'</div>';
           }

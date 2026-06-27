@@ -65,9 +65,15 @@ import WalletConnect from '../components/WalletConnect';
             fetch('/api/v1/wallet/'+addr+'/nfts'),
             fetch('/api/v1/listings?seller='+addr+'&limit=24'),
             fetch('/api/v1/auctions?seller='+addr+'&limit=20'),
-            fetch('/api/v1/offers?addr='+addr+'&limit=50'),
+            // Offers fetched as two separate calls below (bidder + owner params)
             fetch('/api/v1/metrics'),
             fetch('/api/v1/activity?address='+addr+'&limit=20')
+          ]);
+
+          // Separate offers fetches by direction (API uses bidder= and owner= params)
+          var [offSentRes, offRecvRes] = await Promise.allSettled([
+            fetch('/api/v1/offers?bidder='+addr+'&limit=50'),
+            fetch('/api/v1/offers?owner='+addr+'&limit=50')
           ]);
 
           function ok(r){return r.status==='fulfilled' && r.value && r.value.ok;}
@@ -77,20 +83,16 @@ import WalletConnect from '../components/WalletConnect';
           var nfts       = ok(nftRes) ? await json(nftRes) : [];
           var listings   = ok(listRes)? await json(listRes) : [];
           var auctions   = ok(aucRes) ? await json(aucRes) : [];
-          var offersAll  = ok(offRes) ? await json(offRes) : [];
+          // Offers from separate bidder/owner queries
+          var offersSentRaw     = ok({status:'fulfilled',value:offSentRes.value}) ? offSentRes.value.ok ? await offSentRes.value.json() : [] : [];
+          var offersReceivedRaw = ok({status:'fulfilled',value:offRecvRes.value}) ? offRecvRes.value.ok ? await offRecvRes.value.json() : [] : [];
+          if (!Array.isArray(offersSentRaw)) offersSentRaw = [];
+          if (!Array.isArray(offersReceivedRaw)) offersReceivedRaw = [];
           var metrics    = ok(metRes) ? await json(metRes) : {};
           var activity   = ok(actRes) ? await json(actRes) : [];
 
-          // Split offers into sent/received
-          var offersList = Array.isArray(offersAll) ? offersAll : (offersAll.sent || offersAll.received ? offersAll : []);
-          var offersSent = [], offersReceived = [];
-          if (Array.isArray(offersList)) {
-            offersSent     = offersList.filter(function(o){return (o.bidder||'').toLowerCase()===addr.toLowerCase();});
-            offersReceived = offersList.filter(function(o){return (o.bidder||'').toLowerCase()!==addr.toLowerCase();});
-          } else {
-            offersSent     = offersAll.sent || [];
-            offersReceived = offersAll.received || [];
-          }
+          var offersSent = offersSentRaw;
+          var offersReceived = offersReceivedRaw;
 
           // Profile data (basic fields from the API)
           var displayName = (profile && profile.display_name) || shortAddr(addr);
@@ -198,8 +200,8 @@ import WalletConnect from '../components/WalletConnect';
                 break;
               case 'offers':
                 var ohtml = '';
-                if (offersSent.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.5rem;">'+offersSent.map(function(o){return'<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></a>';}).join('')+'</div>'; }
-                if (offersReceived.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Received ('+offersReceived.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;">'+offersReceived.map(function(o){return'<div style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.15);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">From '+esc(shortAddr(o.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></div>';}).join('')+'</div>'; }
+                if (offersSent.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;margin-bottom:1.5rem;">'+offersSent.map(function(o){return'<a href="/token/'+esc(o.collection)+'/'+esc(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></a>';}).join('')+'</div>'; }
+                if (offersReceived.length) { ohtml += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Received ('+offersReceived.length+')</h4><div style="display:flex;flex-direction:column;gap:0.5rem;">'+offersReceived.map(function(o){return'<div style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(125,211,252,0.15);"><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">From '+esc(shortAddr(o.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(shortAddr(o.collection))+' #'+o.token_id+'</p></div><span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.6;">C2FLR</span></span></div>';}).join('')+'</div>'; }
                 tc.innerHTML = ohtml || '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No offers yet</div>';
                 break;
               case 'activity':

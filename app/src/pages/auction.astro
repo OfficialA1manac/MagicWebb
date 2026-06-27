@@ -1,0 +1,218 @@
+---
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Auction Detail" description="Live auction detail on MagicWebb NFT Marketplace" activeNav="/auctions">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section id="auction-detail" style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div class="shimmer" style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;">
+      <div style="aspect-ratio:1;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
+      <div>
+        <div class="skel-line w-60" style="height:1.5rem;margin-bottom:0.75rem;"></div>
+        <div class="skel-line w-40" style="height:1rem;margin-bottom:0.5rem;"></div>
+        <div class="skel-line w-30" style="height:3rem;border-radius:0.75rem;margin-bottom:1rem;"></div>
+        <div class="skel-line w-80" style="height:5rem;border-radius:0.75rem;margin-bottom:0.75rem;"></div>
+      </div>
+    </div>
+  </section>
+
+  <style>
+    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
+    .w-60{width:60%;}.w-40{width:40%;}.w-30{width:30%;}.w-80{width:80%;}
+    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
+    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
+    @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+  </style>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+      function weiToFLR(w,d){d=d||4;try{return(Number(BigInt(w||'0'))/1e18).toFixed(d);}catch(_){return'0.0000';}}
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+      function fmtTimeLeft(endsAt,now){var s=Math.max(0,endsAt-now);if(s<=0)return'Ended';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';var d=Math.floor(s/86400);return d+'d '+Math.floor((s%86400)/3600)+'h';}
+
+      var aid = window.location.pathname.replace('/auction/','').replace('/auction','');
+      var root = document.getElementById('auction-detail');
+      if (!aid||!aid.match(/^\d+$/)) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid auction ID</div>'; return; }
+
+      (async function(){
+        try {
+          var [aucRes,bidsRes,offRes] = await Promise.all([
+            fetch('/api/v1/auctions/'+aid),
+            fetch('/api/v1/auctions/'+aid+'/bids'),
+            fetch('/api/v1/auctions/'+aid).then(function(r){return r.json();}).then(function(a){
+              if(!a||!a.collection)return null;
+              return fetch('/api/v1/offers?collection='+a.collection+'&token_id='+a.token_id+'&status=pending&limit=5');
+            })
+          ]);
+
+          var a = aucRes.ok ? (await aucRes.json()) : null;
+          if (!a) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:#fca5a5;">Auction not found</div>'; return; }
+
+          var bids = bidsRes.ok ? (await bidsRes.json()) : [];
+          var offers = offRes && offRes.ok ? (await offRes.json()) : [];
+
+          var now = Math.floor(Date.now()/1000);
+          var endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
+          var ended = endsAt <= now;
+          var ending = !ended && (endsAt - now < 180);
+          var name = a.name || ('#'+a.token_id);
+          var img = a.image_uri ? '/api/v1/media?url='+encodeURIComponent(a.image_uri) : '';
+          var reserve = weiToFLR(a.reserve_price_wei||'0');
+          var highest = a.highest_bid_wei&&a.highest_bid_wei!=='0' ? weiToFLR(a.highest_bid_wei) : null;
+          var hasBids = !!highest;
+          var leader = a.highest_bidder||'';
+          var minBps = a.min_increment_bps||0;
+
+          // Compute max offer
+          var maxOfferWei = '0';
+          if (Array.isArray(offers)) {
+            offers.forEach(function(o){
+              try{var v=BigInt(o.amount_wei||o.principal_wei||'0');if(v>BigInt(maxOfferWei))maxOfferWei=v.toString();}catch(_){}
+            });
+          }
+
+          // Floor calculation (simplified from Alpine.js — JS BigInt is natively available)
+          function calcFloor(prevWei,reserveWei,offerWei,minBps){
+            try{
+              var prev=BigInt(prevWei||'0'),res=BigInt(reserveWei||'0'),off=BigInt(offerWei||'0');
+              var hasL=prev>0n, base=hasL?(prev>off?prev:off):(res>off?res:off);
+              var lou=base+1n;
+              if(!hasL) return lou;
+              if(minBps===0) return lou;
+              var pct=(prev*BigInt(minBps)+9999n)/10000n;
+              var pctFloor=pct<1n?1n:pct;
+              return lou>(prev+pctFloor)?lou:prev+pctFloor;
+            }catch(_){return 0n;}
+          }
+          function bigToFLR(bi){try{return(Number(bi)/1e18).toFixed(4);}catch(_){return'0.0000';}}
+
+          var floorWei = calcFloor(a.highest_bid_wei||'0', a.reserve_price_wei||'0', maxOfferWei, minBps);
+          var floorFLR = bigToFLR(floorWei);
+          // AuctionRow doesn't include collection_verified — fetch separately if needed
+
+          // Bid history
+          var bidList = Array.isArray(bids) ? bids.slice(0,20) : [];
+
+          root.innerHTML =
+            '<div class="reveal" style="display:grid;grid-template-columns:1fr;gap:2rem;">'+
+              '<div style="display:grid;grid-template-columns:1fr 1fr;gap:2rem;align-items:start;">'+
+                '<div style="aspect-ratio:1;border-radius:1.25rem;overflow:hidden;background:rgba(9,9,11,0.8);border:1px solid '+(ending?'rgba(252,211,77,0.35)':'rgba(255,255,255,0.08)')+';position:relative;">'+
+                  (img?'<img src="'+esc(img)+'" alt="'+esc(name)+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.parentElement.innerHTML=\\'<div style=display:flex;align-items:center;justify-content:center;height:100%;font-size:4rem;color:rgba(255,255,255,0.06);\\\\>🖼</div>\\'">':'<div style="display:flex;align-items:center;justify-content:center;height:100%;font-size:4rem;color:rgba(255,255,255,0.06);">🖼</div>')+
+                  (ending?'<div style="position:absolute;top:0.75rem;right:0.75rem;padding:0.375rem 0.75rem;border-radius:0.75rem;background:rgba(9,9,11,0.8);backdrop-filter:blur(12px);border:1px solid rgba(252,211,77,0.4);box-shadow:0 0 22px -4px rgba(251,191,36,0.5);"><span style="font-size:0.6875rem;font-weight:800;color:#fde68a;text-transform:uppercase;">⚡ Ending Soon</span></div>':'')+
+                '</div>'+
+                '<div>'+
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'+
+                    '<span style="width:0.5rem;height:0.5rem;border-radius:50%;background:'+(ended?'#fca5a5':'#a78bfa')+';animation:'+(ended?'none':'pulse 2s infinite')+';"></span>'+
+                    '<span style="font-size:0.6875rem;font-weight:800;text-transform:uppercase;color:'+(ended?'#fca5a5':'#c4b5fd')+';">'+(ended?'Auction ended':'Live now')+'</span>'+
+                  '</div>'+
+                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;">Auction #'+aid+'</h1>'+
+                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-top:0.375rem;margin-bottom:0.75rem;">'+
+                    '<a href="/collection/'+esc(a.collection)+'" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;">'+esc(shortAddr(a.collection))+'</a>'+
+                    '<span style="color:rgba(255,255,255,0.25);">·</span>'+
+                    '<a href="/token/'+esc(a.collection)+'/'+esc(a.token_id)+'" style="font-size:0.8125rem;color:rgba(255,255,255,0.4);">#'+a.token_id+'</a>'+
+                  '</div>'+
+                  // Countdown
+                  '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid '+(ending?'rgba(252,211,77,0.25)':'rgba(167,139,250,0.2)')+';margin-bottom:1rem;backdrop-filter:blur(8px);">'+
+                    '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.375rem;">Time left</p>'+
+                    '<p id="countdown-display" style="font-size:2rem;font-weight:900;color:#fafafa;line-height:1;">'+fmtTimeLeft(endsAt,now)+'</p>'+
+                    '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">Ends '+new Date(a.ends_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'})+'</p>'+
+                  '</div>'+
+                  // Price
+                  '<div id="price-display" style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.2);margin-bottom:1rem;backdrop-filter:blur(8px);">'+
+                    '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'+
+                      '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(hasBids?'Top bid':'Reserve')+'</span>'+
+                    '</div>'+
+                    '<p style="font-size:2rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1;">'+esc(hasBids?highest:reserve)+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></p>'+
+                    (hasBids?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(leader))+'</p>':'')+
+                  '</div>'+
+                  // Bid/Create button
+                  (!ended
+                    ? '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid rgba(167,139,250,0.2);margin-bottom:1rem;backdrop-filter:blur(8px);">'+
+                        '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Bid floor: '+esc(floorFLR)+' C2FLR</p>'+
+                        '<div style="display:flex;gap:0.5rem;">'+
+                          '<input id="bid-input" type="number" step="0.000001" min="0" placeholder="Enter bid amount" style="flex:1;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(9,9,11,0.5);border:1px solid rgba(255,255,255,0.1);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;">'+
+                          '<button onclick="document.getElementById(\'bid-input\').focus();window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="padding:0.75rem 1.5rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Bid</button>'+
+                        '</div>'+
+                        '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.25);margin-top:0.75rem;">Connect your wallet to bid. Floor: '+(minBps>0?'5% + 1 wei above leader':'+1 wei above leader')+', or reserve if no leader.</p>'+
+                      '</div>'
+                    : '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.2);margin-bottom:1rem;backdrop-filter:blur(8px);">'+
+                        '<p style="font-size:0.875rem;font-weight:700;color:#fafafa;margin-bottom:0.75rem;">♛ Auction ended</p>'+
+                        '<button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="padding:0.75rem 1.5rem;border-radius:0.75rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(251,191,36,0.5);font-family:inherit;">Settle Auction</button>'+
+                      '</div>')+
+                '</div>'+
+              '</div>'+
+              // Bid history
+              '<div id="bid-section">'+
+                '<h2 style="font-size:1.125rem;font-weight:800;color:#fafafa;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;"><span style="width:1.5rem;height:1.5rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.75rem;">↗</span> Bid History</h2>'+
+                '<div id="bid-list">'+
+                (!bidList.length
+                  ? '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>'
+                  : '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bidList.map(function(b,i){
+                      var isLeader = i===0 && hasBids;
+                      return '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isLeader?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isLeader?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';">'+
+                        '<div style="display:flex;align-items:center;gap:0.75rem;">'+
+                          '<span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span>'+
+                          '<div>'+
+                            '<p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(b.bidder))+'</p>'+
+                            '<p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(b.placed_at)+'</p>'+
+                          '</div>'+
+                        '</div>'+
+                        '<span style="font-size:0.9375rem;font-weight:900;color:'+(isLeader?'#fde68a':'#fafafa')+';">'+weiToFLR(b.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
+                      '</div>';
+                    }).join('')+'</div>')+'</div>'+
+              '</div>'+
+            '</div>';
+
+          // Live countdown timer
+          setInterval(function(){
+            var now2 = Math.floor(Date.now()/1000);
+            var el = document.getElementById('countdown-display');
+            if (el) el.textContent = fmtTimeLeft(endsAt, now2);
+          }, 1000);
+
+          // SSE: refresh bids AND price display (not full page reload)
+          try {
+            var sse = new EventSource('/events');
+            var sseReloading = false;
+            sse.addEventListener('auction-updated',function(){
+              if (sseReloading) return;
+              sseReloading = true;
+              // Refetch both auction + bids to update everything
+              Promise.all([
+                fetch('/api/v1/auctions/'+aid),
+                fetch('/api/v1/auctions/'+aid+'/bids')
+              ]).then(function(results){
+                return Promise.all([
+                  results[0].ok ? results[0].json() : null,
+                  results[1].ok ? results[1].json() : []
+                ]);
+              }).then(function(_ref2){
+                var au=_ref2[0], bList=_ref2[1];
+                if(!au)return;
+                var pHas=au.highest_bid_wei&&au.highest_bid_wei!=='0';
+                var now2=Math.floor(Date.now()/1000);
+                // Update countdown
+                var cd=document.getElementById('countdown-display');
+                if(cd&&au.ends_at){cd.textContent=fmtTimeLeft(new Date(au.ends_at).getTime()/1000,now2);}
+                // Full re-render of price display
+                var pEl=document.getElementById('price-display');
+                if(pEl){pEl.innerHTML='<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;"><span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(pHas?'Top bid':'Reserve')+'</span></div><p style="font-size:2rem;font-weight:900;color:'+(pHas?'#fde68a':'#fafafa')+';line-height:1;">'+esc(pHas?weiToFLR(au.highest_bid_wei):weiToFLR(au.reserve_price_wei||'0'))+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></p>'+(pHas?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(au.highest_bidder||''))+'</p>':'');}
+                // Full re-render of bid list (uses pHas from fresh data, not closure)
+                var bl=document.getElementById('bid-list');
+                if(bl&&Array.isArray(bList)){var bSub=bList.slice(0,20);if(!bSub.length){bl.innerHTML='<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>';}else{bl.innerHTML='<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bSub.map(function(bd,i){var isL=i===0&&pHas;return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isL?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isL?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(bd.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(bd.placed_at)+'</p></div></div><span style="font-size:0.9375rem;font-weight:900;color:'+(isL?'#fde68a':'#fafafa')+';">'+weiToFLR(bd.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span></div>';}).join('')+'</div>';}}
+              }).catch(function(){});
+              setTimeout(function(){sseReloading=false;},3000);
+            });
+          } catch(_){}
+
+        } catch(e) {
+          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load auction &mdash; '+esc(e.message||'')+'<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
+        }
+      })();
+    })();
+  </script>
+</BaseLayout>
