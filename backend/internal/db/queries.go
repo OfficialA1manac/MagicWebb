@@ -316,6 +316,8 @@ type ListingsFilter struct {
 	Collection string
 	Seller     string
 	Sort       string            // "recent" | "price_asc" | "price_desc"
+	MinPriceWei string          // minimum price in wei (inclusive)
+	MaxPriceWei string          // maximum price in wei (inclusive)
 	Traits     map[string]string // trait_type -> value (AND across traits)
 	Limit      int
 	Cursor     string
@@ -334,6 +336,14 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 	if f.Seller != "" {
 		args = append(args, f.Seller)
 		where += fmt.Sprintf(" AND l.seller=$%d", len(args))
+	}
+	if f.MinPriceWei != "" {
+		args = append(args, f.MinPriceWei)
+		where += fmt.Sprintf(" AND CAST(l.price_wei AS NUMERIC) >= CAST($%d AS NUMERIC)", len(args))
+	}
+	if f.MaxPriceWei != "" {
+		args = append(args, f.MaxPriceWei)
+		where += fmt.Sprintf(" AND CAST(l.price_wei AS NUMERIC) <= CAST($%d AS NUMERIC)", len(args))
 	}
 	for tt, v := range f.Traits {
 		if tt == "" || v == "" {
@@ -479,10 +489,12 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 }
 
 type AuctionsFilter struct {
-	Collection string
-	Seller     string
-	Status     string // "active" | "settled" | "cancelled" | "" = all
-	Limit      int
+	Collection  string
+	Seller      string
+	Status      string // "active" | "settled" | "cancelled" | "" = all
+	MinPriceWei string // minimum reserve price in wei (inclusive)
+	MaxPriceWei string // maximum reserve price in wei (inclusive)
+	Limit       int
 }
 
 func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, error) {
@@ -502,6 +514,14 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 	if f.Status != "" {
 		args = append(args, f.Status)
 		where += fmt.Sprintf(" AND a.status=$%d", len(args))
+	}
+	if f.MinPriceWei != "" {
+		args = append(args, f.MinPriceWei)
+		where += fmt.Sprintf(" AND CAST(a.reserve_price_wei AS NUMERIC) >= CAST($%d AS NUMERIC)", len(args))
+	}
+	if f.MaxPriceWei != "" {
+		args = append(args, f.MaxPriceWei)
+		where += fmt.Sprintf(" AND CAST(a.reserve_price_wei AS NUMERIC) <= CAST($%d AS NUMERIC)", len(args))
 	}
 	rows, err := q.pool.Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+` `+where+` ORDER BY a.ends_at ASC LIMIT $1`, args...)

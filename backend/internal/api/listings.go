@@ -2,6 +2,7 @@ package api
 
 import (
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -42,6 +43,29 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 				n = 100
 			}
 			f.Limit = n
+		}
+	}
+	// Parse price range filters (in wei) with validation
+	if mp := c.Query("min_price"); mp != "" {
+		if !isValidWeiStr(mp) {
+			return writeErr(c, fiber.StatusBadRequest, "min_price must be a non-negative integer wei value")
+		}
+		f.MinPriceWei = mp
+	}
+	if mp := c.Query("max_price"); mp != "" {
+		if !isValidWeiStr(mp) {
+			return writeErr(c, fiber.StatusBadRequest, "max_price must be a non-negative integer wei value")
+		}
+		f.MaxPriceWei = mp
+	}
+	// Parse trait filters: traits=trait_type:value,trait_type:value
+	if traits := c.Query("traits"); traits != "" {
+		f.Traits = map[string]string{}
+		for _, pair := range strings.Split(traits, ",") {
+			parts := strings.SplitN(pair, ":", 2)
+			if len(parts) == 2 && parts[0] != "" && parts[1] != "" {
+				f.Traits[parts[0]] = parts[1]
+			}
 		}
 	}
 	rows, err := s.q.ListActiveListings(c.Context(), f)

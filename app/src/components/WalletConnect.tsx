@@ -49,8 +49,21 @@ function WalletButton() {
   const { address, isConnected, status } = useAppKitAccount();
   const { chainId, switchNetwork } = useAppKitNetwork();
 
-  const connecting = status === 'connecting' || status === 'reconnecting';
+  const connecting = status === 'connecting' || status === 'reconnecting' || status === 'initializing';
   const wrongNetwork = isConnected && chainId !== undefined && chainId !== targetChain.id;
+
+  // Check localStorage for previously connected wallet
+  const [storedAddr, setStoredAddr] = useState<string | null>(null);
+  const [hasStoredWallet, setHasStoredWallet] = useState(false);
+  useEffect(() => {
+    try {
+      const a = localStorage.getItem('mw_addr');
+      if (a && a.length === 42 && a.startsWith('0x')) {
+        setStoredAddr(a);
+        setHasStoredWallet(true);
+      }
+    } catch (_) {}
+  }, []);
 
   const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
   const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
@@ -63,12 +76,24 @@ function WalletButton() {
         localStorage.setItem('mw_addr', address.toLowerCase());
         localStorage.setItem('mw_kind', 'walletconnect');
       } catch (_) {}
+      // Sync React state so stored-address is shown immediately after reconnect
+      setStoredAddr(address.toLowerCase());
+      setHasStoredWallet(true);
+      // Notify the page so saved-search buttons appear
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
+      }
     } else if (wasConnectedRef.current && !isConnected) {
       wasConnectedRef.current = false;
       try {
         localStorage.removeItem('mw_addr');
         localStorage.removeItem('mw_kind');
       } catch (_) {}
+      setStoredAddr(null);
+      setHasStoredWallet(false);
+      if (typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
+      }
     }
   }, [isConnected, address]);
 
@@ -87,6 +112,66 @@ function WalletButton() {
       }
     };
   }, [isConnected, connecting, open, disconnect]);
+
+  // Show stored wallet address as a click-to-reconnect button while wagmi is initializing.
+  // Guard: hide while connecting to prevent repeated open() calls.
+  if (!isConnected && !connecting && hasStoredWallet && storedAddr) {
+    return (
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
+        <button
+          onClick={() => open()}
+          style={{
+            padding: '0.25rem 0.75rem',
+            borderRadius: '0.5rem',
+            background: 'linear-gradient(135deg, rgba(167,139,250,0.2), rgba(124,58,237,0.15))',
+            border: '1px solid rgba(167,139,250,0.3)',
+            color: '#c4b5fd',
+            fontWeight: 700,
+            fontSize: '0.6875rem',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: '0.375rem',
+            transition: 'all 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.35), rgba(124,58,237,0.25))'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.2), rgba(124,58,237,0.15))'; }}
+        >
+          <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#7dd3fc', boxShadow: '0 0 8px rgba(125,211,252,0.5)' }} />
+          Reconnect
+        </button>
+        <span style={{ fontSize: '0.625rem', fontWeight: 600, color: 'rgba(255,255,255,0.35)', fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
+          {storedAddr.slice(0, 6)}...{storedAddr.slice(-4)}
+        </span>
+        <button
+          onClick={() => {
+            try {
+              localStorage.removeItem('mw_addr');
+              localStorage.removeItem('mw_kind');
+              setStoredAddr(null);
+              setHasStoredWallet(false);
+            } catch (_) {}
+          }}
+          style={{
+            background: 'none',
+            border: 'none',
+            color: 'rgba(255,255,255,0.2)',
+            cursor: 'pointer',
+            padding: '0.25rem',
+            fontSize: '0.75rem',
+            fontFamily: 'inherit',
+            transition: 'color 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#fca5a5'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; }}
+          title="Forget wallet"
+        >
+          ✕
+        </button>
+      </div>
+    );
+  }
 
   if (!isConnected) {
     return (
@@ -134,7 +219,7 @@ function WalletButton() {
         {connecting ? (
           <>
             <span style={{ display: 'inline-block', width: '1rem', height: '1rem', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            Connecting…
+            Reconnecting…
           </>
         ) : (
           <>

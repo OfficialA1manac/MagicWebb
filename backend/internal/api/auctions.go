@@ -43,6 +43,18 @@ func (s *AuctionsService) handleList(c *fiber.Ctx) error {
 			f.Limit = n
 		}
 	}
+	if mp := c.Query("min_price"); mp != "" {
+		if !isValidWeiStr(mp) {
+			return writeErr(c, fiber.StatusBadRequest, "min_price must be a non-negative integer wei value")
+		}
+		f.MinPriceWei = mp
+	}
+	if mp := c.Query("max_price"); mp != "" {
+		if !isValidWeiStr(mp) {
+			return writeErr(c, fiber.StatusBadRequest, "max_price must be a non-negative integer wei value")
+		}
+		f.MaxPriceWei = mp
+	}
 	rows, err := s.q.ListAuctions(c.Context(), f)
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")

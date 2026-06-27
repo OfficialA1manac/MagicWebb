@@ -128,7 +128,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	app.Use(securityHeaders())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL, cfg.Env),
-		AllowMethods:     "GET,POST,PUT,OPTIONS",
+		AllowMethods:     "GET,POST,PUT,DELETE,OPTIONS",
 		AllowHeaders:     "Content-Type,Authorization",
 		AllowCredentials: true,
 	}))
@@ -221,6 +221,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewProfilesService(q).RegisterRoutes(api, cfg)
 	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(api)
+	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewMetricsService(q).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 

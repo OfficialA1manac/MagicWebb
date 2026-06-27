@@ -9,6 +9,12 @@
   let sortBy = 'recent';
   let _fetchGen = 0;
 
+  export let collection = '';
+  export let seller = '';
+  export let minPrice = '';
+  export let maxPrice = '';
+  export let traitFilters = '';
+
   async function fetchListings() {
     const gen = ++_fetchGen;
     loading = true;
@@ -16,9 +22,14 @@
 
     try {
       const params = new URLSearchParams({ limit: '48', sort: sortBy });
+      if (collection) params.set('collection', collection);
+      if (seller) params.set('seller', seller);
+      if (minPrice) params.set('min_price', minPrice);
+      if (maxPrice) params.set('max_price', maxPrice);
+      if (traitFilters) params.set('traits', traitFilters);
       const res = await fetch(`/api/v1/listings?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      if (gen !== _fetchGen) return; // stale response
+      if (gen !== _fetchGen) return;
 
       const data = await res.json();
       if (gen !== _fetchGen) return;
@@ -41,20 +52,31 @@
     sortBy = e.target.value;
     fetchListings();
   }
+
+  function openAppKit() {
+    if (typeof window !== 'undefined' && window.__MW_APPKIT_OPEN__) {
+      window.__MW_APPKIT_OPEN__();
+    }
+  }
 </script>
 
 <div class="grid-section">
   <div class="grid-header">
-    <h2>Listings</h2>
-    <div class="controls">
+    <div class="header-left">
+      <h2>{#if collection}Collection Listings{:else}Current Listings{/if}</h2>
       {#if !loading}
-        <span class="count-badge">{count} loaded</span>
+        <span class="count-badge">{count} item{count !== 1 ? 's' : ''}</span>
       {/if}
+    </div>
+    <div class="controls">
       <select class="sort-select" bind:value={sortBy} on:change={handleSortChange}>
         <option value="recent">Most Recent</option>
         <option value="price_asc">Price: Low to High</option>
         <option value="price_desc">Price: High to Low</option>
       </select>
+      <button on:click={openAppKit} class="list-btn">
+        ＋ List NFT
+      </button>
     </div>
   </div>
 
@@ -73,13 +95,20 @@
     </div>
   {:else if error}
     <div class="error-card">
-      <p>Failed to load listings</p>
+      <div style="font-size:2rem;margin-bottom:0.5rem;">⚠</div>
+      <p style="font-size:1rem;font-weight:700;color:#fca5a5;">Failed to load listings</p>
       <p class="error-detail">{error}</p>
-      <button class="retry-btn" on:click={fetchListings}>Retry</button>
+      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
+        <button class="retry-btn" on:click={fetchListings}>Retry</button>
+        <button class="retry-btn secondary" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
+      </div>
     </div>
   {:else if items.length === 0}
     <div class="empty-card">
-      <p>No active listings</p>
+      <div style="font-size:3rem;margin-bottom:1rem;opacity:0.2;">✦</div>
+      <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
+      <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
+      <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
     </div>
   {:else}
     <div class="nft-grid">
@@ -94,39 +123,71 @@
   .grid-section {
     max-width: 80rem;
     margin: 0 auto;
-    padding: 1.5rem;
   }
   .grid-header {
     display: flex;
     align-items: center;
     justify-content: space-between;
     margin-bottom: 1.5rem;
+    flex-wrap: wrap;
+    gap: 0.75rem;
+  }
+  .header-left {
+    display: flex;
+    align-items: center;
+    gap: 0.75rem;
   }
   .grid-header h2 {
-    font-size: 1.5rem;
-    font-weight: 700;
-    color: #e2e8f0;
+    font-size: 1.25rem;
+    font-weight: 800;
+    color: #fafafa;
     margin: 0;
+    letter-spacing: -0.02em;
   }
-  .controls { display: flex; align-items: center; gap: 0.75rem; }
+  .controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
   .count-badge {
-    padding: 0.25rem 0.625rem;
-    background: rgba(139, 92, 246, 0.15);
-    border: 1px solid rgba(139, 92, 246, 0.2);
+    padding: 0.25rem 0.75rem;
+    background: rgba(125, 211, 252, 0.1);
+    border: 1px solid rgba(125, 211, 252, 0.2);
     border-radius: 2rem;
-    color: #a78bfa;
-    font-size: 0.8125rem;
-    font-weight: 500;
+    color: #7dd3fc;
+    font-size: 0.75rem;
+    font-weight: 700;
   }
   .sort-select {
-    padding: 0.375rem 0.75rem;
-    border: 1px solid rgba(148, 163, 184, 0.2);
+    padding: 0.5rem 0.75rem;
+    border: 1px solid rgba(255, 255, 255, 0.1);
     border-radius: 0.5rem;
-    background: rgba(30, 41, 59, 0.6);
-    color: #e2e8f0;
+    background: rgba(15, 15, 19, 0.6);
+    color: #fafafa;
     font-size: 0.8125rem;
     cursor: pointer;
     outline: none;
+    font-family: inherit;
+    transition: border-color 0.2s;
+  }
+  .sort-select:hover, .sort-select:focus {
+    border-color: rgba(167, 139, 250, 0.4);
+  }
+  .list-btn {
+    padding: 0.5rem 1rem;
+    border-radius: 0.75rem;
+    background: linear-gradient(135deg, #7dd3fc, #0ea5e9);
+    color: #09090b;
+    font-weight: 800;
+    font-size: 0.8125rem;
+    border: none;
+    cursor: pointer;
+    transition: all 0.2s;
+    box-shadow: 0 0 22px -6px rgba(56,189,248,0.45), 0 4px 12px -4px rgba(14,165,233,0.3);
+    font-family: inherit;
+    display: inline-flex;
+    align-items: center;
+    gap: 0.375rem;
+  }
+  .list-btn:hover {
+    opacity: 0.92;
+    transform: scale(1.02);
   }
   .nft-grid {
     display: grid;
@@ -139,43 +200,54 @@
     gap: 1.25rem;
   }
   .card-skeleton {
-    background: rgba(30, 41, 59, 0.4);
+    background: rgba(15, 15, 19, 0.5);
     border-radius: 0.875rem;
     overflow: hidden;
-    animation: shimmer 1.5s infinite;
+    border: 1px solid rgba(255, 255, 255, 0.05);
+    animation: shimmer 1.5s ease-in-out infinite;
   }
   @keyframes shimmer {
-    0% { opacity: 0.6; }
-    50% { opacity: 1; }
-    100% { opacity: 0.6; }
+    0% { opacity: 0.3; }
+    50% { opacity: 0.7; }
+    100% { opacity: 0.3; }
   }
-  .skeleton-image { aspect-ratio: 1; background: rgba(148, 163, 184, 0.1); }
+  .skeleton-image { aspect-ratio: 1; background: rgba(255, 255, 255, 0.03); }
   .skeleton-body { padding: 0.875rem; display: flex; flex-direction: column; gap: 0.5rem; }
   .skeleton-line {
     height: 0.75rem;
-    background: rgba(148, 163, 184, 0.1);
+    background: rgba(255, 255, 255, 0.04);
     border-radius: 0.25rem;
   }
   .error-card, .empty-card {
     display: flex;
     flex-direction: column;
     align-items: center;
-    gap: 0.75rem;
+    gap: 0.5rem;
     padding: 4rem 1.5rem;
     text-align: center;
-    color: #94a3b8;
+    border-radius: 1rem;
+    background: rgba(15, 15, 19, 0.5);
+    border: 1px solid rgba(255, 255, 255, 0.05);
   }
-  .error-detail { font-size: 0.8125rem; color: #64748b; }
+  .error-detail { font-size: 0.8125rem; color: rgba(255, 255, 255, 0.3); }
   .retry-btn {
     padding: 0.5rem 1.25rem;
-    border: 1px solid rgba(139, 92, 246, 0.3);
-    border-radius: 0.5rem;
-    background: rgba(139, 92, 246, 0.1);
+    border-radius: 0.625rem;
+    background: rgba(167, 139, 250, 0.1);
+    border: 1px solid rgba(167, 139, 250, 0.25);
     color: #a78bfa;
-    font-size: 0.875rem;
+    font-size: 0.8125rem;
+    font-weight: 700;
     cursor: pointer;
+    font-family: inherit;
+    transition: all 0.2s;
   }
   .retry-btn:hover {
-    background: rgba(139, 92, 246, 0.2);
+    background: rgba(167, 139, 250, 0.2);
+  }
+  .retry-btn.secondary {
+    background: rgba(255, 255, 255, 0.04);
+    border-color: rgba(255, 255, 255, 0.1);
+    color: rgba(255, 255, 255, 0.5);
   }
 </style>

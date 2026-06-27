@@ -624,8 +624,10 @@ const maxImageRetries = 6
 // is stored), filtered to those whose backoff has expired. Limited to `limit`
 // rows, next eligible first.
 func (q *Q) ListTokensWithUpstreamImages(ctx context.Context, limit int) ([]ImageRetryToken, error) {
-	if limit <= 0 || limit > 200 {
+	if limit <= 0 {
 		limit = 50
+	} else if limit > 100 {
+		limit = 100
 	}
 	rows, err := q.pool.Query(ctx,
 		`SELECT collection, token_id::text, image_uri, image_retry_count
@@ -755,6 +757,74 @@ func (q *Q) BumpImageRetry(ctx context.Context, collection, tokenID string, coun
 		 WHERE collection=$1 AND token_id=$2`,
 		collection, tokenID, count+1)
 	return err
+}
+
+// ── Saved Searches ────────────────────────────────────────────────────────────
+
+type SavedSearchRow struct {
+	ID        int64     `json:"id"`
+	UserAddr  string    `json:"user_addr"`
+	Name      string    `json:"name"`
+	Page      string    `json:"page"`
+	Params    string    `json:"params"`
+	CreatedAt time.Time `json:"created_at"`
+}
+
+// ListSavedSearches returns saved searches for a user, newest first.
+// When page is non-empty, filters to only that page ("listings" or "auctions").
+func (q *Q) ListSavedSearches(ctx context.Context, addr string, limit int, page string) ([]SavedSearchRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	var rows pgx.Rows
+	var err error
+	if page != "" {
+		rows, err = q.pool.Query(ctx,
+			`SELECT id, user_addr, name, page, params, created_at
+			 FROM saved_searches WHERE user_addr=$1 AND page=$2
+			 ORDER BY created_at DESC LIMIT $3`,
+			strings.ToLower(addr), page, limit)
+	} else {
+		rows, err = q.pool.Query(ctx,
+			`SELECT id, user_addr, name, page, params, created_at
+			 FROM saved_searches WHERE user_addr=$1
+			 ORDER BY created_at DESC LIMIT $2`,
+			strings.ToLower(addr), limit)
+	}
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []SavedSearchRow
+	for rows.Next() {
+		var r SavedSearchRow
+		if err := rows.Scan(&r.ID, &r.UserAddr, &r.Name, &r.Page, &r.Params, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// InsertSavedSearch creates a new saved search. Returns the inserted ID.
+func (q *Q) InsertSavedSearch(ctx context.Context, addr, name, page, params string) (int64, error) {
+	var id int64
+	err := q.pool.QueryRow(ctx,
+		`INSERT INTO saved_searches(user_addr, name, page, params)
+		 VALUES($1,$2,$3,$4) RETURNING id`,
+		strings.ToLower(addr), name, page, params).Scan(&id)
+	return id, err
+}
+
+// DeleteSavedSearch removes a saved search. Only the owning user may delete.
+// Returns true when a row was actually deleted.
+func (q *Q) DeleteSavedSearch(ctx context.Context, id int64, addr string) (bool, error) {
+	tag, err := q.pool.Exec(ctx,
+		`DELETE FROM saved_searches WHERE id=$1 AND user_addr=$2`, id, strings.ToLower(addr))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
 }
 
 // ── Trait filters ────────────────────────────────────────────────────────────────

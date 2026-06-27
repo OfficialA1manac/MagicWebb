@@ -1,6 +1,14 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
+
+const urlParams = Astro.url.searchParams;
+const collectionParam = urlParams.get('collection') || '';
+const sellerParam = urlParams.get('seller') || '';
+const statusParam = urlParams.get('status') !== null ? urlParams.get('status') : 'active';
+const minPriceParam = urlParams.get('min_price') || '';
+const maxPriceParam = urlParams.get('max_price') || '';
+const sortParam = urlParams.get('sort') || 'ends_asc';
 ---
 
 <BaseLayout title="Live Auctions" description="English auctions with anti-snipe protection on MagicWebb NFT Marketplace" activeNav="/auctions">
@@ -8,10 +16,10 @@ import WalletConnect from '../components/WalletConnect';
 
   <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
     <!-- Header -->
-    <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:2rem;">
+    <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;">
       <div>
-        <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
-          <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);">♕</span>
+        <h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+          <span style="width:2.5rem;height:2.5rem;border-radius:0.875rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);">♕</span>
           Live Auctions
           <span style="position:relative;width:0.625rem;height:0.625rem;border-radius:50%;background:#a78bfa;animation:pulse 2s infinite;margin-left:0.25rem;"></span>
         </h1>
@@ -19,7 +27,73 @@ import WalletConnect from '../components/WalletConnect';
       </div>
       <div style="display:flex;gap:0.75rem;align-items:center;">
         <span id="auction-count-badge" class="count-badge" style="padding:0.375rem 0.75rem;border-radius:2rem;background:rgba(167,139,250,0.12);border:1px solid rgba(167,139,250,0.25);color:#c4b5fd;font-size:0.75rem;font-weight:700;text-transform:uppercase;">— active</span>
-        <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">← Back home</a>
+        <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;text-decoration:none;">← Back home</a>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div id="filter-bar" class="reveal" style="display:flex;flex-wrap:wrap;align-items:end;gap:0.75rem;padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);margin-bottom:1.5rem;">
+      <!-- Collection search -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:200px;flex:1;">
+        <label for="filter-collection" style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Collection</label>
+        <input id="filter-collection" type="text" list="collection-datalist" placeholder="Search or select collection…" value={collectionParam}
+               autocomplete="off"
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+        <datalist id="collection-datalist"></datalist>
+      </div>
+
+      <!-- Seller filter -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:160px;">
+        <label for="filter-seller" style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Seller Address</label>
+        <input id="filter-seller" type="text" placeholder="0x…" value={sellerParam}
+               autocomplete="off"
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+      </div>
+
+      <!-- Status filter -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:120px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Status</label>
+        <select id="filter-status"
+                style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;cursor:pointer;transition:border-color 0.2s;">
+          <option value="active" selected={statusParam === 'active'}>Active</option>
+          <option value="" selected={statusParam === ''}>All</option>
+          <option value="settled" selected={statusParam === 'settled'}>Settled</option>
+          <option value="cancelled" selected={statusParam === 'cancelled'}>Cancelled</option>
+        </select>
+      </div>
+
+      <!-- Price range -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:120px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Min Reserve (C2FLR)</label>
+        <input id="filter-min-price" type="number" min="0" step="0.01" placeholder="0" value={minPriceParam ? (Number(minPriceParam) / 1e18).toFixed(4) : ''}
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:120px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Max Reserve (C2FLR)</label>
+        <input id="filter-max-price" type="number" min="0" step="0.01" placeholder="Any" value={maxPriceParam ? (Number(maxPriceParam) / 1e18).toFixed(4) : ''}
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+      </div>
+
+      <!-- Sort -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:130px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Sort By</label>
+        <select id="filter-sort"
+                style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;cursor:pointer;transition:border-color 0.2s;">
+          <option value="ends_asc" selected={sortParam === 'ends_asc'}>Ending Soon</option>
+          <option value="newest" selected={sortParam === 'newest'}>Newest</option>
+          <option value="highest_bid" selected={sortParam === 'highest_bid'}>Highest Bid</option>
+        </select>
+      </div>
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:0.5rem;align-items:end;">
+        <button id="apply-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.75rem;border:none;cursor:pointer;font-family:inherit;transition:all 0.2s;box-shadow:0 0 16px -4px rgba(167,139,250,0.35);">Apply</button>
+        <button id="clear-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;">Clear</button>
+        <button id="save-search-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(252,211,77,0.08);border:1px solid rgba(252,211,77,0.2);color:#fcd34d;font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">★ Save</button>
+        <div style="position:relative;">
+          <button id="saved-searches-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">▾ Saved</button>
+          <div id="saved-searches-dropdown" style="display:none;position:absolute;top:calc(100% + 0.375rem);right:0;min-width:220px;background:rgba(18,18,22,0.98);border:1px solid rgba(255,255,255,0.08);border-radius:0.625rem;padding:0.5rem;box-shadow:0 12px 40px rgba(0,0,0,0.4);z-index:100;"></div>
+        </div>
       </div>
     </div>
 
@@ -41,105 +115,442 @@ import WalletConnect from '../components/WalletConnect';
     .w-75{width:75%;}.w-50{width:50%;}.w-66{width:66%;}
     @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
     @keyframes pulse{0%,100%{opacity:1;}50%{opacity:0.3;}}
+    #filter-bar input:focus, #filter-bar select:focus {
+      border-color: rgba(167,139,250,0.4) !important;
+      outline: none;
+    }
   </style>
 
   <script is:inline>
-    (async function() {
+    (function(){if(typeof window==='undefined')return;
+
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
       function weiToFLR(wei, dec){dec=dec||4;try{return(Number(BigInt(wei))/1e18).toFixed(dec);}catch(_){return'0.0000';}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeLeft(endsAt){var s=Math.max(0,endsAt-Math.floor(Date.now()/1000));if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';return Math.floor(s/86400)+'d '+Math.floor((s%86400)/3600)+'h';}
+      function escAttr(s){return String(s||'').replace(/"/g,'&quot;');}
+      function isEthAddr(s){
+        if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
+        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        return true;
+      }
+      // Convert FLR decimal string to exact wei (no float rounding)
+      function flrToWei(decimalStr){
+        var s = String(decimalStr||'').trim();
+        if(!s) return null;
+        if(!/^\d+(\.\d+)?$/.test(s)) return null;
+        var parts = s.split('.');
+        var whole = parts[0] || '0';
+        var frac = (parts[1] || '').padEnd(18, '0').slice(0, 18);
+        var weiStr = whole + frac;
+        try { var bi = BigInt(weiStr); if(bi <= 0n) return null; return bi.toString(); }
+        catch(_) { return null; }
+      }
 
       var grid = document.getElementById('auctions-grid');
       var badge = document.getElementById('auction-count-badge');
+      var collectionInput = document.getElementById('filter-collection');
+      var datalist = document.getElementById('collection-datalist');
+      var statusSelect = document.getElementById('filter-status');
+      var minPriceInput = document.getElementById('filter-min-price');
+      var maxPriceInput = document.getElementById('filter-max-price');
+      var sortSelect = document.getElementById('filter-sort');
+      var applyBtn = document.getElementById('apply-filters-btn');
+      var clearBtn = document.getElementById('clear-filters-btn');
 
-      try {
-        var res = await fetch('/api/v1/auctions?limit=24&sort=ends_asc');
-        if (!res.ok) throw new Error('HTTP '+res.status);
-        var auctions = await res.json();
-        if (!Array.isArray(auctions)) auctions = [];
+      // ── Load collections into datalist ──
+      async function loadCollections(){
+        try {
+          var res = await fetch('/api/v1/collections?limit=200');
+          if(!res.ok) return;
+          var cols = await res.json();
+          if(!Array.isArray(cols)) return;
+          datalist.innerHTML = cols.map(function(c){
+            var addr = c.address || '';
+            return '<option value="'+esc(addr)+'">'+(c.name ? esc(c.name)+' ('+esc(shortAddr(addr))+')' : esc(shortAddr(addr)))+'</option>';
+          }).join('');
+        } catch(_) {}
+      }
 
-        if (badge) badge.textContent = auctions.length + ' active';
+      // ── Build API URL from filters ──
+      function buildApiUrl(){
+        var params = new URLSearchParams();
+        var coll = (collectionInput ? collectionInput.value.trim() : '');
+        if(coll && isEthAddr(coll)) params.set('collection', coll);
+        params.set('status', (statusSelect ? statusSelect.value : 'active'));
+        if(sortSelect && sortSelect.value !== 'ends_asc') params.set('sort', sortSelect.value);
+        params.set('limit', '48');
+        var sellerVal = (sellerInput ? sellerInput.value.trim() : '');
+        if(sellerVal && isEthAddr(sellerVal)) params.set('seller', sellerVal);
+
+        var minWei = flrToWei(minPriceInput ? minPriceInput.value : '');
+        var maxWei = flrToWei(maxPriceInput ? maxPriceInput.value : '');
+        if(minWei) params.set('min_price', minWei);
+        if(maxWei) params.set('max_price', maxWei);
+
+        return '/api/v1/auctions?'+params.toString();
+      }
+
+      // ── Fetch and render auctions ──
+      var currentApiUrl = buildApiUrl();
+      var refreshTimer = null;
+      var sellerInput = document.getElementById('filter-seller');
+
+      async function fetchAuctions() {
         if (!grid) return;
+        var apiUrl = buildApiUrl();
+        currentApiUrl = apiUrl;
 
-        if (!auctions.length) {
-          grid.innerHTML = '<div style="grid-column:1/-1;padding:4rem 1.5rem;text-align:center;color:rgba(255,255,255,0.3);">No live auctions — be the first to create one</div>';
-          return;
-        }
+        try {
+          var res = await fetch(apiUrl);
+          if (!res.ok) throw new Error('HTTP '+res.status);
+          var auctions = await res.json();
+          if (!Array.isArray(auctions)) auctions = [];
 
-        var now = Math.floor(Date.now()/1000);
-        grid.innerHTML = auctions.map(function(a) {
-          var name = a.name || ('#' + a.token_id);
-          var reserve = weiToFLR(a.reserve_price_wei || '0');
-          var highest = weiToFLR(a.highest_bid_wei || a.reserve_price_wei || '0');
-          var hasBids = a.highest_bid_wei && a.highest_bid_wei !== '0';
-          var endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
-          var tLeft = timeLeft(endsAt);
-          var ending = endsAt - now < 180; // Within 3 min = anti-snipe zone
-          var imgSrc = a.image_uri ? '/api/v1/media?url=' + encodeURIComponent(a.image_uri) : '';
+          if (badge) badge.textContent = auctions.length + ' result'+(auctions.length!==1?'s':'');
 
-          return '<a href="/auction/' + a.auction_id + '" class="auction-card tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid '+(ending?'rgba(252,211,77,0.35)':'rgba(255,255,255,0.07)')+';border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
-            '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +
-              (imgSrc ? '<img src="'+esc(imgSrc)+'" alt="'+esc(name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;transition:transform 0.5s;" onerror="this.parentElement.innerHTML=\\'<div style=display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;\\>🖼</div>\\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;">🖼</div>') +
-              '<div style="position:absolute;top:0.5rem;left:0.5rem;display:flex;flex-direction:column;gap:0.375rem;">' +
+          if (!auctions.length) {
+            grid.innerHTML = '<div style="grid-column:1/-1;padding:4rem 1.5rem;text-align:center;color:rgba(255,255,255,0.3);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No auctions match your filters</div>';
+            return;
+          }
 
-                '<span style="padding:0.125rem 0.375rem;border-radius:0.375rem;background:rgba(255,255,255,0.08);border:1px solid rgba(255,255,255,0.12);font-size:0.5625rem;font-weight:800;text-transform:uppercase;color:rgba(255,255,255,0.55);backdrop-filter:blur(4px);">Auction</span>' +
-              '</div>' +
-              (ending ? '<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.35);box-shadow:0 0 18px -4px rgba(251,191,36,0.5);"><span style="font-size:0.625rem;font-weight:800;color:#fde68a;text-transform:uppercase;">⚡ Ending</span></div>' : '') +
-              '<div style="position:absolute;bottom:0;left:0;right:0;padding:0.625rem;background:linear-gradient(transparent,rgba(0,0,0,0.7));">' +
-                '<div style="display:flex;align-items:center;justify-content:space-between;">' +
-                  '<div>' +
-                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.4);text-transform:uppercase;font-weight:700;">'+(hasBids?'Top bid':'Reserve')+'</span>' +
-                    '<div style="font-size:0.9375rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1.2;">'+esc(highest)+' <span style="font-size:0.625rem;opacity:0.7;">C2FLR</span></div>' +
-                  '</div>' +
-                  '<div style="text-align:right;">' +
-                    '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">Ends in</span>' +
-                    '<div style="font-size:0.8125rem;font-weight:800;color:#c4b5fd;font-family:JetBrains Mono,monospace;">'+esc(tLeft)+'</div>' +
+          var now = Math.floor(Date.now()/1000);
+          grid.innerHTML = auctions.map(function(a) {
+            var name = a.name || ('#' + a.token_id);
+            var reserve = weiToFLR(a.reserve_price_wei || '0');
+            var highest = weiToFLR(a.highest_bid_wei || a.reserve_price_wei || '0');
+            var hasBids = a.highest_bid_wei && a.highest_bid_wei !== '0';
+            var endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
+            var tLeft = timeLeft(endsAt);
+            var ending = endsAt - now < 180;
+            var imgSrc = a.image_uri ? '/api/v1/media?url=' + encodeURIComponent(a.image_uri) : '';
+            var isActive = a.status === 'active';
+            var statusColor = isActive ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.1)';
+
+            return '<a href="/auction/' + a.auction_id + '" class="auction-card tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid '+(isActive?(ending?'rgba(252,211,77,0.35)':'rgba(255,255,255,0.07)'):'rgba(255,255,255,0.04)')+';border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
+              '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +
+                (imgSrc ? '<img src="'+esc(imgSrc)+'" alt="'+esc(name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;transition:transform 0.5s;" onerror="this.parentElement.innerHTML=\\'<div style=display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;\\>🖼</div>\\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;">🖼</div>') +
+                '<div style="position:absolute;top:0.5rem;left:0.5rem;display:flex;flex-direction:column;gap:0.375rem;">' +
+                  '<span style="padding:0.125rem 0.375rem;border-radius:0.375rem;background:rgba(255,255,255,0.08);border:1px solid '+statusColor+';font-size:0.5625rem;font-weight:800;text-transform:uppercase;color:'+(isActive?'rgba(255,255,255,0.55)':'rgba(255,255,255,0.3)')+';backdrop-filter:blur(4px);">'+(isActive?'Auction':esc(a.status))+'</span>' +
+                '</div>' +
+                (ending && isActive ? '<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.35);box-shadow:0 0 18px -4px rgba(251,191,36,0.5);"><span style="font-size:0.625rem;font-weight:800;color:#fde68a;text-transform:uppercase;">⚡ Ending</span></div>' : '') +
+                '<div style="position:absolute;bottom:0;left:0;right:0;padding:0.625rem;background:linear-gradient(transparent,rgba(0,0,0,0.7));">' +
+                  '<div style="display:flex;align-items:center;justify-content:space-between;">' +
+                    '<div>' +
+                      '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.4);text-transform:uppercase;font-weight:700;">'+(hasBids&&isActive?'Top bid':isActive?'Reserve':'Price')+'</span>' +
+                      '<div style="font-size:0.9375rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1.2;">'+esc(highest)+' <span style="font-size:0.625rem;opacity:0.7;">C2FLR</span></div>' +
+                    '</div>' +
+                    '<div style="text-align:right;">' +
+                      '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(isActive?'Ends in':'')+'</span>' +
+                      (isActive ? '<div class="countdown-text" style="font-size:0.8125rem;font-weight:800;color:#c4b5fd;font-family:JetBrains Mono,monospace;">'+esc(tLeft)+'</div>' : '') +
+                    '</div>' +
                   '</div>' +
                 '</div>' +
               '</div>' +
-            '</div>' +
-            '<div style="padding:0.75rem;border-top:1px solid rgba(255,255,255,0.04);">' +
-              '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;text-transform:uppercase;margin-bottom:0.1875rem;">'+esc(shortAddr(a.collection))+'</p>' +
-              '<p style="font-size:0.875rem;font-weight:700;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(name)+'</p>' +
-              '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.625rem;">' +
-                '<span style="font-size:0.625rem;color:rgba(255,255,255,0.25);">#'+a.auction_id+'</span>' +
-                '<span style="padding:0.25rem 0.875rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-size:0.6875rem;font-weight:800;box-shadow:0 0 16px -3px rgba(167,139,250,0.4);">Bid</span>' +
+              '<div style="padding:0.75rem;border-top:1px solid rgba(255,255,255,0.04);">' +
+                '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;text-transform:uppercase;margin-bottom:0.1875rem;">'+esc(shortAddr(a.collection))+'</p>' +
+                '<p style="font-size:0.875rem;font-weight:700;color:#fafafa;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;">'+esc(name)+'</p>' +
+                '<div style="display:flex;align-items:center;justify-content:space-between;margin-top:0.625rem;">' +
+                  '<span style="font-size:0.625rem;color:rgba(255,255,255,0.25);">#'+a.auction_id+'</span>' +
+                  (isActive ? '<span style="padding:0.25rem 0.875rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-size:0.6875rem;font-weight:800;box-shadow:0 0 16px -3px rgba(167,139,250,0.4);">Bid</span>' : '') +
+                '</div>' +
               '</div>' +
-            '</div>' +
-          '</a>';
-        }).join('');
-      } catch(e) {
-        if (grid) grid.innerHTML = '<div style="grid-column:1/-1;padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;">Could not load auctions — '+esc(e.message)+'</div>';
-        if (badge) badge.textContent = 'error';
+            '</a>';
+          }).join('');
+        } catch(e) {
+          if (grid) grid.innerHTML = '<div style="grid-column:1/-1;padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;">Could not load auctions — '+esc(e.message)+'</div>';
+          if (badge) badge.textContent = 'error';
+        }
       }
 
-      // 30s refresh for live countdowns
-      setInterval(async function() {
-        try {
-          var r = await fetch('/api/v1/auctions?limit=24&sort=ends_asc');
-          if (!r.ok) return;
-          var a = await r.json();
-          if (!Array.isArray(a) || !grid) return;
-          if (badge) badge.textContent = a.length + ' active';
-          var now = Math.floor(Date.now()/1000);
-          // Update countdown text only (lightweight)
-          var cards = grid.querySelectorAll('.auction-card');
-          cards.forEach(function(card, i) {
-            if (!a[i]) return;
-            var endsAt = a[i].ends_at ? (new Date(a[i].ends_at).getTime()/1000) : 0;
-            var tLeft = Math.max(0, endsAt - now);
-            var tStr = '';
-            if (tLeft<60) tStr=tLeft+'s'; else if(tLeft<3600) tStr=Math.floor(tLeft/60)+'m'; else if(tLeft<86400) tStr=Math.floor(tLeft/3600)+'h '+Math.floor((tLeft%3600)/60)+'m'; else tStr=Math.floor(tLeft/86400)+'d';
-            var timerEl = card.querySelector('.countdown-text');
-            if (timerEl) timerEl.textContent = tStr;
-          });
-        } catch(_) {}
-      }, 30000);
-    })();
+      // ── Apply filters (navigate with URL params) ──
+      function applyFilters(){
+        var params = new URLSearchParams();
+        var coll = (collectionInput ? collectionInput.value.trim() : '');
+        if(coll && isEthAddr(coll)) params.set('collection', coll);
+        if(statusSelect && statusSelect.value !== 'active') params.set('status', statusSelect.value);
+        if(sortSelect && sortSelect.value !== 'ends_asc') params.set('sort', sortSelect.value);
+        var sellerVal2 = (sellerInput ? sellerInput.value.trim() : '');
+        if(sellerVal2 && isEthAddr(sellerVal2)) params.set('seller', sellerVal2);
 
-    // 3D tilt
-    document.addEventListener('mouseover',function(e){var c=e.target.closest('.tilt-card');if(!c)return;var r=c.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,cx=r.width/2,cy=r.height/2;c.style.transform='perspective(1000px) rotateX('+((y-cy)/cy*-6)+'deg) rotateY('+((x-cx)/cx*6)+'deg) scale3d(1.02,1.02,1.02)';c.style.boxShadow='0 20px 60px rgba(139,92,246,0.2)';c.style.borderColor='rgba(167,139,250,0.4)';});
-    document.addEventListener('mouseout',function(e){var c=e.target.closest('.tilt-card');if(!c)return;if(c.contains(e.relatedTarget))return;c.style.transform='perspective(1000px) rotateX(0) rotateY(0) scale3d(1,1,1)';c.style.boxShadow='';c.style.borderColor='';});
+        var minWei2 = flrToWei(minPriceInput ? minPriceInput.value : '');
+        var maxWei2 = flrToWei(maxPriceInput ? maxPriceInput.value : '');
+        if(minWei2) params.set('min_price', minWei2);
+        if(maxWei2) params.set('max_price', maxWei2);
+
+        var qs = params.toString();
+        location.href = qs ? '/auctions?'+qs : '/auctions';
+      }
+
+      // ── Clear filters ──
+      function clearFilters(){
+        location.href = '/auctions';
+      }
+
+      // ── Event listeners ──
+      if(collectionInput){
+        collectionInput.addEventListener('focus', function(){loadCollections();});
+        collectionInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      }
+      if(sellerInput) sellerInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      if(minPriceInput) minPriceInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      if(maxPriceInput) maxPriceInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      if(sortSelect) sortSelect.addEventListener('change', applyFilters);
+      if(statusSelect) statusSelect.addEventListener('change', applyFilters);
+      if(applyBtn) applyBtn.addEventListener('click', applyFilters);
+      if(clearBtn) clearBtn.addEventListener('click', clearFilters);
+
+      // Focus styles
+      document.querySelectorAll('#filter-bar input, #filter-bar select').forEach(function(el){
+        el.addEventListener('focus', function(){this.style.borderColor = 'rgba(167,139,250,0.4)';});
+        el.addEventListener('blur', function(){this.style.borderColor = 'rgba(255,255,255,0.08)';});
+      });
+
+      // ── Saved Searches ──────────────────────────────────────────────
+      var saveBtn = document.getElementById('save-search-btn');
+      var savedBtn = document.getElementById('saved-searches-btn');
+      var savedDropdown = document.getElementById('saved-searches-dropdown');
+
+      function getJWT(){
+        try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
+      }
+
+      function getConnectedAddr(){
+        try { return localStorage.getItem('mw_addr') || ''; } catch(_) { return ''; }
+      }
+
+      function hasActiveFilters(){
+        var collVal = (collectionInput ? collectionInput.value.trim() : '');
+        var minP = parseFloat(minPriceInput ? minPriceInput.value : '');
+        var maxP = parseFloat(maxPriceInput ? maxPriceInput.value : '');
+        var statusVal = statusSelect ? statusSelect.value : 'active';
+        var sortVal = sortSelect ? sortSelect.value : 'ends_asc';
+        return collVal || (!isNaN(minP) && minP > 0) || (!isNaN(maxP) && maxP > 0) || statusVal !== 'active' || sortVal !== 'ends_asc';
+      }
+
+      function checkWalletAndShowButtons(){
+        var jwt = getJWT();
+        var addr = getConnectedAddr();
+        if(jwt && addr && isEthAddr(addr)){
+          if(hasActiveFilters()) saveBtn.style.display = 'inline-flex';
+          else saveBtn.style.display = 'none';
+          savedBtn.style.display = 'inline-flex';
+        } else {
+          saveBtn.style.display = 'none';
+          savedBtn.style.display = 'none';
+        }
+      }
+
+      checkWalletAndShowButtons();
+      window.addEventListener('storage', checkWalletAndShowButtons);
+      window.addEventListener('mw-wallet-changed', checkWalletAndShowButtons);
+
+      // ── Load saved searches ──
+      async function loadSavedSearches(){
+        var jwt = getJWT();
+        if(!jwt || !savedDropdown) return;
+        try {
+          var res = await fetch('/api/v1/saved-searches?limit=20&page=auctions', {
+            headers: {'Authorization': 'Bearer '+jwt}
+          });
+          if(!res.ok) throw new Error('HTTP '+res.status);
+          var searches = await res.json();
+          if(!Array.isArray(searches)) searches = [];
+          // API returns only the user's searches; filter to auctions page client-side
+          // Request limit=20, page=auctions to avoid dropping results when other pages dominate
+          searches = searches.filter(function(s){return s.page === 'auctions';});
+
+          if(!searches.length){
+            savedDropdown.innerHTML = '<div style="padding:0.75rem;text-align:center;color:rgba(255,255,255,0.25);font-size:0.75rem;">No saved searches</div>';
+            return;
+          }
+
+          savedDropdown.innerHTML = '<div style="margin-bottom:0.25rem;padding:0.25rem 0.5rem;font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.25);text-transform:uppercase;">Saved Searches</div>' +
+            searches.map(function(s){
+              return '<div class="saved-search-row" style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem;border-radius:0.375rem;cursor:pointer;transition:background 0.15s;" onmouseenter="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseleave="this.style.background=\'transparent\'">'+
+                '<a href="/auctions?'+escAttr(s.params)+'" style="font-size:0.8125rem;font-weight:600;color:#fafafa;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(s.name)+'</a>'+
+                '<button class="delete-search-btn" data-id="'+s.id+'" style="padding:0.125rem 0.375rem;border-radius:0.25rem;border:none;background:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:0.625rem;flex-shrink:0;font-family:inherit;transition:color 0.15s;" onmouseenter="this.style.color=\'#fca5a5\'" onmouseleave="this.style.color=\'rgba(255,255,255,0.2)\'">✕</button>'+
+              '</div>';
+            }).join('');
+
+          savedDropdown.querySelectorAll('.delete-search-btn').forEach(function(btn){
+            btn.addEventListener('click', async function(e){
+              e.preventDefault(); e.stopPropagation();
+              var id = btn.dataset.id;
+              var jwt2 = getJWT();
+              if(!jwt2 || !id) return;
+              try {
+                var delRes = await fetch('/api/v1/saved-searches/'+id, {
+                  method: 'DELETE',
+                  headers: {'Authorization': 'Bearer '+jwt2}
+                });
+                if(delRes.ok || delRes.status === 204) loadSavedSearches();
+              } catch(_) {}
+            });
+          });
+        } catch(_) {
+          if(savedDropdown) savedDropdown.innerHTML = '<div style="padding:0.75rem;text-align:center;color:rgba(255,255,255,0.25);font-size:0.75rem;">Could not load</div>';
+        }
+      }
+
+      // ── Save search modal ──
+      if(saveBtn){
+        saveBtn.addEventListener('click', function(){
+          var overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;animation:fadeIn 0.15s ease;';
+
+          var modal = document.createElement('div');
+          modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;padding:1.5rem;max-width:380px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.5);animation:modalSlideUp 0.2s ease;';
+
+          modal.innerHTML =
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'+
+              '<h3 style="font-size:1rem;font-weight:800;color:#fafafa;">Save Search</h3>'+
+              '<button id="save-search-close" style="width:1.75rem;height:1.75rem;border-radius:0.375rem;border:none;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);cursor:pointer;font-size:0.875rem;display:flex;align-items:center;justify-content:center;font-family:inherit;">✕</button>'+
+            '</div>'+
+            '<div style="margin-bottom:1rem;">'+
+              '<label style="display:block;font-size:0.625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:0.375rem;">Search Name</label>'+
+              '<input id="save-search-name" type="text" maxlength="100" placeholder="e.g. Rare auctions under 50 FLR" style="width:100%;padding:0.625rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;">'+
+            '</div>'+
+            '<div id="save-search-status" style="display:none;margin-bottom:0.75rem;"></div>'+
+            '<div style="display:flex;gap:0.5rem;">'+
+              '<button id="save-search-cancel" style="flex:1;padding:0.625rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:transparent;color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;">Cancel</button>'+
+              '<button id="save-search-confirm" style="flex:1;padding:0.625rem;border-radius:0.5rem;border:none;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.75rem;cursor:pointer;font-family:inherit;box-shadow:0 0 16px -3px rgba(251,191,36,0.35);">Save</button>'+
+            '</div>';
+
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          var nameInput = document.getElementById('save-search-name');
+          if(nameInput) setTimeout(function(){nameInput.focus();}, 100);
+
+          function closeSaveModal(){if(overlay.parentNode) overlay.parentNode.removeChild(overlay);}
+
+          document.getElementById('save-search-close').addEventListener('click', closeSaveModal);
+          document.getElementById('save-search-cancel').addEventListener('click', closeSaveModal);
+          overlay.addEventListener('click', function(e){if(e.target===overlay) closeSaveModal();});
+
+          var confirmBtn = document.getElementById('save-search-confirm');
+          var statusEl = document.getElementById('save-search-status');
+
+          confirmBtn.addEventListener('click', async function(){
+            var name = nameInput ? nameInput.value.trim() : '';
+            if(!name){
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please enter a name</p>';
+              return;
+            }
+
+            var jwt = getJWT();
+            if(!jwt){
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please reconnect your wallet</p>';
+              return;
+            }
+
+            // Build current params
+            var params = new URLSearchParams();
+            var collVal = (collectionInput ? collectionInput.value.trim() : '');
+            if(collVal && isEthAddr(collVal)) params.set('collection', collVal);
+            if(statusSelect && statusSelect.value !== 'active') params.set('status', statusSelect.value);
+            if(sortSelect && sortSelect.value !== 'ends_asc') params.set('sort', sortSelect.value);
+            var sellerVal3 = (sellerInput ? sellerInput.value.trim() : '');
+            if(sellerVal3 && isEthAddr(sellerVal3)) params.set('seller', sellerVal3);
+            var minWei3 = flrToWei(minPriceInput ? minPriceInput.value : '');
+            var maxWei3 = flrToWei(maxPriceInput ? maxPriceInput.value : '');
+            if(minWei3) params.set('min_price', minWei3);
+            if(maxWei3) params.set('max_price', maxWei3);
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Saving…';
+            confirmBtn.style.opacity = '0.6';
+            statusEl.style.display = 'none';
+
+            try {
+              var res = await fetch('/api/v1/saved-searches', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwt},
+                body: JSON.stringify({name: name, page: 'auctions', params: params.toString()})
+              });
+              if(res.ok || res.status === 201){
+                statusEl.style.display = 'block';
+                statusEl.innerHTML = '<p style="color:#c4b5fd;font-size:0.75rem;font-weight:600;">✓ Saved!</p>';
+                setTimeout(function(){closeSaveModal();}, 600);
+              } else {
+                var errData;
+                try{errData=await res.json();}catch(_){errData={error:'Failed to save'};}
+                statusEl.style.display = 'block';
+                statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ '+esc(errData.error||'Failed to save')+'</p>';
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Save';
+                confirmBtn.style.opacity = '1';
+              }
+            } catch(err) {
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ Network error</p>';
+              confirmBtn.disabled = false;
+              confirmBtn.textContent = 'Save';
+              confirmBtn.style.opacity = '1';
+            }
+          });
+
+          nameInput.addEventListener('keydown', function(e){if(e.key==='Enter') confirmBtn.click();});
+        });
+      }
+
+      // ── Saved searches dropdown ──
+      if(savedBtn){
+        savedBtn.addEventListener('click', function(){
+          var isOpen = savedDropdown.style.display === 'block';
+          if(isOpen){
+            savedDropdown.style.display = 'none';
+          } else {
+            savedDropdown.style.display = 'block';
+            loadSavedSearches();
+          }
+        });
+        document.addEventListener('click', function(e){
+          if(!savedBtn.contains(e.target) && !savedDropdown.contains(e.target)){
+            savedDropdown.style.display = 'none';
+          }
+        });
+      }
+
+      // ── Initial load ──
+      if(collectionInput) loadCollections();
+      fetchAuctions();
+
+      // ── 30s refresh for live countdowns ──
+      function scheduleRefresh(){
+        if(refreshTimer) clearTimeout(refreshTimer);
+        refreshTimer = setTimeout(async function() {
+          try {
+            var active = statusSelect && statusSelect.value === 'active';
+            if(!active) return;
+            var r = await fetch(buildApiUrl());
+            if(!r.ok) return;
+            var a = await r.json();
+            if(!Array.isArray(a) || !grid) return;
+            if(badge) badge.textContent = a.length + ' result'+(a.length!==1?'s':'');
+            var now = Math.floor(Date.now()/1000);
+            var cards = grid.querySelectorAll('.auction-card');
+            cards.forEach(function(card, i) {
+              if(!a[i]) return;
+              var endsAt = a[i].ends_at ? (new Date(a[i].ends_at).getTime()/1000) : 0;
+              var tLeft = Math.max(0, endsAt - now);
+              var tStr = '';
+              if(tLeft<60) tStr=tLeft+'s'; else if(tLeft<3600) tStr=Math.floor(tLeft/60)+'m'; else if(tLeft<86400) tStr=Math.floor(tLeft/3600)+'h '+Math.floor((tLeft%3600)/60)+'m'; else tStr=Math.floor(tLeft/86400)+'d';
+              var timerEl = card.querySelector('.countdown-text');
+              if(timerEl) timerEl.textContent = tStr;
+            });
+          } catch(_) {}
+          scheduleRefresh();
+        }, 30000);
+      }
+      scheduleRefresh();
+
+      // 3D tilt
+      document.addEventListener('mouseover',function(e){var c=e.target.closest('.tilt-card');if(!c)return;var r=c.getBoundingClientRect(),x=e.clientX-r.left,y=e.clientY-r.top,cx=r.width/2,cy=r.height/2;c.style.transform='perspective(1000px) rotateX('+((y-cy)/cy*-6)+'deg) rotateY('+((x-cx)/cx*6)+'deg) scale3d(1.02,1.02,1.02)';c.style.boxShadow='0 20px 60px rgba(139,92,246,0.2)';c.style.borderColor='rgba(167,139,250,0.4)';});
+      document.addEventListener('mouseout',function(e){var c=e.target.closest('.tilt-card');if(!c)return;if(c.contains(e.relatedTarget))return;c.style.transform='perspective(1000px) rotateX(0) rotateY(0) scale3d(1,1,1)';c.style.boxShadow='';c.style.borderColor='';});
+    })();
   </script>
 </BaseLayout>

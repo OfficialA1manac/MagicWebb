@@ -2,17 +2,25 @@
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
 import NFTGrid from '../components/NFTGrid.svelte';
+
+const urlParams = Astro.url.searchParams;
+const collectionParam = urlParams.get('collection') || '';
+const sellerParam = urlParams.get('seller') || '';
+const minPriceParam = urlParams.get('min_price') || '';
+const maxPriceParam = urlParams.get('max_price') || '';
+const traitFiltersParam = urlParams.get('traits') || '';
+const sortParam = urlParams.get('sort') || 'recent';
 ---
 
-<BaseLayout title="Listings" description="Browse active NFT listings on MagicWebb — buy and sell NFTs on Flare Network" activeNav="/listings">
+<BaseLayout title="Listings" description="Browse active NFT listings on MagicWebb — buy, sell, and filter NFTs on Flare Network" activeNav="/listings">
   <WalletConnect slot="wallet" client:only="react" />
 
   <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
     <!-- Header -->
-    <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:2rem;">
+    <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;">
       <div>
-        <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
-          <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">✦</span>
+        <h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+          <span style="width:2.5rem;height:2.5rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">✦</span>
           Current Listings
         </h1>
         <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Fixed-price sales across every tracked collection.</p>
@@ -23,13 +31,522 @@ import NFTGrid from '../components/NFTGrid.svelte';
            title="Connect your wallet to list an NFT">
           <span style="font-size:1rem;line-height:1;">＋</span> List an NFT
         </button>
-        <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">← Back home</a>
+        <a href="/" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;text-decoration:none;">← Back home</a>
+      </div>
+    </div>
+
+    <!-- Filter Bar -->
+    <div id="filter-bar" class="reveal" style="display:flex;flex-wrap:wrap;align-items:end;gap:0.75rem;padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);margin-bottom:1.5rem;">
+      <!-- Collection search -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:200px;flex:1;">
+        <label for="filter-collection" style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Collection</label>
+        <div style="position:relative;">
+          <input id="filter-collection" type="text" list="collection-datalist" placeholder="Search or select collection…" value={collectionParam}
+                 autocomplete="off"
+                 style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+          <datalist id="collection-datalist"></datalist>
+          {collectionParam ? `<button id="clear-collection-btn" type="button" style="position:absolute;right:0.375rem;top:50%;transform:translateY(-50%);background:none;border:none;color:rgba(255,255,255,0.25);cursor:pointer;padding:0.25rem;font-size:0.75rem;font-family:inherit;" title="Clear collection">✕</button>` : ''}
+        </div>
+      </div>
+
+      <!-- Price range -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:140px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Min Price (C2FLR)</label>
+        <input id="filter-min-price" type="number" min="0" step="0.01" placeholder="0" value={minPriceParam ? (Number(minPriceParam) / 1e18).toFixed(4) : ''}
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+      </div>
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:140px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Max Price (C2FLR)</label>
+        <input id="filter-max-price" type="number" min="0" step="0.01" placeholder="Any" value={maxPriceParam ? (Number(maxPriceParam) / 1e18).toFixed(4) : ''}
+               style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
+      </div>
+
+      <!-- Sort -->
+      <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:140px;">
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Sort By</label>
+        <select id="filter-sort"
+                style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;cursor:pointer;transition:border-color 0.2s;">
+          <option value="recent" selected={sortParam === 'recent'}>Most Recent</option>
+          <option value="price_asc" selected={sortParam === 'price_asc'}>Price: Low to High</option>
+          <option value="price_desc" selected={sortParam === 'price_desc'}>Price: High to Low</option>
+        </select>
+      </div>
+
+      <!-- Action buttons -->
+      <div style="display:flex;gap:0.5rem;align-items:end;">
+        <button id="apply-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.75rem;border:none;cursor:pointer;font-family:inherit;transition:all 0.2s;box-shadow:0 0 16px -4px rgba(56,189,248,0.35);">Apply</button>
+        <button id="clear-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;">Clear</button>
+        <button id="save-search-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(252,211,77,0.08);border:1px solid rgba(252,211,77,0.2);color:#fcd34d;font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">★ Save</button>
+        <div style="position:relative;">
+          <button id="saved-searches-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">▾ Saved</button>
+          <div id="saved-searches-dropdown" style="display:none;position:absolute;top:calc(100% + 0.375rem);right:0;min-width:220px;background:rgba(18,18,22,0.98);border:1px solid rgba(255,255,255,0.08);border-radius:0.625rem;padding:0.5rem;box-shadow:0 12px 40px rgba(0,0,0,0.4);z-index:100;"></div>
+        </div>
+      </div>
+    </div>
+
+    <!-- Trait Filters (shown when collection selected) -->
+    <div id="trait-filters-section" class="reveal" style="display:{collectionParam ? 'block' : 'none'};margin-bottom:1.5rem;padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.06);">
+      <div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:0.75rem;">
+        <h3 style="font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;letter-spacing:0.05em;">Trait Filters</h3>
+        <span id="active-trait-count" style="font-size:0.625rem;color:rgba(255,255,255,0.25);"></span>
+      </div>
+      <div id="trait-filters-container" style="display:flex;flex-wrap:wrap;gap:0.5rem;">
+        <!-- Dynamically populated from API -->
       </div>
     </div>
 
     <!-- NFT Grid (Svelte component) -->
     <div class="reveal">
-      <NFTGrid client:load />
+      <NFTGrid client:load
+        collection={collectionParam}
+        seller={sellerParam}
+        minPrice={minPriceParam}
+        maxPrice={maxPriceParam}
+        traitFilters={traitFiltersParam} />
     </div>
   </section>
+
+  <script is:inline>
+    (function(){if(typeof window==='undefined')return;
+
+      function isEthAddr(s){
+        if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
+        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        return true;
+      }
+
+      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+
+      // Convert FLR decimal string to exact wei (no float rounding)
+      function flrToWei(decimalStr){
+        var s = String(decimalStr||'').trim();
+        if(!s) return null;
+        if(!/^\d+(\.\d+)?$/.test(s)) return null;
+        var parts = s.split('.');
+        var whole = parts[0] || '0';
+        var frac = (parts[1] || '').padEnd(18, '0').slice(0, 18);
+        var weiStr = whole + frac;
+        try { var bi = BigInt(weiStr); if(bi <= 0n) return null; return bi.toString(); }
+        catch(_) { return null; }
+      }
+
+      var collectionInput = document.getElementById('filter-collection');
+      var datalist = document.getElementById('collection-datalist');
+      var minPriceInput = document.getElementById('filter-min-price');
+      var maxPriceInput = document.getElementById('filter-max-price');
+      var sortSelect = document.getElementById('filter-sort');
+      var applyBtn = document.getElementById('apply-filters-btn');
+      var clearBtn = document.getElementById('clear-filters-btn');
+      var traitSection = document.getElementById('trait-filters-section');
+      var traitContainer = document.getElementById('trait-filters-container');
+      var activeTraitCount = document.getElementById('active-trait-count');
+      var countBadge = document.getElementById('listing-count-badge');
+
+      var currentUrlParams = new URLSearchParams(window.location.search);
+      var activeTraits = (function(){
+        var t = {};
+        var ts = currentUrlParams.get('traits') || '';
+        if(ts) ts.split(',').forEach(function(p){
+          var parts = p.split(':');
+          if(parts.length===2) t[parts[0]] = parts[1];
+        });
+        return t;
+      })();
+
+      // ── Load collections into datalist ──
+      async function loadCollections(){
+        try {
+          var res = await fetch('/api/v1/collections?limit=200');
+          if(!res.ok) return;
+          var cols = await res.json();
+          if(!Array.isArray(cols)) return;
+          datalist.innerHTML = cols.map(function(c){
+            var addr = c.address || '';
+            var name = c.name || '';
+            return '<option value="'+esc(addr)+'" data-name="'+esc(name)+'">'+(name ? esc(name)+' ('+esc(shortAddr(addr))+')' : esc(shortAddr(addr)))+'</option>';
+          }).join('');
+        } catch(_) {}
+      }
+
+      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function escAttr(s){return String(s||'').replace(/"/g,'&quot;');}
+
+      // ── Load trait filters ──
+      async function loadTraits(collectionAddr){
+        if(!collectionAddr || !isEthAddr(collectionAddr)){
+          traitSection.style.display = 'none';
+          return;
+        }
+        try {
+          var res = await fetch('/api/v1/collections/'+encodeURIComponent(collectionAddr)+'/traits');
+          if(!res.ok) throw new Error('HTTP '+res.status);
+          var traits = await res.json();
+          if(!traits || Object.keys(traits).length === 0){
+            traitSection.style.display = 'none';
+            return;
+          }
+          traitSection.style.display = 'block';
+          var html = '';
+          var activeCount = 0;
+          Object.keys(traits).sort().forEach(function(tt){
+            var vals = traits[tt];
+            if(!vals||!vals.length) return;
+            var activeVal = activeTraits[tt] || '';
+            if(activeVal) activeCount++;
+            html += '<div class="trait-group" style="display:flex;flex-direction:column;gap:0.25rem;">'+
+              '<span style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;">'+esc(tt)+'</span>'+
+              '<div style="display:flex;flex-wrap:wrap;gap:0.25rem;">';
+            vals.sort().forEach(function(v){
+              var sel = (v === activeVal) ? '1' : '0';
+              html += '<button class="trait-chip" data-trait="'+esc(tt)+'" data-value="'+esc(v)+'" data-selected="'+sel+'" style="padding:0.25rem 0.5rem;border-radius:0.375rem;border:1px solid '+(sel==='1'?'rgba(125,211,252,0.4)':'rgba(255,255,255,0.06)')+';background:'+(sel==='1'?'rgba(125,211,252,0.12)':'rgba(255,255,255,0.03)')+';color:'+(sel==='1'?'#7dd3fc':'rgba(255,255,255,0.5)')+';font-size:0.6875rem;font-weight:'+(sel==='1'?'800':'600')+';cursor:pointer;font-family:inherit;transition:all 0.15s;">'+esc(v)+'</button>';
+            });
+            html += '</div></div>';
+          });
+          traitContainer.innerHTML = html;
+          if(activeTraitCount) activeTraitCount.textContent = activeCount > 0 ? activeCount+' active' : '';
+
+          // Trait click handler — deselect sibling chips for same trait
+          traitContainer.querySelectorAll('.trait-chip').forEach(function(btn){
+            btn.addEventListener('click', function(){
+              var tt = btn.dataset.trait;
+              var v = btn.dataset.value;
+              var sel = btn.dataset.selected === '1';
+              if(sel){
+                delete activeTraits[tt];
+                btn.dataset.selected = '0';
+                btn.style.borderColor = 'rgba(255,255,255,0.06)';
+                btn.style.background = 'rgba(255,255,255,0.03)';
+                btn.style.color = 'rgba(255,255,255,0.5)';
+                btn.style.fontWeight = '600';
+              } else {
+                // Deselect any previously selected chip for the same trait
+                traitContainer.querySelectorAll('.trait-chip[data-trait="'+esc(tt)+'"]').forEach(function(sib){
+                  if(sib.dataset.selected === '1'){
+                    sib.dataset.selected = '0';
+                    sib.style.borderColor = 'rgba(255,255,255,0.06)';
+                    sib.style.background = 'rgba(255,255,255,0.03)';
+                    sib.style.color = 'rgba(255,255,255,0.5)';
+                    sib.style.fontWeight = '600';
+                  }
+                });
+                activeTraits[tt] = v;
+                btn.dataset.selected = '1';
+                btn.style.borderColor = 'rgba(125,211,252,0.4)';
+                btn.style.background = 'rgba(125,211,252,0.12)';
+                btn.style.color = '#7dd3fc';
+                btn.style.fontWeight = '800';
+              }
+              var count = Object.keys(activeTraits).length;
+              if(activeTraitCount) activeTraitCount.textContent = count > 0 ? count+' active' : '';
+            });
+          });
+        } catch(_) {
+          traitSection.style.display = 'none';
+        }
+      }
+
+      // ── Apply filters ──
+      function applyFilters(){
+        var params = new URLSearchParams();
+
+        var coll = (collectionInput.value || '').trim();
+        if(coll && isEthAddr(coll)) params.set('collection', coll);
+
+        // Convert FLR amounts to wei using integer-safe helper
+        var minWei = flrToWei(minPriceInput.value);
+        var maxWei = flrToWei(maxPriceInput.value);
+        if(minWei) params.set('min_price', minWei);
+        if(maxWei) params.set('max_price', maxWei);
+
+        // Trait filters
+        var traitPairs = [];
+        Object.keys(activeTraits).forEach(function(k){
+          traitPairs.push(k+':'+activeTraits[k]);
+        });
+        if(traitPairs.length) params.set('traits', traitPairs.join(','));
+
+        // Sort
+        if(sortSelect && sortSelect.value !== 'recent') params.set('sort', sortSelect.value);
+
+        var qs = params.toString();
+        var newUrl = qs ? '/listings?'+qs : '/listings';
+        location.href = newUrl;
+      }
+
+      // ── Clear filters ──
+      function clearFilters(){
+        location.href = '/listings';
+      }
+
+      // ── Event listeners ──
+      if(collectionInput){
+        collectionInput.addEventListener('focus', function(){loadCollections();});
+        collectionInput.addEventListener('input', function(){
+          var v = this.value.trim();
+          // Reset activeTraits when collection changes to empty/invalid
+          if(!isEthAddr(v)){
+            activeTraits = {};
+            if(traitSection) traitSection.style.display = 'none';
+            if(activeTraitCount) activeTraitCount.textContent = '';
+          } else {
+            activeTraits = {};
+            if(activeTraitCount) activeTraitCount.textContent = '';
+            loadTraits(v);
+          }
+        });
+        // Enter key triggers apply
+        collectionInput.addEventListener('keydown', function(e){
+          if(e.key === 'Enter') applyFilters();
+        });
+      }
+
+      if(minPriceInput) minPriceInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      if(maxPriceInput) maxPriceInput.addEventListener('keydown', function(e){if(e.key==='Enter') applyFilters();});
+      if(sortSelect) sortSelect.addEventListener('change', applyFilters);
+      if(applyBtn) applyBtn.addEventListener('click', applyFilters);
+      if(clearBtn) clearBtn.addEventListener('click', clearFilters);
+
+      // Focus styles
+      document.querySelectorAll('#filter-bar input, #filter-bar select').forEach(function(el){
+        el.addEventListener('focus', function(){this.style.borderColor = 'rgba(125,211,252,0.4)';});
+        el.addEventListener('blur', function(){this.style.borderColor = 'rgba(255,255,255,0.08)';});
+      });
+
+      // Initialize: load traits if collection pre-selected
+      if(collectionParam && isEthAddr(collectionParam)){
+        loadTraits(collectionParam);
+      }
+      loadCollections();
+
+      // ── Saved Searches ──────────────────────────────────────────────
+      var saveBtn = document.getElementById('save-search-btn');
+      var savedBtn = document.getElementById('saved-searches-btn');
+      var savedDropdown = document.getElementById('saved-searches-dropdown');
+
+      function getJWT(){
+        try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
+      }
+
+      function getConnectedAddr(){
+        try { return localStorage.getItem('mw_addr') || ''; } catch(_) { return ''; }
+      }
+
+      function hasActiveFilters(){
+        var coll = (collectionInput ? collectionInput.value.trim() : '');
+        var minP = parseFloat(minPriceInput ? minPriceInput.value : '');
+        var maxP = parseFloat(maxPriceInput ? maxPriceInput.value : '');
+        var sort = sortSelect ? sortSelect.value : 'recent';
+        var hasTraits = Object.keys(activeTraits).length > 0;
+        return coll || (!isNaN(minP) && minP > 0) || (!isNaN(maxP) && maxP > 0) || sort !== 'recent' || hasTraits;
+      }
+
+      function checkWalletAndShowButtons(){
+        var jwt = getJWT();
+        var addr = getConnectedAddr();
+        if(jwt && addr && isEthAddr(addr)){
+          if(hasActiveFilters()) saveBtn.style.display = 'inline-flex';
+          else saveBtn.style.display = 'none';
+          savedBtn.style.display = 'inline-flex';
+        } else {
+          saveBtn.style.display = 'none';
+          savedBtn.style.display = 'none';
+        }
+      }
+
+      // Check wallet on page load and when localStorage changes
+      checkWalletAndShowButtons();
+      window.addEventListener('storage', checkWalletAndShowButtons);
+      window.addEventListener('mw-wallet-changed', checkWalletAndShowButtons);
+
+      // ── Load saved searches ──
+      async function loadSavedSearches(){
+        var jwt = getJWT();
+        if(!jwt || !savedDropdown) return;
+        try {
+          var res = await fetch('/api/v1/saved-searches?limit=20&page=listings', {
+            headers: {'Authorization': 'Bearer '+jwt}
+          });
+          if(!res.ok) throw new Error('HTTP '+res.status);
+          var searches = await res.json();
+          if(!Array.isArray(searches)) searches = [];
+
+          // Filter to listings page only (server-side page param should handle this)
+          searches = searches.filter(function(s){return s.page === 'listings';});
+
+          if(!searches.length){
+            savedDropdown.innerHTML = '<div style="padding:0.75rem;text-align:center;color:rgba(255,255,255,0.25);font-size:0.75rem;">No saved searches</div>';
+            return;
+          }
+
+          savedDropdown.innerHTML = '<div style="margin-bottom:0.25rem;padding:0.25rem 0.5rem;font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.25);text-transform:uppercase;">Saved Searches</div>' +
+            searches.map(function(s){
+              return '<div class="saved-search-row" data-id="'+s.id+'" style="display:flex;align-items:center;justify-content:space-between;padding:0.5rem;border-radius:0.375rem;cursor:pointer;transition:background 0.15s;" onmouseenter="this.style.background=\'rgba(255,255,255,0.04)\'" onmouseleave="this.style.background=\'transparent\'">'+
+                '<a href="/listings?'+escAttr(s.params)+'" style="font-size:0.8125rem;font-weight:600;color:#fafafa;text-decoration:none;flex:1;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;">'+esc(s.name)+'</a>'+
+                '<button class="delete-search-btn" data-id="'+s.id+'" style="padding:0.125rem 0.375rem;border-radius:0.25rem;border:none;background:none;color:rgba(255,255,255,0.2);cursor:pointer;font-size:0.625rem;flex-shrink:0;font-family:inherit;transition:color 0.15s;" onmouseenter="this.style.color=\'#fca5a5\'" onmouseleave="this.style.color=\'rgba(255,255,255,0.2)\'">✕</button>'+
+              '</div>';
+            }).join('');
+
+          // Delete handlers
+          savedDropdown.querySelectorAll('.delete-search-btn').forEach(function(btn){
+            btn.addEventListener('click', async function(e){
+              e.preventDefault();
+              e.stopPropagation();
+              var id = btn.dataset.id;
+              var jwt2 = getJWT();
+              if(!jwt2 || !id) return;
+              try {
+                var delRes = await fetch('/api/v1/saved-searches/'+id, {
+                  method: 'DELETE',
+                  headers: {'Authorization': 'Bearer '+jwt2}
+                });
+                if(delRes.ok || delRes.status === 204){
+                  loadSavedSearches();
+                }
+              } catch(_) {}
+            });
+          });
+        } catch(_) {
+          if(savedDropdown) savedDropdown.innerHTML = '<div style="padding:0.75rem;text-align:center;color:rgba(255,255,255,0.25);font-size:0.75rem;">Could not load</div>';
+        }
+      }
+
+      // ── Save search modal ──
+      if(saveBtn){
+        saveBtn.addEventListener('click', function(){
+          var overlay = document.createElement('div');
+          overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;animation:fadeIn 0.15s ease;';
+
+          var modal = document.createElement('div');
+          modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;padding:1.5rem;max-width:380px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.5);animation:modalSlideUp 0.2s ease;';
+
+          modal.innerHTML =
+            '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1rem;">'+
+              '<h3 style="font-size:1rem;font-weight:800;color:#fafafa;">Save Search</h3>'+
+              '<button id="save-search-close" style="width:1.75rem;height:1.75rem;border-radius:0.375rem;border:none;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);cursor:pointer;font-size:0.875rem;display:flex;align-items:center;justify-content:center;font-family:inherit;">✕</button>'+
+            '</div>'+
+            '<div style="margin-bottom:1rem;">'+
+              '<label style="display:block;font-size:0.625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;margin-bottom:0.375rem;">Search Name</label>'+
+              '<input id="save-search-name" type="text" maxlength="100" placeholder="e.g. Blue-chip punks under 10 FLR" style="width:100%;padding:0.625rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;">'+
+            '</div>'+
+            '<div id="save-search-status" style="display:none;margin-bottom:0.75rem;"></div>'+
+            '<div style="display:flex;gap:0.5rem;">'+
+              '<button id="save-search-cancel" style="flex:1;padding:0.625rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:transparent;color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;">Cancel</button>'+
+              '<button id="save-search-confirm" style="flex:1;padding:0.625rem;border-radius:0.5rem;border:none;background:linear-gradient(135deg,#fcd34d,#f59e0b);color:#09090b;font-weight:800;font-size:0.75rem;cursor:pointer;font-family:inherit;box-shadow:0 0 16px -3px rgba(251,191,36,0.35);">Save</button>'+
+            '</div>';
+
+          overlay.appendChild(modal);
+          document.body.appendChild(overlay);
+
+          var nameInput = document.getElementById('save-search-name');
+          if(nameInput) setTimeout(function(){nameInput.focus();}, 100);
+
+          function closeSaveModal(){if(overlay.parentNode) overlay.parentNode.removeChild(overlay);}
+
+          document.getElementById('save-search-close').addEventListener('click', closeSaveModal);
+          document.getElementById('save-search-cancel').addEventListener('click', closeSaveModal);
+          overlay.addEventListener('click', function(e){if(e.target===overlay) closeSaveModal();});
+
+          var confirmBtn = document.getElementById('save-search-confirm');
+          var statusEl = document.getElementById('save-search-status');
+
+          confirmBtn.addEventListener('click', async function(){
+            var name = nameInput ? nameInput.value.trim() : '';
+            if(!name){
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please enter a name</p>';
+              return;
+            }
+
+            var jwt = getJWT();
+            if(!jwt){
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please reconnect your wallet</p>';
+              return;
+            }
+
+            // Build current params
+            var params = new URLSearchParams();
+            var coll = (collectionInput ? collectionInput.value.trim() : '');
+            if(coll && isEthAddr(coll)) params.set('collection', coll);
+            var minWei2 = flrToWei(minPriceInput ? minPriceInput.value : '');
+            var maxWei2 = flrToWei(maxPriceInput ? maxPriceInput.value : '');
+            if(minWei2) params.set('min_price', minWei2);
+            if(maxWei2) params.set('max_price', maxWei2);
+            var traitPairs = [];
+            Object.keys(activeTraits).forEach(function(k){traitPairs.push(k+':'+activeTraits[k]);});
+            if(traitPairs.length) params.set('traits', traitPairs.join(','));
+            if(sortSelect && sortSelect.value !== 'recent') params.set('sort', sortSelect.value);
+
+            confirmBtn.disabled = true;
+            confirmBtn.textContent = 'Saving…';
+            confirmBtn.style.opacity = '0.6';
+            statusEl.style.display = 'none';
+
+            try {
+              var res = await fetch('/api/v1/saved-searches', {
+                method: 'POST',
+                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwt},
+                body: JSON.stringify({name: name, page: 'listings', params: params.toString()})
+              });
+              if(res.ok || res.status === 201){
+                statusEl.style.display = 'block';
+                statusEl.style.color = '#7dd3fc';
+                statusEl.innerHTML = '<p style="color:#7dd3fc;font-size:0.75rem;font-weight:600;">✓ Saved!</p>';
+                setTimeout(function(){closeSaveModal();}, 600);
+              } else {
+                var errData;
+                try{errData=await res.json();}catch(_){errData={error:'Failed to save'};}
+                statusEl.style.display = 'block';
+                statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ '+esc(errData.error||'Failed to save')+'</p>';
+                confirmBtn.disabled = false;
+                confirmBtn.textContent = 'Save';
+                confirmBtn.style.opacity = '1';
+              }
+            } catch(err) {
+              statusEl.style.display = 'block';
+              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ Network error</p>';
+              confirmBtn.disabled = false;
+              confirmBtn.textContent = 'Save';
+              confirmBtn.style.opacity = '1';
+            }
+          });
+
+          // Enter key to save
+          nameInput.addEventListener('keydown', function(e){if(e.key==='Enter') confirmBtn.click();});
+        });
+      }
+
+      // ── Saved searches dropdown ──
+      if(savedBtn){
+        savedBtn.addEventListener('click', function(){
+          var isOpen = savedDropdown.style.display === 'block';
+          if(isOpen){
+            savedDropdown.style.display = 'none';
+          } else {
+            savedDropdown.style.display = 'block';
+            loadSavedSearches();
+          }
+        });
+
+        // Close dropdown on click outside
+        document.addEventListener('click', function(e){
+          if(!savedBtn.contains(e.target) && !savedDropdown.contains(e.target)){
+            savedDropdown.style.display = 'none';
+          }
+        });
+      }
+
+    })();
+  </script>
+
+  <style>
+    .trait-chip:hover {
+      border-color: rgba(125,211,252,0.3) !important;
+      background: rgba(125,211,252,0.08) !important;
+    }
+    #filter-bar input:focus, #filter-bar select:focus {
+      border-color: rgba(125,211,252,0.4);
+      outline: none;
+    }
+  </style>
 </BaseLayout>

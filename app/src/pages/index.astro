@@ -144,6 +144,24 @@ import WalletConnect from '../components/WalletConnect';
 
   <!-- Client-side data fetching for counters + trending + recent listings -->
   <script is:inline>
+    // Fetch with retry helper (defined before use via hoisting)
+    async function fetchWithRetry(url, retries) {
+      for (var i = 0; i <= retries; i++) {
+        try {
+          var res = await fetch(url);
+          if (res.ok) return res;
+          if (res.status < 500) return res;
+        } catch(e) {
+          if (i === retries) throw e;
+        }
+        // No backoff after the last attempt
+        if (i < retries) {
+          await new Promise(function(r) { setTimeout(r, Math.pow(2, i) * 500); });
+        }
+      }
+      throw new Error('Max retries exceeded');
+    }
+
     (async function() {
       // HTML-escape helper for safe innerHTML injection
       function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
@@ -174,14 +192,15 @@ import WalletConnect from '../components/WalletConnect';
         if (c1) c1.textContent = '—'; if (c2) c2.textContent = '—'; if (c3) c3.textContent = '—'; if (c4) c4.textContent = '—';
       }
 
+      // Fetch recent listings with retry logic
       try {
-        // Fetch recent listings — the Go API returns JSON array
-        var lRes = await fetch('/api/v1/listings?limit=8&sort=recent');
+        var lRes = await fetchWithRetry('/api/v1/listings?limit=8&sort=recent', 2);
         var grid = document.getElementById('recent-listings-grid');
         if (lRes.ok) {
           try {
             var listings = await lRes.json();
-            if (listings && listings.length) {
+            if (!Array.isArray(listings)) listings = [];
+            if (listings.length) {
               grid.innerHTML = listings.map(function(item) {
                 var price = weiToFLR(item.price_wei||'0', 4);
                 var name = item.name || ('#' + (item.token_id||item.tokenID||''));
@@ -204,17 +223,17 @@ import WalletConnect from '../components/WalletConnect';
                 '</a>';
               }).join('');
             } else {
-              grid.innerHTML = '<div class="shimmer" style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.3);grid-column:1/-1;">No listings yet — be the first to list an NFT</div>';
+              grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.3);grid-column:1/-1;"><div style="font-size:2rem;margin-bottom:0.5rem;opacity:0.2;">✦</div><p>No listings yet — <a href="/listings" style="color:#7dd3fc;font-weight:700;">be the first to list an NFT</a></p></div>';
             }
           } catch(_json) {
-            if (grid) grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not parse listings — please try again</div>';
+            if (grid) grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not parse listings — <button onclick="location.reload()" style="background:none;border:none;color:#7dd3fc;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">retry</button></div>';
           }
         } else {
-          if (grid) grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings (HTTP '+lRes.status+') — please try again</div>';
+          if (grid) grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — <button onclick="location.reload()" style="background:none;border:none;color:#7dd3fc;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">retry</button></div>';
         }
       } catch(e) {
         var gridEl = document.getElementById('recent-listings-grid');
-        if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — '+esc(e.message||'')+'</div>';
+        if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — <button onclick="location.reload()" style="background:none;border:none;color:#7dd3fc;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">retry</button></div>';
       }
 
       try {
