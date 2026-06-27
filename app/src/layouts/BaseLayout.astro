@@ -1,0 +1,493 @@
+---
+export interface Props {
+  title: string;
+  description?: string;
+  activeNav?: string;
+}
+
+const { title, description, activeNav } = Astro.props;
+const desc = description || 'Decentralized NFT marketplace on Flare Network — buy, sell, and auction NFTs';
+const currentPath = Astro.url?.pathname || '/';
+const isActive = (path: string) => currentPath === path ? 'active' : '';
+---
+
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <title>{title} — MagicWebb</title>
+    <meta name="description" content={desc} />
+    <meta name="theme-color" content="#09090b" />
+
+    <!-- Open Graph -->
+    <meta property="og:title" content={`${title} — MagicWebb NFT Marketplace`} />
+    <meta property="og:description" content={desc} />
+    <meta property="og:type" content="website" />
+
+    <!-- Fonts -->
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+
+    <!-- Inline SVG favicon -->
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
+
+    <!-- ═════════════ DESIGN SYSTEM ═════════════ -->
+    <style>
+      /* ── CSS Custom Properties (5-color palette) ── */
+      :root {
+        --ink-950: #09090b;
+        --ink-900: #0f0f13;
+        --ink-800: #1a1a24;
+        --sky-300: #7dd3fc;
+        --sky-500: #0ea5e9;
+        --gold-300: #fcd34d;
+        --gold-500: #f59e0b;
+        --violet-300: #a78bfa;
+        --violet-500: #7c3aed;
+        --white: #fafafa;
+        --white-10: rgba(255,255,255,0.1);
+        --white-20: rgba(255,255,255,0.2);
+        --white-40: rgba(255,255,255,0.4);
+        --white-60: rgba(255,255,255,0.6);
+        --white-80: rgba(255,255,255,0.8);
+      }
+
+      /* ── Reset ── */
+      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+      html {
+        font-family: 'Inter', system-ui, -apple-system, sans-serif;
+        background: var(--ink-950);
+        color: var(--white);
+        -webkit-font-smoothing: antialiased;
+        scroll-behavior: smooth;
+      }
+      body { min-height: 100vh; overflow-x: hidden; }
+      a { color: inherit; text-decoration: none; }
+      button { font-family: inherit; cursor: pointer; border: none; }
+      code, .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+
+      /* ── Scrollbar ── */
+      ::-webkit-scrollbar { width: 10px; height: 10px; }
+      ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
+      ::-webkit-scrollbar-thumb { background: linear-gradient(135deg, var(--sky-300), var(--violet-300)); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
+      ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg, var(--sky-500), var(--violet-500)); background-clip: padding-box; }
+      * { scrollbar-width: thin; scrollbar-color: var(--sky-300) rgba(255,255,255,0.05); }
+
+      /* ── Utility classes ── */
+      .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
+      .glass-soft  { background: rgba(15,15,20,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
+      .glow-sky    { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
+      .glow-gold   { box-shadow: 0 0 22px -6px rgba(251,191,36,0.50); }
+      .glow-violet { box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
+      .glow-white  { box-shadow: 0 0 18px -4px rgba(255,255,255,0.55); }
+      .btn-sky     { background-image: linear-gradient(135deg, var(--sky-300), var(--sky-500)); }
+      .btn-gold    { background-image: linear-gradient(135deg, var(--gold-300), var(--gold-500)); }
+      .btn-violet  { background-image: linear-gradient(135deg, var(--violet-300), var(--violet-500)); }
+      .btn-disabled { background-image: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25)) !important; cursor: not-allowed; }
+      .ring-focus:focus-visible { outline: 2px solid var(--sky-300); outline-offset: 2px; }
+
+      /* ── Animated brand gradient text ── */
+      .brand-text {
+        background-image: linear-gradient(90deg, var(--sky-300), var(--gold-300), var(--violet-300), var(--sky-300));
+        background-size: 200% auto;
+        -webkit-background-clip: text;
+        background-clip: text;
+        color: transparent;
+        animation: brand-shift 5s ease infinite;
+      }
+      @keyframes brand-shift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
+
+      .shimmer {
+        background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%);
+        background-size: 200% 100%;
+        animation: shimmer 2s infinite;
+      }
+      @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
+
+      /* ── Navbar ── */
+      nav.topnav {
+        position: sticky;
+        top: 0;
+        z-index: 50;
+        display: flex;
+        align-items: center;
+        justify-content: space-between;
+        padding: 0 1.5rem;
+        height: 4rem;
+        border-bottom: 1px solid rgba(255,255,255,0.08);
+        backdrop-filter: blur(20px);
+        -webkit-backdrop-filter: blur(20px);
+        background: rgba(9,9,11,0.85);
+      }
+      .nav-brand {
+        display: flex;
+        align-items: center;
+        gap: 0.625rem;
+        flex-shrink: 0;
+      }
+      .nav-logo-icon {
+        width: 2.25rem;
+        height: 2.25rem;
+        border-radius: 0.75rem;
+        background: linear-gradient(135deg, var(--sky-300), var(--sky-500));
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        font-size: 1.25rem;
+        color: var(--ink-950);
+        box-shadow: 0 0 22px -6px rgba(56,189,248,0.45);
+        transition: transform 0.2s;
+        flex-shrink: 0;
+      }
+      .nav-brand:hover .nav-logo-icon { transform: scale(1.08); }
+      .nav-logo-text {
+        font-size: 1.25rem;
+        font-weight: 800;
+        letter-spacing: -0.025em;
+        color: var(--white);
+      }
+      .nav-logo-text .brand-text { font-weight: 900; }
+
+      .nav-links {
+        display: none;
+        align-items: center;
+        gap: 0.25rem;
+      }
+      @media (min-width: 768px) {
+        .nav-links { display: flex; }
+      }
+      .nav-links a {
+        padding: 0.375rem 0.75rem;
+        border-radius: 0.5rem;
+        font-size: 0.8125rem;
+        font-weight: 600;
+        color: var(--white-60);
+        transition: all 0.2s;
+      }
+      .nav-links a:hover { color: var(--white); background: rgba(255,255,255,0.05); }
+      .nav-links a.active { color: var(--sky-300); }
+      .nav-links a.nav-listings { color: #bae6fd; }
+      .nav-links a.nav-listings:hover { color: var(--white); background: rgba(14,165,233,0.15); }
+      .nav-links a.nav-auctions { color: #ddd6fe; }
+      .nav-links a.nav-auctions:hover { color: var(--white); background: rgba(167,139,250,0.15); }
+      .nav-links a.nav-offers { color: #fde68a; }
+      .nav-links a.nav-offers:hover { color: var(--white); background: rgba(252,211,77,0.15); }
+
+      .nav-right { display: flex; align-items: center; gap: 0.5rem; }
+
+      /* ── Mobile hamburger ── */
+      .hamburger {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        width: 2.5rem;
+        height: 2.5rem;
+        border-radius: 0.5rem;
+        background: transparent;
+        color: var(--white-60);
+        font-size: 1.25rem;
+        transition: all 0.2s;
+      }
+      .hamburger:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+      @media (min-width: 768px) { .hamburger { display: none; } }
+
+      .mobile-menu {
+        display: none;
+        position: fixed;
+        inset: 0;
+        z-index: 49;
+        background: rgba(9,9,11,0.95);
+        backdrop-filter: blur(20px);
+        padding: 5rem 1.5rem 2rem;
+        flex-direction: column;
+        gap: 0.375rem;
+      }
+      .mobile-menu.open { display: flex; }
+      .mobile-menu a {
+        display: block;
+        padding: 0.75rem 1rem;
+        border-radius: 0.75rem;
+        font-size: 0.9375rem;
+        font-weight: 600;
+        color: var(--white-60);
+        transition: all 0.15s;
+      }
+      .mobile-menu a:hover { color: var(--white); background: rgba(255,255,255,0.06); }
+      .mobile-menu .mobile-wallet { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+
+      /* ── Footer ── */
+      footer.main-footer {
+        border-top: 1px solid rgba(255,255,255,0.08);
+        margin-top: 4rem;
+        padding: 2rem 1.5rem;
+        text-align: center;
+        color: var(--white-40);
+        font-size: 0.8125rem;
+      }
+      footer.main-footer a { color: var(--sky-300); transition: color 0.2s; }
+      footer.main-footer a:hover { color: var(--violet-300); }
+      footer.main-footer .brand-text { font-weight: 800; }
+
+      /* ── Fade-in-up reveal animation ── */
+      .reveal {
+        opacity: 0;
+        transform: translateY(24px);
+        transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
+      }
+      .reveal.visible { opacity: 1; transform: translateY(0); }
+
+      @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
+      .anim-fade-in { animation: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+
+      @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
+      @keyframes shimmer-placeholder { 0% { opacity: 0.3; } 50% { opacity: 0.7; } 100% { opacity: 0.3; } }
+      @keyframes spin { to { transform: rotate(360deg); } }
+      @keyframes pulse-ring { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
+
+      /* ── Gradient backgrounds ── */
+      .bg-mesh-hero {
+        background:
+          radial-gradient(ellipse 80% 50% at 50% -20%, rgba(125,211,252,0.12), transparent),
+          radial-gradient(ellipse 60% 35% at 80% 70%, rgba(167,139,250,0.08), transparent),
+          radial-gradient(ellipse 40% 40% at 20% 30%, rgba(252,211,77,0.05), transparent);
+      }
+
+      /* ── 3D Card Tilt ── */
+      .tilt-card {
+        transform-style: preserve-3d;
+        perspective: 1000px;
+        transition: transform 0.1s ease-out;
+      }
+
+      /* ── Cursor glow ── */
+      .cursor-glow {
+        pointer-events: none;
+        position: fixed;
+        width: 300px;
+        height: 300px;
+        border-radius: 50%;
+        background: radial-gradient(circle, rgba(125,211,252,0.06) 0%, transparent 70%);
+        transform: translate(-50%, -50%);
+        z-index: 0;
+        transition: opacity 0.3s;
+      }
+
+      /* ── Count-up animation ── */
+      @keyframes count-pop {
+        0% { transform: scale(1); }
+        50% { transform: scale(1.08); }
+        100% { transform: scale(1); }
+      }
+      .count-pop { animation: count-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
+
+      /* ── Float animation for decorative elements ── */
+      @keyframes float {
+        0%, 100% { transform: translateY(0px); }
+        50% { transform: translateY(-10px); }
+      }
+      .float { animation: float 4s ease-in-out infinite; }
+      .float-delayed { animation: float 4s ease-in-out 1s infinite; }
+      .float-slow { animation: float 6s ease-in-out infinite; }
+    </style>
+
+    <!-- Inline interactive scripts (particles, cursor, reveal, mobile menu, parallax) -->
+    <script>
+      // ── Cursor glow ──
+      (function() {
+        if (typeof window === 'undefined') return;
+        const glow = document.createElement('div');
+        glow.className = 'cursor-glow';
+        glow.style.opacity = '0';
+        document.body.prepend(glow);
+        let raf = 0;
+        document.addEventListener('mousemove', function(e) {
+          if (raf) cancelAnimationFrame(raf);
+          raf = requestAnimationFrame(function() {
+            glow.style.left = e.clientX + 'px';
+            glow.style.top = e.clientY + 'px';
+            glow.style.opacity = '1';
+          });
+        });
+        document.addEventListener('mouseleave', function() { glow.style.opacity = '0'; });
+      })();
+
+      // ── Particle network background ──
+      (function() {
+        if (typeof window === 'undefined') return;
+        var canvas = document.createElement('canvas');
+        canvas.id = 'particles-canvas';
+        canvas.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.35;';
+        document.body.prepend(canvas);
+        var ctx = canvas.getContext('2d');
+        var particles = [];
+        var PARTICLE_COUNT = 50;
+        var CONNECT_DIST = 120;
+
+        function resize() {
+          canvas.width = window.innerWidth;
+          canvas.height = window.innerHeight;
+        }
+        resize();
+        window.addEventListener('resize', resize);
+
+        for (var i = 0; i < PARTICLE_COUNT; i++) {
+          particles.push({
+            x: Math.random() * canvas.width,
+            y: Math.random() * canvas.height,
+            vx: (Math.random() - 0.5) * 0.4,
+            vy: (Math.random() - 0.5) * 0.4,
+            r: Math.random() * 1.5 + 0.5,
+            opacity: Math.random() * 0.5 + 0.2
+          });
+        }
+
+        function draw() {
+          ctx.clearRect(0, 0, canvas.width, canvas.height);
+          for (var i = 0; i < particles.length; i++) {
+            var p = particles[i];
+            p.x += p.vx;
+            p.y += p.vy;
+            if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
+            if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
+
+            ctx.beginPath();
+            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
+            ctx.fillStyle = 'rgba(125,211,252,' + p.opacity + ')';
+            ctx.fill();
+
+            // Draw connections
+            for (var j = i + 1; j < particles.length; j++) {
+              var p2 = particles[j];
+              var dx = p.x - p2.x;
+              var dy = p.y - p2.y;
+              var dist = Math.sqrt(dx * dx + dy * dy);
+              if (dist < CONNECT_DIST) {
+                ctx.beginPath();
+                ctx.moveTo(p.x, p.y);
+                ctx.lineTo(p2.x, p2.y);
+                ctx.strokeStyle = 'rgba(167,139,250,' + (0.12 * (1 - dist / CONNECT_DIST)) + ')';
+                ctx.lineWidth = 0.5;
+                ctx.stroke();
+              }
+            }
+          }
+          requestAnimationFrame(draw);
+        }
+        draw();
+      })();
+
+      // ── Scroll-triggered reveal ──
+      (function() {
+        if (typeof window === 'undefined') return;
+        var observer = new IntersectionObserver(function(entries) {
+          entries.forEach(function(entry) {
+            if (entry.isIntersecting) {
+              entry.target.classList.add('visible');
+              observer.unobserve(entry.target);
+            }
+          });
+        }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
+
+        document.addEventListener('DOMContentLoaded', function() {
+          document.querySelectorAll('.reveal').forEach(function(el) { observer.observe(el); });
+        });
+        // Also observe after Astro page transitions
+        setTimeout(function() {
+          document.querySelectorAll('.reveal:not(.visible)').forEach(function(el) { observer.observe(el); });
+        }, 300);
+      })();
+
+      // ── Mobile menu ──
+      (function() {
+        if (typeof window === 'undefined') return;
+        document.addEventListener('DOMContentLoaded', function() {
+          var btn = document.getElementById('mobile-menu-btn');
+          var menu = document.getElementById('mobile-menu');
+          if (btn && menu) {
+            btn.addEventListener('click', function() { menu.classList.toggle('open'); });
+            menu.querySelectorAll('a').forEach(function(a) {
+              a.addEventListener('click', function() { menu.classList.remove('open'); });
+            });
+          }
+        });
+      })();
+
+      // ── Parallax hero ──
+      (function() {
+        if (typeof window === 'undefined') return;
+        var ticking = false;
+        window.addEventListener('scroll', function() {
+          if (!ticking) {
+            requestAnimationFrame(function() {
+              var hero = document.querySelector('.hero-parallax');
+              if (hero) {
+                var scrollY = window.pageYOffset;
+                hero.style.transform = 'translateY(' + (scrollY * 0.3) + 'px)';
+                hero.style.opacity = Math.max(0, 1 - scrollY / 600);
+              }
+              ticking = false;
+            });
+            ticking = true;
+          }
+        }, { passive: true });
+      })();
+    </script>
+  </head>
+  <body>
+    <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;"></div>
+
+    <!-- ═════════════ NAVBAR ═════════════ -->
+    <nav class="topnav">
+      <a href="/" class="nav-brand">
+        <div class="nav-logo-icon" aria-hidden="true">✦</div>
+        <span class="nav-logo-text">Magic<span class="brand-text">Webb</span></span>
+      </a>
+
+      <div class="nav-links">
+        <a href="/" class={isActive('/') ? 'active' : ''}>Home</a>
+        <a href="/listings" class={`nav-listings ${isActive('/listings')}`}>Listings</a>
+        <a href="/auctions" class={`nav-auctions ${isActive('/auctions')}`}>Auctions</a>
+        <a href="/offers" class={`nav-offers ${isActive('/offers')}`}>Offers</a>
+        <a href="/search" class={isActive('/search') ? 'active' : ''}>Search</a>
+        <a href="/metrics" class={isActive('/metrics') ? 'active' : ''}>Metrics</a>
+        <a href="/docs" class={isActive('/docs') ? 'active' : ''}>Docs</a>
+      </div>
+
+      <div class="nav-right">
+        <!-- WalletConnect slot — injected by React client:only -->
+        <slot name="wallet" />
+        <button id="mobile-menu-btn" class="hamburger" aria-label="Menu">☰</button>
+      </div>
+    </nav>
+
+    <!-- Mobile menu -->
+    <div id="mobile-menu" class="mobile-menu">
+      <a href="/">Home</a>
+      <a href="/listings">Listings</a>
+      <a href="/auctions">Auctions</a>
+      <a href="/offers">Offers</a>
+      <a href="/search">Search</a>
+      <a href="/metrics">Metrics</a>
+      <a href="/docs">Docs</a>
+    </div>
+
+    <!-- ═════════════ MAIN CONTENT ═════════════ -->
+    <main style="position:relative;z-index:1;">
+      <slot />
+    </main>
+
+    <!-- ═════════════ FOOTER ═════════════ -->
+    <footer class="main-footer">
+      <span class="brand-text" style="font-weight:800;">MagicWebb</span>
+      &nbsp;· Non-custodial NFT marketplace on&nbsp;
+      <a href="https://flare.network">Flare Network</a>
+      &nbsp;·&nbsp;
+      <a href="https://github.com/OfficialA1manac/MagicWebb">GitHub</a>
+      &nbsp;·&nbsp;
+      <a href="/docs">Docs</a>
+    </footer>
+  </body>
+</html>

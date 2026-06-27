@@ -1,150 +1,236 @@
 ---
+import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
 ---
 
-<!doctype html>
-<html lang="en">
-  <head>
-    <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
-    <title>MagicWebb — NFT Marketplace on Flare</title>
-    <meta name="description" content="MagicWebb is a decentralized NFT marketplace on Flare Network. Buy, sell, and auction NFTs with low fees." />
-    <meta name="theme-color" content="#0f172a" />
+<BaseLayout title="Trade NFTs on Flare" description="MagicWebb is a fully decentralized NFT marketplace on Flare Network. Buy, sell, and auction digital assets with the lowest fees." activeNav="/">
+  <WalletConnect slot="wallet" client:only="react" />
 
-    <!-- Open Graph -->
-    <meta property="og:title" content="MagicWebb — NFT Marketplace on Flare" />
-    <meta property="og:description" content="Buy, sell, and auction NFTs on Flare Network" />
-    <meta property="og:type" content="website" />
+  <!-- ═══════════════ HERO ═══════════════ -->
+  <section class="hero-parallax" style="text-align:center;padding:5rem 1.5rem 4rem;position:relative;overflow:hidden;">
+    <!-- Floating decorative blobs -->
+    <div class="float" style="position:absolute;top:10%;left:5%;width:180px;height:180px;border-radius:50%;background:radial-gradient(circle,rgba(125,211,252,0.15),transparent 70%);pointer-events:none;"></div>
+    <div class="float-delayed" style="position:absolute;top:20%;right:8%;width:140px;height:140px;border-radius:50%;background:radial-gradient(circle,rgba(167,139,250,0.12),transparent 70%);pointer-events:none;"></div>
+    <div class="float-slow" style="position:absolute;bottom:15%;left:20%;width:120px;height:120px;border-radius:50%;background:radial-gradient(circle,rgba(252,211,77,0.08),transparent 70%);pointer-events:none;"></div>
 
-    <!-- Fonts -->
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
-    <style>
-      /* ── Reset ── */
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: #0f172a; color: #e2e8f0; }
-      body { min-height: 100vh; }
-      a { color: inherit; text-decoration: none; }
-      button { font-family: inherit; cursor: pointer; }
-
-      /* ── Gradient background ── */
-      body::before {
-        content: '';
-        position: fixed;
-        inset: 0;
-        background:
-          radial-gradient(ellipse 80% 50% at 50% -20%, rgba(139, 92, 246, 0.15), transparent),
-          radial-gradient(ellipse 50% 30% at 80% 80%, rgba(99, 102, 241, 0.1), transparent),
-          radial-gradient(ellipse 30% 50% at 0% 50%, rgba(139, 92, 246, 0.08), transparent);
-        pointer-events: none;
-        z-index: 0;
-      }
-
-      .layout { position: relative; z-index: 1; min-height: 100vh; display: flex; flex-direction: column; }
-
-      /* ── Navbar ── */
-      nav {
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 1rem 1.5rem;
-        border-bottom: 1px solid rgba(148, 163, 184, 0.1);
-        backdrop-filter: blur(12px);
-        background: rgba(15, 23, 42, 0.8);
-      }
-      .logo {
-        font-size: 1.25rem;
-        font-weight: 700;
-        background: linear-gradient(135deg, #8b5cf6, #6366f1, #a78bfa);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-      .nav-links { display: flex; gap: 1.5rem; align-items: center; }
-      .nav-links a {
-        color: #94a3b8;
-        font-size: 0.875rem;
-        font-weight: 500;
-        transition: color 0.2s;
-      }
-      .nav-links a:hover { color: #e2e8f0; }
-
-      /* ── Hero ── */
-      .hero {
-        flex: 1;
-        display: flex;
-        flex-direction: column;
-        align-items: center;
-        justify-content: center;
-        gap: 2rem;
-        padding: 4rem 1.5rem;
-        text-align: center;
-      }
-      .hero h1 {
-        font-size: clamp(2.5rem, 6vw, 4rem);
-        font-weight: 700;
-        line-height: 1.1;
-        background: linear-gradient(135deg, #e2e8f0, #a78bfa, #6366f1);
-        -webkit-background-clip: text;
-        -webkit-text-fill-color: transparent;
-        background-clip: text;
-      }
-      .hero p {
-        max-width: 32rem;
-        color: #94a3b8;
-        font-size: 1.125rem;
-        line-height: 1.6;
-      }
-      .status-note {
-        color: #64748b;
-        font-size: 0.8125rem;
-      }
-
-      /* ── Footer ── */
-      footer {
-        padding: 1.5rem;
-        text-align: center;
-        color: #475569;
-        font-size: 0.8125rem;
-        border-top: 1px solid rgba(148, 163, 184, 0.1);
-      }
-    </style>
-  </head>
-  <body>
-    <div class="layout">
-      <nav>
-        <span class="logo">MagicWebb</span>
-        <div class="nav-links">
-          <a href="/" style="color:#e2e8f0;">Home</a>
-          <a href="/listings">Listings</a>
-          <a href="/auctions">Auctions</a>
-          <a href="/offers">Offers</a>
-          <a href="/search">Search</a>
-          <a href="/docs">Docs</a>
-        </div>
-        <!-- WalletConnect is fully self-contained (init + providers + UI).
-             client:only="react" skips SSR — the mount point is a server-rendered
-             <div> placeholder, hydrated by React in the browser. -->
-        <WalletConnect client:only="react" />
-      </nav>
-
-      <main class="hero">
-        <h1>Trade NFTs on Flare</h1>
-        <p>
-          MagicWebb is a fully decentralized NFT marketplace on Flare Network.
-          Buy, sell, and auction digital assets with the lowest fees on the network.
-        </p>
-        <p class="status-note">
-          Connect your wallet to start trading. Supports MetaMask, Trust Wallet,
-          Rainbow, and any WalletConnect-compatible wallet.
-        </p>
-      </main>
-
-      <footer>
-        MagicWebb &mdash; Decentralized NFT Marketplace on Flare Network
-      </footer>
+    <!-- Testnet badge -->
+    <div class="reveal" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.375rem 0.75rem;border-radius:999px;background:rgba(14,165,233,0.12);border:1px solid rgba(125,211,252,0.35);color:#bae6fd;font-size:0.625rem;font-weight:800;text-transform:uppercase;letter-spacing:0.1em;margin-bottom:1.5rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">
+      <span style="width:0.375rem;height:0.375rem;border-radius:50%;background:#7dd3fc;animation:pulse 2s infinite;"></span>
+      ✦ Flare Coston2 Testnet
     </div>
-  </body>
-</html>
+
+    <!-- Headline -->
+    <h1 class="reveal" style="font-size:clamp(2.75rem,7vw,5rem);font-weight:900;line-height:0.95;letter-spacing:-0.03em;margin-bottom:1.25rem;">
+      <span style="color:#fafafa;">Trade NFTs on</span><br/>
+      <span class="brand-text">Flare Network</span>
+    </h1>
+
+    <p class="reveal" style="max-width:34rem;margin:0 auto 2rem;color:rgba(255,255,255,0.55);font-size:1.0625rem;line-height:1.65;">
+      Non-custodial marketplace.&nbsp;
+      <span style="color:#7dd3fc;font-weight:700;">Fixed-price listings</span>,&nbsp;
+      <span style="color:#a78bfa;font-weight:700;">English auctions</span>,&nbsp;
+      <span style="color:#fcd34d;font-weight:700;">signed offers</span>.
+      Your keys, your NFTs, your control.
+    </p>
+
+    <!-- CTA buttons -->
+    <div class="reveal" style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;margin-bottom:3rem;">
+      <a href="/listings" class="btn-sky" style="padding:0.875rem 1.75rem;border-radius:0.875rem;color:#09090b;font-weight:800;font-size:0.9375rem;transition:all 0.2s;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);display:inline-flex;align-items:center;gap:0.5rem;">
+        Browse Listings
+        <span style="font-size:1.125rem;">→</span>
+      </a>
+      <a href="/auctions" class="btn-violet" style="padding:0.875rem 1.75rem;border-radius:0.875rem;color:#fafafa;font-weight:800;font-size:0.9375rem;transition:all 0.2s;box-shadow:0 0 30px -4px rgba(167,139,250,0.45),0 8px 20px -8px rgba(124,58,237,0.3);display:inline-flex;align-items:center;gap:0.5rem;">
+        Live Auctions
+        <span style="font-size:1.125rem;">♕</span>
+      </a>
+      <a href="/metrics" style="padding:0.875rem 1.75rem;border-radius:0.875rem;background:rgba(255,255,255,0.06);color:#fafafa;font-weight:800;font-size:0.9375rem;border:1px solid rgba(255,255,255,0.12);transition:all 0.2s;display:inline-flex;align-items:center;gap:0.5rem;">
+        <span style="color:#fcd34d;">▦</span>
+        Metrics
+      </a>
+    </div>
+
+    <!-- Live counters — data fetched client-side -->
+    <div class="reveal" style="display:flex;justify-content:center;gap:1rem;flex-wrap:wrap;">
+      <div style="padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.8);border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(12px);min-width:110px;">
+        <div id="counter-listings" class="count-pop" style="font-size:1.75rem;font-weight:900;color:#fafafa;line-height:1;">—</div>
+        <div style="font-size:0.625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.1em;margin-top:0.375rem;font-weight:700;">Listings</div>
+      </div>
+      <div style="padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.8);border:1px solid rgba(167,139,250,0.25);backdrop-filter:blur(12px);min-width:110px;">
+        <div id="counter-auctions" class="count-pop" style="font-size:1.75rem;font-weight:900;color:#c4b5fd;line-height:1;">—</div>
+        <div style="font-size:0.625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.1em;margin-top:0.375rem;font-weight:700;">Auctions</div>
+      </div>
+      <div style="padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.8);border:1px solid rgba(255,255,255,0.08);backdrop-filter:blur(12px);min-width:110px;">
+        <div id="counter-collections" class="count-pop" style="font-size:1.75rem;font-weight:900;color:#fafafa;line-height:1;">—</div>
+        <div style="font-size:0.625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.1em;margin-top:0.375rem;font-weight:700;">Collections</div>
+      </div>
+      <div style="padding:1rem 1.25rem;border-radius:1rem;background:rgba(15,15,19,0.8);border:1px solid rgba(252,211,77,0.25);backdrop-filter:blur(12px);min-width:110px;">
+        <div id="counter-volume" class="count-pop" style="font-size:1.75rem;font-weight:900;color:#fde68a;line-height:1;">—</div>
+        <div style="font-size:0.625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.1em;margin-top:0.375rem;font-weight:700;">24h Volume</div>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ FEATURES ═══════════════ -->
+  <section style="max-width:72rem;margin:0 auto;padding:3rem 1.5rem;">
+    <h2 class="reveal" style="text-align:center;font-size:2rem;font-weight:800;margin-bottom:3rem;letter-spacing:-0.02em;">
+      How it <span class="brand-text">Works</span>
+    </h2>
+    <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(240px,1fr));gap:1.5rem;">
+      <div class="reveal" style="padding:1.75rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);text-align:center;">
+        <div style="width:3rem;height:3rem;border-radius:1rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:#09090b;font-size:1.5rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">⌬</div>
+        <h3 style="font-size:1.125rem;font-weight:700;margin-bottom:0.5rem;color:#fafafa;">Connect Wallet</h3>
+        <p style="font-size:0.875rem;color:rgba(255,255,255,0.45);line-height:1.5;">Link any WalletConnect-compatible wallet via QR code or deep link. Non-custodial — you keep your keys.</p>
+      </div>
+      <div class="reveal" style="padding:1.75rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);text-align:center;">
+        <div style="width:3rem;height:3rem;border-radius:1rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:#09090b;font-size:1.5rem;box-shadow:0 0 22px -6px rgba(251,191,36,0.5);">⚐</div>
+        <h3 style="font-size:1.125rem;font-weight:700;margin-bottom:0.5rem;color:#fafafa;">Buy & Sell</h3>
+        <p style="font-size:0.875rem;color:rgba(255,255,255,0.45);line-height:1.5;">Fixed-price listings with just 1.5% platform fee. Listing is free — you only pay when you sell.</p>
+      </div>
+      <div class="reveal" style="padding:1.75rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);text-align:center;">
+        <div style="width:3rem;height:3rem;border-radius:1rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:#fafafa;font-size:1.5rem;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);">♕</div>
+        <h3 style="font-size:1.125rem;font-weight:700;margin-bottom:0.5rem;color:#fafafa;">Auctions</h3>
+        <p style="font-size:0.875rem;color:rgba(255,255,255,0.45);line-height:1.5;">English auctions with anti-snipe protection — any bid in the final 3 minutes extends the clock by 3 minutes.</p>
+      </div>
+      <div class="reveal" style="padding:1.75rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);text-align:center;">
+        <div style="width:3rem;height:3rem;border-radius:1rem;background:linear-gradient(135deg,#7dd3fc,#a78bfa);display:flex;align-items:center;justify-content:center;margin:0 auto 1rem;color:#fafafa;font-size:1.5rem;box-shadow:0 0 22px -6px rgba(139,92,246,0.45);">↗</div>
+        <h3 style="font-size:1.125rem;font-weight:700;margin-bottom:0.5rem;color:#fafafa;">Make Offers</h3>
+        <p style="font-size:0.875rem;color:rgba(255,255,255,0.45);line-height:1.5;">Submit signed offers on any NFT. Fully refundable until accepted — your funds stay in escrow.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ TRENDING (client-side fetch) ═══════════════ -->
+  <section style="max-width:72rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div class="reveal" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+      <h2 style="font-size:1.5rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;">
+        <span style="width:2.25rem;height:2.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#fcd34d,#f59e0b);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(251,191,36,0.5);">↗</span>
+        Trending Collections
+      </h2>
+      <a href="/metrics" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">All metrics →</a>
+    </div>
+    <div id="trending-grid" class="reveal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(180px,1fr));gap:1rem;">
+      <div class="shimmer" style="padding:2rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.25);">Loading…</div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ RECENT LISTINGS ═══════════════ -->
+  <section style="max-width:72rem;margin:0 auto;padding:2rem 1.5rem;">
+    <div class="reveal" style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">
+      <h2 style="font-size:1.5rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;">
+        <span style="width:2.25rem;height:2.25rem;border-radius:0.75rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">✦</span>
+        Recent Listings
+      </h2>
+      <a href="/listings" style="font-size:0.8125rem;color:#7dd3fc;font-weight:700;transition:color 0.2s;">View all →</a>
+    </div>
+    <div id="recent-listings-grid" class="reveal" style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);"></div>
+      <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);"></div>
+    </div>
+  </section>
+
+  <!-- ═══════════════ CTA BANNER ═══════════════ -->
+  <section class="reveal" style="max-width:72rem;margin:3rem auto;padding:0 1.5rem;">
+    <div style="padding:3rem 2rem;border-radius:1.5rem;background:linear-gradient(135deg,rgba(125,211,252,0.08),rgba(167,139,250,0.08),rgba(252,211,77,0.05));border:1px solid rgba(255,255,255,0.08);text-align:center;position:relative;overflow:hidden;">
+      <div class="float" style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(125,211,252,0.2),transparent 70%);pointer-events:none;"></div>
+      <h2 style="font-size:1.75rem;font-weight:800;margin-bottom:0.75rem;color:#fafafa;position:relative;">Ready to start trading?</h2>
+      <p style="color:rgba(255,255,255,0.5);margin-bottom:1.5rem;font-size:0.9375rem;position:relative;">Connect your wallet and join the marketplace on Flare Network.</p>
+      <a href="/listings" class="btn-sky" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.875rem 1.75rem;border-radius:0.875rem;color:#09090b;font-weight:800;font-size:0.9375rem;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);position:relative;transition:all 0.2s;">
+        Explore Listings <span style="font-size:1.125rem;">→</span>
+      </a>
+    </div>
+  </section>
+
+  <!-- Client-side data fetching for counters + trending + recent listings -->
+  <script>
+    (async function() {
+      // HTML-escape helper for safe innerHTML injection
+      function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
+      try {
+        // Fetch metrics for counters
+        const mRes = await fetch('/api/v1/metrics');
+        if (mRes.ok) {
+          const m = await mRes.json();
+          document.getElementById('counter-listings').textContent = m.listing_count || 0;
+          document.getElementById('counter-auctions').textContent = m.auction_count || 0;
+          document.getElementById('counter-collections').textContent = m.collection_count || 0;
+          if (m.volume_24h_wei) {
+            const vol = (Number(BigInt(m.volume_24h_wei)) / 1e18).toFixed(2);
+            document.getElementById('counter-volume').innerHTML = vol + ' <span style="font-size:0.75rem;">C2FLR</span>';
+          }
+        }
+      } catch(_) {}
+
+      try {
+        // Fetch recent listings
+        const lRes = await fetch('/api/v1/listings?limit=8&sort=recent');
+        if (lRes.ok) {
+          const listings = await lRes.json();
+          const grid = document.getElementById('recent-listings-grid');
+          if (listings && listings.length) {
+            grid.innerHTML = listings.map(function(item) {
+              const price = (Number(BigInt(item.price_wei)) / 1e18).toFixed(4);
+              const name = item.name || ('#' + item.token_id);
+              const imgSrc = item.image_uri ? '/api/v1/media?uri=' + encodeURIComponent(item.image_uri) : '';
+              return '<a href="/token/' + esc(item.collection) + '/' + esc(item.token_id) + '" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
+                '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +
+                  (imgSrc ? '<img src="' + esc(imgSrc) + '" alt="' + esc(name) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;transition:transform 0.5s;" onerror="this.parentElement.innerHTML=\'<div style=display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.15);font-size:3rem;\\>🖼</div>\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.15);font-size:3rem;">🖼</div>') +
+                  (item.collection_verified ? '<span style="position:absolute;top:0.5rem;left:0.5rem;width:1.25rem;height:1.25rem;background:#7c3aed;border-radius:50%;display:flex;align-items:center;justify-content:center;font-size:0.625rem;color:#fff;font-weight:700;box-shadow:0 2px 8px rgba(124,58,237,0.4);" title="Verified">✓</span>' : '') +
+                  '<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);box-shadow:0 0 18px -4px rgba(251,191,36,0.45);">' +
+                    '<span style="font-size:0.75rem;font-weight:900;color:#fde68a;">' + esc(price) + '</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;text-transform:uppercase;">C2FLR</span>' +
+                  '</div>' +
+                '</div>' +
+                '<div style="padding:0.75rem;">' +
+                  '<p style="font-size:0.625rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;text-transform:uppercase;margin-bottom:0.25rem;">' + esc(item.collection ? item.collection.slice(0,6) + '...' + item.collection.slice(-4) : '') + '</p>' +
+                  '<p style="font-size:0.875rem;font-weight:700;color:#fafafa;">' + esc(name) + '</p>' +
+                '</div>' +
+              '</a>';
+            }).join('');
+          }
+        }
+      } catch(_) {}
+
+      try {
+        // Fetch trending collections
+        const tRes = await fetch('/api/v1/metrics/trending');
+        if (tRes.ok) {
+          const trending = await tRes.json();
+          const grid = document.getElementById('trending-grid');
+          if (trending && trending.length) {
+            grid.innerHTML = trending.slice(0, 4).map(function(t) {
+              return '<a href="/collection/' + esc(t.collection) + '" style="display:block;padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);transition:all 0.3s;text-align:center;">' +
+                '<div style="font-size:2rem;margin-bottom:0.5rem;color:rgba(255,255,255,0.2);">🗂</div>' +
+                '<p style="font-size:0.75rem;font-weight:600;color:rgba(255,255,255,0.7);font-family:JetBrains Mono,monospace;">' + esc(t.collection ? t.collection.slice(0,6) + '...' + t.collection.slice(-4) : '') + '</p>' +
+                '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-top:0.25rem;">Score ' + esc(t.score ? t.score.toFixed(1) : '—') + '</p>' +
+              '</a>';
+            }).join('');
+          }
+        }
+      } catch(_) {}
+    })();
+
+    // 3D tilt effect on cards
+    document.addEventListener('mouseover', function(e) {
+      var card = e.target.closest('.tilt-card');
+      if (!card) return;
+      var rect = card.getBoundingClientRect();
+      var x = e.clientX - rect.left;
+      var y = e.clientY - rect.top;
+      var centerX = rect.width / 2;
+      var centerY = rect.height / 2;
+      var rotateX = (y - centerY) / centerY * -8;
+      var rotateY = (x - centerX) / centerX * 8;
+      card.style.transform = 'perspective(1000px) rotateX(' + rotateX + 'deg) rotateY(' + rotateY + 'deg) scale3d(1.02,1.02,1.02)';
+      card.style.boxShadow = '0 20px 60px rgba(139,92,246,0.2)';
+      card.style.borderColor = 'rgba(167,139,250,0.4)';
+    });
+    document.addEventListener('mouseout', function(e) {
+      var card = e.target.closest('.tilt-card');
+      if (!card) return;
+      card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1,1,1)';
+      card.style.boxShadow = '';
+      card.style.borderColor = 'rgba(255,255,255,0.08)';
+    });
+  </script>
+</BaseLayout>

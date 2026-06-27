@@ -78,16 +78,56 @@ function WalletButton() {
 
   if (!isConnected) {
     return (
-      <button className="connect-btn" onClick={() => open()} disabled={connecting}>
+      <button
+        onClick={() => open()}
+        disabled={connecting}
+        style={{
+          padding: '0.625rem 1.25rem',
+          borderRadius: '0.75rem',
+          background: connecting
+            ? 'linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25))'
+            : 'linear-gradient(135deg, #a78bfa, #7c3aed)',
+          color: connecting ? 'rgba(255,255,255,0.4)' : '#ffffff',
+          fontWeight: 800,
+          fontSize: '0.8125rem',
+          border: 'none',
+          cursor: connecting ? 'not-allowed' : 'pointer',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          transition: 'all 0.2s ease',
+          boxShadow: connecting ? 'none' : '0 0 22px -6px rgba(167,139,250,0.45), 0 4px 12px -4px rgba(124,58,237,0.3)',
+          fontFamily: 'inherit',
+          lineHeight: 1,
+        }}
+        onMouseEnter={(e) => {
+          if (!connecting) {
+            e.currentTarget.style.opacity = '0.92';
+            e.currentTarget.style.transform = 'scale(1.02)';
+            e.currentTarget.style.boxShadow = '0 0 30px -4px rgba(167,139,250,0.6), 0 6px 20px -6px rgba(124,58,237,0.35)';
+          }
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.opacity = '1';
+          e.currentTarget.style.transform = 'scale(1)';
+          e.currentTarget.style.boxShadow = '0 0 22px -6px rgba(167,139,250,0.45), 0 4px 12px -4px rgba(124,58,237,0.3)';
+        }}
+        onMouseDown={(e) => {
+          if (!connecting) e.currentTarget.style.transform = 'scale(0.97)';
+        }}
+        onMouseUp={(e) => {
+          if (!connecting) e.currentTarget.style.transform = 'scale(1.02)';
+        }}
+      >
         {connecting ? (
-          <><span className="spinner" /> Connecting…</>
+          <>
+            <span style={{ display: 'inline-block', width: '1rem', height: '1rem', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
+            Connecting…
+          </>
         ) : (
           <>
-            <svg className="wallet-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-              <rect x="2" y="6" width="20" height="12" rx="2" />
-              <circle cx="16" cy="12" r="2" fill="currentColor" />
-            </svg>
-            Connect Wallet
+            <span style={{ fontSize: '1rem', lineHeight: 1, color: '#ddd6fe' }}>⌬</span>
+            <span>Connect Wallet</span>
           </>
         )}
       </button>
@@ -96,24 +136,79 @@ function WalletButton() {
 
   if (wrongNetwork) {
     return (
-      <div className="network-warning">
-        <p>Wrong network. Switch to <strong>Flare Coston2</strong>.</p>
-        <button className="switch-btn" onClick={() => switchNetwork(flareCoston2.id)}>
-          Switch Network
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', boxShadow: '0 0 18px -4px rgba(251,191,36,0.45)' }}>
+        <span style={{ fontSize: '0.625rem', fontWeight: 700, color: '#fde68a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>⚠ Wrong Network</span>
+        <button
+          onClick={() => switchNetwork(flareCoston2.id)}
+          style={{
+            padding: '0.375rem 0.75rem',
+            borderRadius: '0.5rem',
+            background: 'linear-gradient(135deg, #fcd34d, #f59e0b)',
+            color: '#09090b',
+            fontWeight: 700,
+            fontSize: '0.6875rem',
+            border: 'none',
+            cursor: 'pointer',
+            fontFamily: 'inherit',
+            boxShadow: '0 0 14px -3px rgba(251,191,36,0.45)',
+          }}
+        >
+          Switch to Coston2
         </button>
       </div>
     );
   }
 
   return (
-    <div className="connected-state">
-      <div className="wallet-badge">
-        <span className="status-dot" />
-        <span className="address-display" onClick={copyAddress} title="Click to copy">
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
+        <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#7dd3fc', boxShadow: '0 0 8px rgba(125,211,252,0.5)', position: 'relative' }}>
+          <span style={{ position: 'absolute', inset: '-3px', borderRadius: '50%', background: 'rgba(125,211,252,0.2)', animation: 'pulse-ring 1.5s ease-out infinite' }} />
+        </span>
+        <span style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
+        <span style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>
+        <span
+          onClick={copyAddress}
+          title="Click to copy"
+          style={{
+            fontSize: '0.75rem',
+            fontWeight: 700,
+            color: '#fafafa',
+            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
+            cursor: 'pointer',
+            transition: 'color 0.2s',
+          }}
+          onMouseEnter={(e) => { e.currentTarget.style.color = '#fcd34d'; }}
+          onMouseLeave={(e) => { e.currentTarget.style.color = '#fafafa'; }}
+        >
           {displayAddr}
         </span>
       </div>
-      <button className="disconnect-btn" onClick={() => open({ view: 'Account' })}>
+      <button
+        onClick={() => open({ view: 'Account' })}
+        style={{
+          padding: '0.25rem 0.625rem',
+          borderRadius: '0.5rem',
+          background: 'transparent',
+          border: '1px solid rgba(255,255,255,0.08)',
+          color: 'rgba(255,255,255,0.4)',
+          fontSize: '0.6875rem',
+          fontWeight: 600,
+          cursor: 'pointer',
+          fontFamily: 'inherit',
+          transition: 'all 0.2s',
+        }}
+        onMouseEnter={(e) => {
+          e.currentTarget.style.color = '#fca5a5';
+          e.currentTarget.style.borderColor = 'rgba(252,165,165,0.3)';
+          e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
+        }}
+        onMouseLeave={(e) => {
+          e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
+          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
+          e.currentTarget.style.background = 'transparent';
+        }}
+      >
         Disconnect
       </button>
     </div>
@@ -149,7 +244,7 @@ async function initAppKit(): Promise<void> {
         url: 'https://magicwebb.fly.dev',
         icons: ['/favicon.ico'],
       },
-      features: { analytics: true, email: false, socials: false },
+      features: { analytics: false, email: false, socials: false },
       themeMode: 'dark',
       enableWalletSelector: true,
       enableNetworkSelector: true,
@@ -170,9 +265,31 @@ export default function WalletConnect() {
     initAppKit().then(() => setReady(true));
   }, []);
 
-  // Not ready yet — show a minimal placeholder so the navbar doesn't collapse
+  // Not ready yet — show a minimal shimmer placeholder
   if (!ready || !_wagmiConfig) {
-    return <button className="connect-btn" disabled style={{ opacity: 0.5 }}>•••</button>;
+    return (
+      <button
+        disabled
+        style={{
+          padding: '0.625rem 1.25rem',
+          borderRadius: '0.75rem',
+          background: 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(124,58,237,0.1))',
+          border: '1px solid rgba(255,255,255,0.05)',
+          color: 'rgba(255,255,255,0.2)',
+          fontWeight: 800,
+          fontSize: '0.8125rem',
+          cursor: 'default',
+          display: 'inline-flex',
+          alignItems: 'center',
+          gap: '0.5rem',
+          fontFamily: 'inherit',
+          animation: 'shimmer-placeholder 1.5s ease-in-out infinite',
+        }}
+      >
+        <span style={{ fontSize: '1rem', opacity: 0.3 }}>⌬</span>
+        <span>Loading…</span>
+      </button>
+    );
   }
 
   return (
