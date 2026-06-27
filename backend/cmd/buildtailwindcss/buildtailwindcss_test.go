@@ -34,7 +34,7 @@ func TestRepoRootReachesGomod(t *testing.T) {
 }
 
 // TestOutputPathIsUnderStaticFS. The compiled CSS must land under
-// internal/ui/static so embed.go's //go:embed all:static catches it
+// frontend/static/ so embed.go's //go:embed all:static catches it
 // and Fiber's filesystem middleware exposes it at /static/tailwind.css.
 // If this fails, layout.html's <link rel=stylesheet href=/static/
 // tailwind.css> 404s in production.
@@ -42,7 +42,7 @@ func TestOutputPathIsUnderStaticFS(t *testing.T) {
 	// Run repoRoot() via the test (it must walk to go.mod).
 	root := repoRoot()
 	want := filepath.Join(root, "..", "frontend", "static", "tailwind.css")
-	got := filepath.Clean(filepath.Join(root, "internal", "ui", "static", "tailwind.css"))
+	got := filepath.Clean(filepath.Join(root, "..", "frontend", "static", "tailwind.css"))
 	if got != want {
 		t.Fatalf("output path construction drifted: got %q want %q", got, want)
 	}

@@ -244,6 +244,50 @@ contract OfferBookTest is Test {
         assertEq(seller.balance - sellerBefore, 2 ether - _fee(2 ether)); // seller nets 98.5%
     }
 
+    // ── ERC-1155 rejectOffer units check (L-13 hardening) ──────────────────────
+
+    /// @dev L-13 regression: rejectOffer on ERC-1155 must require the caller
+    ///      holds at least the offer's `units` (mirroring acceptOffer). A 1-unit
+    ///      holder cannot reject a 5-unit offer; a sufficient holder can.
+    function test_rejectOffer1155RequiresSufficientUnits() public {
+        vm.startPrank(seller);
+        multi.mint(seller, 77, 10);
+        multi.setApprovalForAll(address(ob), true);
+        vm.stopPrank();
+
+        // Bidder makes a 5-unit offer on token 77.
+        vm.prank(bidder);
+        ob.makeOffer1155{value: 2 ether}(address(multi), 77, 2 ether, 5, _exp());
+
+        (uint128 principal, uint128 units,,) = ob.positions(address(multi), 77, bidder);
+        assertEq(principal, 2 ether);
+        assertEq(units, 5);
+
+        // Seller transfers away 9 of 10 units — now holds only 1 unit.
+        vm.prank(seller);
+        multi.safeTransferFrom(seller, address(0xCAFE), 77, 9, "");
+        assertEq(multi.balanceOf(seller, 77), 1);
+
+        // 1-unit holder tries to reject a 5-unit offer → reverts NotOwner.
+        vm.prank(seller);
+        vm.expectRevert(NotOwner.selector);
+        ob.rejectOffer(address(multi), 77, bidder);
+
+        // Seller gets back enough units (5+ from the cafe address).
+        vm.prank(address(0xCAFE));
+        multi.safeTransferFrom(address(0xCAFE), seller, 77, 9, "");
+        assertEq(multi.balanceOf(seller, 77), 10);
+
+        // Now seller holds 10 ≥ 5 units — rejectOffer succeeds.
+        uint256 bidderBalBefore = bidder.balance;
+        vm.prank(seller);
+        ob.rejectOffer(address(multi), 77, bidder);
+
+        assertEq(bidder.balance, bidderBalBefore + 2 ether, "full principal refunded");
+        (principal,,,) = ob.positions(address(multi), 77, bidder);
+        assertEq(principal, 0, "position cleared");
+    }
+
     // ── Fuzz ────────────────────────────────────────────────────────────────────
 
     function testFuzz_feeChargedAtAcceptNotMake(uint128 principal) public {

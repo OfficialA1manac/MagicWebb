@@ -97,7 +97,7 @@
   <div id="listings-grid"
        class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
        hx-get="/partials/listings"
-       hx-trigger="sse:listing-updated, every 1s [!document.hidden]"
+       hx-trigger="sse:listing-updated, every 60s [!document.hidden]"
        hx-swap="innerHTML">
     {{template "partials/listing_cards.html" .}}
   </div>

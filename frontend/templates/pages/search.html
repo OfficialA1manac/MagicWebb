@@ -3,7 +3,8 @@
 <div class="mb-8">
   <form action="/search" method="get">
     <div class="flex gap-3">
-      <input name="q" value="{{.Query}}" type="text" placeholder="Search NFTs and collections…"
+      <label for="search-q" class="sr-only">Search NFTs and collections</label>
+      <input id="search-q" name="q" value="{{.Query}}" type="text" placeholder="Search NFTs and collections…" aria-label="Search NFTs and collections"
              class="flex-1 bg-neutral-900 border border-neutral-700 rounded-xl px-4 py-3 text-white placeholder-neutral-600 focus:outline-none focus:border-emerald-500">
       <button type="submit" class="px-6 py-3 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">Search</button>
     </div>

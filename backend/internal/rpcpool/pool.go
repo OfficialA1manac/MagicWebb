@@ -88,11 +88,53 @@ func New(ctx context.Context, urls []string, timeout time.Duration) (*Pool, erro
 		log.Warn().Msg("rpcpool: no endpoint passed the health probe; starting anyway")
 	}
 	log.Info().Int("endpoints", len(nodes)).Int("healthy", len(healthy)).Msg("rpcpool: ready")
-	return newPoolWithNodes(nodes, timeout), nil
+	p := newPoolWithNodes(nodes, timeout)
+	// Start a periodic background health re-check so recovered preferred
+	// nodes are reconsidered for the sticky cursor. Without this, a node
+	// that fails once and recovers later is never promoted back to the
+	// preferred slot — the cursor stays pinned to whichever endpoint
+	// happened to work after the failure. Every 5 minutes we probe every
+	// node with a lightweight BlockNumber call and, if the first healthy
+	// node differs from the current cursor, CAS the cursor to the
+	// promoted node.
+	go p.healthLoop()
+	return p, nil
 }
 
 func newPoolWithNodes(nodes []ethNode, timeout time.Duration) *Pool {
 	return &Pool{nodes: nodes, timeout: timeout}
+}
+
+// healthLoop periodically probes every node and promotes the first healthy
+// endpoint as the sticky cursor. This allows a recovered preferred node to
+// reclaim its position after a transient failure.
+func (p *Pool) healthLoop() {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for range ticker.C {
+		var promoted bool
+		for idx, n := range p.nodes {
+			probeCtx, probeCancel := context.WithTimeout(context.Background(), p.timeout)
+			_, err := n.BlockNumber(probeCtx)
+			probeCancel()
+			if err == nil {
+				cur := p.cur.Load()
+				if uint64(idx) != cur {
+					// Found a healthy endpoint that's ahead of the current
+					// cursor. CAS it into place so subsequent RPC calls
+					// prefer the earlier (usually closest / preferred) node.
+					if p.cur.CompareAndSwap(cur, uint64(idx)) {
+						log.Info().Uint64("cursor", uint64(idx)).Msg("rpcpool: health check promoted endpoint")
+					}
+				}
+				promoted = true
+				break
+			}
+		}
+		if !promoted {
+			log.Warn().Msg("rpcpool: health check found no healthy endpoints")
+		}
+	}
 }
 
 // Close releases every underlying client transport.
@@ -123,7 +165,12 @@ func call[T any](p *Pool, ctx context.Context, op string, perCall time.Duration,
 		cancel()
 		if err == nil {
 			if i > 0 {
-				p.cur.Store(idx) // stick to the endpoint that worked
+				// Use CAS so only one goroutine promotes the sticky cursor.
+				// Without this, concurrent callers racing on failover can
+				// bounce the cursor between endpoints, thrashing the
+				// sticky-pinning invariant and causing each caller to
+				// observe a different "preferred" endpoint on every call.
+				p.cur.CompareAndSwap(start, idx)
 			}
 			return v, nil
 		}

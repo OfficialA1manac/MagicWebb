@@ -129,13 +129,25 @@
       <span class="text-lg font-black text-gold-200">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
       <div class="flex gap-2 shrink-0">
         <button class="px-3 py-1.5 rounded-lg btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
-                @click="$store.wallet.acceptOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Accept</button>
+                @click="$store.wallet.acceptOffer('{{$.Contract}}', '{{$.TokenID}}', '{{lower .Bidder}}')">Accept</button>
         <button class="px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 text-white text-xs font-bold transition"
-                @click="$store.wallet.rejectOffer('{{.Collection}}', '{{.TokenID}}', '{{lower .Bidder}}')">Reject</button>
+                @click="$store.wallet.rejectOffer('{{$.Contract}}', '{{$.TokenID}}', '{{lower .Bidder}}')">Reject</button>
       </div>
     </div>
     {{end}}
   </div>
 </div>
 {{end}}
+
+<!-- Hidden state bridge: Alpine x-data on the parent page reads these
+     data attributes on every htmx swap to keep the action panel's
+     tab visibility + Buy-form values in sync with the live data. -->
+<div id="token-state" style="display:none"
+     data-has-listing="{{if .Listing}}true{{else}}false{{end}}"
+     data-has-auction="{{if .Auction}}true{{else}}false{{end}}"
+     {{with .Listing}}
+     data-seller="{{lower .Seller}}"
+     data-price="{{.PriceWei}}"
+     data-price-display="{{wei2flr .PriceWei}}"
+     {{end}}></div>
 {{end}}

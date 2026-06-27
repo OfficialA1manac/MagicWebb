@@ -15,14 +15,14 @@
 | `OfferMade` / `OfferAccepted` | routine | OfferBook activity               | indexer handle                                            |
 | `PushFailed`         | **MEDIUM**       | A `.call{value: …}` reverted             | `runWithdrawalSweeper` will surface a banner via SSE; if PushFailed frequency >1/min investigate the receiver set |
 | `AuctionStalled`     | **HIGH**         | Buyer-fault sandbox violation           | `settleUnstuck()` 7-day window opens; alert on-chain      |
-| `EntriesHalted` / `EntriesUnpaused` | routine | Manager activity              | off-chain only (events are not stored on the cores)       |
+| `EntriesPaused` / `EntriesUnpaused` | routine | Manager activity              | off-chain only (events are not stored on the cores)       |
 | `AuditLog`           | informational    | Manager role + circuit-breaker writes   | audit only                                                |
 
 ## Backend health (Fly.io dashboard)
 
 ```bash
 # Process / indexer liveness
-curl -fsSL https://magicwebb.fly.dev/api/v1/healthz | jq .status
+curl -fsSL https://magicwebb.fly.dev/healthz | jq .status
 # → {"status":"ok","watcher":"alive","uptime_s":3124,"last_block":4781209}
 
 # SSE fan-out
@@ -42,8 +42,8 @@ curl -fsS -N --max-time 5 https://magicwebb.fly.dev/events | head -c 64
 
 ```bash
 # 1. Get the past 24 h of PushFailed events.
-cast logs --rpc-url https://flare-api.flare.network/ext/C/rpc \
-  --from-block $(($(cast block latest -n 86400 --rpc-url …) - 1)) \
+cast logs --rpc-url "$RPC_URL" \
+  --from-block $(($(cast block latest -n 86400 --rpc-url "$RPC_URL") - 1)) \
   --to-block latest \
   --address $MARKETPLACE_ADDR,$AUCTION_ADDR,$OFFERBOOK_ADDR \
   --event "PushFailed(address,uint256)"
@@ -51,7 +51,7 @@ cast logs --rpc-url https://flare-api.flare.network/ext/C/rpc \
 # 2. Cross-reference each `to` address against on-chain
 #    pendingReturns().
 cast call $AUCTION_ADDR "pendingReturns(address)(uint256)" $TO_ADDR \
-  --rpc-url https://flare-api.flare.network/ext/C/rpc
+  --rpc-url "$RPC_URL"
 
 # 3. If the receiver is a contract, simulate receive():
 cast estimate $TO_ADDR --rpc-url …  # contract with empty value
@@ -59,16 +59,17 @@ cast estimate $TO_ADDR --rpc-url …  # contract with empty value
 
 If a receiver is a contract WITHOUT a payable `receive() / fallback()`
 that has been holding escrow for >7 days, **page on-call**: this is
-the only path for funds to be permanently trapped, and even there
-the receiver owner can deploy a NEW contract that proxies to a
-correct wallet and call `withdrawRefund()`.
+the only path for funds to be permanently trapped. A replacement
+contract at a new address cannot claim the original address's
+`pendingReturns` credit — the funds are unrecoverable unless the
+receiver contract itself is upgradeable or has an explicit
+`withdrawRefund()` path.
 
 ## Keeper advisory-lock health
 
-The keeper is single-flight via Postgres advisory-lock (`SELECT
-pg_try_advisory_lock(<KEEPER_KEY_HASH>)`). If two replicas
+The keeper is single-flight via Postgres advisory-lock(`SELECT pg_try_advisory_lock(<KEEPER_KEY_HASH>)`). If two replicas
 simultaneously hold the lock (rare split-brain via network
-partition), `WaitKeeperLock` rejects both, and the keepper logs
+partition), `WaitKeeperLock` rejects both, and the keeper logs
 `keeper gate: acquisition failed`. 
 
 ```bash
@@ -173,21 +174,37 @@ Any regression fails the cron -> emails on-call.
 
 ## Appendix — Full event signature cheat-sheet
 
-```
-Listed(address indexed seller, address indexed collection, uint256 indexed tokenId, uint128 price, uint64 endsAt, uint8 standard)
-Bought(address indexed seller, address indexed buyer, address indexed collection, uint256 tokenId, uint128 price)
-Cancelled(address indexed seller, address indexed collection, uint256 indexed tokenId)
-AuctionCreated(uint256 indexed id, address indexed seller, address indexed collection, uint256 tokenId, uint128 reserve, uint64 endsAt)
-BidPlaced(uint256 indexed id, address indexed bidder, uint256 cumulative, bool newLeader)
-AuctionSettled(uint256 indexed id, address indexed winner, address seller, uint128 amount)
-AuctionStalled(uint256 indexed id, address indexed buyer, uint64 stalledAt)
-AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refundWei)
-OfferMade(address indexed collection, uint256 indexed tokenId, address indexed bidder, uint128 principal, uint128 units, uint64 expiresAt, uint8 standard)
-OfferAccepted(address indexed collection, uint256 indexed tokenId, address indexed bidder, address seller)
-OfferRejected(address indexed collection, uint256 indexed tokenId, address indexed bidder)
+```text
+// Marketplace (fixed-price listings)
+Listed(    address indexed coll, uint256 indexed id, address indexed seller, TokenStandard standard, uint128 amount, uint128 price, uint64 expiresAt)
+Bought(   address indexed coll, uint256 indexed id, address indexed buyer, address seller, TokenStandard standard, uint128 amount, uint128 price, uint256 fee)
+Cancelled(address indexed coll, uint256 indexed id, address indexed seller)
+
+// AuctionHouse (English auctions)
+AuctionCreated(       uint256 indexed id, address indexed coll, uint256 indexed tokenId, address seller, TokenStandard standard, uint128 amount, uint128 reserve, uint64 startsAt, uint64 endsAt)
+BidPlaced(            uint256 indexed id, address indexed bidder, uint256 amount, uint256 newTotal)
+OutbidNotification(   uint256 indexed id, address indexed outbid, uint256 newLeaderTotal)
+AuctionExtended(      uint256 indexed id, uint64 newEndsAt)
+AuctionSettled(       uint256 indexed id, address indexed winner, address indexed seller, uint128 winningBid, uint256 fee)
+LoserRefunded(        uint256 indexed id, address indexed bidder, uint256 amount)
+AuctionCancelled(     uint256 indexed id)
+RefundPushed(         address indexed bidder, uint256 amount)
+AuctionStalled(       uint256 indexed id, address indexed winner, address indexed seller)
+AuctionReclaimed(     uint256 indexed id, address indexed winner, uint256 refundAmount)
+
+// OfferBook (stacked offers)
+OfferMade(     address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal, uint128 units, uint64 expiresAt)
+OfferAccepted( address indexed coll, uint256 indexed tokenId, address indexed seller, address bidder, uint256 principal, uint256 fee, uint128 units, TokenStandard standard)
+OfferRefunded( address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal)
+
+// MarketplaceCore (shared base)
 PushFailed(address indexed to, uint256 amount)
-WithdrawRefunded(address indexed to, uint256 amount)   // emitted on auction-side settle losers
-RefundedExpired(address indexed collection, uint256 indexed tokenId, address indexed bidder, uint128 principal)
+
+// MarketplaceManager (role registry, circuit breaker)
+EntriesPaused(   address indexed by)
+EntriesUnpaused( address indexed by)
+ModuleSet(       bytes32 indexed slot, address indexed addr)
+AuditLog(        bytes32 indexed action, address indexed actor, address indexed subject, bytes32 extra)
 ```
 
 Indices are designed so an off-chain indexer can join cheaply with

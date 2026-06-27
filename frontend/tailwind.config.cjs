@@ -115,5 +115,60 @@ module.exports = {
       },
     },
   },
+  // Safelist: dynamic classes used by docs.html where the accent color
+  // is a Go template variable ({{.Accent}}) — Tailwind's JIT cannot see
+  // these at build time and would purge them without explicit safelist
+  // entries. The docs page renders index cards and prose elements with
+  // dynamic accent: sky, gold, violet, white, emerald.
+  safelist: [
+    // Doc index card hover borders
+    'hover:border-sky-500/60',   'hover:border-gold-500/60',
+    'hover:border-violet-500/60','hover:border-white-500/60',
+    'hover:border-emerald-500/60',
+    // Doc index card hover shadows
+    'hover:shadow-sky-500/10',   'hover:shadow-gold-500/10',
+    'hover:shadow-violet-500/10','hover:shadow-white-500/10',
+    'hover:shadow-emerald-500/10',
+    // Doc index card hover heading
+    'group-hover:text-sky-400',  'group-hover:text-gold-400',
+    'group-hover:text-violet-400','group-hover:text-white-400',
+    'group-hover:text-emerald-400',
+    // Doc index card text accent
+    'text-sky-400',  'text-gold-400',
+    'text-violet-400','text-white-400',
+    'text-emerald-400',
+    // Doc index card accent background
+    'bg-sky-500/10', 'bg-gold-500/10',
+    'bg-violet-500/10','bg-white-500/10',
+    'bg-emerald-500/10',
+    // Doc sidebar border left accent
+    'border-sky-400','border-gold-400',
+    'border-violet-400','border-white-400',
+    'border-emerald-400',
+    // Doc sidebar active link background
+    'bg-sky-500/20','bg-gold-500/20',
+    'bg-violet-500/20','bg-white-500/20',
+    'bg-emerald-500/20',
+    // Doc mobile pill active text
+    'text-sky-300','text-gold-300',
+    'text-violet-300','text-white-300',
+    'text-emerald-300',
+    // Prose accent overrides
+    'prose-h1:from-sky-400', 'prose-h1:from-gold-400',
+    'prose-h1:from-violet-400', 'prose-h1:from-white-400',
+    'prose-h1:from-emerald-400',
+    'prose-a:text-sky-400', 'prose-a:text-gold-400',
+    'prose-a:text-violet-400', 'prose-a:text-white-400',
+    'prose-a:text-emerald-400',
+    'prose-code:text-sky-300', 'prose-code:text-gold-300',
+    'prose-code:text-violet-300', 'prose-code:text-white-300',
+    'prose-code:text-emerald-300',
+    'prose-blockquote:border-sky-500', 'prose-blockquote:border-gold-500',
+    'prose-blockquote:border-violet-500','prose-blockquote:border-white-500',
+    'prose-blockquote:border-emerald-500',
+    'prose-th:text-sky-300', 'prose-th:text-gold-300',
+    'prose-th:text-violet-300', 'prose-th:text-white-300',
+    'prose-th:text-emerald-300',
+  ],
   plugins: [require('@tailwindcss/typography')],
 };

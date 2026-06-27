@@ -2,32 +2,41 @@
 
 import { useEffect, useRef, useState } from 'react';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider } from 'wagmi';
+import { WagmiProvider, useDisconnect } from 'wagmi';
 import { createAppKit } from '@reown/appkit/react';
 import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { useAppKit, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react';
 import { http } from 'wagmi';
 
-const flareCoston2 = {
-  id: 114,
-  name: 'Flare Coston2',
-  nativeCurrency: { name: 'Coston2 Flare', symbol: 'C2FLR', decimals: 18 },
-  rpcUrls: { default: { http: ['https://coston2-api.flare.network/ext/C/rpc'] } },
-  blockExplorers: { default: { name: 'Coston2 Explorer', url: 'https://coston2-explorer.flare.network' } },
-} as const;
+// Target chain is derived from server-injected window globals so the
+// same build works for Coston2 (chain 114) and mainnet (chain 14) without
+// recompilation. The backend injects MW_CHAIN_ID, MW_RPC_URL,
+// MW_NETWORK_NAME, MW_NATIVE_CURRENCY, MW_EXPLORER via layout.html.
+// Falls back to Coston2 defaults if the globals are absent (dev mode).
+function getTargetChain() {
+  if (typeof window === 'undefined') {
+    return { id: 114, name: 'Flare Coston2', nativeCurrency: { name: 'Coston2 Flare', symbol: 'C2FLR', decimals: 18 }, rpcUrls: { default: { http: ['https://coston2-api.flare.network/ext/C/rpc'] } }, blockExplorers: { default: { name: 'Coston2 Explorer', url: 'https://coston2-explorer.flare.network' } } };
+  }
+  const chainId = Number((window as any).MW_CHAIN_ID || 114);
+  const rpcUrl = (window as any).MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
+  const name = (window as any).MW_NETWORK_NAME || 'Flare Coston2';
+  const currency = (window as any).MW_NATIVE_CURRENCY || 'C2FLR';
+  const explorer = (window as any).MW_EXPLORER || 'https://coston2-explorer.flare.network';
+  const currencyName = name === 'Flare' ? 'Flare' : 'Coston2 Flare';
+  return {
+    id: chainId,
+    name,
+    nativeCurrency: { name: currencyName, symbol: currency, decimals: 18 },
+    rpcUrls: { default: { http: [rpcUrl] } },
+    blockExplorers: { default: { name: name + ' Explorer', url: explorer } },
+  };
+}
 
-const flareNetwork = {
-  id: 14,
-  name: 'Flare',
-  nativeCurrency: { name: 'Flare', symbol: 'FLR', decimals: 18 },
-  rpcUrls: { default: { http: ['https://flare-api.flare.network/ext/C/rpc'] } },
-  blockExplorers: { default: { name: 'Flare Explorer', url: 'https://flare-explorer.flare.network' } },
-} as const;
+const targetChain = getTargetChain();
 
-const chains = [flareCoston2, flareNetwork];
+const chains = [targetChain];
 const transports = {
-  [flareCoston2.id]: http('https://coston2-api.flare.network/ext/C/rpc'),
-  [flareNetwork.id]: http('https://flare-api.flare.network/ext/C/rpc'),
+  [targetChain.id]: http(targetChain.rpcUrls.default.http[0]),
 };
 
 function getProjectId(): string {
@@ -36,11 +45,12 @@ function getProjectId(): string {
 
 function WalletButton() {
   const { open } = useAppKit();
+  const { disconnect } = useDisconnect();
   const { address, isConnected, status } = useAppKitAccount();
   const { chainId, switchNetwork } = useAppKitNetwork();
 
   const connecting = status === 'connecting' || status === 'reconnecting';
-  const wrongNetwork = isConnected && chainId !== undefined && chainId !== flareCoston2.id;
+  const wrongNetwork = isConnected && chainId !== undefined && chainId !== targetChain.id;
 
   const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
   const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
@@ -66,7 +76,7 @@ function WalletButton() {
   useEffect(() => {
     if (typeof window !== 'undefined') {
       (window as any).__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
-      (window as any).__MW_APPKIT_DISCONNECT__ = () => { open({ view: 'Account' }); };
+      (window as any).__MW_APPKIT_DISCONNECT__ = () => { disconnect(); };
       (window as any).__MW_APPKIT_READY__ = true;
     }
     return () => {
@@ -76,7 +86,7 @@ function WalletButton() {
         try { delete (window as any).__MW_APPKIT_READY__; } catch (_) {}
       }
     };
-  }, [isConnected, connecting, open]);
+  }, [isConnected, connecting, open, disconnect]);
 
   if (!isConnected) {
     return (
@@ -141,7 +151,7 @@ function WalletButton() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', boxShadow: '0 0 18px -4px rgba(251,191,36,0.45)' }}>
         <span style={{ fontSize: '0.625rem', fontWeight: 700, color: '#fde68a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>⚠ Wrong Network</span>
         <button
-          onClick={() => switchNetwork(flareCoston2.id)}
+          onClick={() => switchNetwork(targetChain.id)}
           style={{
             padding: '0.375rem 0.75rem',
             borderRadius: '0.5rem',
@@ -155,7 +165,7 @@ function WalletButton() {
             boxShadow: '0 0 14px -3px rgba(251,191,36,0.45)',
           }}
         >
-          Switch to Coston2
+          Switch to {targetChain.name}
         </button>
       </div>
     );
@@ -169,7 +179,7 @@ function WalletButton() {
         </span>
         <span style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
         <span style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>
-        <span
+        <button
           onClick={copyAddress}
           title="Click to copy"
           style={{
@@ -179,15 +189,18 @@ function WalletButton() {
             fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
             cursor: 'pointer',
             transition: 'color 0.2s',
+            background: 'none',
+            border: 'none',
+            padding: 0,
           }}
           onMouseEnter={(e) => { e.currentTarget.style.color = '#fcd34d'; }}
           onMouseLeave={(e) => { e.currentTarget.style.color = '#fafafa'; }}
         >
           {displayAddr}
-        </span>
+        </button>
       </div>
       <button
-        onClick={() => open({ view: 'Account' })}
+        onClick={() => disconnect()}
         style={{
           padding: '0.25rem 0.625rem',
           borderRadius: '0.5rem',
@@ -219,30 +232,46 @@ function WalletButton() {
 
 let _wagmiConfig: any = null;
 let _appKitReady = false;
+let _initFailed = false;
 
 async function initAppKit(): Promise<void> {
   if (typeof window === 'undefined') return;
   if (_appKitReady) return;
   const projectId = getProjectId();
-  if (!projectId) { console.warn('[mw-wc] No Reown project ID'); return; }
+  if (!projectId) { console.warn('[mw-wc] No Reown project ID'); _initFailed = true; return; }
   try {
     const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
     createAppKit({
-      adapters: [adapter], networks: chains as any, defaultNetwork: flareCoston2, projectId,
+      adapters: [adapter], networks: chains as any, defaultNetwork: targetChain, projectId,
       metadata: { name: 'MagicWebb', description: 'NFT Marketplace on Flare Network', url: 'https://magicwebb.fly.dev', icons: ['/favicon.ico'] },
       features: { analytics: false, email: false, socials: false },
       themeMode: 'dark', enableWalletSelector: true, enableNetworkSelector: true,
     });
     _appKitReady = true;
-  } catch (e) { console.error('[mw-wc] AppKit init failed:', e); }
+  } catch (e) { console.error('[mw-wc] AppKit init failed:', e); _initFailed = true; }
 }
 
 const queryClient = new QueryClient();
 
 export default function WalletConnect() {
   const [ready, setReady] = useState(false);
-  useEffect(() => { initAppKit().then(() => setReady(true)); }, []);
+  const [retryCount, setRetryCount] = useState(0);
+  useEffect(() => { initAppKit().then(() => setReady(true)); }, [retryCount]);
+
+  if (_initFailed) {
+    return (
+      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1.25rem', borderRadius: '0.75rem', background: 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(220,38,38,0.05))', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5', fontWeight: 600, fontSize: '0.75rem', fontFamily: 'inherit' }}>
+        <span>⚠ Wallet unavailable</span>
+        <button
+          onClick={() => { _initFailed = false; _appKitReady = false; setRetryCount(c => c + 1); }}
+          style={{ padding: '0.25rem 0.625rem', borderRadius: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', fontWeight: 700, fontSize: '0.6875rem', cursor: 'pointer', fontFamily: 'inherit' }}
+        >
+          Retry
+        </button>
+      </div>
+    );
+  }
 
   if (!ready || !_wagmiConfig) {
     return (

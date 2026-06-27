@@ -10,8 +10,12 @@ import (
 )
 
 // Store is a single-use, TTL'd nonce store keyed by address.
+// The only write entry point is SetIfFree — callers that need SIWE
+// should always use it to prevent one party from clobbering another's
+// pending nonce. The deprecated Set() method has been removed from
+// the interface; any code that calls Set instead of SetIfFree on a
+// Store-typed variable will not compile.
 type Store interface {
-	Set(address, nonce string, ttl time.Duration)
 	SetIfFree(address, nonce string, ttl time.Duration) bool
 	GetDel(address string) (string, bool)
 }
@@ -32,13 +36,6 @@ func New() *MemStore {
 	s := &MemStore{entries: make(map[string]record)}
 	go s.cleanup()
 	return s
-}
-
-// Set stores nonce for address with given TTL.
-func (s *MemStore) Set(address, nonce string, ttl time.Duration) {
-	s.mu.Lock()
-	s.entries[address] = record{value: nonce, expiresAt: time.Now().Add(ttl)}
-	s.mu.Unlock()
 }
 
 // SetIfFree stores nonce only when no live nonce already exists. Returns

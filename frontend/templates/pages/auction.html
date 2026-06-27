@@ -100,7 +100,10 @@
             return v > m ? v : m;
           } catch (_) { return m; }
         }, 0n);
-        if (max > 0n) this.highestOfferWei = max.toString();
+        // v34: reset to zero when no offers are pending, so the
+        // min-bid floor doesn't carry a stale offer from a prior
+        // fetch (which would overstate the floor and block valid bids).
+        this.highestOfferWei = max > 0n ? max.toString() : '0';
       } catch (_) { /* keep stale value; guard will under-estimate, never block a valid bid */ }
     },
     // v8 — refresh the prevBidWei stamp from the auction row so the floor
@@ -186,8 +189,8 @@
       <p class="text-[11px] text-white/40 mt-1">Auction ends <span class="text-white/80">{{.EndsAt.Format "Jan 2, 15:04"}}</span></p>
     </div>
 
-    {{if not $.Ended}}
-    <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-violet-400/30 p-5 mb-4 glow-violet">
+    <div x-show="remaining !== 'Ended'"
+         class="bg-ink-900/80 backdrop-blur rounded-2xl border border-violet-400/30 p-5 mb-4 glow-violet">
       <h3 class="text-sm font-extrabold text-white mb-3 flex items-center gap-2"><span class="text-violet-200">♝</span> Submit / Place a Bid</h3>
       <div class="flex gap-2">
         <div class="relative flex-1">
@@ -203,16 +206,14 @@
       <p class="text-[11px] text-white/60 mt-1.5 leading-relaxed">         Current floor: <span class="text-violet-200 font-mono font-bold" x-text="fmtWei(minBidWei) + ' {{.NativeCurrency}}'"></span>         <template x-if="BigInt(highestOfferWei||'0') > 0n"><span class="ml-2 text-gold-200">(an active offer of <span class="font-mono" x-text="fmtWei(highestOfferWei) + ' {{.NativeCurrency}}'"></span> sets the floor)</span></template>
       </p>
     </div>
-    {{end}}
 
-    {{if $.Ended}}
-    <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-gold-400/30 p-5 mb-4 glow-gold">
+    <div x-show="remaining === 'Ended'" x-cloak
+         class="bg-ink-900/80 backdrop-blur rounded-2xl border border-gold-400/30 p-5 mb-4 glow-gold">
       <p class="text-sm font-extrabold text-white mb-3 flex items-center gap-2"><span class="text-gold-200">♛</span> Settle auction</p>
       <p class="text-xs text-white/60 leading-relaxed mb-3">The auction has ended. Anyone can finalize the on-chain settlement; the high bidder receives the NFT and the seller receives 98.5% of the top bid.</p>
       <button @click="$store.wallet.settle({{.AuctionID}})"
               class="px-5 py-3 rounded-xl btn-gold hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-gold shadow-lg shadow-gold-500/30 active:scale-[0.97]">Settle now</button>
     </div>
-    {{end}}
   </div>
 </div>
 {{end}}

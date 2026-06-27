@@ -101,12 +101,57 @@ contract GasGriefingReceiver {
     constructor() payable {}
 
     receive() external payable {
-        // Burn ~100k gas — works because withdrawRefund no longer caps gas.
-        for (uint256 i; i < 1000; ++i) {
+        // Burn ~220k gas via 10 storage writes — works because withdrawRefund
+        // no longer caps gas. 10 pushes exceeds the old 50k gas cap and is
+        // sufficient to exercise the gas-heavy receive() path without the
+        // waste of 1000 iterations (~2M gas).
+        for (uint256 i; i < 10; ++i) {
             junk.push(i);
         }
     }
+}
 
+
+/// @dev Malicious buyer that re-enters Marketplace.batchList during
+///      onERC721Received. L-09: proves batchList is protected by
+///      nonReentrant from a real (non-STATICCALL) callback context.
+///      Unlike _list()'s approval probes (view functions called via
+///      STATICCALL which block state-changing sub-calls at the EVM
+///      level), buy()'s safeTransferFrom uses a regular CALL to the
+///      recipient, so onERC721Received can legitimately attempt
+///      state changes — making it a valid ReentrancyGuard distinguisher.
+contract ReentrantBuyer {
+    Marketplace public immutable mp;
+    Marketplace.BatchItem[] private _reentryItems;
+    bool public armed;
+    uint256 private _attempts;
+
+    constructor(Marketplace _mp) { mp = _mp; }
+
+    function setReentryItems(Marketplace.BatchItem[] calldata items) external {
+        delete _reentryItems;
+        for (uint256 i; i < items.length; ++i) _reentryItems.push(items[i]);
+    }
+
+    function arm()   external { armed = true;  _attempts = 0; }
+    function disarm() external { armed = false; }
+
+    function onERC721Received(address, address, uint256, bytes calldata)
+        external returns (bytes4)
+    {
+        if (armed && _attempts < 1 && _reentryItems.length > 0) {
+            _attempts++;
+            // Inner mp.batchList call. With nonReentrant PRESENT, the call
+            // reverts immediately (caught by try/catch). With nonReentrant
+            // ABSENT, the call executes its full _list loop and writes
+            // listings[coll][reentry-token][seller] at the reentry's price.
+            try mp.batchList(_reentryItems) {} catch {}
+        }
+        return this.onERC721Received.selector;
+    }
+
+    // Required to receive ETH for buy() payments.
+    receive() external payable {}
 }
 
 // ─── Test contract ──────────────────────────────────────────────────────────
@@ -907,54 +952,61 @@ contract AuditFuzzTest is Test {
         assertEq(uint256(p3), uint256(0.2 ether), "item 3 price");
     }
 
-    /// @notice L-09: batchList IS nonReentrant. A malicious collection whose
-    ///         getApproved attempts to re-enter mp.batchList with a SECOND,
-    ///         distinct batch (item 99 at 0.99 ETH) MUST see the inner call
-    ///         reverted. The reentry target slot MUST remain empty.
-    ///         The outer call's listings at items 1 and 2 stay intact.
+    /// @notice L-09: batchList IS nonReentrant. Uses buy() → safeTransferFrom →
+    ///         onERC721Received as the reentry trigger because _list()'s approval
+    ///         probes (ownerOf, isApprovedForAll, getApproved) are view functions
+    ///         called via STATICCALL, which makes any state-changing reentry
+    ///         impossible at the EVM level regardless of ReentrancyGuard.
+    ///         buy()'s safeTransferFrom uses a regular CALL, so the recipient's
+    ///         onERC721Received can re-enter mp.batchList with a SECOND, distinct
+    ///         batch (item 99 at 0.99 ETH).
     function test_batchList_protectedByNonReentrant() public {
         Marketplace mp = new Marketplace(feeRecipient, address(0));
-        ReentrantBatchColl coll = new ReentrantBatchColl(mp);
+        MockERC721 coll = new MockERC721();
 
-        // `seller` owns the token ids we use; the mock's getApproved reenters
-        // batchList during the OUTER call's first iteration and writes to
-        // listings[coll][99][seller] — a slot the outer never touches.
-        coll.setOwner(1, seller);
-        coll.setOwner(2, seller);
-        coll.setOwner(99, seller);
+        // Seller mints and lists tokens 1 and 2.
+        vm.startPrank(seller);
+        uint256 t1 = coll.mint(seller);
+        uint256 t2 = coll.mint(seller);
+        uint256 t99 = coll.mint(seller);
+        coll.setApprovalForAll(address(mp), true);
+        mp.list(address(coll), t1, 0.1 ether, uint64(block.timestamp + 7 days));
+        mp.list(address(coll), t2, 0.15 ether, uint64(block.timestamp + 7 days));
+        vm.stopPrank();
 
-        // Outer batch: list tokens 1 and 2 at 0.1 ETH.
-        Marketplace.BatchItem[] memory outer = new Marketplace.BatchItem[](2);
-        outer[0] = Marketplace.BatchItem(address(coll), 1, 0.1 ether, uint64(block.timestamp + 7 days));
-        outer[1] = Marketplace.BatchItem(address(coll), 2, 0.1 ether, uint64(block.timestamp + 7 days));
-
-        // Reentry batch: token 99 at 0.99 ETH — DISTINCT slot from outer.
-        // If nonReentrant is absent, listings[99] would exist at 0.99 after
-        // the reentry call returns and we could detect it via storage.
-        Marketplace.BatchItem[] memory reentry = new Marketplace.BatchItem[](1);
-        reentry[0] = Marketplace.BatchItem(address(coll), 99, 0.99 ether, uint64(block.timestamp + 7 days));
-        coll.setReentryItems(reentry);
-        coll.arm();
-
+        // ReentrantBuyer receives token 99 and approves the marketplace.
+        ReentrantBuyer buyer = new ReentrantBuyer(mp);
         vm.prank(seller);
-        mp.batchList(outer);
-        coll.disarm();
+        coll.safeTransferFrom(seller, address(buyer), t99);
+        vm.deal(address(buyer), 10 ether);
+        vm.prank(address(buyer));
+        coll.setApprovalForAll(address(mp), true);
 
-        // Outer items MUST be listed at the outer's prices.
-        // (Auto-getter returns positional tuple; use destructuring, not .seller/.price.)
-        (address s1b, , , uint128 p1b,) = mp.listings(address(coll), 1, seller);
-        assertEq(s1b, seller, "item 1 listed by outer call");
-        assertEq(uint256(p1b), uint256(0.1 ether), "item 1 outer price preserved");
-        (address s2b, , , uint128 p2b,) = mp.listings(address(coll), 2, seller);
-        assertEq(s2b, seller, "item 2 listed by outer call");
-        assertEq(uint256(p2b), uint256(0.1 ether), "item 2 outer price preserved");
+        // Reentry batch: list token 99 at 0.99 ETH.
+        Marketplace.BatchItem[] memory reentry = new Marketplace.BatchItem[](1);
+        reentry[0] = Marketplace.BatchItem(address(coll), t99, 0.99 ether, uint64(block.timestamp + 7 days));
+        buyer.setReentryItems(reentry);
+        buyer.arm();
+
+        // Buyer buys token 1 — during safeTransferFrom, onERC721Received fires
+        // which re-enters mp.batchList(reentry). If nonReentrant PRESENT, the
+        // inner call reverts and listing[99][buyer] stays unset. If ABSENT,
+        // listing[99][buyer] gets written at 0.99 ETH.
+        vm.prank(address(buyer));
+        mp.buy{value: 0.1 ether}(address(coll), t1, seller);
+        buyer.disarm();
+
+        // Outer buy succeeded — buyer now owns token 1.
+        assertEq(coll.ownerOf(t1), address(buyer), "buyer received token 1");
+
+        // Outer listing for token 2 stays intact.
+        (address s2, , , uint128 p2,) = mp.listings(address(coll), t2, seller);
+        assertEq(s2, seller, "item 2 seller preserved");
+        assertEq(uint256(p2), uint256(0.15 ether), "item 2 price preserved");
 
         // Reentry target slot MUST be unset: the inner mp.batchList call was
         // reverted by ReentrancyGuard before it could write the listing.
-        // If nonReentrant were absent, listings[coll][99][seller] would
-        // exist at price 0.99 (the reentry target) — this assertion would
-        // fail and the test would surface the regression immediately.
-        (address s99, , , uint128 p99, ) = mp.listings(address(coll), 99, seller);
+        (address s99, , , uint128 p99, ) = mp.listings(address(coll), t99, address(buyer));
         assertEq(s99, address(0),
                  "reentry slot UNSET - inner mp.batchList was reverted by ReentrancyGuard");
         assertEq(uint256(p99), 0, "reentry slot price zero (reentry blocked)");
@@ -998,6 +1050,62 @@ contract AuditFuzzTest is Test {
         assertEq(ah.bidderCount(id), 2,
                  "bob top-up does NOT push duplicate; _bidders[id] has exactly 2 entries");
         assertEq(ah.cumulative(id, bob), 4 ether, "bob cumulative = 4 ether after top-up");
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  (k)  nonReentrant on auction creation (v29 — Round 4).
+    //      AuctionHouse.create() and create1155() carry both `entryGate`
+    //      and `nonReentrant`. All external calls during creation are to
+    //      IERC721/IERC1155 view functions (ownerOf, balanceOf,
+    //      isApprovedForAll, getApproved) — Solidity compiles these as
+    //      STATICCALL, which forbids state changes at the EVM level.
+    //      Practical reentrancy through these probes is therefore
+    //      impossible; the nonReentrant guard is defense-in-depth
+    //      against any future code path that adds a non-staticcall
+    //      (e.g. an onReceived hook, a registry read with a callback,
+    //      or an ERC-777-style pre-transfer hook). This test validates
+    //      that both creation entry points function correctly and
+    //      documents the STATICCALL limitation.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    /// @dev Validates that create() and create1155() both produce auctions
+    ///      normally through a legitimate collection. The nonReentrant
+    ///      modifier is present on both functions; STATICCALL from IERC721/
+    ///      IERC1155 view probes prevents practical reentrancy at the EVM
+    ///      level, making nonReentrant defense-in-depth for any future
+    ///      non-staticcall path added to auction creation.
+    function test_create_nonReentrantDefenseInDepth() public {
+        // ERC-721: create() succeeds with a valid collection.
+        (uint256 id721, uint256 tid721) = _auction7d();
+        assertEq(id721, 1, "create() produced auction id 1");
+        AuctionHouse.Auction memory a721 = ah.getAuction(id721);
+        assertEq(a721.seller, seller);
+        assertEq(a721.collection, address(nft));
+        assertEq(a721.tokenId, tid721);
+        assertEq(uint256(a721.standard), uint256(TokenStandard.ERC721));
+
+        // ERC-1155: create1155() succeeds with a valid multi-token.
+        vm.startPrank(seller);
+        multi.mint(seller, 99, 10);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id1155 = ah.create1155(
+            address(multi),
+            99,
+            10,        // amount
+            0.5 ether,  // reserve
+            uint64(block.timestamp + 7 days),
+            500,        // 5% min increment
+            0
+        );
+        vm.stopPrank();
+        assertEq(id1155, 2, "create1155() produced auction id 2");
+        AuctionHouse.Auction memory a1155 = ah.getAuction(id1155);
+        assertEq(a1155.seller, seller);
+        assertEq(a1155.collection, address(multi));
+        assertEq(a1155.tokenId, 99);
+        assertEq(uint256(a1155.standard), uint256(TokenStandard.ERC1155));
+        assertEq(a1155.amount, 10);
+        assertEq(a1155.reserve, 0.5 ether);
     }
 
     // ════════════════════════════════════════════════════════════════════════════
@@ -1262,57 +1370,4 @@ contract SellerNoReceive {
     }
 }
 
-/// @dev Mock malicious ERC-721 collection for the L-09 reentrancy test.
-///
-///      `ownerOf`, `isApprovedForAll`, and `getApproved` are deliberately
-///      declared NON-view (despite IERC721 declaring them as `view`) so the
-///      mock can fire an external call to `mp.batchList(reentryItems)` from
-///      inside `getApproved`. Solidity's compile-time view-purity check only
-///      applies to LOCAL state writes — cross-contract calls to non-view
-///      functions from a locally-declared view context are allowed because
-///      the compiler cannot prove the target's mutability.
-///
-///      The runtime ABI dispatcher uses the IERC721 function selector
-///      (e.g. 0x081812fc for `getApproved(uint256)`); the mock matches the
-///      selector with its non-view implementation and fires the reentry
-///      attempt. The `arm()` / `_attempts` pair ensures the reentry fires
-///      exactly ONCE on the outer call's first getApproved (any deeper
-///      reentrant call sees `_attempts >= 1` and skips).
-contract ReentrantBatchColl {
-    Marketplace public immutable mp;
-    Marketplace.BatchItem[] private _reentryItems;
-    bool public armed;
-    uint256 private _attempts;
-    mapping(uint256 => address) private _owners;
 
-    constructor(Marketplace _mp) { mp = _mp; }
-
-    function setOwner(uint256 tid, address o) external { _owners[tid] = o; }
-
-    function setReentryItems(Marketplace.BatchItem[] calldata items) external {
-        delete _reentryItems;
-        for (uint256 i; i < items.length; ++i) _reentryItems.push(items[i]);
-    }
-
-    function arm()   external { armed = true;  _attempts = 0; }
-    function disarm() external { armed = false; }
-
-    // Mock's non-view declarations intentionally diverge from IERC721's view
-    // marker so state writes + external calls are allowed. The runtime ABI
-    // dispatch in Marketplace._list() uses the IERC721 selector; mock matches.
-    function ownerOf(uint256 id) external returns (address) { return _owners[id]; }
-    function isApprovedForAll(address, address) external pure returns (bool) { return true; }
-    function getApproved(uint256) external returns (address) {
-        if (armed && _attempts < 1 && _reentryItems.length > 0) {
-            _attempts++;
-            // Inner mp.batchList call. With nonReentrant PRESENT, the call
-            // reverts immediately and the try/catch swallows the revert;
-            // listings[reentry-token-id] stays empty. With nonReentrant
-            // ABSENT, the call executes its full _list loop and would write
-            // listings[coll][reentry-token][seller] at the reentry's price.
-            // The test below observes listings[99] to distinguish the cases.
-            try mp.batchList(_reentryItems) {} catch {}
-        }
-        return address(mp);
-    }
-}

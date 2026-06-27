@@ -39,8 +39,8 @@ func (s *OffersService) handleList(c *fiber.Ctx) error {
 		if n, err := strconv.Atoi(lim); err == nil {
 			if n < 1 {
 				n = 1
-			} else if n > 200 {
-				n = 200
+			} else if n > 100 {
+				n = 100
 			}
 			f.Limit = n
 		}

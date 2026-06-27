@@ -30,13 +30,13 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 ## Bid on an auction
 1. Open an active auction → enter bid amount
 2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
-3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed
-4. At auction end, the keeper bot settles automatically: NFT goes to winner, seller receives the winning bid minus the 1.5% platform fee (98.5%)
+3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed. If the automatic transfer fails (e.g., your wallet is a contract that cannot receive ETH), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
+4. At auction end, anyone (winner, seller, or a third party) can call **settle** permissionlessly — the keeper bot may do it automatically when configured, but settlement does not depend on any single actor. NFT goes to winner, seller receives the winning bid minus the 1.5% platform fee (98.5%).
 
 ## Auction fees
 - Bidding is free — you send only your bid amount.
 - If you win: the seller pays the 1.5% platform fee, so the seller receives 98.5% of the winning bid.
-- If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept.
+- If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept. Most refunds arrive automatically; if a push fails, the amount is parked in `pendingReturns` and you can pull it manually via **Withdraw Refund**.
 
 ## Offer on an NFT
 You can offer on **any** NFT — there is no eligibility gate, and offering is free:
@@ -45,11 +45,11 @@ You can offer on **any** NFT — there is no eligibility gate, and offering is f
 2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your FLR is escrowed on-chain)
 3. The owner may accept, reject, or let it expire
 4. If accepted: the NFT transfers to you automatically
-5. Your offer is free and locked until accepted, rejected, or expired — then your full amount is refunded. Repeat offers on the same NFT stack into one position; there is no early withdrawal.
+5. Your offer is free and locked until accepted, rejected, or expired — then your full amount is refunded. Repeat offers on the same NFT stack into one position; there is no early withdrawal. If the automatic refund push fails, the amount is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund**.
 
 ## Accept an offer (owner)
 Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.
-NFT goes to bidder, you receive ETH minus 1.5% platform fee.
+NFT goes to bidder, you receive FLR minus 1.5% platform fee (native currency, C2FLR on testnet).
 
 ## No royalties
-MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted).
+MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted). The guide uses the native FLR currency throughout (C2FLR on Coston2 testnet, FLR on mainnet).

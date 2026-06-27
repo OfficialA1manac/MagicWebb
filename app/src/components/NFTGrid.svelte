@@ -7,8 +7,10 @@
   let error = null;
   let count = 0;
   let sortBy = 'recent';
+  let _fetchGen = 0;
 
   async function fetchListings() {
+    const gen = ++_fetchGen;
     loading = true;
     error = null;
 
@@ -16,15 +18,18 @@
       const params = new URLSearchParams({ limit: '48', sort: sortBy });
       const res = await fetch(`/api/v1/listings?${params}`);
       if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (gen !== _fetchGen) return; // stale response
 
       const data = await res.json();
+      if (gen !== _fetchGen) return;
       items = data;
       count = data.length;
     } catch (e) {
+      if (gen !== _fetchGen) return;
       error = e.message || 'Failed to load listings';
       items = [];
     } finally {
-      loading = false;
+      if (gen === _fetchGen) loading = false;
     }
   }
 
@@ -43,7 +48,7 @@
     <h2>Listings</h2>
     <div class="controls">
       {#if !loading}
-        <span class="count-badge">{count} active</span>
+        <span class="count-badge">{count} loaded</span>
       {/if}
       <select class="sort-select" bind:value={sortBy} on:change={handleSortChange}>
         <option value="recent">Most Recent</option>

@@ -164,14 +164,14 @@ contract AuctionHouse is MarketplaceCore {
 
     /// @notice Create an ERC-721 auction. Starts immediately.
     function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
-        external entryGate returns (uint256 id)
+        external nonReentrant entryGate returns (uint256 id)
     {
         return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, endsAt, minIncBps, minIncFlat);
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
     function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
-        external entryGate returns (uint256 id)
+        external nonReentrant entryGate returns (uint256 id)
     {
         if (amount == 0) revert InvalidAmount();
         return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, endsAt, minIncBps, minIncFlat);
@@ -284,7 +284,15 @@ contract AuctionHouse is MarketplaceCore {
             // reduced to a 1-wei griefing loop (audit-#5). Per-cycle
             // gas cost vs. 0.001 ETH flip cost makes the attack uneconomic.
             if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
-            uint128 minNext = uint128(uint256(a.leaderTotal) + inc);
+            // L-11 fix: keep the min-next comparison in uint256 to avoid
+            // silent truncation when leaderTotal + inc exceeds uint128 max.
+            // The downcast to uint128 is only done after the comparison
+            // passes; if the threshold overflows uint128, revert BidOverflow
+            // so the bidder knows the ceiling and can (in principle) request
+            // an on-chain increment parameter update from the seller.
+            uint256 minNext256 = uint256(a.leaderTotal) + inc;
+            if (minNext256 > type(uint128).max) revert BidOverflow();
+            uint128 minNext = uint128(minNext256);
             if (newTotal < minNext) revert BidTooLow();
             newLead = true;
             address prev  = a.leader;
@@ -354,7 +362,14 @@ contract AuctionHouse is MarketplaceCore {
         if (std == TokenStandard.ERC721) {
             try IERC721(coll).transferFrom(sel, winner, tid) { moved = true; } catch {}
         } else {
-            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {}
+            // L-12 CEI fix: set settled=true before the external
+            // safeTransferFrom call so onERC1155Received observes the
+            // auction as settled. If safeTransferFrom fails, revert
+            // settled back to false for the stall path.
+            a.settled = true;
+            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {
+                a.settled = false;
+            }
         }
 
         if (!moved) {
@@ -371,6 +386,9 @@ contract AuctionHouse is MarketplaceCore {
             }
             if (!sellerStillOwns) {
                 // NFT is gone — will never be deliverable. Refund winner, cancel.
+                // L-12a: for ERC-1155, restore settled flag if we set it
+                // optimistically above.
+                if (std == TokenStandard.ERC1155) a.settled = false;
                 _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
@@ -385,6 +403,7 @@ contract AuctionHouse is MarketplaceCore {
             bool sellerApproved = _checkSellerApproval(std, coll, sel, tid);
             if (!sellerApproved) {
                 // Seller's fault: revoked approval. Refund winner, cancel.
+                if (std == TokenStandard.ERC1155) a.settled = false;
                 _refundWinnerAndCancel(a, id, winner, winBid);
                 return;
             }
@@ -396,6 +415,9 @@ contract AuctionHouse is MarketplaceCore {
             // STALL_WINDOW, reclaim() becomes available as a safety valve
             // so the winner's funds are never permanently locked — the
             // 7-day delay is the economic cost of the buyer's refusal.
+            // L-12b: for ERC-1155, restore settled flag (we set it
+            // optimistically in the safeTransferFrom try-block above).
+            if (std == TokenStandard.ERC1155) a.settled = false;
             a.stalledAt = uint64(block.timestamp);
             emit AuctionStalled(id, winner, sel);
             return;
@@ -452,7 +474,16 @@ contract AuctionHouse is MarketplaceCore {
         if (std == TokenStandard.ERC721) {
             try IERC721(coll).transferFrom(sel, winner, a.tokenId) { moved = true; } catch {}
         } else {
-            try IERC1155(coll).safeTransferFrom(sel, winner, a.tokenId, a.amount, "") { moved = true; } catch {}
+            // Mirror settle()'s pre-transfer state update so onERC1155Received
+            // observes the auction as settled/finalized. Store the original
+            // stalledAt and restore it on failure (R-04: NEVER refresh stalledAt).
+            uint64 origStalled = a.stalledAt;
+            a.settled   = true;
+            a.stalledAt = 0;
+            try IERC1155(coll).safeTransferFrom(sel, winner, a.tokenId, a.amount, "") { moved = true; } catch {
+                a.settled   = false;
+                a.stalledAt = origStalled;
+            }
         }
         if (!moved) {
             bool sellerStillOwns = false;

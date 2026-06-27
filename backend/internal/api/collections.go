@@ -50,7 +50,7 @@ func (s *CollectionsService) handleList(c *fiber.Ctx) error {
 }
 
 func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
-	address := c.Params("address")
+	address := strings.ToLower(c.Params("address"))
 	col, err := s.q.GetCollection(c.Context(), address)
 	if err != nil {
 		if isNotFound(err) {
@@ -60,7 +60,12 @@ func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	}
 	floor, _ := s.q.GetFloorPrice(c.Context(), address)
 	vol, _ := s.q.Get24hVolume(c.Context(), address)
-	listed, _ := s.q.GetListedCount(c.Context(), address)
+	listed, listedErr := s.q.GetListedCount(c.Context(), address)
+	// Surface genuine DB errors from GetListedCount — swallowing them
+	// turns a query failure into a misleading "listed_count=0" response.
+	if listedErr != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
 
 	detail := collectionDetail{CollectionRow: *col, ListedCount: listed}
 	if floor != nil {

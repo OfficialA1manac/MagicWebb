@@ -233,7 +233,7 @@ const OFFERBOOK_ABI = [
 ];
 const ERC721_ABI = [
   'function setApprovalForAll(address op, bool approved) external',
-  'function isApprovedForAll(address owner, uint256 op) external view returns (bool)',
+  'function isApprovedForAll(address owner, address op) external view returns (bool)',
   'function ownerOf(uint256 tokenId) external view returns (address)',
   'function balanceOf(address owner) external view returns (uint256)',
 ];
@@ -310,8 +310,13 @@ function fmtAddr(a) {
 window.addEventListener('alpine:init', () => {
 
   // ── modals store: drives the global action_modal partial ──
+  // v34 fix: use `isOpen` for the boolean state instead of `open`
+  // to avoid the name collision with the `open(opts)` method. Alpine
+  // store properties and methods share the same namespace; having
+  // both `open: false` and `open(opts){...}` meant the method
+  // overwrote the state and vice versa on every assignment.
   Alpine.store('modals', {
-    open: false,
+    isOpen: false,
     actionKind: 'buy',
     icon: '⚐',
     title: '', subtitle: '',
@@ -372,10 +377,10 @@ window.addEventListener('alpine:init', () => {
           }
           return Promise.resolve(null);
         }
-      if (this.open && this._resolver) {
+      if (this.isOpen && this._resolver) {
         return new Promise((resolve) => {
           const tick = setInterval(() => {
-            if (!this.open) {
+            if (!this.isOpen) {
               clearInterval(tick);
               resolve(this.open(opts));
             }
@@ -417,7 +422,7 @@ window.addEventListener('alpine:init', () => {
                   detail: { action: this.actionKind, txHash: this.txHash },
                 }));
                 resolve({ ok: true, txHash: detail.txHash });
-                setTimeout(() => { if (this.open && this._resolver === resolver) this.dismiss(); }, 9000);
+                setTimeout(() => { if (this.isOpen && this._resolver === resolver) this.dismiss(); }, 9000);
               },
               fail: (e) => {
                 this.step = 4;
@@ -444,7 +449,7 @@ window.addEventListener('alpine:init', () => {
           }
         };
         this._resolver = resolver;
-        this.open = true;
+        this.isOpen = true;
         // Auto-execute immediately — the wallet's native prompt IS the
         // confirmation. Start at step 1 so the progress indicator and
         // summary are visible from the first paint (no blank step-0 flash).
@@ -458,7 +463,7 @@ window.addEventListener('alpine:init', () => {
       if (this.step === 1 || this.step === 2) {
         toast('Action was starting — your wallet may still show a pending prompt.', 'info');
       }
-      this.open = false;
+      this.isOpen = false;
       this._resolver = null;
       this.progress = 0;
     },
@@ -469,7 +474,11 @@ window.addEventListener('alpine:init', () => {
     _raw: { provider: null, signer: null, wc: null },
     address: null,
     chainId: null,
-    jwt:     localStorage.getItem('mw_jwt') || null,
+    // v34: JWT kept in memory only (not persisted to localStorage).
+    // The server sets an HttpOnly/Secure/SameSite cookie on /auth/verify
+    // which the browser sends automatically on same-origin requests.
+    // This eliminates the XSS-exfiltration vector from localStorage.
+    jwt:     null,
     unread:  0,
     busy:    false,
     _stateError: null,
@@ -624,6 +633,13 @@ window.addEventListener('alpine:init', () => {
           if (!silent) {
             toast(`Connected wallet is on chain #${Number(network.chainId)} — expected Coston2 (114). Switch networks in your wallet, then Re-pair via QR.`, 'error', 8000);
           }
+          // Wrong-chain cleanup: tear down the WC session and close the
+          // overlay so the user can re-pair cleanly without a stale
+          // session blocking the next attempt.
+          try { this._raw.wc?.disconnect?.(); } catch (_) {}
+          try { MW_WC_hide(); } catch (_) {}
+          try { window.__MW_APPKIT__?.disconnect?.(); } catch (_) {}
+          this._raw = { provider: null, signer: null, wc: null };
           this.setState('error');
           this._connectStartedAt = 0; // release double-click debounce
           return;
@@ -888,8 +904,8 @@ window.addEventListener('alpine:init', () => {
       this.unread = 0;
       this.setState('idle');
       localStorage.removeItem('mw_addr');
-      localStorage.removeItem('mw_jwt');
       localStorage.removeItem('mw_kind');
+      // v34: JWT is in-memory only; no mw_jwt localStorage item to remove.
       try { MW_WC_hide(); } catch (_) {}
     },
 
@@ -936,16 +952,16 @@ window.addEventListener('alpine:init', () => {
         if (!verifyRes.ok) throw new Error('/auth/verify HTTP ' + verifyRes.status);
         const { token } = await verifyRes.json();
         if (typeof token !== 'string' || !token) throw new Error('/auth/verify returned no token');
+        // v34: JWT in memory only — the server also sets an HttpOnly cookie.
         this.jwt = token;
-        localStorage.setItem('mw_jwt', token);
       } catch (e) {
         // Clean up the half-authenticated state — drop JWT + persisted token
         // so a subsequent retry starts from nonce-issue. We do NOT surface a
         // local toast here; the parent connect() catch already toasts via the
         // canonical revertMessage() message channel. The previous double-toast
         // (inner toast + parent's) was the F-03 audit finding users reported.
+        // v34: JWT is in-memory only; no localStorage to clear.
         this.jwt = null;
-        try { localStorage.removeItem('mw_jwt'); } catch (e) {}
         throw e;
       }
     },
@@ -1063,7 +1079,7 @@ window.addEventListener('alpine:init', () => {
           let settled = false;
 
           try {
-            const promise = opts.fn({
+            const promise = opts.run({
               signer: R(signer),
               provider: R(provider),
               setStep: (n, label) => {
@@ -1116,7 +1132,38 @@ window.addEventListener('alpine:init', () => {
 
     // ── Marketplace: Buy ──
 
+    // ── Client-side input validation ─────────────────────────────────────
+    // Pre-flight checks before any wallet action:
+    //   • Address validation via ethers.isAddress
+    //   • Wei bounds: reject zero, negative, NaN, Infinity
+    //   • Surface typed toast on validation failure
+    _validateAction({ collection, tokenId, seller, priceWei, minWei = '10000000000000000' }) {
+      // Belt-and-braces: if ethers UMD hasn't loaded yet, skip
+      // validation and allow the action through (the on-chain call
+      // will revert with a clear error if the address is invalid).
+      if (typeof ethers === 'undefined' || typeof ethers.isAddress !== 'function') return true;
+      const errs = [];
+      if (collection && !ethers.isAddress(collection)) errs.push('Invalid collection address');
+      if (seller && !ethers.isAddress(seller)) errs.push('Invalid seller address');
+      if (priceWei !== undefined) {
+        try {
+          const p = BigInt(priceWei);
+          if (p <= 0n) errs.push('Amount must be greater than zero');
+          if (p < BigInt(minWei)) errs.push('Minimum is 0.01 ' + NATIVE_CURRENCY);
+        } catch (_) { errs.push('Invalid amount'); }
+      }
+      if (tokenId !== undefined && (isNaN(Number(tokenId)) || Number(tokenId) < 0)) {
+        errs.push('Invalid token ID');
+      }
+      if (errs.length) {
+        toast(errs.join('. ') + '.', 'error');
+        return false;
+      }
+      return true;
+    },
+
     async buy(collection, tokenId, seller, priceWei) {
+      if (!this._validateAction({ collection, tokenId, seller, priceWei })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'buy',
         icon: '⚐',
@@ -1213,6 +1260,7 @@ window.addEventListener('alpine:init', () => {
     // ── Marketplace: List ── -
 
     async list(collection, tokenId, priceWei, expiresAt, standard = 'erc721') {
+      if (!this._validateAction({ collection, tokenId, priceWei })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'list', icon: '✦',
         title: 'List for sale',
@@ -1237,8 +1285,16 @@ window.addEventListener('alpine:init', () => {
         const signer = await this.ensureSigner();
         if (!signer) { fail({ title: 'Wallet lost', body: 'Reconnect and try again.' }); return; }
         const contract = new ethers.Contract(MARKETPLACE, MARKETPLACE_ABI, R(signer));
-        const tx = await contract.list(collection, tokenId, BigInt(priceWei), Math.floor(expiresAt));
+        let tx;
+        if (standard === 'erc1155') {
+          tx = await contract.list1155(collection, tokenId, BigInt(1), BigInt(priceWei), Math.floor(expiresAt));
+        } else {
+          tx = await contract.list(collection, tokenId, BigInt(priceWei), Math.floor(expiresAt));
+        }
         setStep(2, 'Waiting for confirmation…');
+        await tx.wait();
+        done({ txHash: tx.hash, title: 'Listed for sale', body: 'Live in ~2s of confirm.' });
+        window.dispatchEvent(new CustomEvent('mw-listed', { detail: { collection, tokenId, tx: tx.hash } }));
         await tx.wait();
         done({ txHash: tx.hash, title: 'Listed for sale', body: 'Live in ~2s of confirm.' });
         window.dispatchEvent(new CustomEvent('mw-listed', { detail: { collection, tokenId, tx: tx.hash } }));
@@ -1246,6 +1302,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async cancel(collection, tokenId) {
+      if (!this._validateAction({ collection, tokenId })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'cancel', icon: '×',
         title: 'Cancel listing',
@@ -1274,6 +1331,7 @@ window.addEventListener('alpine:init', () => {
     // ── Auction: Create ──
 
     async createAuction(collection, tokenId, reserveWei, endsAt, minIncBps, minIncFlatWei, standard = 'erc721') {
+      if (!this._validateAction({ collection, tokenId, priceWei: reserveWei })) return { ok: false, error: 'validation' };
       const willExtendHazard = (Number(endsAt) - Date.now()/1000) < EXTENSION_WINDOW;
       return await this.runAction({
         kind: 'auction', icon: '♕',
@@ -1301,13 +1359,25 @@ window.addEventListener('alpine:init', () => {
         const signer = await this.ensureSigner();
         if (!signer) { fail({ title: 'Wallet lost', body: 'Reconnect and try again.' }); return; }
         const contract = new ethers.Contract(AUCTION, AUCTION_ABI, R(signer));
-        const tx = await contract.create(
-          collection, tokenId,
-          BigInt(reserveWei || '0'),
-          Math.floor(endsAt),
-          minIncBps || 500,
-          BigInt(minIncFlatWei || '0'),
-        );
+        let tx;
+        if (standard === 'erc1155') {
+          tx = await contract.create1155(
+            collection, tokenId,
+            BigInt(1), // amount: single unit (caller overrides for multi-unit)
+            BigInt(reserveWei || '0'),
+            Math.floor(endsAt),
+            minIncBps || 500,
+            BigInt(minIncFlatWei || '0'),
+          );
+        } else {
+          tx = await contract.create(
+            collection, tokenId,
+            BigInt(reserveWei || '0'),
+            Math.floor(endsAt),
+            minIncBps || 500,
+            BigInt(minIncFlatWei || '0'),
+          );
+        }
         setStep(2, 'Waiting for confirmation…');
         const rcpt = await tx.wait();
         const auctionId = rcpt?.logs?.[0]?.topics?.[1]
@@ -1324,6 +1394,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async bid(auctionId, bidAmountWei, endsAt) {
+      if (!this._validateAction({ priceWei: bidAmountWei })) return { ok: false, error: 'validation' };
       const willExtend = endsAt && (Number(endsAt) - Math.floor(Date.now()/1000)) < EXTENSION_WINDOW;
       return await this.runAction({
         kind: 'bid', icon: '♝',
@@ -1356,6 +1427,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async settle(auctionId) {
+      if (isNaN(Number(auctionId)) || Number(auctionId) < 0) { toast('Invalid auction ID.', 'error'); return { ok: false, error: 'validation' }; }
       return await this.runAction({
         kind: 'settle', icon: '⚖',
         title: 'Settle auction',
@@ -1382,6 +1454,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async cancelEarly(auctionId) {
+      if (isNaN(Number(auctionId)) || Number(auctionId) < 0) { toast('Invalid auction ID.', 'error'); return { ok: false, error: 'validation' }; }
       return await this.runAction({
         kind: 'cancel', icon: '✕',
         title: 'Cancel auction early',
@@ -1443,7 +1516,8 @@ window.addEventListener('alpine:init', () => {
 
     // ── OfferBook ──
 
-    async makeOffer(collection, tokenId, principalWei, expiresAt) {
+    async makeOffer(collection, tokenId, principalWei, expiresAt, standard = 'erc721') {
+      if (!this._validateAction({ collection, tokenId, priceWei: principalWei })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'offer', icon: '⚐',
         title: 'Make an offer',
@@ -1455,20 +1529,28 @@ window.addEventListener('alpine:init', () => {
         ],
         ctaLabel: 'Escrow ' + fmtFLR(principalWei) + ' ' + NATIVE_CURRENCY,
         disclaimer: 'Your escrow is fully refundable until the seller accepts. After expiry it returns automatically.',
-        run: ({ setStep, done, fail }) => this._executeMakeOffer(collection, tokenId, principalWei, expiresAt, { setStep, done, fail }),
+        run: ({ setStep, done, fail }) => this._executeMakeOffer(collection, tokenId, principalWei, expiresAt, standard, { setStep, done, fail }),
       });
     },
 
-    async _executeMakeOffer(collection, tokenId, principalWei, expiresAt, { setStep, done, fail }) {
+    async _executeMakeOffer(collection, tokenId, principalWei, expiresAt, standard, { setStep, done, fail }) {
       try {
         setStep(1, 'Sign offer in wallet…');
         const signer = await this.ensureSigner();
         if (!signer) { fail({ title: 'Wallet lost', body: 'Reconnect and try again.' }); return; }
         const contract = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, R(signer));
-        const tx = await contract.makeOffer(
-          collection, tokenId, BigInt(principalWei), Math.floor(expiresAt),
-          { value: BigInt(principalWei) },
-        );
+        let tx;
+        if (standard === 'erc1155') {
+          tx = await contract.makeOffer1155(
+            collection, tokenId, BigInt(principalWei), BigInt(1), Math.floor(expiresAt),
+            { value: BigInt(principalWei) },
+          );
+        } else {
+          tx = await contract.makeOffer(
+            collection, tokenId, BigInt(principalWei), Math.floor(expiresAt),
+            { value: BigInt(principalWei) },
+          );
+        }
         setStep(2, 'Waiting for confirmation…');
         await tx.wait();
         done({ txHash: tx.hash, title: 'Offer placed', body: 'Funds are escrowed. Auto-refund at expiry.' });
@@ -1477,6 +1559,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async acceptOffer(collection, tokenId, bidder) {
+      if (!this._validateAction({ collection, tokenId, seller: bidder })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'accept', icon: '✓',
         title: 'Accept offer',
@@ -1509,6 +1592,7 @@ window.addEventListener('alpine:init', () => {
     },
 
     async rejectOffer(collection, tokenId, bidder) {
+      if (!this._validateAction({ collection, tokenId, seller: bidder })) return { ok: false, error: 'validation' };
       return await this.runAction({
         kind: 'reject', icon: '↩',
         title: 'Reject offer',

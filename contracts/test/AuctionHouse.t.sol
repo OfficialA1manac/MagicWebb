@@ -115,6 +115,48 @@ contract AuctionHouseTest is Test {
         ah.bid{value: 0}(id);
     }
 
+    // ── L-11: near-max leaderTotal overflow guard ────────────────────────────
+
+    /// @dev L-11 regression: when leaderTotal is near uint128 max, the
+    ///      minNext comparison must operate in uint256 to avoid silent
+    ///      truncation. A bid that would push newTotal over uint128 max
+    ///      reverts with BidOverflow.
+    function test_nearMaxLeaderBidDoesNotTruncate() public {
+        (uint256 id,) = _create();
+        // Set up alice as leader at near uint128 max.
+        uint128 nearMax = type(uint128).max - 0.01 ether;
+        vm.deal(alice, uint256(nearMax) + 50 ether);
+        vm.prank(alice);
+        ah.bid{value: nearMax}(id);
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, alice);
+        assertEq(t, nearMax, "alice leads at nearMax");
+
+        // Bob accumulates close to the ceiling, then tops up to
+        // overflow his own cumulative (exercising the BidOverflow
+        // guard on the bidder's cumulative, not the leader-minNext path).
+        uint128 bobFirst = nearMax - 1 ether;
+        vm.deal(bob, uint256(bobFirst) + 10 ether);
+        vm.prank(bob);
+        ah.bid{value: bobFirst}(id);
+        assertEq(ah.cumulative(id, bob), bobFirst, "bob accumulated close to max");
+
+        // Bob tops up by enough to push cumulative past uint128 max.
+        vm.prank(bob);
+        vm.expectRevert(BidOverflow.selector);
+        ah.bid{value: 1.5 ether}(id);
+
+        // Carol bids below leaderTotal — accumulates without overflow.
+        uint128 smallBid = 0.01 ether;
+        vm.deal(carol, uint256(smallBid) + 1 ether);
+        vm.prank(carol);
+        ah.bid{value: smallBid}(id);
+        assertEq(ah.cumulative(id, carol), smallBid, "carol escrow accumulated");
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice, "alice still leader");
+        assertEq(t2, nearMax, "leaderTotal unchanged");
+    }
+
     // ── Anti-snipe ────────────────────────────────────────────────────────────
 
     function test_antiSnipeExtends() public {

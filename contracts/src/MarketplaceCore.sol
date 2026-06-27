@@ -73,21 +73,32 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         _;
     }
 
-    // ── Seller-pays fee math ─────────────────────────────────────────────────
+    // ═══════════════════════════════════════════════════════════════════════
+    // Fee math — 1.5% platform fee (seller-pays, immutable).
+    // ═══════════════════════════════════════════════════════════════════════
 
-    /// @dev 1.5% fee for a given sale price. Deducted from the seller's proceeds at settlement.
+    /// @notice Compute 1.5% platform fee for a given sale commitment.
+    /// @param commitment The gross sale amount (listing price / bid / offer principal).
+    /// @return The platform fee (1.5% of `commitment`).
+    /// @dev Seller-favourable TRUNCATION: `(commitment * 150) / 10_000` floors down.
+    ///      For example, a 99-wei sale computes 99*150/10000 = 1 (1.485 truncated to 1).
+    ///      The seller receives `commitment - fee`, so truncation always favours the
+    ///      seller (less fee deducted). The lost fraction (< 1 wei per sale) is
+    ///      economically negligible and cannot be gamed — the divisor (10_000) is
+    ///      much larger than any practical price precision.
     function _feeOf(uint256 commitment) internal pure returns (uint256) {
         return (commitment * PLATFORM_FEE_BPS) / 10_000;
     }
 
-    /// @dev Forward the platform fee to the immutable feeRecipient.
-    ///      Best-effort push with pull-fallback: if the feeRecipient cannot
-    ///      receive ETH (multisig needing >50k gas, contract without
-    ///      receive()), the fee is credited to pendingReturns for later
-    ///      withdrawal instead of reverting the entire settlement.
-    ///      This prevents a systemic DOS where a broken feeRecipient
-    ///      permanently bricks every buy() / acceptOffer() on the protocol.
-    ///      Mirrors AuctionHouse.settle() pull-fallback pattern.
+    /// @notice Pay the platform fee to the immutable feeRecipient.
+    /// @param fee Amount to forward (already computed via `_feeOf`).
+    /// @dev Best-effort push with a 50,000-gas cap per EIP-150 63/64 forwarding.
+    ///      If the feeRecipient is a contract that needs >50k gas for its receive()
+    ///      (e.g. Gnosis Safe, Argent, smart wallet), the push falls back to
+    ///      `pendingReturns[feeRecipient]` — the credit is visible on-chain and can
+    ///      be pulled later via the uncapped `withdrawRefund()` path. This prevents
+    ///      a broken or misconfigured feeRecipient from permanently DOSing every
+    ///      buy() and acceptOffer() transaction on the protocol.
     function _payFee(uint256 fee) internal {
         if (fee == 0) return;
         (bool ok,) = feeRecipient.call{gas: 50_000, value: fee}("");
@@ -97,12 +108,17 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         }
     }
 
-    /// @dev Pay `amount` to `to`. Best-effort push with pull-fallback.
-    ///      If the recipient cannot receive ETH, the amount is credited to
-    ///      pendingReturns for later withdrawal. Prevents a malicious seller
-    ///      contract from permanently trapping the buyer's ETH in a failed
-    ///      buy() or acceptOffer() transaction.
-    ///      gas: 50_000 caps EIP-150 63/64 forwarding.
+    /// @notice Send `amount` ETH to `to`. Best-effort push with pull-fallback.
+    /// @param to     Recipient address.
+    /// @param amount ETH amount in wei.
+    /// @dev gas: 50_000 cap respects EIP-150 63/64 forwarding budget.
+    ///      If the recipient's receive() or fallback() needs more than 50k gas
+    ///      (common for smart wallets and multisigs), the push is capped and the
+    ///      amount is credited to `pendingReturns[to]` instead. The recipient can
+    ///      then pull the full amount at their convenience via the uncapped
+    ///      `withdrawRefund()` function — no funds are permanently lost.
+    ///      Emits `PushFailed(to, amount)` on fallback so off-chain indexers can
+    ///      surface the credit without polling storage.
     function _pay(address to, uint256 amount) internal {
         if (amount == 0) return;
         (bool ok,) = to.call{gas: 50_000, value: amount}("");

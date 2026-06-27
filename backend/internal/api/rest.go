@@ -17,7 +17,6 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -212,10 +211,12 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(api)
 	NewMetricsService(q).RegisterRoutes(api)
-	NewIndexerService(q).RegisterRoutes(api)
+	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
-	// Image-by-hash route registered at app level (not namespaced under /api/v1).
-	app.Get(imagestore.PathPrefix+"/:sha256", ms.HandleImageByHash())
+	// Image-by-hash route registered under /api/v1 so it shares the
+	// rateLimitMiddleware applied to the api router — the old app-level
+	// registration bypassed rate limiting entirely.
+	api.Get("/img/:sha256", ms.HandleImageByHash())
 }
 
 // ── Middleware ───────────────────────────────────────────────────────────────

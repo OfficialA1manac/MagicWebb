@@ -8,7 +8,8 @@ import (
 
 // IndexerService handles indexer status API operations.
 type IndexerService struct {
-	q *db.Q
+	q       *db.Q
+	chainID uint64
 }
 
 type indexerStatusResp struct {
@@ -18,8 +19,8 @@ type indexerStatusResp struct {
 }
 
 // NewIndexerService creates an IndexerService.
-func NewIndexerService(q *db.Q) *IndexerService {
-	return &IndexerService{q: q}
+func NewIndexerService(q *db.Q, chainID uint64) *IndexerService {
+	return &IndexerService{q: q, chainID: chainID}
 }
 
 // RegisterRoutes registers the indexer status route under the given router group.
@@ -28,7 +29,7 @@ func (s *IndexerService) RegisterRoutes(api fiber.Router) {
 }
 
 func (s *IndexerService) handleStatus(c *fiber.Ctx) error {
-	block, err := s.q.GetIndexedBlock(c.Context(), 0)
+	block, err := s.q.GetIndexedBlock(c.Context(), int(s.chainID))
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}

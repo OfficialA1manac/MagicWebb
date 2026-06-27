@@ -9,7 +9,7 @@ hardening).
 
 ## v29 — 2026-06-24 — Full-stack Round 4 (cross-layer)
 
-The **$75k+ full-stack audit** engagement surfaced five findings
+The **$75k+ full-stack audit** engagement surfaced six findings
 across chain / backend / frontend. Three fixed in this release;
 two deferred as LOW; one MEDIUM cosmetic pending.
 

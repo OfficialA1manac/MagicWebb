@@ -88,12 +88,33 @@ if [ "${LIVE_SHA}" = "${ORIGIN_SHA}" ]; then
 fi
 
 # Suffix-compare tolerates the common case where one side is short.
-LIVE_SHORT="${LIVE_SHA:0:7}"
-ORIG_SHORT="${ORIGIN_SHA:0:7}"
-if [ "${LIVE_SHORT}" = "${ORIG_SHORT}" ]; then
-  green  "  ✅   ${LIVE_SHORT}  ==  ${ORIG_SHORT} (short-match; lengths differ)"
-  bold   "  Note: Fly served a ${#LIVE_SHA}-char SHA, origin is ${#ORIGIN_SHA}-char — both refer to commit ${ORIG_SHORT}."
-  exit 0
+# Verify the shorter SHA is an actual prefix of the longer one
+# rather than just matching first-7 blindly (which could let a
+# malformed SHA pass the gate by coincidence).
+if [ "${#LIVE_SHA}" -lt "${#ORIGIN_SHA}" ]; then
+  LIVE_SHORT="${LIVE_SHA}"
+  ORIG_PREFIX="${ORIGIN_SHA:0:${#LIVE_SHA}}"
+  if [ "${LIVE_SHORT}" = "${ORIG_PREFIX}" ]; then
+    green  "  ✅   ${LIVE_SHORT}  ≺  ${ORIGIN_SHA} (live is prefix of origin)"
+    bold   "  Note: Fly served a ${#LIVE_SHA}-char SHA, origin is ${#ORIGIN_SHA}-char — both refer to commit ${LIVE_SHORT}."
+    exit 0
+  fi
+elif [ "${#ORIGIN_SHA}" -lt "${#LIVE_SHA}" ]; then
+  ORIG_SHORT="${ORIGIN_SHA}"
+  LIVE_PREFIX="${LIVE_SHA:0:${#ORIGIN_SHA}}"
+  if [ "${ORIG_SHORT}" = "${LIVE_PREFIX}" ]; then
+    green  "  ✅   ${ORIG_SHORT}  ≺  ${LIVE_SHA} (origin is prefix of live)"
+    bold   "  Note: origin is ${#ORIGIN_SHA}-char SHA, live served ${#LIVE_SHA}-char — both refer to commit ${ORIG_SHORT}."
+    exit 0
+  fi
+else
+  LIVE_SHORT="${LIVE_SHA:0:7}"
+  ORIG_SHORT="${ORIGIN_SHA:0:7}"
+  if [ "${LIVE_SHORT}" = "${ORIG_SHORT}" ]; then
+    green  "  ✅   ${LIVE_SHORT}  ==  ${ORIG_SHORT} (short-match; lengths differ)"
+    bold   "  Note: Fly served a ${#LIVE_SHA}-char SHA, origin is ${#ORIGIN_SHA}-char — both refer to commit ${ORIG_SHORT}."
+    exit 0
+  fi
 fi
 
 red "  ❌   DRIFT detected"

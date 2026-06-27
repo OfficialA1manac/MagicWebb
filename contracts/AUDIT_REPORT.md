@@ -835,7 +835,8 @@ Data Flow:
 | **JWT/Auth** | TTL capped at 24h | ✅ PASS | `ttl > 24h` clamped down |
 | **JWT/Auth** | Algorithm enforcement (HS256 only) | ✅ PASS | Prevents `alg=none` attacks |
 | **JWT/Auth** | Session cookie SameSite=Lax | ✅ PASS | Explicitly set (allows cross-origin GET navigations) |
-| **JWT/Auth** | Session cookie HttpOnly | ✅ PASS | Mitigates XSS exfiltration |
+| **JWT/Auth** | Session cookie HttpOnly | ✅ PASS | Mitigates XSS exfiltration; covers page-load & SSE auth |
+| **JWT/Auth** | In-memory JWT (no localStorage) | ✅ FIXED (v34) | JWT kept in memory only — `authHeaders()` sends Bearer header for in-page API calls; server-set HttpOnly cookie covers page-load/SSE auth. Previous `localStorage` persistence removed to close XSS exfiltration vector. |
 | **SIWE/Nonce** | Race-safe `SetIfFree` | ✅ PASS | Atomic DELETE + INSERT ON CONFLICT DO NOTHING RETURNING |
 | **SIWE/Nonce** | Chain ID binding (F-01) | ✅ PASS | `"Chain ID: N"` substring check in `verifyHandler` |
 | **SIWE/Nonce** | Domain binding | ✅ PASS | `SIWEDomain` substring check |

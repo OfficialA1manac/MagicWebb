@@ -147,6 +147,33 @@ func Load() {
 	C.OfferBookAddr = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
 
+	// Chain metadata validation: fail fast when the configured chain's
+	// NETWORK_NAME / NATIVE_CURRENCY / EXPLORER_URL don't match the
+	// deployed CHAIN_ID. Without this check, a production deploy that
+	// sets CHAIN_ID=14 (Flare mainnet) but forgets to override the
+	// Costons2 defaults would surface misleading WalletConnect labels,
+	// user-facing "C2FLR" currency symbols on mainnet, and explorer
+	// links pointing to the wrong chain — every one of which is a
+	// support-ticket factory. The expected pairs below are the only
+	// supported chains; any unrecognised combination is assumed to be
+	// a staging/test configuration and the warning can be silenced by
+	// setting the three vars explicitly.
+	switch C.ChainID {
+	case 14:
+		if C.NetworkName == "Flare Coston2" || C.NativeCurrency == "C2FLR" || C.ExplorerURL == "https://coston2-explorer.flare.network" {
+			fmt.Fprintln(os.Stderr, "FATAL: CHAIN_ID=14 (mainnet) but metadata still matches Coston2 defaults; set NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL for mainnet")
+			os.Exit(1)
+		}
+	case 114:
+		// Coston2 — defaults are correct; no action.
+	default:
+		// Unknown chain: log a warning so operators know they must set
+		// the metadata vars explicitly. Not fatal because test/staging
+		// chains may legitimately use atypical values.
+		fmt.Fprintf(os.Stderr, "WARN: unknown CHAIN_ID=%d; NETWORK_NAME=%s, NATIVE_CURRENCY=%s, EXPLORER_URL=%s may be incorrect\n",
+			C.ChainID, C.NetworkName, C.NativeCurrency, C.ExplorerURL)
+	}
+
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
 	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
 	// never silently drop the primary from rotation.

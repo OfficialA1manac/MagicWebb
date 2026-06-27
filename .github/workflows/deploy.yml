@@ -90,6 +90,8 @@ jobs:
     timeout-minutes: 15
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
       - name: Install flyctl
         # Direct curl install — avoids `superfly/flyctl-actions` SHA-pinning
         # supply-chain concern. flyctl is a single static binary on the

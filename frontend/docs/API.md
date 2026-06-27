@@ -1,6 +1,6 @@
 # API Reference
 
-MagicWebb exposes a RESTful JSON API under `/api/v1/`. All endpoints are rate-limited to **60 requests per minute per IP**. Endpoints that modify user data require a **SIWE JWT** obtained via the `/auth/*` flow.
+MagicWebb exposes a RESTful JSON API under `/api/v1/`. Most endpoints are rate-limited to **60 requests per minute per IP**; the `/auth/*` authentication flow has a separate **20 requests per minute per IP** limit. Endpoints that modify user data require a **SIWE JWT** obtained via the `/auth/*` flow.
 
 ## OpenAPI Specification
 
@@ -128,7 +128,9 @@ Include the JWT in one of two ways:
 
 ### Success
 
-All successful responses return JSON. Arrays are always returned as `[]` (never `null`).
+Most successful responses return JSON. Arrays are always returned as `[]` (never `null`).
+Some endpoints (e.g. `POST /api/v1/notifications/read`) return **204 No Content** with no body —
+these are documented individually in the endpoint overview.
 
 ### Errors
 

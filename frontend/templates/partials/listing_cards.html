@@ -6,24 +6,27 @@
        verified badge -> PURPLE/VIOLET
        live indicator -> SKY BLUE
        standard pill -> muted white-on-glass (informational)
-       traits peek -> PURPLE chip (categorical metadata) -->
-<a href="/token/{{.Collection}}/{{.TokenID}}"
+       traits peek -> PURPLE chip (categorical metadata)
+
+     v34: Restructured so interactive controls (retry, buy) are NOT
+     descendants of the <a> link, per HTML spec (interactive content
+     must not be nested inside an <a> element). The image + collection
+     name remain clickable via the <a>; the buy button sits at the same
+     level as the <a> as a sibling <div>. -->
+<div
    class="group relative block bg-ink-900 rounded-2xl overflow-hidden border border-white/10
           hover:border-sky-300/50 hover:shadow-sky-glow transition-all duration-300 hover:-translate-y-1 will-change-transform">
+
+  <!-- Clickable link: image + badges (NOT including buy/retry buttons) -->
+  <a href="/token/{{.Collection}}/{{.TokenID}}" class="block">
   <div class="relative aspect-square overflow-hidden bg-ink-800">
     {{if .ImageURI}}
     <img src="{{mediaURL .ImageURI}}"
          alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
          loading="lazy"
          class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
-         onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+         onerror="this.style.display='none';Array.from(this.closest('.group').querySelectorAll('.mw-img-fallback, .mw-img-retry')).forEach(function(el){el.classList.remove('hidden')})">
     <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
-    <div class="hidden mw-img-fallback absolute inset-0 flex items-end p-3">
-      <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
-        ⚠ Image unavailable — self-host on click.
-        <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="ml-2 underline text-sky-200 hover:text-white">retry ingest</button>
-      </div>
-    </div>
     {{else}}
     <div class="absolute inset-0 flex flex-col items-center justify-center text-white/40">
       <div class="text-5xl shimmer">🖼</div>
@@ -48,16 +51,32 @@
       <span class="text-xs font-black text-gold-200 tracking-tight">{{wei2flr .PriceWei}}</span>        <span class="text-[9px] text-gold-300/80 ml-0.5 font-extrabold uppercase tracking-wider">{{$.NativeCurrency}}</span>
     </div>
 
-    <!-- Bottom-right (live countdown for auctions only — listings have no expiry countdown but we'll surface short freshness) -->
+    <!-- Bottom-right freshness badge -->
     <div class="absolute bottom-3 right-3 px-2 py-0.5 rounded-md bg-ink-1000/70 backdrop-blur border border-sky-300/30 text-[9px] font-bold text-sky-200 uppercase tracking-wider">
       Listed
     </div>
   </div>
+  </a>
 
-  <!-- Card body: title + meta row -->
+  <!-- Retry button (sibling to <a>, not nested inside it).
+       Shown by the onerror handler on the <img> above via .mw-img-retry class. -->
+  {{if .ImageURI}}
+  <div class="hidden mw-img-retry">
+    <div class="flex items-end p-3">
+      <div class="text-[11px] text-white bg-ink-1000/80 backdrop-blur rounded-md px-2 py-1 border border-sky-300/30">
+        ⚠ Image unavailable
+        <button onclick="MW_RETRY_IMAGE('{{.Collection}}','{{.TokenID}}',event)" class="pointer-events-auto ml-2 underline text-sky-200 hover:text-white">retry ingest</button>
+      </div>
+    </div>
+  </div>
+  {{end}}
+
+  <!-- Card body: title + meta row (NOT wrapped in <a>) -->
   <div class="p-4 border-t border-white/5 bg-ink-900">
+    <a href="/token/{{.Collection}}/{{.TokenID}}" class="block">
     <p class="text-[10px] text-white/40 font-mono truncate uppercase tracking-wider">{{shortAddr .Collection}}</p>
     <p class="text-sm font-extrabold text-white mt-1 truncate">{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}</p>
+    </a>
     <div class="flex flex-wrap gap-1 mt-2 min-h-[14px]">
     </div>
     <div class="flex items-center justify-between mt-3">
@@ -69,6 +88,6 @@
       </button>
     </div>
   </div>
-</a>
+</div>
 {{end}}
 {{end}}

@@ -9,7 +9,7 @@
 ```bash
 cd contracts
 forge build                          # solc 0.8.26, via_ir, optimizer 1M
-forge test                           # 146 tests + 1 invariant — all pass
+forge test                           # 149 tests + 1 invariant — all pass
 forge test --match-path test/AuditFuzz.t.sol -vv   # fuzz regression set
 slither . --filter-paths 'lib/|test/'              # zero findings
 ```
@@ -56,7 +56,7 @@ fly deploy --strategy canary                              # Fly canary:
 - [x] v29 F-01 SIWE Chain ID substring check in `verifyHandler`.
 - [x] v29 F-02 `processTransfers` chunk abort on HeaderByNumber miss.
 - [x] v29 F-03 keeper gas cap + EIP-1559 invariant lift.
-- [x] 16 Postgres migrations auto-applied on first launch
+- [x] 15 Postgres migrations auto-applied on first launch
       (`backend/internal/db/migrations/001..015_*.sql`).
 - [x] SSE live updates + Fly.io LISTEN/NOTIFY cross-instance fan-out.
 - [x] Keeper advisory-lock single-flight (`WaitKeeperLock`).
@@ -111,8 +111,9 @@ SERVICE_TOKEN=               # 32+ chars; gates IndexerService.Reindex RPC
 curl -fsSL https://magicwebb.fly.dev/ | grep -F '{{' ; \
   [ "$(curl -s https://magicwebb.fly.dev/ | grep -cF '{{')" = "0" ] && echo PASS
 
-# 2. Native currency injection (Coston2 default = C2FLR)
-curl -fsSL https://magicwebb.fly.dev/ | grep -cF 'C2FLR'  # expect ≥4
+# 2. Native currency injection (uses {{NATIVE_CURRENCY}} from .env — C2FLR on Coston2, FLR on mainnet)
+NATIVE_SYMBOL="${NATIVE_CURRENCY:-C2FLR}"
+curl -fsSL https://magicwebb.fly.dev/ | grep -cF "$NATIVE_SYMBOL"  # expect ≥4
 
 # 3. Chain ID injection
 curl -fsSL https://magicwebb.fly.dev/ | grep -cF 'window.MW_NETWORK_ID'  # 1

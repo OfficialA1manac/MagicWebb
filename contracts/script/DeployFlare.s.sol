@@ -31,6 +31,18 @@ contract DeployFlare is Script {
         require(creator.code.length > 0, "CREATOR_ADDR must be a multisig contract on mainnet");
 
         address deployer = vm.addr(pk);
+        // L-14 fix: enforce that the deployer EOA and the creator multisig
+        // are DIFFERENT addresses. On mainnet, if creator == deployer, the
+        // deployer EOA would retain DEFAULT_ADMIN_ROLE and OPERATOR_ROLE
+        // after deployment (the conditional renouncement below would be
+        // a no-op), giving the deployer permanent administrative control
+        // over the protocol. This requirement forces proper separation of
+        // duties: the deployer is a temporary hot key that gets broadcast-
+        // only access, while the admin multisig (a separate, cold/wallet
+        // or Safe) receives all roles. The renouncement block below then
+        // always fires, guaranteeing zero deployer EOA roles at the end
+        // of the deployment transaction.
+        require(creator != deployer, "CREATOR_ADDR must differ from deployer on mainnet");
 
         vm.startBroadcast(pk);
 

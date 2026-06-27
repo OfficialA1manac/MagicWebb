@@ -1,5 +1,5 @@
 # MagicWebb
-### A Non-Custodial NFT Marketplace for the Flare Network
+## A Non-Custodial NFT Marketplace for the Flare Network
 
 **Version 1.0 — May 2026**
 
@@ -7,7 +7,7 @@
 
 ## Executive summary
 
-MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and signed off-chain offers. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 1.5% platform fee across all operations (listing, buying, auctions, offers). The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
+MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and on-chain payable offers with escrowed principal. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 1.5% platform fee, charged only on settlement (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds. Listing, auction creation, bidding, and making offers are all free — the fee is never charged on operations that do not result in a sale. The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
 
 This document explains what MagicWebb is, who it serves, why it exists, and where it is going. A separate **technical whitepaper** (`WHITEPAPER_TECHNICAL.md`) covers the smart-contract design and threat model in depth.
 
@@ -104,7 +104,7 @@ Whether you are trading a 1-of-1 generative art piece (ERC-721) or 1,000 collect
 
 ## 5. Architecture (high-level)
 
-```
+```text
 On-chain (Flare Coston2)
    ├── Marketplace        — fixed-price listings
    ├── AuctionHouse       — English auctions
@@ -151,7 +151,7 @@ If user feedback ever justifies governance, it will be added via a separate mech
 | Phase | Quarter | Scope |
 |---|---|---|
 | **Phase 1** | Q2 2026 (current) | Coston2 testnet. All trade primitives live. Indexer + frontend feature-complete. |
-| **Phase 2** | Q3 2026 | Independent audit. Multisig admin handover. Mainnet deploy. ERC-2981 royalty integration. FTSO USD display. |
+| **Phase 2** | Q3 2026 | Independent audit. Multisig fee-recipient deployment. Mainnet deploy. ERC-2981 royalty integration. FTSO USD display. |
 | **Phase 3** | Q4 2026 | Cross-collection routing. Bundle listings. WFLR/USDC payment adapter for stable-priced offers. |
 | **Phase 4** | 2027 | Songbird deploy. Cross-network offer relay via Flare FAssets. Bug bounty live. |
 
@@ -183,6 +183,6 @@ The NFT space spent its first cycle on speculation, the second on infrastructure
 
 ---
 
-**Find us:** github.com/<repo>
+**Find us:** github.com/OfficialA1manac/MagicWebb
 **Read the code:** `contracts/src/`, `backend/`
 **Read the technical whitepaper:** `WHITEPAPER_TECHNICAL.md`

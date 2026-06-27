@@ -87,25 +87,6 @@ func (s *PgStore) SetIfFree(address, nonce string, ttl time.Duration) (ok bool) 
 	return true
 }
 
-// Set upserts the nonce for an address (latest issued nonce wins, per the
-// in-memory store's overwrite semantics).
-//
-// Deprecated: callers that need SIWE issue should use SetIfFree, which
-// prevents an attacker from clobbering a real user's pending nonce. Set is
-// retained for the in-memory store shim and for tests that explicitly
-// exercise the overwrite path.
-func (s *PgStore) Set(address, nonce string, ttl time.Duration) {
-	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)
-	defer cancel()
-	if _, err := s.pool.Exec(ctx,
-		`INSERT INTO siwe_nonces(address, nonce, expires_at) VALUES($1,$2,$3)
-		 ON CONFLICT(address) DO UPDATE SET nonce=EXCLUDED.nonce, expires_at=EXCLUDED.expires_at`,
-		address, nonce, time.Now().Add(ttl),
-	); err != nil {
-		log.Error().Err(err).Str("address", address).Msg("nonce: pg set failed")
-	}
-}
-
 // GetDel atomically consumes a non-expired nonce. Single-use across instances.
 func (s *PgStore) GetDel(address string) (string, bool) {
 	ctx, cancel := context.WithTimeout(context.Background(), pgOpTimeout)

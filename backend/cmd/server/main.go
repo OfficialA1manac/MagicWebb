@@ -211,10 +211,20 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if !isValidEthAddr(addr) {
 			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{"error": "invalid address format"})
 		}
-		n, found := ns.GetDel(addr)
-		if !found || !strings.Contains(req.Message, n) {
-			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "nonce not found or expired"})
-		}
+
+		// L-15 fix: perform ALL validation BEFORE consuming the nonce.
+		// The previous ordering called ns.GetDel first, which consumed
+		// the nonce before domain/chain/signature validation. If any
+		// of those validations failed, the nonce was already consumed
+		// and the legitimate user had to request a new one — adding an
+		// unnecessary round trip. Worse, if an attacker could trigger
+		// validation failures deliberately (e.g. by submitting a message
+		// with an invalid domain), they could DOS a real user by
+		// repeatedly consuming their nonce without ever completing auth.
+		// The fix: validate domain, chain ID, and ECDSA signature BEFORE
+		// consuming the nonce. On any validation failure, the nonce is
+		// never touched and the legitimate user can retry immediately.
+
 		// Bind the signed message to our domain so a signature obtained for another
 		// site cannot be replayed here (SIWE domain binding).
 		// R-07 fix: use structured EIP-4361 parsing instead of substring match.
@@ -256,7 +266,24 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		if err != nil || !ok {
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "signature verification failed"})
 		}
-		token, err := auth.Issue(addr, config.C.JWTSecret, auth.DefaultAudience, config.C.NonceTTL*24)
+
+		// All validations passed — NOW consume the nonce (single-use).
+		n, found := ns.GetDel(addr)
+		if !found {
+			// Nonce was already consumed (race with another verify call)
+			// or expired. The caller must request a fresh nonce.
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce already consumed or expired, request a new one"})
+		}
+		if !strings.Contains(req.Message, n) {
+			// Nonce found but message doesn't contain it — security
+			// invariant violation (should be unreachable if the client
+			// uses the nonce we issued, but we don't consume the nonce
+			// here because the attacker could force consumption without
+			// valid signature).
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "nonce mismatch"})
+		}
+
+		token, err := auth.Issue(addr, config.C.JWTSecret, auth.DefaultAudience, 24*time.Hour)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
 		}
@@ -318,28 +345,26 @@ func isValidEthAddr(s string) bool {
 // siweDomainMatches extracts the domain from an EIP-4361 SIWE message
 // and checks for an exact match. The domain is the first line of the
 // message, which must end with " wants you to sign in with your Ethereum
-// account:". If the message doesn't follow EIP-4361 format, falls back
-// to substring match for legacy compatibility.
+// account:". Messages that don't follow EIP-4361 format are rejected
+// outright — no legacy substring fallback, to prevent cross-application
+// replay attacks where the target domain is embedded in a Statement or
+// URI field (R-07).
 func siweDomainMatches(msg, expected string) bool {
 	// EIP-4361: first line is "<domain> wants you to sign in with your Ethereum account:"
 	idx := strings.Index(msg, " wants you to sign in")
-	if idx > 0 {
-		domain := msg[:idx]
-		return domain == expected
+	if idx <= 0 {
+		return false
 	}
-	// Legacy fallback: substring match for non-EIP-4361 messages.
-	return strings.Contains(msg, expected)
+	domain := msg[:idx]
+	return domain == expected
 }
 
 // siweChainIDMatches extracts the Chain ID from an EIP-4361 SIWE message
 // and checks for an exact integer match. It parses the line starting with
-// "Chain ID: ". If the field is not found or cannot be parsed, it falls
-// back to a substring match for legacy compatibility.
-//
-// R-09 fix: the previous `strings.Contains` check was vulnerable to
-// cross-chain replay — an attacker could embed the target chain ID text
-// in the URI or Statement field while signing for a different chain.
-// Structured line parsing eliminates this attack vector entirely.
+// "Chain ID: ". Messages that don't contain a parseable Chain ID line are
+// rejected outright — no legacy substring fallback, to prevent cross-chain
+// replay attacks where the target chain ID text is embedded in a URI or
+// Statement field (R-12).
 func siweChainIDMatches(msg string, expected uint64) bool {
 	lines := strings.Split(msg, "\n")
 	for _, line := range lines {
@@ -348,11 +373,12 @@ func siweChainIDMatches(msg string, expected uint64) bool {
 			if id, err := strconv.ParseUint(idStr, 10, 64); err == nil {
 				return id == expected
 			}
+			// Chain ID line exists but can't be parsed — reject.
+			return false
 		}
 	}
-	// Legacy fallback: substring match for non-EIP-4361 messages.
-	wantSubstr := fmt.Sprintf("Chain ID: %d", expected)
-	return strings.Contains(msg, wantSubstr)
+	// No Chain ID line found — reject.
+	return false
 }
 
 func verifyEIP191(message, sigHex, address string) (bool, error) {

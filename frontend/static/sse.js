@@ -146,18 +146,17 @@ This extension adds support for Server Sent Events to htmx.  See /www/extensions
       triggerSpecs.forEach(function(ts) {
         if (ts.trigger.slice(0, 4) !== 'sse:') {
           return
-        }
-
-        var listener = function (event) {
-          if (maybeCloseSSESource(sourceElement)) {
-            return
-          }
-          if (!api.bodyContains(elt)) {
-            source.removeEventListener(ts.trigger.slice(4), listener)
-          }
-          // Trigger events to be handled by the rest of htmx
-          htmx.trigger(elt, ts.trigger, event)
-          htmx.trigger(elt, 'htmx:sseMessage', event)
+        }					var listener = function (event) {
+						if (maybeCloseSSESource(sourceElement)) {
+							return
+						}
+						if (!api.bodyContains(elt)) {
+							source.removeEventListener(ts.trigger.slice(4), listener)
+							return // L-16: avoid triggering htmx on detached elements
+						}
+						// Trigger events to be handled by the rest of htmx
+						htmx.trigger(elt, ts.trigger, event)
+						htmx.trigger(elt, 'htmx:sseMessage', event)
         }
 
         // Register the new listener

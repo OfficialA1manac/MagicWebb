@@ -159,13 +159,24 @@ import WalletConnect from '../components/WalletConnect';
             const vol = (Number(BigInt(m.volume_24h_wei)) / 1e18).toFixed(2);
             document.getElementById('counter-volume').innerHTML = vol + ' <span style="font-size:0.75rem;">C2FLR</span>';
           }
+        } else {
+          // Non-2xx response — show fallback instead of stuck loading state
+          document.getElementById('counter-listings').textContent = '—';
+          document.getElementById('counter-auctions').textContent = '—';
+          document.getElementById('counter-collections').textContent = '—';
+          document.getElementById('counter-volume').innerHTML = '—';
         }
-      } catch(_) {}
+      } catch(_) {
+        // Network error — show fallback
+        var c1 = document.getElementById('counter-listings'); var c2 = document.getElementById('counter-auctions'); var c3 = document.getElementById('counter-collections'); var c4 = document.getElementById('counter-volume');
+        if (c1) c1.textContent = '—'; if (c2) c2.textContent = '—'; if (c3) c3.textContent = '—'; if (c4) c4.textContent = '—';
+      }
 
       try {
         // Fetch recent listings
         const lRes = await fetch('/api/v1/listings?limit=8&sort=recent');
         if (lRes.ok) {
+          try {
           const listings = await lRes.json();
           const grid = document.getElementById('recent-listings-grid');
           if (listings && listings.length) {
@@ -187,9 +198,21 @@ import WalletConnect from '../components/WalletConnect';
                 '</div>' +
               '</a>';
             }).join('');
+          } else {
+            grid.innerHTML = '<div class="shimmer" style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.3);grid-column:1/-1;">No listings yet — be the first to list an NFT</div>';
           }
+        } catch(_json) {
+          var gridEl = document.getElementById('recent-listings-grid');
+          if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — please try again</div>';
         }
-      } catch(_) {}
+        } else {
+          var gridEl = document.getElementById('recent-listings-grid');
+          if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — please try again</div>';
+        }
+      } catch(_) {
+        var gridEl = document.getElementById('recent-listings-grid');
+        if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — please try again</div>';
+      }
 
       try {
         // Fetch trending collections
@@ -205,9 +228,14 @@ import WalletConnect from '../components/WalletConnect';
                 '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-top:0.25rem;">Score ' + esc(t.score ? t.score.toFixed(1) : '—') + '</p>' +
               '</a>';
             }).join('');
+          } else {
+            grid.innerHTML = '<div class="shimmer" style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.3);grid-column:1/-1;">No trending data yet</div>';
           }
         }
-      } catch(_) {}
+      } catch(_) {
+        var grid2 = document.getElementById('trending-grid');
+        if (grid2) grid2.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load trending — please try again</div>';
+      }
     })();
 
     // 3D tilt effect on cards
@@ -228,6 +256,7 @@ import WalletConnect from '../components/WalletConnect';
     document.addEventListener('mouseout', function(e) {
       var card = e.target.closest('.tilt-card');
       if (!card) return;
+      if (card.contains(e.relatedTarget)) return;
       card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1,1,1)';
       card.style.boxShadow = '';
       card.style.borderColor = 'rgba(255,255,255,0.08)';

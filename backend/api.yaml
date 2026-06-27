@@ -62,7 +62,7 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE formatted events (data: JSON\n\n)
+                description: 'SSE formatted events (data: JSON\n\n)'
         "503":
           description: Too many subscribers
 
@@ -712,6 +712,8 @@ paths:
                   verified: { type: boolean }
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Admin only
         "500":
@@ -747,6 +749,8 @@ paths:
                   verified:   { type: boolean }
         "400":
           $ref: "#/components/responses/BadRequest"
+        "401":
+          $ref: "#/components/responses/Unauthorized"
         "403":
           description: Admin only
         "500":
@@ -926,12 +930,12 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: SIWE JWT via Authorization: Bearer <token>
+      description: "SIWE JWT via Authorization: Bearer <token>"
     CookieAuth:
       type: apiKey
       in: cookie
-      name: mw_s_*
-      description: HttpOnly session cookie set after SIWE login
+      name: mw_s_
+      description: "HttpOnly session cookie with addr prefix (e.g. mw_s_0xabcd...)"
 
   responses:
     BadRequest:

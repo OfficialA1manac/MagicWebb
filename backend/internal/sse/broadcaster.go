@@ -201,7 +201,25 @@ func (b *Broadcaster) listen(ctx context.Context, dsn string) {
 			}
 			select {
 			case b.events <- Event{Type: w.Type, Data: w.Data}:
+				// Successful delivery — reset the streak.
+				// Without this, a transient failure (single saturation
+				// event) would leave SaturationStreak stuck at 1
+				// forever, polluting the /api/v1/metrics saturation
+				// panel until process restart. The same reset pattern
+				// is used in Publish()'s successful enqueue path.
+				SaturationStreak.Store(0)
 			default:
+				// L-17: increment DroppedTotal for remote-origin drops,
+				// symmetrical with the local-fan-out saturation metric
+				// in Publish(). Without this, remote drops are invisible
+				// in the /api/v1/metrics saturation panel — a bridge
+				// channel that's consistently full on the listener side
+				// would silently lose cross-instance events with no
+				// monitoring signal. The per-instance DroppedTotal
+				// aggregation still reflects the true drop rate
+				// regardless of whether the drop is local or bridged.
+				DroppedTotal.Add(1)
+				SaturationStreak.Add(1)
 			}
 		}
 		_ = conn.Close(context.Background())

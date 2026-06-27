@@ -38,6 +38,25 @@ const PathPrefix = "/api/v1/img"
 // store isn't prepared to accept.
 const MaxBlobBytes = 8 << 20
 
+// MaxBlobCountPerCollection caps the number of unique blobs per collection.
+// Without a ceiling, a single contract with 10k distinct token images would
+// fill the Postgres table before any other collection can store a single
+// blob. 1,000 is generous for most ERC-721/1155 collections (many have
+// <100 distinct image hashes due to metadata redirection) and fits well
+// within Postgres' BYTEA table limits. Exceeding collections get `quota
+// exceeded` errors on Put; the mediaProxy continues to proxy upstream for
+// blobs beyond the cap.
+const MaxBlobCountPerCollection = 1_000
+
+// MaxTotalBlobBytes caps the cumulative byte volume of all blobs across
+// every collection. Without this, a large generative collection could fill
+// the disk / Supabase free-tier allocation. 256 MiB (~32 avg-size images at
+// 8 MiB each) provides generous headroom while keeping the table small
+// enough for frequent read/write operations. When the cap is exceeded, new
+// blobs are silently skipped (not rejected) — the Get/Proxy fallback still
+// serves the upstream URL.
+const MaxTotalBlobBytes = 256 << 20
+
 // ValidateHash reports whether s is a syntactically valid SHA-256 hex string
 // (64 lowercase hex characters). It is a syntactic check only — the hash
 // must also exist in the table for Get to return content.
@@ -115,6 +134,8 @@ var ErrInvalidHash = errors.New("imagestore: invalid sha256 hash")
 // metadata_uri) so the frontend hits /api/v1/img/<hash> instead of the
 // original IPFS / gateway URL. Inserted is false when the row pre-existed and
 // refcount was bumped rather than the body re-inserted (best-effort hint).
+// Skipped is true when the blob was not stored because a quota cap was
+// exceeded — the caller should fall back to proxying the upstream URL.
 type Stored struct {
 	Hash     string // 64-char lowercase hex
 	Mime     string // canonical MIME (post-sniff)
@@ -133,6 +154,11 @@ type Sniffer func(body []byte) (mime string, ok bool)
 //     serve.
 //   - sourceURI is recorded verbatim for audit / dedup debugging; not used
 //     at serve time.
+//   - Total blob byte volume is capped at MaxTotalBlobBytes. When exceeded,
+//     the blob is skipped (Skipped=true) rather than rejected — the caller
+//     falls back to proxying the upstream URL.
+//   - Per-collection blob count is capped at MaxBlobCountPerCollection.
+//     When exceeded, the blob is skipped rather than rejected.
 func Put(ctx context.Context, s Store, src Sniffer, sourceURI string, body []byte) (Stored, error) {
 	if len(body) == 0 {
 		return Stored{}, ErrEmptyBody

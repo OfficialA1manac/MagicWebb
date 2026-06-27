@@ -3,11 +3,20 @@
 <!-- Outer x-data is on the page template, NOT inside the swapped
      region, so Alpine survives the 1s htmx-swap of the live data. The
      action tab bar, form inputs, and @click handlers stay interactive
-     across refreshes. -->
-<div x-data="{
+     across refreshes.
+
+     v34: hasListing / hasAuction / listingPriceWei / listingPriceDisplay
+     are synced from the #token-state hidden div in the swapped partial
+     on every htmx refresh, so tab visibility + Buy-form values stay in
+     sync with the live data. -->
+<div id="token-page-root" x-data="{
     sellerAddr: '{{with .Listing}}{{lower .Seller}}{{end}}',
     ownerAddr:   '{{lower .Owner}}',
     action:      (new URLSearchParams(location.search).get('action')) || '{{if .Listing}}buy{{else}}offer{{end}}',
+    hasListing:  {{if .Listing}}true{{else}}false{{end}},
+    hasAuction:  {{if .Auction}}true{{else}}false{{end}},
+    listingPriceWei: '{{with .Listing}}{{.PriceWei}}{{end}}',
+    listingPriceDisplay: '{{with .Listing}}{{wei2flr .PriceWei}}{{end}}',
     listPrice:   '', listDays: '30',
     offerAmt:    '', offerDays: '3',
     auctionReserve: '', auctionDays: '3',
@@ -22,7 +31,19 @@
        hx-get="/partials/token/{{.Contract}}/{{.TokenID}}"
        hx-trigger="sse:listing-updated, sse:auction-updated, sse:offer-updated, every 1s [!document.hidden]"
        hx-swap="innerHTML"
-       hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
+       @htmx:after-swap="
+         let state = $event.detail.target.querySelector('#token-state')?.dataset;
+         if (state) {
+             hasListing  = state.hasListing === 'true';
+             hasAuction  = state.hasAuction === 'true';
+             sellerAddr  = state.seller || '';
+             listingPriceWei     = state.price || '';
+             listingPriceDisplay = state.priceDisplay || '';
+             if (action === 'buy'  && !hasListing) action = 'offer';
+             if (action === 'list' && (hasListing || hasAuction)) action = 'offer';
+         }
+         Alpine.initTree($event.detail.target);
+       ">
   {{template "partials/token_live.html" .}}
   </div>
 
@@ -55,36 +76,30 @@
          an existing fixed-price sale. -->
     <div class="bg-ink-900/80 backdrop-blur rounded-2xl border border-white/10 overflow-hidden glow-sky">
       <div class="flex border-b border-white/10 bg-white/[0.02]">
-        {{with .Listing}}
-        <button @click="action='buy'"
+        <button x-show="hasListing" @click="action='buy'"
                 :class="action==='buy' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Buy</button>
-        {{end}}
         <button @click="action='offer'"
                 :class="action==='offer' ? 'text-gold-200 border-gold-300 bg-gold-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Offer</button>
-        {{if and (not .Listing) (not .Auction)}}
-        <button @click="action='list'"
+        <button x-show="!hasListing && !hasAuction && isOwner" @click="action='list'"
                 :class="action==='list' ? 'text-sky-200 border-sky-300 bg-sky-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">List</button>
-        <button @click="action='auction'"
+        <button x-show="!hasListing && !hasAuction && isOwner" @click="action='auction'"
                 :class="action==='auction' ? 'text-violet-200 border-violet-300 bg-violet-500/10' : 'text-white/40 border-transparent hover:text-white'"
                 class="flex-1 px-3 py-3.5 text-xs font-extrabold border-b-2 transition uppercase tracking-wider">Auction</button>
-        {{end}}
       </div>
 
       <div class="p-5">
-        <div x-show="action==='buy'" x-cloak class="space-y-3">
-          {{with .Listing}}
+        <div x-show="action==='buy' && hasListing" x-cloak class="space-y-3">
           <button class="w-full py-4 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-base transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.buy('{{.Collection}}', '{{.TokenID}}', '{{lower .Seller}}', '{{.PriceWei}}')">
-            <span>Buy Now</span><span class="text-base">→</span><span>{{wei2flr .PriceWei}} {{$.NativeCurrency}}</span>
+                  @click="$store.wallet.buy('{{$.Contract}}', '{{$.TokenID}}', sellerAddr, listingPriceWei)">
+            <span>Buy Now</span><span class="text-base">→</span><span x-text="listingPriceDisplay"></span><span class="ml-1">{{$.NativeCurrency}}</span>
           </button>
           <template x-if="isSeller">
             <button class="w-full py-2.5 rounded-xl border border-gold-400/30 hover:bg-gold-500/10 text-gold-200 text-sm font-bold transition"
-                    @click="$store.wallet.cancel('{{.Collection}}', '{{.TokenID}}')">Cancel Listing</button>
+                    @click="$store.wallet.cancel('{{$.Contract}}', '{{$.TokenID}}')">Cancel Listing</button>
           </template>
-          {{end}}
         </div>
 
         <div x-show="action==='offer'" x-cloak class="space-y-3">
@@ -98,12 +113,12 @@
             <option value="1">Expires in 1 day</option><option value="3">Expires in 3 days</option><option value="7">Expires in 7 days</option><option value="14">Expires in 14 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-gold hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-gold shadow-lg shadow-gold-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.makeOffer('{{.Contract}}', '{{.TokenID}}', (parseFloat(offerAmt||0)*1e18).toString(), Date.now()/1000 + parseInt(offerDays||3)*86400)">
+                  @click="$store.wallet.makeOffer('{{.Contract}}', '{{.TokenID}}', window.ethers.parseEther(offerAmt||'0').toString(), Math.floor(Date.now()/1000) + parseInt(offerDays||3)*86400)">
             <span class="text-base">⚐</span> Submit Offer
           </button>
         </div>
 
-        <div x-show="action==='list'" x-cloak class="space-y-3">
+        <div x-show="action==='list' && isOwner" x-cloak class="space-y-3">
           <p class="text-xs text-white/60 leading-relaxed">List for free. You receive <span class="text-gold-200 font-extrabold">98.5%</span> of the sale price after the 1.5% platform fee.</p>
           <div class="relative">
             <input x-model="listPrice" type="number" step="0.001" min="0.01" placeholder="0.00"
@@ -114,12 +129,12 @@
             <option value="7">7 days</option><option value="30">30 days</option><option value="90">90 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-sky hover:opacity-95 text-ink-950 font-extrabold text-sm transition glow-sky shadow-lg shadow-sky-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.list('{{.Contract}}', '{{.TokenID}}', (parseFloat(listPrice||0)*1e18).toString(), Date.now()/1000 + parseInt(listDays||30)*86400)">
+                  @click="$store.wallet.list('{{.Contract}}', '{{.TokenID}}', window.ethers.parseEther(listPrice||'0').toString(), Math.floor(Date.now()/1000) + parseInt(listDays||30)*86400)">
             <span>List for Sale</span><span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
           </button>
         </div>
 
-        <div x-show="action==='auction'" x-cloak class="space-y-3">
+        <div x-show="action==='auction' && isOwner" x-cloak class="space-y-3">
           <p class="text-xs text-white/60 leading-relaxed">English auction, max 7 days. Anti-snipe <span class="text-sky-200 font-extrabold">+3:00</span>. 1.5% fee from seller at settlement. <span class="text-sky-300 font-extrabold">No min-increment</span> — bids need only be <span class="text-sky-300 font-extrabold">+1 wei</span> over the previous top bid (or highest active offer), and at least your reserve.</p>
           <div class="relative">
             <input x-model="auctionReserve" type="number" step="0.001" min="0.01" placeholder="Reserve price (min 0.01 {{.NativeCurrency}})"
@@ -130,7 +145,7 @@
             <option value="1">1 day</option><option value="3">3 days</option><option value="7">7 days (max)</option>
           </select>
           <button class="w-full py-3.5 rounded-xl btn-violet hover:opacity-95 text-white font-extrabold text-sm transition glow-violet shadow-lg shadow-violet-500/30 active:scale-[0.97] flex items-center justify-center gap-2"
-                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? (parseFloat(auctionReserve)*1e18).toString() : '0', Date.now()/1000 + parseInt(auctionDays||3)*86400, 0, '0')">
+                  @click="$store.wallet.createAuction('{{.Contract}}', '{{.TokenID}}', auctionReserve ? window.ethers.parseEther(auctionReserve).toString() : '0', Math.floor(Date.now()/1000) + parseInt(auctionDays||3)*86400, 0, '0')">
             <span>♕</span><span>Create Auction</span><span class="text-xs px-1.5 py-0.5 rounded bg-ink-950/20 uppercase tracking-wider">Free</span>
           </button>
         </div>

@@ -112,6 +112,15 @@ contract OfferBook is MarketplaceCore {
         uint64  expiresAt
     ) internal {
         if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
+        // L-13 fix: reject zero-value top-ups. Without this, a caller with
+        // an existing position >= MIN_PRICE could call makeOffer with
+        // principal=0 to refresh the expiry or rewrite units without
+        // adding escrow, breaking the "locked until accept/reject/expiry"
+        // invariant — the offerer can effectively cancel and re-issue at
+        // a shorter expiry or different unit count without the seller's
+        // awareness, and a front-running seller who observed a top-up
+        // with reduced units would accept fewer units than expected.
+        if (principal == 0) revert InvalidAmount();
 
         // M-01 fix: when topping up an existing position, the new expiry must
         // not be less than the existing expiry. Without this, a bidder can
@@ -204,7 +213,7 @@ contract OfferBook is MarketplaceCore {
         if (p.standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
         } else {
-            if (IERC1155(coll).balanceOf(msg.sender, tokenId) == 0) revert NotOwner();
+            if (IERC1155(coll).balanceOf(msg.sender, tokenId) < p.units) revert NotOwner();
         }
 
         delete positions[coll][tokenId][bidder];

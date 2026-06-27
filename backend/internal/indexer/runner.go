@@ -512,11 +512,25 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				continue
 			}
 			for _, a := range auctions {
-				if err := r.sendSettle(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID)); err != nil {
+				txHash, err := r.sendSettle(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID))
+				if err != nil {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: settle tx failed")
-				} else {
-					log.Info().Int64("auctionId", a.AuctionID).Msg("keeper: settle tx sent")
+					continue
 				}
+				// Wait for receipt confirmation before moving to the next auction.
+				// Without this, sequential settle calls in one tick race on
+				// PendingNonceAt (all see the same nonce) and only the first
+				// tx is accepted — the rest fail with "nonce too low" and the
+				// auctions remain unsettled until the next keeper tick. The
+				// waitMined call also confirms the tx was mined successfully
+				// (not reverted), which reduces the number of keeper retries
+				// on already-settled auctions.
+				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
+					log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
+						Msg("keeper: settle tx receipt not confirmed; will retry on next tick")
+					continue
+				}
+				log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: settle confirmed")
 			}
 
 			inactive, err := r.q.GetInactiveAuctions(ctx)
@@ -525,23 +539,28 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				continue
 			}
 			for _, a := range inactive {
-				if err := r.sendSettle(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID)); err != nil {
+				txHash, err := r.sendSettle(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID))
+				if err != nil {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: cancel-inactive tx failed")
-				} else {
-					log.Info().Int64("auctionId", a.AuctionID).Msg("keeper: cancel-inactive tx sent")
+					continue
 				}
+				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
+					log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
+					Msg("keeper: cancel-inactive tx receipt not confirmed; will retry on next tick")
+					continue
+				}
+				log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: cancel-inactive confirmed")
 			}
 		}
 	}
 }
 
-func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, auctionID int64) error {
+func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, auctionID int64) (common.Hash, error) {
 	idBytes := make([]byte, 32)
 	big.NewInt(auctionID).FillBytes(idBytes)
 	data := append([]byte(nil), settleSelector...)
 	data = append(data, idBytes...)
-	_, err := r.sendRaw(ctx, key, from, to, signer, chainID, data, 150_000)
-	return err
+	return r.sendRaw(ctx, key, from, to, signer, chainID, data, 150_000)
 }
 
 // ── Offer Keeper (on-chain refund of expired positions) ────────────────────
@@ -584,12 +603,18 @@ func (r *Runner) runOfferKeeper(ctx context.Context) {
 				data = append(data, idBytes...)
 				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Bidder).Bytes(), 32)...)
 
-				if _, err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000); err != nil {
+				txHash, err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000)
+				if err != nil {
 					log.Error().Err(err).Str("bidder", o.Bidder).Msg("offer keeper: refund tx failed")
-				} else {
-					log.Info().Str("coll", o.Collection).Str("token", o.TokenID).Str("bidder", o.Bidder).
-						Msg("offer keeper: refund tx sent")
+					continue
 				}
+				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
+					log.Error().Err(err).Str("bidder", o.Bidder).Str("tx", txHash.Hex()).
+						Msg("offer keeper: refund tx receipt not confirmed; will retry on next tick")
+					continue
+				}
+				log.Info().Str("coll", o.Collection).Str("token", o.TokenID).Str("bidder", o.Bidder).
+					Str("tx", txHash.Hex()).Msg("offer keeper: refund confirmed")
 			}
 		}
 	}

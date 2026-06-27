@@ -361,6 +361,10 @@ func proxyHostAllowed(host string) bool {
 	return true
 }
 
+// cgnat10 is the 100.64.0.0/10 CGNAT prefix (RFC 6598). Carrier-grade NAT
+// ranges are not globally routable and should not be proxied-to.
+var cgnat10 = netip.MustParsePrefix("100.64.0.0/10")
+
 func publicAddrAllowed(addr netip.Addr) bool {
 	addr = addr.Unmap()
 	return addr.IsValid() &&
@@ -369,7 +373,36 @@ func publicAddrAllowed(addr netip.Addr) bool {
 		!addr.IsLinkLocalUnicast() &&
 		!addr.IsLinkLocalMulticast() &&
 		!addr.IsMulticast() &&
-		!addr.IsUnspecified()
+		!addr.IsUnspecified() &&
+		// Reject CGNAT (RFC 6598 100.64.0.0/10) used by mobile carriers
+		// and some ISPs — these are not globally unique and proxying to
+		// them creates an SSRF vector into carrier-internal networks.
+		!cgnat10.Contains(addr) &&
+		// Reject documentation ranges (TEST-NET-[123]: 192.0.2.0/24,
+		// 198.51.100.0/24, 203.0.113.0/24) and the benchmarking range
+		// (198.18.0.0/15). These have no legitimate NFT content and
+		// proxying to them would serve no purpose.
+		!isTestNet(addr)
+}
+
+// isTestNet reports whether addr falls within any of the IANA-specified
+// documentation / test-net prefixes (RFC 5735, RFC 2544).
+func isTestNet(addr netip.Addr) bool {
+	if !addr.Is4() {
+		return false
+	}
+	switch {
+	case netip.MustParsePrefix("192.0.2.0/24").Contains(addr):   // TEST-NET-1
+		return true
+	case netip.MustParsePrefix("198.51.100.0/24").Contains(addr): // TEST-NET-2
+		return true
+	case netip.MustParsePrefix("203.0.113.0/24").Contains(addr):  // TEST-NET-3
+		return true
+	case netip.MustParsePrefix("198.18.0.0/15").Contains(addr):   // Benchmarking (RFC 2544)
+		return true
+	default:
+		return false
+	}
 }
 
 // SniffImage validates that body begins with a recognised image magic signature

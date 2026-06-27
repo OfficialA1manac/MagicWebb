@@ -91,10 +91,13 @@
         if (this._escHandler)   document.removeEventListener('keydown',           this._escHandler);
       },
 
-      // Pulls the user's NFT list once auth+provider are good. The
-      // connect gate (Browser Wallet / WalletConnect) is shown when
-      // the wallet store hasn't recorded an address yet — i.e. the
-      // user clicked "List an NFT" without first connecting.
+      // Pulls the user's NFT list once auth+provider are good.
+      // v34: request-generation guard (`_lastReq`) ensures only the
+      // most recent fetch completion updates `nfts` and `loading`.
+      // Stale responses from earlier load() calls after close() or
+      // address change are discarded, preventing the "wrong wallet's
+      // NFTs shown" or "stale list after close" bug class.
+      _reqGen: 0,
       async _loadNfts() {
         const w = (typeof Alpine !== 'undefined') ? Alpine.store('wallet') : null;
         const addr = w && w.address;
@@ -103,11 +106,15 @@
           this.loading     = false;
           return;
         }
+        const gen = ++this._reqGen;
         try {
           const res = await fetch('/api/v1/wallet/' + addr + '/nfts');
-          if (res.ok) this.nfts = await res.json();
+          if (!res.ok) { this.loading = false; return; }
+          const data = await res.json();
+          if (gen !== this._reqGen) return; // stale response — discard
+          this.nfts = data;
         } catch (_) {}
-        this.loading = false;
+        if (gen === this._reqGen) this.loading = false;
       },
 
       // Routes to WalletConnect — the only connect path —
@@ -136,6 +143,7 @@
         this.loading     = false;
         this.needConnect = false;
         this.nfts        = [];
+        this._reqGen++; // invalidate any in-flight fetch
         try {
           const root = document.getElementById('nft-picker-modal-root');
           if (root) root.style.display = 'none';

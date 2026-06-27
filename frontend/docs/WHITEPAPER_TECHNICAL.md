@@ -13,7 +13,7 @@ MagicWebb is a non-custodial NFT marketplace shipped as a **single Go binary** (
 | Goal | Rationale |
 |---|---|
 | Non-custodial | NFTs remain in seller custody until atomic settlement. |
-| Minimal architecture | One Go binary (server + UI + indexer) plus the contracts. No separate frontend service, no Node build, no container required. |
+| Minimal architecture | One Go binary (server + UI + indexer) plus the contracts. The Astro frontend is pre-built to `app/dist/` and served as static assets by the Go binary — no Node runtime required at deployment. No separate frontend service, no container required. |
 | Hybrid 721/1155 | One marketplace surface for both token standards. |
 | Fully on-chain offers | Offers escrow native FLR in `OfferBook` on-chain — no off-chain signatures, deposits, or relayers. |
 | Predictable operations | Single `.env` and a Makefile lifecycle (`dev`, `build`, `run`, `migrate`, `test`, `deploy`, `load-addrs`). |
@@ -43,7 +43,7 @@ The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or 
 
 **Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-Deploy scripts require only `CREATOR_ADDR` (the immutable `feeRecipient`; there is no admin wallet). No `FEE_BPS` variable exists — the rate is fixed in code.
+Deploy scripts accept `CREATOR_ADDR` as the `feeRecipient`. After deploy, the `CONTRACT_ADMIN` role (managed via `MarketplaceManager`) is granted to a multisig, and the deployer must call `renounceRole` to complete the immutability transition — see [`IMMUTABILITY_TRANSITION.md`](../../docs/IMMUTABILITY_TRANSITION.md) for the exact sequence. No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 

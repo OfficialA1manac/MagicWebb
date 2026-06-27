@@ -38,7 +38,6 @@ import (
 // after the next deploy, when users on a clean browser cache see
 // nothing.
 //go:embed static/tailwind.css
-var _ = func() bool { return true }() // ensure embed is used
 var tailwindCSS string
 
 func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {

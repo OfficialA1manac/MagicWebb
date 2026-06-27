@@ -47,9 +47,40 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
 	if h := imagestore.ExtractHash(raw); h != "" {
-		return s.imageByHash(c)
+		// Resolve local blob hash via the imagestore directly instead of
+		// calling imageByHash(c) which expects c.Params("sha256") from
+		// the /api/v1/img/:sha256 route. Construct a synthetic context
+		// by calling the store directly.
+		if !imagestore.ValidateHash(h) {
+			return writeErr(c, fiber.StatusBadRequest, "invalid sha256")
+		}
+		blob, err := s.q.GetImage(c.Context(), h)
+		if err != nil {
+			if imagestore.IsNoRows(err) {
+				return writeErr(c, fiber.StatusNotFound, "blob not found")
+			}
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
+		if imgMime, isImg := media.SniffImage(blob.Body); isImg {
+			c.Set("Content-Type", imgMime)
+		} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
+			c.Set("Content-Type", "application/json")
+		} else {
+			return writeErr(c, fiber.StatusUnsupportedMediaType, "blob unfit for serve")
+		}
+		c.Set("Cache-Control", "public, max-age=31536000, immutable")
+		c.Set("X-Content-Type-Options", "nosniff")
+		c.Set("X-Imagestore-Sha256", h)
+		return c.Send(blob.Body)
 	}
-	if !media.ProxyAllowed(raw) {
+	// Use the DNS-aware ProxyAllowedContext at the entry gate instead of
+	// the syntactic-only ProxyAllowed. Without this, an attacker could
+	// supply a URL whose hostname is a legitimate public domain that
+	// resolves (at DNS time through ProxyAllowedContext for redirects)
+	// to a private IP — the entry-gate ProxyAllowed check only validated
+	// the hostname syntax, not its resolved addresses, leaving a
+	// DNS-rebinding SSRF window between the entry gate and the fetch.
+	if !media.ProxyAllowedContext(c.Context(), raw) {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
 	body, err := media.FetchBytes(c.Context(), raw, "")
@@ -123,6 +154,19 @@ func (s *MediaService) handleRetry(c *fiber.Ctx) error {
 	}
 	if !isRetriableUpstream(imageURI) {
 		return writeErr(c, fiber.StatusBadRequest, "image_uri is not an upstream URL")
+	}
+	// SSRF gate: validate the resolved URI before fetching, not just
+	// the original ipfs:// scheme. Without this, an attacker-controlled
+	// token metadata could supply an image_uri with an ipfs:// scheme
+	// that resolves through FetchBytes to an http gateway URL pointing
+	// at a private IP — the isRetriableUpstream check only validates
+	// the URI scheme, not the resolved address at the other end.
+	resolved := imageURI
+	if strings.HasPrefix(imageURI, "ipfs://") {
+		resolved = media.ResolveURI(imageURI, tokenID)
+	}
+	if strings.HasPrefix(resolved, "http") && !media.ProxyAllowedContext(c.Context(), resolved) {
+		return writeErr(c, fiber.StatusBadRequest, "image_uri resolves to disallowed address")
 	}
 
 	body, ferr := fetch(c.Context(), imageURI, tokenID)

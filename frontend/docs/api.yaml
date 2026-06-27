@@ -62,7 +62,7 @@ paths:
             text/event-stream:
               schema:
                 type: string
-                description: SSE formatted events (data: JSON\n\n)
+                description: 'SSE formatted events (data: JSON\n\n)'
         "503":
           description: Too many subscribers
 
@@ -930,8 +930,8 @@ components:
     CookieAuth:
       type: apiKey
       in: cookie
-      name: mw_s_*
-      description: HttpOnly session cookie set after SIWE login
+      name: mw_s_
+      description: "HttpOnly session cookie with addr prefix (e.g. mw_s_0xabcd...)"
 
   responses:
     BadRequest:

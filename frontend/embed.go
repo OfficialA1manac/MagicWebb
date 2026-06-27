@@ -244,9 +244,16 @@ func Init(mediaURLFn func(string) string) {
 		Templates[page] = t
 	}
 
-	// Standalone partial sets (for HTMX partial swaps)
+	// Standalone partial sets (for HTMX partial swaps).
+	// L-18 fix: each parsed fragment is named with the same identifier
+	// used at execution time (the partial path like "partials/...").
+	// Previously, template.New("") created an unnamed template; the
+	// parsed file name would be the base name (e.g. "listing_cards.html")
+	// but ExecuteTemplate / render() expects the key "partials/listing_cards.html".
+	// By naming the template with the full partial path, the lookup key
+	// matches what render() passes to ExecuteTemplate.
 	for _, partial := range partialPaths {
-		t := template.Must(template.New("").Funcs(funcMap).Option("missingkey=zero").ParseFS(sub, partial))
+		t := template.Must(template.New(partial).Funcs(funcMap).Option("missingkey=zero").ParseFS(sub, partial))
 		Templates[partial] = t
 	}
 }

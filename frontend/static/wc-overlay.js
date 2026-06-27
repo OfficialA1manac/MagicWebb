@@ -125,15 +125,51 @@ function createOverlay() {
     var inp = document.getElementById('wc-overlay-uri-input');
     if (!inp || !inp.value) return;
     inp.select();
-    try { navigator.clipboard.writeText(inp.value); } catch (_) { try { document.execCommand('copy'); } catch (_) {} }
-    copyBtn.textContent = '✓ Copied';
-    copyBtn.style.background = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
-    copyBtn.style.color = '#fff';
-    setTimeout(function () {
-      copyBtn.textContent = 'Copy';
-      copyBtn.style.background = 'linear-gradient(135deg,#7dd3fc,#0ea5e9)';
-      copyBtn.style.color = '#09090b';
-    }, 2000);
+    var promise = null;
+    try { promise = navigator.clipboard.writeText(inp.value); } catch (_) {
+      try { document.execCommand('copy'); promise = Promise.resolve(); } catch (_) {}
+    }
+    if (promise && typeof promise.then === 'function') {
+      promise.then(function () {
+        copyBtn.textContent = '\u2713 Copied';
+        copyBtn.style.background = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
+        copyBtn.style.color = '#fff';
+        setTimeout(function () {
+          copyBtn.textContent = 'Copy';
+          copyBtn.style.background = 'linear-gradient(135deg,#7dd3fc,#0ea5e9)';
+          copyBtn.style.color = '#09090b';
+        }, 2000);
+      }).catch(function () {
+        // Clipboard writeText() promise rejected asynchronously (e.g.
+        // insecure context, permission denied, or DOMException). Fall
+        // back to execCommand('copy') which works in most contexts
+        // where navigator.clipboard is unavailable. Only update the
+        // button UI on success — leave unchanged on failure so the
+        // user sees the action didn't complete.
+        try {
+          if (document.execCommand('copy')) {
+            copyBtn.textContent = '\u2713 Copied';
+            copyBtn.style.background = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
+            copyBtn.style.color = '#fff';
+            setTimeout(function () {
+              copyBtn.textContent = 'Copy';
+              copyBtn.style.background = 'linear-gradient(135deg,#7dd3fc,#0ea5e9)';
+              copyBtn.style.color = '#09090b';
+            }, 2000);
+          }
+        } catch (_) {}
+      });
+    } else {
+      // execCommand fallback succeeded synchronously.
+      copyBtn.textContent = '\u2713 Copied';
+      copyBtn.style.background = 'linear-gradient(135deg,#a78bfa,#7c3aed)';
+      copyBtn.style.color = '#fff';
+      setTimeout(function () {
+        copyBtn.textContent = 'Copy';
+        copyBtn.style.background = 'linear-gradient(135deg,#7dd3fc,#0ea5e9)';
+        copyBtn.style.color = '#09090b';
+      }, 2000);
+    }
   };
   uriRow.appendChild(copyBtn);
   qrBlock.appendChild(uriRow);
@@ -149,17 +185,22 @@ function createOverlay() {
   deepLink.rel = 'noopener noreferrer';
   qrBlock.appendChild(deepLink);
 
-  // Dismiss button
+  body.appendChild(qrBlock);
+  card.appendChild(body);
+
+  // Dismiss button: appended to the CARD (not qrBlock) so it remains
+  // visible during both the loading spinner state AND the QR state. When
+  // placed inside qrBlock (the hidden QR section), users could never
+  // dismiss the overlay if the WalletConnect URI never arrived — the
+  // Cancel button was hidden behind qrBlock.style.display='none' during
+  // the loading phase. Now it's always accessible.
   var dismissBtn = document.createElement('button');
   dismissBtn.style.cssText = 'margin-top:8px;padding:8px 16px;border:none;border-radius:8px;background:transparent;color:rgba(255,255,255,0.35);font-size:11px;font-weight:600;font-family:sans-serif;cursor:pointer;transition:color 0.2s;';
   dismissBtn.textContent = 'Cancel';
   dismissBtn.onmouseover = function () { dismissBtn.style.color = 'rgba(255,255,255,0.7)'; };
   dismissBtn.onmouseout = function () { dismissBtn.style.color = 'rgba(255,255,255,0.35)'; };
   dismissBtn.onclick = function () { MW_WC_hide(); };
-  qrBlock.appendChild(dismissBtn);
-
-  body.appendChild(qrBlock);
-  card.appendChild(body);
+  card.appendChild(dismissBtn);
   overlay.appendChild(card);
   document.body.appendChild(overlay);
 
