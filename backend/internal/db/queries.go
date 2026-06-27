@@ -1458,3 +1458,49 @@ func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow
 	}
 	return out, rows.Err()
 }
+
+// GetRecentTransactionsByAddress returns marketplace activity rows where the
+// given address appears as seller, buyer, bidder, or auction creator. Each
+// UNION branch gets its own address filter + per-branch LIMIT, then the outer
+// ORDER BY + LIMIT caps the merged result. Same overall structure as
+// GetRecentTransactions but with address-scoped per-branch WHERE clauses.
+func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, limit int) ([]ActivityRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx, `
+		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
+			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
+			   FROM listings WHERE lower(seller) = lower($1)
+			   ORDER BY listed_at DESC LIMIT $2)
+			UNION ALL
+			(SELECT 'Sold', collection, token_id, price_wei, occurred_at, tx_hash
+			   FROM sales WHERE lower(seller) = lower($1) OR lower(buyer) = lower($1)
+			   ORDER BY occurred_at DESC LIMIT $2)
+			UNION ALL
+			(SELECT 'AuctionCreated', collection, token_id, reserve_price_wei, starts_at, create_tx
+			   FROM auctions WHERE lower(seller) = lower($1)
+			   ORDER BY starts_at DESC LIMIT $2)
+			UNION ALL
+			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
+			   FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
+			   WHERE lower(b.bidder) = lower($1)
+			   ORDER BY b.placed_at DESC LIMIT $2)
+		) AS activity
+		ORDER BY at DESC
+		LIMIT $2
+	`, address, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ActivityRow
+	for rows.Next() {
+		var r ActivityRow
+		if err := rows.Scan(&r.Type, &r.Collection, &r.TokenID, &r.AmountWei, &r.Timestamp, &r.TxHash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}

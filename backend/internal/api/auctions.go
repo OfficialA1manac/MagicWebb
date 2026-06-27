@@ -30,6 +30,7 @@ func (s *AuctionsService) RegisterRoutes(api fiber.Router) {
 func (s *AuctionsService) handleList(c *fiber.Ctx) error {
 	f := db.AuctionsFilter{
 		Collection: c.Query("collection"),
+		Seller:     c.Query("seller"),
 		Status:     c.Query("status"),
 	}
 	if lim := c.Query("limit"); lim != "" {

@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"math"
 	"strconv"
+	"strings"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
@@ -51,7 +52,14 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 			limit = n
 		}
 	}
-	rows, err := s.q.GetRecentTransactions(c.Context(), limit)
+	address := strings.ToLower(c.Query("address"))
+	var rows []db.ActivityRow
+	var err error
+	if address != "" {
+		rows, err = s.q.GetRecentTransactionsByAddress(c.Context(), address, limit)
+	} else {
+		rows, err = s.q.GetRecentTransactions(c.Context(), limit)
+	}
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
