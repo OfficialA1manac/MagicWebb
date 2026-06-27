@@ -19,64 +19,37 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
     <title>{title} — MagicWebb</title>
     <meta name="description" content={desc} />
     <meta name="theme-color" content="#09090b" />
-
-    <!-- Open Graph -->
     <meta property="og:title" content={`${title} — MagicWebb NFT Marketplace`} />
     <meta property="og:description" content={desc} />
     <meta property="og:type" content="website" />
-
-    <!-- Fonts -->
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-
-    <!-- Inline SVG favicon -->
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
 
-    <!-- ═════════════ DESIGN SYSTEM ═════════════ -->
     <style>
-      /* ── CSS Custom Properties (5-color palette) ── */
       :root {
-        --ink-950: #09090b;
-        --ink-900: #0f0f13;
-        --ink-800: #1a1a24;
-        --sky-300: #7dd3fc;
-        --sky-500: #0ea5e9;
-        --gold-300: #fcd34d;
-        --gold-500: #f59e0b;
-        --violet-300: #a78bfa;
-        --violet-500: #7c3aed;
-        --white: #fafafa;
-        --white-10: rgba(255,255,255,0.1);
-        --white-20: rgba(255,255,255,0.2);
-        --white-40: rgba(255,255,255,0.4);
-        --white-60: rgba(255,255,255,0.6);
-        --white-80: rgba(255,255,255,0.8);
+        --ink-950: #09090b; --ink-900: #0f0f13; --ink-800: #1a1a24;
+        --sky-300: #7dd3fc; --sky-500: #0ea5e9;
+        --gold-300: #fcd34d; --gold-500: #f59e0b;
+        --violet-300: #a78bfa; --violet-500: #7c3aed;
+        --white: #fafafa; --white-10: rgba(255,255,255,0.1); --white-20: rgba(255,255,255,0.2);
+        --white-40: rgba(255,255,255,0.4); --white-60: rgba(255,255,255,0.6); --white-80: rgba(255,255,255,0.8);
       }
-
-      /* ── Reset ── */
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html {
-        font-family: 'Inter', system-ui, -apple-system, sans-serif;
-        background: var(--ink-950);
-        color: var(--white);
-        -webkit-font-smoothing: antialiased;
-        scroll-behavior: smooth;
-      }
+      html { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--ink-950); color: var(--white); -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
       body { min-height: 100vh; overflow-x: hidden; }
       a { color: inherit; text-decoration: none; }
       button { font-family: inherit; cursor: pointer; border: none; }
-      code, .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
+      .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-      /* ── Scrollbar ── */
       ::-webkit-scrollbar { width: 10px; height: 10px; }
       ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
       ::-webkit-scrollbar-thumb { background: linear-gradient(135deg, var(--sky-300), var(--violet-300)); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
       ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg, var(--sky-500), var(--violet-500)); background-clip: padding-box; }
       * { scrollbar-width: thin; scrollbar-color: var(--sky-300) rgba(255,255,255,0.05); }
 
-      /* ── Utility classes ── */
       .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
       .glass-soft  { background: rgba(15,15,20,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
       .glow-sky    { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
@@ -87,365 +60,94 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
       .btn-gold    { background-image: linear-gradient(135deg, var(--gold-300), var(--gold-500)); }
       .btn-violet  { background-image: linear-gradient(135deg, var(--violet-300), var(--violet-500)); }
       .btn-disabled { background-image: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25)) !important; cursor: not-allowed; }
-      .ring-focus:focus-visible { outline: 2px solid var(--sky-300); outline-offset: 2px; }
 
-      /* ── Animated brand gradient text ── */
       .brand-text {
         background-image: linear-gradient(90deg, var(--sky-300), var(--gold-300), var(--violet-300), var(--sky-300));
-        background-size: 200% auto;
-        -webkit-background-clip: text;
-        background-clip: text;
-        color: transparent;
+        background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent;
         animation: brand-shift 5s ease infinite;
       }
       @keyframes brand-shift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-
-      .shimmer {
-        background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%);
-        background-size: 200% 100%;
-        animation: shimmer 2s infinite;
-      }
+      .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
       @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
 
-      /* ── Navbar ── */
-      nav.topnav {
-        position: sticky;
-        top: 0;
-        z-index: 50;
-        display: flex;
-        align-items: center;
-        justify-content: space-between;
-        padding: 0 1.5rem;
-        height: 4rem;
-        border-bottom: 1px solid rgba(255,255,255,0.08);
-        backdrop-filter: blur(20px);
-        -webkit-backdrop-filter: blur(20px);
-        background: rgba(9,9,11,0.85);
-      }
-      .nav-brand {
-        display: flex;
-        align-items: center;
-        gap: 0.625rem;
-        flex-shrink: 0;
-      }
-      .nav-logo-icon {
-        width: 2.25rem;
-        height: 2.25rem;
-        border-radius: 0.75rem;
-        background: linear-gradient(135deg, var(--sky-300), var(--sky-500));
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        font-size: 1.25rem;
-        color: var(--ink-950);
-        box-shadow: 0 0 22px -6px rgba(56,189,248,0.45);
-        transition: transform 0.2s;
-        flex-shrink: 0;
-      }
+      nav.topnav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 4rem; border-bottom: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: rgba(9,9,11,0.85); }
+      .nav-brand { display: flex; align-items: center; gap: 0.625rem; flex-shrink: 0; }
+      .nav-logo-icon { width: 2.25rem; height: 2.25rem; border-radius: 0.75rem; background: linear-gradient(135deg, var(--sky-300), var(--sky-500)); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: var(--ink-950); box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); transition: transform 0.2s; flex-shrink: 0; }
       .nav-brand:hover .nav-logo-icon { transform: scale(1.08); }
-      .nav-logo-text {
-        font-size: 1.25rem;
-        font-weight: 800;
-        letter-spacing: -0.025em;
-        color: var(--white);
-      }
+      .nav-logo-text { font-size: 1.25rem; font-weight: 800; letter-spacing: -0.025em; color: var(--white); }
       .nav-logo-text .brand-text { font-weight: 900; }
 
-      .nav-links {
-        display: none;
-        align-items: center;
-        gap: 0.25rem;
-      }
-      @media (min-width: 768px) {
-        .nav-links { display: flex; }
-      }
-      .nav-links a {
-        padding: 0.375rem 0.75rem;
-        border-radius: 0.5rem;
-        font-size: 0.8125rem;
-        font-weight: 600;
-        color: var(--white-60);
-        transition: all 0.2s;
-      }
+      .nav-links { display: none; align-items: center; gap: 0.25rem; }
+      @media (min-width: 768px) { .nav-links { display: flex; } }
+      .nav-links a { padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--white-60); transition: all 0.2s; }
       .nav-links a:hover { color: var(--white); background: rgba(255,255,255,0.05); }
       .nav-links a.active { color: var(--sky-300); }
-      .nav-links a.nav-listings { color: #bae6fd; }
-      .nav-links a.nav-listings:hover { color: var(--white); background: rgba(14,165,233,0.15); }
-      .nav-links a.nav-auctions { color: #ddd6fe; }
-      .nav-links a.nav-auctions:hover { color: var(--white); background: rgba(167,139,250,0.15); }
-      .nav-links a.nav-offers { color: #fde68a; }
-      .nav-links a.nav-offers:hover { color: var(--white); background: rgba(252,211,77,0.15); }
-
+      .nav-links a.nav-listings { color: #bae6fd; } .nav-links a.nav-listings:hover { color: var(--white); background: rgba(14,165,233,0.15); }
+      .nav-links a.nav-auctions { color: #ddd6fe; } .nav-links a.nav-auctions:hover { color: var(--white); background: rgba(167,139,250,0.15); }
+      .nav-links a.nav-offers { color: #fde68a; } .nav-links a.nav-offers:hover { color: var(--white); background: rgba(252,211,77,0.15); }
       .nav-right { display: flex; align-items: center; gap: 0.5rem; }
 
-      /* ── Mobile hamburger ── */
-      .hamburger {
-        display: flex;
-        align-items: center;
-        justify-content: center;
-        width: 2.5rem;
-        height: 2.5rem;
-        border-radius: 0.5rem;
-        background: transparent;
-        color: var(--white-60);
-        font-size: 1.25rem;
-        transition: all 0.2s;
-      }
+      .notif-btn { position: relative; width: 2.25rem; height: 2.25rem; border-radius: 0.5rem; background: transparent; color: var(--white-60); font-size: 1.125rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
+      .notif-btn:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+      .notif-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: linear-gradient(135deg, var(--gold-300), var(--gold-500)); color: var(--ink-950); font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px -4px rgba(251,191,36,0.50); }
+      .notif-dropdown { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 20rem; max-width: 90vw; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 1rem; overflow: hidden; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+      .notif-dropdown.open { display: block; }
+      .notif-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--white-10); font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; }
+      .notif-list { max-height: 20rem; overflow-y: auto; }
+      .notif-list a { display: block; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
+      .notif-list a:hover { background: rgba(255,255,255,0.04); }
+      .notif-title { font-size: 0.8125rem; font-weight: 600; color: var(--white); }
+      .notif-body { font-size: 0.6875rem; color: var(--white-40); margin-top: 0.125rem; }
+      .notif-empty { padding: 2rem 1rem; text-align: center; color: var(--white-40); font-size: 0.8125rem; }
+
+      .hamburger { display: flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: transparent; color: var(--white-60); font-size: 1.25rem; transition: all 0.2s; }
       .hamburger:hover { color: var(--white); background: rgba(255,255,255,0.08); }
       @media (min-width: 768px) { .hamburger { display: none; } }
 
-      .mobile-menu {
-        display: none;
-        position: fixed;
-        inset: 0;
-        z-index: 49;
-        background: rgba(9,9,11,0.95);
-        backdrop-filter: blur(20px);
-        padding: 5rem 1.5rem 2rem;
-        flex-direction: column;
-        gap: 0.375rem;
-      }
+      .mobile-menu { display: none; position: fixed; inset: 0; z-index: 49; background: rgba(9,9,11,0.95); backdrop-filter: blur(20px); padding: 5rem 1.5rem 2rem; flex-direction: column; gap: 0.375rem; }
       .mobile-menu.open { display: flex; }
-      .mobile-menu a {
-        display: block;
-        padding: 0.75rem 1rem;
-        border-radius: 0.75rem;
-        font-size: 0.9375rem;
-        font-weight: 600;
-        color: var(--white-60);
-        transition: all 0.15s;
-      }
+      .mobile-menu a { display: block; padding: 0.75rem 1rem; border-radius: 0.75rem; font-size: 0.9375rem; font-weight: 600; color: var(--white-60); transition: all 0.15s; }
       .mobile-menu a:hover { color: var(--white); background: rgba(255,255,255,0.06); }
-      .mobile-menu .mobile-wallet { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid rgba(255,255,255,0.08); }
+      .mobile-wallet-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--white-10); }
+      .mobile-wallet-section .mobile-section-label { font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 1rem; margin-bottom: 0.5rem; }
+      .mobile-wallet-btn { display: block; width: 100%; text-align: left; padding: 0.875rem 1rem; border-radius: 0.75rem; font-size: 0.9375rem; font-weight: 700; transition: all 0.15s; margin-bottom: 0.375rem; }
+      .mobile-connect-btn { background: linear-gradient(135deg, var(--violet-300), var(--violet-500)); color: var(--white); box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
+      .mobile-connect-btn:hover { opacity: 0.92; }
+      .mobile-disconnect-btn { background: transparent; border: 1px solid rgba(252,165,165,0.3); color: #fca5a5; }
+      .mobile-disconnect-btn:hover { background: rgba(239,68,68,0.08); }
+      .mobile-wallet-info { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; color: var(--white-60); font-size: 0.8125rem; }
+      .mobile-wallet-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #7dd3fc; box-shadow: 0 0 8px rgba(125,211,252,0.5); }
 
-      /* ── Footer ── */
-      footer.main-footer {
-        border-top: 1px solid rgba(255,255,255,0.08);
-        margin-top: 4rem;
-        padding: 2rem 1.5rem;
-        text-align: center;
-        color: var(--white-40);
-        font-size: 0.8125rem;
-      }
-      footer.main-footer a { color: var(--sky-300); transition: color 0.2s; }
-      footer.main-footer a:hover { color: var(--violet-300); }
+      footer.main-footer { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4rem; padding: 2rem 1.5rem; text-align: center; color: var(--white-40); font-size: 0.8125rem; }
+      footer.main-footer a { color: var(--sky-300); transition: color 0.2s; } footer.main-footer a:hover { color: var(--violet-300); }
       footer.main-footer .brand-text { font-weight: 800; }
 
-      /* ── Fade-in-up reveal animation ── */
-      .reveal {
-        opacity: 0;
-        transform: translateY(24px);
-        transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1);
-      }
+      .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
       .reveal.visible { opacity: 1; transform: translateY(0); }
-
       @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
       .anim-fade-in { animation: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
-
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
       @keyframes shimmer-placeholder { 0% { opacity: 0.3; } 50% { opacity: 0.7; } 100% { opacity: 0.3; } }
       @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes pulse-ring { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
 
-      /* ── Gradient backgrounds ── */
-      .bg-mesh-hero {
-        background:
-          radial-gradient(ellipse 80% 50% at 50% -20%, rgba(125,211,252,0.12), transparent),
-          radial-gradient(ellipse 60% 35% at 80% 70%, rgba(167,139,250,0.08), transparent),
-          radial-gradient(ellipse 40% 40% at 20% 30%, rgba(252,211,77,0.05), transparent);
-      }
-
-      /* ── 3D Card Tilt ── */
-      .tilt-card {
-        transform-style: preserve-3d;
-        perspective: 1000px;
-        transition: transform 0.1s ease-out;
-      }
-
-      /* ── Cursor glow ── */
-      .cursor-glow {
-        pointer-events: none;
-        position: fixed;
-        width: 300px;
-        height: 300px;
-        border-radius: 50%;
-        background: radial-gradient(circle, rgba(125,211,252,0.06) 0%, transparent 70%);
-        transform: translate(-50%, -50%);
-        z-index: 0;
-        transition: opacity 0.3s;
-      }
-
-      /* ── Count-up animation ── */
-      @keyframes count-pop {
-        0% { transform: scale(1); }
-        50% { transform: scale(1.08); }
-        100% { transform: scale(1); }
-      }
+      .bg-mesh-hero { background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(125,211,252,0.12), transparent), radial-gradient(ellipse 60% 35% at 80% 70%, rgba(167,139,250,0.08), transparent), radial-gradient(ellipse 40% 40% at 20% 30%, rgba(252,211,77,0.05), transparent); }
+      .tilt-card { transform-style: preserve-3d; perspective: 1000px; transition: transform 0.1s ease-out; }
+      .cursor-glow { pointer-events: none; position: fixed; width: 300px; height: 300px; border-radius: 50%; background: radial-gradient(circle, rgba(125,211,252,0.06) 0%, transparent 70%); transform: translate(-50%, -50%); z-index: 0; transition: opacity 0.3s; }
+      @keyframes count-pop { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
       .count-pop { animation: count-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
-
-      /* ── Float animation for decorative elements ── */
-      @keyframes float {
-        0%, 100% { transform: translateY(0px); }
-        50% { transform: translateY(-10px); }
-      }
-      .float { animation: float 4s ease-in-out infinite; }
-      .float-delayed { animation: float 4s ease-in-out 1s infinite; }
-      .float-slow { animation: float 6s ease-in-out infinite; }
+      @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
+      .float { animation: float 4s ease-in-out infinite; } .float-delayed { animation: float 4s ease-in-out 1s infinite; } .float-slow { animation: float 6s ease-in-out infinite; }
     </style>
-
-    <!-- Inline interactive scripts (particles, cursor, reveal, mobile menu, parallax) -->
-    <script>
-      // ── Cursor glow ──
-      (function() {
-        if (typeof window === 'undefined') return;
-        const glow = document.createElement('div');
-        glow.className = 'cursor-glow';
-        glow.style.opacity = '0';
-        document.body.prepend(glow);
-        let raf = 0;
-        document.addEventListener('mousemove', function(e) {
-          if (raf) cancelAnimationFrame(raf);
-          raf = requestAnimationFrame(function() {
-            glow.style.left = e.clientX + 'px';
-            glow.style.top = e.clientY + 'px';
-            glow.style.opacity = '1';
-          });
-        });
-        document.addEventListener('mouseleave', function() { glow.style.opacity = '0'; });
-      })();
-
-      // ── Particle network background ──
-      (function() {
-        if (typeof window === 'undefined') return;
-        var canvas = document.createElement('canvas');
-        canvas.id = 'particles-canvas';
-        canvas.style.cssText = 'position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.35;';
-        document.body.prepend(canvas);
-        var ctx = canvas.getContext('2d');
-        var particles = [];
-        var PARTICLE_COUNT = 50;
-        var CONNECT_DIST = 120;
-
-        function resize() {
-          canvas.width = window.innerWidth;
-          canvas.height = window.innerHeight;
-        }
-        resize();
-        window.addEventListener('resize', resize);
-
-        for (var i = 0; i < PARTICLE_COUNT; i++) {
-          particles.push({
-            x: Math.random() * canvas.width,
-            y: Math.random() * canvas.height,
-            vx: (Math.random() - 0.5) * 0.4,
-            vy: (Math.random() - 0.5) * 0.4,
-            r: Math.random() * 1.5 + 0.5,
-            opacity: Math.random() * 0.5 + 0.2
-          });
-        }
-
-        function draw() {
-          ctx.clearRect(0, 0, canvas.width, canvas.height);
-          for (var i = 0; i < particles.length; i++) {
-            var p = particles[i];
-            p.x += p.vx;
-            p.y += p.vy;
-            if (p.x < 0 || p.x > canvas.width) p.vx *= -1;
-            if (p.y < 0 || p.y > canvas.height) p.vy *= -1;
-
-            ctx.beginPath();
-            ctx.arc(p.x, p.y, p.r, 0, Math.PI * 2);
-            ctx.fillStyle = 'rgba(125,211,252,' + p.opacity + ')';
-            ctx.fill();
-
-            // Draw connections
-            for (var j = i + 1; j < particles.length; j++) {
-              var p2 = particles[j];
-              var dx = p.x - p2.x;
-              var dy = p.y - p2.y;
-              var dist = Math.sqrt(dx * dx + dy * dy);
-              if (dist < CONNECT_DIST) {
-                ctx.beginPath();
-                ctx.moveTo(p.x, p.y);
-                ctx.lineTo(p2.x, p2.y);
-                ctx.strokeStyle = 'rgba(167,139,250,' + (0.12 * (1 - dist / CONNECT_DIST)) + ')';
-                ctx.lineWidth = 0.5;
-                ctx.stroke();
-              }
-            }
-          }
-          requestAnimationFrame(draw);
-        }
-        draw();
-      })();
-
-      // ── Scroll-triggered reveal ──
-      (function() {
-        if (typeof window === 'undefined') return;
-        var observer = new IntersectionObserver(function(entries) {
-          entries.forEach(function(entry) {
-            if (entry.isIntersecting) {
-              entry.target.classList.add('visible');
-              observer.unobserve(entry.target);
-            }
-          });
-        }, { threshold: 0.15, rootMargin: '0px 0px -40px 0px' });
-
-        document.addEventListener('DOMContentLoaded', function() {
-          document.querySelectorAll('.reveal').forEach(function(el) { observer.observe(el); });
-        });
-        // Also observe after Astro page transitions
-        setTimeout(function() {
-          document.querySelectorAll('.reveal:not(.visible)').forEach(function(el) { observer.observe(el); });
-        }, 300);
-      })();
-
-      // ── Mobile menu ──
-      (function() {
-        if (typeof window === 'undefined') return;
-        document.addEventListener('DOMContentLoaded', function() {
-          var btn = document.getElementById('mobile-menu-btn');
-          var menu = document.getElementById('mobile-menu');
-          if (btn && menu) {
-            btn.addEventListener('click', function() { menu.classList.toggle('open'); });
-            menu.querySelectorAll('a').forEach(function(a) {
-              a.addEventListener('click', function() { menu.classList.remove('open'); });
-            });
-          }
-        });
-      })();
-
-      // ── Parallax hero ──
-      (function() {
-        if (typeof window === 'undefined') return;
-        var ticking = false;
-        window.addEventListener('scroll', function() {
-          if (!ticking) {
-            requestAnimationFrame(function() {
-              var hero = document.querySelector('.hero-parallax');
-              if (hero) {
-                var scrollY = window.pageYOffset;
-                hero.style.transform = 'translateY(' + (scrollY * 0.3) + 'px)';
-                hero.style.opacity = Math.max(0, 1 - scrollY / 600);
-              }
-              ticking = false;
-            });
-            ticking = true;
-          }
-        }, { passive: true });
-      })();
-    </script>
   </head>
   <body>
     <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;"></div>
 
-    <!-- ═════════════ NAVBAR ═════════════ -->
     <nav class="topnav">
       <a href="/" class="nav-brand">
         <div class="nav-logo-icon" aria-hidden="true">✦</div>
         <span class="nav-logo-text">Magic<span class="brand-text">Webb</span></span>
       </a>
-
       <div class="nav-links">
         <a href="/" class={isActive('/') ? 'active' : ''}>Home</a>
         <a href="/listings" class={`nav-listings ${isActive('/listings')}`}>Listings</a>
@@ -455,39 +157,69 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
         <a href="/metrics" class={isActive('/metrics') ? 'active' : ''}>Metrics</a>
         <a href="/docs" class={isActive('/docs') ? 'active' : ''}>Docs</a>
       </div>
-
       <div class="nav-right">
-        <!-- WalletConnect slot — injected by React client:only -->
+        <div id="notif-bell-container" style="position:relative;">
+          <button id="notif-bell-btn" class="notif-btn" aria-label="Notifications" title="Notifications">
+            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
+            <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
+          </button>
+          <div id="notif-dropdown" class="notif-dropdown">
+            <div class="notif-header">Notifications</div>
+            <div class="notif-list" id="notif-list"><div class="notif-empty">Loading…</div></div>
+          </div>
+        </div>
         <slot name="wallet" />
         <button id="mobile-menu-btn" class="hamburger" aria-label="Menu">☰</button>
       </div>
     </nav>
 
-    <!-- Mobile menu -->
     <div id="mobile-menu" class="mobile-menu">
-      <a href="/">Home</a>
-      <a href="/listings">Listings</a>
-      <a href="/auctions">Auctions</a>
-      <a href="/offers">Offers</a>
-      <a href="/search">Search</a>
-      <a href="/metrics">Metrics</a>
-      <a href="/docs">Docs</a>
+      <a href="/">Home</a><a href="/listings">Listings</a><a href="/auctions">Auctions</a>
+      <a href="/offers">Offers</a><a href="/search">Search</a><a href="/metrics">Metrics</a><a href="/docs">Docs</a>
+      <div class="mobile-wallet-section">
+        <div class="mobile-section-label">Wallet</div>
+        <div id="mobile-wallet-disconnected" style="display:none;">
+          <button id="mobile-connect-wallet" class="mobile-wallet-btn mobile-connect-btn">⌬ Connect Wallet</button>
+        </div>
+        <div id="mobile-wallet-connected" style="display:none;">
+          <div class="mobile-wallet-info"><span class="mobile-wallet-dot"></span><span id="mobile-wallet-addr" class="font-mono" style="font-size:0.75rem;"></span></div>
+          <button id="mobile-disconnect-wallet" class="mobile-wallet-btn mobile-disconnect-btn">Disconnect Wallet</button>
+        </div>
+      </div>
     </div>
 
-    <!-- ═════════════ MAIN CONTENT ═════════════ -->
-    <main style="position:relative;z-index:1;">
-      <slot />
-    </main>
+    <main style="position:relative;z-index:1;"><slot /></main>
 
-    <!-- ═════════════ FOOTER ═════════════ -->
     <footer class="main-footer">
-      <span class="brand-text" style="font-weight:800;">MagicWebb</span>
-      &nbsp;· Non-custodial NFT marketplace on&nbsp;
-      <a href="https://flare.network">Flare Network</a>
-      &nbsp;·&nbsp;
-      <a href="https://github.com/OfficialA1manac/MagicWebb">GitHub</a>
-      &nbsp;·&nbsp;
-      <a href="/docs">Docs</a>
+      <span class="brand-text" style="font-weight:800;">MagicWebb</span> · Non-custodial NFT marketplace on <a href="https://flare.network">Flare Network</a> · <a href="https://github.com/OfficialA1manac/MagicWebb">GitHub</a> · <a href="/docs">Docs</a>
     </footer>
+
+    <script>
+      (function(){if(typeof window==='undefined')return;var g=document.createElement('div');g.className='cursor-glow';g.style.opacity='0';document.body.prepend(g);var r=0;document.addEventListener('mousemove',function(e){if(r)cancelAnimationFrame(r);r=requestAnimationFrame(function(){g.style.left=e.clientX+'px';g.style.top=e.clientY+'px';g.style.opacity='1';});});document.addEventListener('mouseleave',function(){g.style.opacity='0';});})();
+      (function(){if(typeof window==='undefined')return;var c=document.createElement('canvas');c.style.cssText='position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.35;';document.body.prepend(c);var x=c.getContext('2d'),p=[],N=50,D=120;function R(){c.width=window.innerWidth;c.height=window.innerHeight;}R();window.addEventListener('resize',R);for(var i=0;i<N;i++)p.push({x:Math.random()*c.width,y:Math.random()*c.height,vx:(Math.random()-0.5)*0.4,vy:(Math.random()-0.5)*0.4,r:Math.random()*1.5+0.5,o:Math.random()*0.5+0.2});function dr(){x.clearRect(0,0,c.width,c.height);for(var i=0;i<p.length;i++){var a=p[i];a.x+=a.vx;a.y+=a.vy;if(a.x<0||a.x>c.width)a.vx*=-1;if(a.y<0||a.y>c.height)a.vy*=-1;x.beginPath();x.arc(a.x,a.y,a.r,0,Math.PI*2);x.fillStyle='rgba(125,211,252,'+a.o+')';x.fill();for(var j=i+1;j<p.length;j++){var b=p[j],dx=a.x-b.x,dy=a.y-b.y,ds=Math.sqrt(dx*dx+dy*dy);if(ds<D){x.beginPath();x.moveTo(a.x,a.y);x.lineTo(b.x,b.y);x.strokeStyle='rgba(167,139,250,'+(0.12*(1-ds/D))+')';x.lineWidth=0.5;x.stroke();}}}requestAnimationFrame(dr);}dr();})();
+      (function(){if(typeof window==='undefined')return;var o=new IntersectionObserver(function(e){e.forEach(function(en){if(en.isIntersecting){en.target.classList.add('visible');o.unobserve(en.target);}});},{threshold:0.15,rootMargin:'0px 0px -40px 0px'});document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.reveal').forEach(function(el){o.observe(el);});});setTimeout(function(){document.querySelectorAll('.reveal:not(.visible)').forEach(function(el){o.observe(el);});},300);})();
+      (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){var b=document.getElementById('mobile-menu-btn'),m=document.getElementById('mobile-menu');if(b&&m){b.addEventListener('click',function(){m.classList.toggle('open');});m.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){m.classList.remove('open');});});}});})();
+      (function(){if(typeof window==='undefined')return;var t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){var h=document.querySelector('.hero-parallax');if(h){var s=window.pageYOffset;h.style.transform='translateY('+(s*0.3)+'px)';h.style.opacity=Math.max(0,1-s/600);}t=false;});t=true;}},{passive:true});})();
+
+      // ── Notification bell ──
+      (function(){if(typeof window==='undefined')return;var unread=0;
+        function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+        function updBadge(){var b=document.getElementById('notif-badge');if(!b)return;if(unread>0){b.style.display='flex';b.textContent=unread>99?'99+':unread;}else{b.style.display='none';}}
+        async function load(){var l=document.getElementById('notif-list');if(!l)return;var j=localStorage.getItem('mw_jwt');if(!j){l.innerHTML='<div class=\"notif-empty\">Connect your wallet for notifications</div>';return;}try{var r=await fetch('/api/v1/notifications?limit=20',{headers:{'Authorization':'Bearer '+j}});if(!r.ok)throw new Error('HTTP '+r.status);var d=await r.json();var items=d.notifications||[];unread=d.unread||0;updBadge();if(!items.length){l.innerHTML='<div class=\"notif-empty\">All caught up</div>';return;}l.innerHTML=items.map(function(n){return '<a href=\"'+esc(n.link||'#')+'\"><div class=\"notif-title\">'+esc(n.title)+'</div><div class=\"notif-body\">'+esc(n.body)+'</div></a>';}).join('');}catch(_){l.innerHTML='<div class=\"notif-empty\">Could not load notifications</div>';}}
+        async function mark(){if(unread<=0)return;var j=localStorage.getItem('mw_jwt');if(!j)return;try{await fetch('/api/v1/notifications/read',{method:'POST',headers:{'Authorization':'Bearer '+j}});unread=0;updBadge();}catch(_){}}
+        document.addEventListener('DOMContentLoaded',function(){var btn=document.getElementById('notif-bell-btn'),dd=document.getElementById('notif-dropdown'),bc=document.getElementById('notif-bell-container');if(btn&&dd){btn.addEventListener('click',function(e){e.stopPropagation();var was=dd.classList.contains('open');dd.classList.toggle('open');if(!was){load().then(function(){if(unread>0)mark();});}});document.addEventListener('click',function(e){if(bc&&!bc.contains(e.target))dd.classList.remove('open');});}load();});
+        try{var sse=new EventSource('/events');sse.onmessage=function(){load();};sse.onerror=function(){};}catch(_){}
+      })();
+
+      // ── Mobile wallet controls ──
+      (function(){if(typeof window==='undefined')return;
+        function check(){var a=localStorage.getItem('mw_addr');var d=document.getElementById('mobile-wallet-disconnected');var c=document.getElementById('mobile-wallet-connected');var ae=document.getElementById('mobile-wallet-addr');if(a&&a.length>10){if(d)d.style.display='none';if(c)c.style.display='block';if(ae)ae.textContent=a.slice(0,6)+'...'+a.slice(-4);}else{if(d)d.style.display='block';if(c)c.style.display='none';}}
+        document.addEventListener('DOMContentLoaded',function(){check();
+          var mc=document.getElementById('mobile-connect-wallet');if(mc)mc.addEventListener('click',function(){document.getElementById('mobile-menu').classList.remove('open');if(typeof window.__MW_APPKIT_OPEN__==='function'){window.__MW_APPKIT_OPEN__();}else if(typeof window.MW_CONNECT_WALLET==='function'){window.MW_CONNECT_WALLET();}});
+          var md=document.getElementById('mobile-disconnect-wallet');if(md)md.addEventListener('click',function(){if(typeof window.__MW_APPKIT_DISCONNECT__==='function'){window.__MW_APPKIT_DISCONNECT__();}else{try{localStorage.removeItem('mw_addr');localStorage.removeItem('mw_kind');localStorage.removeItem('mw_jwt');}catch(_){}location.reload();}});
+        });
+        var iv=setInterval(check,3000);window.addEventListener('beforeunload',function(){clearInterval(iv);});
+      })();
+    </script>
   </body>
 </html>

@@ -8,7 +8,6 @@ import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
 import { useAppKit, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react';
 import { http } from 'wagmi';
 
-// ── Flare chains ──────────────────────────────────────────────────────────────
 const flareCoston2 = {
   id: 114,
   name: 'Flare Coston2',
@@ -35,7 +34,6 @@ function getProjectId(): string {
   return (import.meta.env.PUBLIC_REOWN_PROJECT_ID as string) || '';
 }
 
-// ── Inner component (calls AppKit hooks — only rendered when providers exist) ──
 function WalletButton() {
   const { open } = useAppKit();
   const { address, isConnected, status } = useAppKitAccount();
@@ -47,15 +45,6 @@ function WalletButton() {
   const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
   const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
 
-  // Sync wallet state to localStorage so the Go HTMX pages (/, /auctions,
-  // /token/:addr/:id, etc.) can read the connected address from
-  // localStorage.mw_addr / localStorage.mw_kind and show the saved-wallet pill
-  // or connected state. Without this bridge, navigating from an Astro page to
-  // a Go HTMX page shows the user as disconnected.
-  //
-  // useRef guard prevents wiping localStorage on initial mount (before wagmi
-  // restores the session): only clear localStorage on an explicit disconnect
-  // transition (was connected → now disconnected), never on first render.
   const wasConnectedRef = useRef(false);
   useEffect(() => {
     if (isConnected && address) {
@@ -65,16 +54,29 @@ function WalletButton() {
         localStorage.setItem('mw_kind', 'walletconnect');
       } catch (_) {}
     } else if (wasConnectedRef.current && !isConnected) {
-      // Only clear on explicit disconnect (transition from connected → disconnected)
       wasConnectedRef.current = false;
       try {
         localStorage.removeItem('mw_addr');
         localStorage.removeItem('mw_kind');
       } catch (_) {}
     }
-    // Intentionally ignore the initial-render case (!wasConnected && !isConnected)
-    // to preserve any address saved by a previous session.
   }, [isConnected, address]);
+
+  // Expose globals so the mobile menu / external triggers can open AppKit
+  useEffect(() => {
+    if (typeof window !== 'undefined') {
+      (window as any).__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
+      (window as any).__MW_APPKIT_DISCONNECT__ = () => { open({ view: 'Account' }); };
+      (window as any).__MW_APPKIT_READY__ = true;
+    }
+    return () => {
+      if (typeof window !== 'undefined') {
+        try { delete (window as any).__MW_APPKIT_OPEN__; } catch (_) {}
+        try { delete (window as any).__MW_APPKIT_DISCONNECT__; } catch (_) {}
+        try { delete (window as any).__MW_APPKIT_READY__; } catch (_) {}
+      }
+    };
+  }, [isConnected, connecting, open]);
 
   if (!isConnected) {
     return (
@@ -215,79 +217,37 @@ function WalletButton() {
   );
 }
 
-// ── Outer component — initialises AppKit once, wraps children in providers ────
 let _wagmiConfig: any = null;
 let _appKitReady = false;
 
 async function initAppKit(): Promise<void> {
   if (typeof window === 'undefined') return;
   if (_appKitReady) return;
-
   const projectId = getProjectId();
-  if (!projectId) {
-    console.warn('[mw-wc] No Reown project ID — set PUBLIC_REOWN_PROJECT_ID in .env');
-    return;
-  }
-
+  if (!projectId) { console.warn('[mw-wc] No Reown project ID'); return; }
   try {
     const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
-
     createAppKit({
-      adapters: [adapter],
-      networks: chains as any,
-      defaultNetwork: flareCoston2,
-      projectId,
-      metadata: {
-        name: 'MagicWebb',
-        description: 'NFT Marketplace on Flare Network',
-        url: 'https://magicwebb.fly.dev',
-        icons: ['/favicon.ico'],
-      },
+      adapters: [adapter], networks: chains as any, defaultNetwork: flareCoston2, projectId,
+      metadata: { name: 'MagicWebb', description: 'NFT Marketplace on Flare Network', url: 'https://magicwebb.fly.dev', icons: ['/favicon.ico'] },
       features: { analytics: false, email: false, socials: false },
-      themeMode: 'dark',
-      enableWalletSelector: true,
-      enableNetworkSelector: true,
+      themeMode: 'dark', enableWalletSelector: true, enableNetworkSelector: true,
     });
-
     _appKitReady = true;
-  } catch (e) {
-    console.error('[mw-wc] AppKit init failed:', e);
-  }
+  } catch (e) { console.error('[mw-wc] AppKit init failed:', e); }
 }
 
 const queryClient = new QueryClient();
 
 export default function WalletConnect() {
   const [ready, setReady] = useState(false);
+  useEffect(() => { initAppKit().then(() => setReady(true)); }, []);
 
-  useEffect(() => {
-    initAppKit().then(() => setReady(true));
-  }, []);
-
-  // Not ready yet — show a minimal shimmer placeholder
   if (!ready || !_wagmiConfig) {
     return (
-      <button
-        disabled
-        style={{
-          padding: '0.625rem 1.25rem',
-          borderRadius: '0.75rem',
-          background: 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(124,58,237,0.1))',
-          border: '1px solid rgba(255,255,255,0.05)',
-          color: 'rgba(255,255,255,0.2)',
-          fontWeight: 800,
-          fontSize: '0.8125rem',
-          cursor: 'default',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          fontFamily: 'inherit',
-          animation: 'shimmer-placeholder 1.5s ease-in-out infinite',
-        }}
-      >
-        <span style={{ fontSize: '1rem', opacity: 0.3 }}>⌬</span>
-        <span>Loading…</span>
+      <button disabled style={{ padding: '0.625rem 1.25rem', borderRadius: '0.75rem', background: 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(124,58,237,0.1))', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.2)', fontWeight: 800, fontSize: '0.8125rem', cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'inherit', animation: 'shimmer-placeholder 1.5s ease-in-out infinite' }}>
+        <span style={{ fontSize: '1rem', opacity: 0.3 }}>⌬</span><span>Loading…</span>
       </button>
     );
   }
