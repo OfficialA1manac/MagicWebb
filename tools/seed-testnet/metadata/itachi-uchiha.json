@@ -1,13 +1,13 @@
 {
-  "name": "Itachi Uchiha — Tears of the Crow",
-  "description": "Itachi Uchiha, the prodigy of the Hidden Leaf who sacrificed everything for peace. Cloaked in the Akatsuki mantle with the Sharingan blazing crimson, he walks the path of shadows knowing the truth no one else can see. A single crow perched on his finger holds Shisui's final gift — Kotoamatsukami, the unbreakable genjutsu that can rewrite destiny itself.\n\nThis piece captures the stillness before the storm: the weight of a clan's annihilation, the love for a brother too young to understand, and the quiet resignation of a shinobi who chose the world over himself. The amaterasu flames flicker at the edges, never truly extinguished.",
+  "name": "Raven — Shadow of the Crimson Moon",
+  "description": "Raven, the phantom of the Veil Order who walked the razor's edge between light and shadow. Cloaked in a mantle of midnight silk with eyes that burn like embers, he moves through the world as a ghost — known only by the trail of crows that follow wherever he goes. A single crow perched on his finger carries the last gift of his fallen comrade: the forbidden technique that can rewrite the threads of fate itself.\n\nThis piece captures the stillness before the storm: the weight of a thousand impossible choices, the love for a brother who will never understand, and the quiet resignation of a warrior who chose the world over himself. Abyssal flames flicker at the edges, never truly extinguished.",
   "image": "PLACEHOLDER_IMAGE_URI",
   "attributes": [
-    { "trait_type": "Anime", "value": "Naruto Shippuden" },
-    { "trait_type": "Character", "value": "Itachi Uchiha" },
-    { "trait_type": "Affiliation", "value": "Akatsuki / Hidden Leaf" },
-    { "trait_type": "Dojutsu", "value": "Mangekyo Sharingan" },
-    { "trait_type": "Signature Technique", "value": "Amaterasu" },
+    { "trait_type": "Series", "value": "Original" },
+    { "trait_type": "Character", "value": "Raven" },
+    { "trait_type": "Affiliation", "value": "The Veil Order" },
+    { "trait_type": "Dojutsu", "value": "Crimson Eclipse" },
+    { "trait_type": "Signature Technique", "value": "Abyssal Flare" },
     { "trait_type": "Rarity Tier", "value": "Legendary" },
     { "trait_type": "Art Style", "value": "Dark Cel-Shaded" },
     { "trait_type": "Background", "value": "Crimson Moon" }

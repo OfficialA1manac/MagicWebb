@@ -1,16 +1,16 @@
 # Phase 5 — NFT Creation & Marketplace Seeding
 
 This directory contains the metadata and deployment scripts for seeding
-MagicWebb's Coston2 testnet with 4 production-quality anime NFTs.
+MagicWebb's Coston2 testnet with 4 original-character NFTs.
 
 ## NFTs
 
 | ID (example) | Name | Price |
 |-------------|------|-------|
-| totalSupply+1 | Itachi Uchiha — Tears of the Crow | 5 C2FLR |
-| totalSupply+2 | Garou — The Hero Hunter Awakened | 5 C2FLR |
-| totalSupply+3 | Cid Kagenou — I Am Atomic | 5 C2FLR |
-| totalSupply+4 | Will Serfort — The Sword That Defies Magic | 5 C2FLR |
+| totalSupply+1 | Raven — Shadow of the Crimson Moon | 5 C2FLR |
+| totalSupply+2 | Titan — The Cosmic Awakening | 5 C2FLR |
+| totalSupply+3 | Umbra — The Eminence in the Dark | 5 C2FLR |
+| totalSupply+4 | Blade — The Magicless Swordsman | 5 C2FLR |
 
 > **Token IDs are not fixed.** The seed script reads `totalSupply()` from the NFT contract before minting, so the actual IDs depend on the contract's current state. The table above shows IDs relative to the pre-mint total supply.
 
@@ -18,7 +18,7 @@ MagicWebb's Coston2 testnet with 4 production-quality anime NFTs.
 
 1. **Foundry** installed (`forge` + `cast`)
 2. **PRIVATE_KEY** for a Coston2 wallet with C2FLR
-3. **4K anime images** generated and pinned to IPFS/Arweave
+3. **4K character images** generated and pinned to IPFS/Arweave
 4. **Metadata JSONs** updated with real `image` URIs
 
 ## Image Generation (4K, 3840×2160)
@@ -31,10 +31,10 @@ Generate or commission the 4 character images:
 
 Recommended prompts (Midjourney / Stable Diffusion / manual art):
 
-- **Ninja:** "Cloaked shinobi with glowing eyes, standing under a crimson moon, crows circling overhead, dark cel-shaded anime style, 4K, dramatic lighting"
-- **Hero:** "A warrior in awakened form with cosmic energy flowing through veins, shattered building background, dynamic action pose, anime style, 4K"
-- **Shadow:** "Mysterious figure in dark bodysuit with purple mana swirling around, galaxy nebula background, ethereal glow, dramatic stance, anime style, 4K"
-- **Mage:** "Sword-wielding warrior mid-strike with light trails, magical tower background, determined expression, motion effect, anime style, 4K"
+- **Raven:** "Cloaked shinobi with glowing eyes, standing under a crimson moon, crows circling overhead, dark cel-shaded anime style, 4K, dramatic lighting"
+- **Titan:** "A warrior in awakened form with cosmic energy flowing through veins, shattered ruined colosseum background, dynamic action pose, anime style, 4K"
+- **Umbra:** "Mysterious figure in dark bodysuit with purple mana swirling around, galaxy nebula background, ethereal glow, dramatic stance, anime style, 4K"
+- **Blade:** "Sword-wielding warrior mid-strike with light trails, magical Endless Spire background, determined expression, motion effect, anime style, 4K"
 
 ## Usage
 

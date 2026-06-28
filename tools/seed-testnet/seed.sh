@@ -121,10 +121,10 @@ EXPIRES=$((NOW + 7776000))  # 90 days
 
 echo "== Listing NFTs @ 5 C2FLR =="
 NFT_NAMES=(
-    "Itachi Uchiha — Tears of the Crow"
-    "Garou — The Hero Hunter Awakened"
-    "Cid Kagenou — I Am Atomic"
-    "Will Serfort — The Sword That Defies Magic"
+    "Raven — Shadow of the Crimson Moon"
+    "Titan — The Cosmic Awakening"
+    "Umbra — The Eminence in the Dark"
+    "Blade — The Magicless Swordsman"
 )
 
 i=0
