@@ -56,10 +56,25 @@ seed script to call it after each `mint()`. The metadata JSONs in
 `./metadata/` should be pinned to IPFS and their URIs recorded as
 environment variables or passed as script arguments.
 
+## Minting with Metadata URIs
+
+The current NFT contract on Coston2 may or may not expose a public `setTokenURI(uint256,string)` function. The seed script handles both cases:
+
+- **If METADATA_BASE is set:** After each mint, the script calls `setTokenURI(tokenId, METADATA_BASE/<filename>.json)`. If the contract doesn't support this selector, the call silently fails and a warning is logged — the token is still minted and listed, just without an on-chain metadata link.
+- **If METADATA_BASE is empty (default):** The script skips `setTokenURI` calls entirely. Tokens are minted and listed but the indexer won't resolve metadata via `tokenURI()`.
+
 ```bash
 # Set up environment
 export PRIVATE_KEY=0x_your_coston2_private_key
 export RPC_URL=https://coston2-api.flare.network/ext/C/rpc
+
+# Optional: base URL for pinned metadata JSONs
+# Each file in ./metadata/ will be available as:
+#   $METADATA_BASE/itachi-uchiha.json
+#   $METADATA_BASE/garou.json
+#   $METADATA_BASE/cid-kagenou.json
+#   $METADATA_BASE/will-serfort.json
+# Pin all 4 files to IPFS/Arweave first, then set:
 export METADATA_BASE=https://ipfs.io/ipfs/QmYourMetadataCID
 
 # Run seed script
@@ -69,14 +84,15 @@ bash tools/seed-testnet/seed.sh
 The script will:
 1. Verify both contracts exist on-chain (code size + totalSupply)
 2. Mint token IDs derived from contract state (not hardcoded)
-3. Approve the marketplace contract
-4. List each NFT for exactly 5 C2FLR (5,000,000,000,000,000,000 wei)
-5. Verify ownership and active marketplace listing for each token
+3. Set each token's on-chain URI from `METADATA_BASE` + metadata filename
+4. Approve the marketplace contract
+5. List each NFT for exactly 5 C2FLR (5,000,000,000,000,000,000 wei)
+6. Verify ownership and active marketplace listing for each token
 
 ## Metadata Structure
 
 Each `metadata/*.json` follows the OpenSea/NFT standard:
 - `name`: Display name (formatted with series reference)
 - `description`: Rich, lore-accurate character description
-- `image`: URI to the 4K artwork (IPFS/Arweave)
+- `image`: URI to the 4K artwork (IPFS/Arweave) — **must be set to a real image URI before minting**
 - `attributes[]`: 8 trait slots covering anime, character, affiliation, power, technique, rarity, art style, and background

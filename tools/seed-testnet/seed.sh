@@ -20,6 +20,11 @@ CHAIN_ID=114
 MARKETPLACE="${MARKETPLACE_ADDR:-0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37}"
 NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
 
+# ── Metadata base URI (IPFS/Arweave directory containing metadata/*.json)
+# Each token's metadata URI will be:  $METADATA_BASE/<filename>.json
+# If empty, the script skips setTokenURI calls and logs a warning.
+METADATA_BASE="${METADATA_BASE:-}"
+
 # ── Deployer / seller ──
 : "${PRIVATE_KEY:?PRIVATE_KEY env required (Coston2 wallet with gas)}"
 SELLER=$(cast wallet address --private-key "$PRIVATE_KEY")
@@ -45,6 +50,14 @@ echo ""
 
 # ── Price: 5 C2FLR each ──
 PRICE_WEI=5000000000000000000
+
+# ── Metadata filenames (one per minted token, in mint order) ──
+METADATA_FILES=(
+  "itachi-uchiha.json"
+  "garou.json"
+  "cid-kagenou.json"
+  "will-serfort.json"
+)
 
 # ── Verify contracts exist ──
 echo "== Contract verification =="
@@ -74,6 +87,23 @@ for i in $(seq 0 3); do
     TID=$((POST_TOTAL))
     TOKEN_IDS="$TOKEN_IDS $TID"
     echo "  ✓ Token $TID minted to $SELLER"
+
+    # ── Set token URI from metadata ──
+    if [ -n "$METADATA_BASE" ]; then
+        META_NAME="${METADATA_FILES[$i]}"
+        META_URI="${METADATA_BASE%/}/${META_NAME}"
+        echo "    Setting tokenURI for token $TID → $META_URI"
+        # Attempt setTokenURI(tokenId, uri). Some NFT contracts use
+        # setBaseURI() instead — try setTokenURI first, log a warning
+        # if the function selector is not recognised (silent skip).
+        if ! cast send "$NFT" "setTokenURI(uint256,string)" "$TID" "$META_URI" \
+            --private-key "$PRIVATE_KEY" --rpc-url "$RPC" --gas-limit 100000 2>&1; then
+            echo "    ⚠ setTokenURI failed — the NFT contract may not support it. Token $TID still minted without on-chain metadata link."
+        fi
+    else
+        echo "    ⚠ METADATA_BASE not set — skipping tokenURI assignment (token $TID has no on-chain metadata link)"
+    fi
+
     PRE_TOTAL=$POST_TOTAL
 done
 echo ""
