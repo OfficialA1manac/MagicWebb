@@ -976,39 +976,39 @@ components:
     ListingRow:
       type: object
       properties:
-        Collection:            { type: string, description: "Note: Go field name (no json tag)" }
-        TokenID:               { type: string }
-        Seller:                { type: string }
-        PriceWei:              { type: string }
-        Amount:                { type: integer }
-        Standard:              { type: string, enum: [erc721, erc1155] }
-        ExpiresAt:             { type: string, format: date-time }
-        ListedAt:              { type: string, format: date-time }
-        TxHash:                { type: string }
-        Name:                  { type: string }
-        ImageURI:              { type: string }
-        TotalSupply:           { type: integer }
-        CollectionVerified:    { type: boolean }
+        collection:            { type: string }
+        token_id:              { type: string, description: "Token ID (decimal uint256)" }
+        seller:                { type: string }
+        price_wei:             { type: string }
+        amount:                { type: integer }
+        standard:              { type: string, enum: [erc721, erc1155] }
+        expires_at:            { type: string, format: date-time }
+        listed_at:             { type: string, format: date-time }
+        tx_hash:               { type: string }
+        name:                  { type: string }
+        image_uri:             { type: string }
+        total_supply:          { type: integer, description: "Collection-level total supply (0 when unindexed)" }
+        collection_verified:   { type: boolean }
 
     # ── Auctions ──────────────────────────────────────────────────────
     AuctionRow:
       type: object
       properties:
-        AuctionID:           { type: integer }
-        Collection:          { type: string }
-        TokenID:             { type: string }
-        Seller:              { type: string }
-        Standard:            { type: string, enum: [erc721, erc1155] }
-        ReservePriceWei:     { type: string }
-        HighestBidWei:       { type: string }
-        HighestBidder:       { type: string }
-        MinIncrementBps:     { type: integer }
-        StartsAt:            { type: string, format: date-time }
-        EndsAt:              { type: string, format: date-time }
-        Status:              { type: string, enum: [active, settled, cancelled] }
-        CreateTx:            { type: string }
-        Name:                { type: string }
-        ImageURI:            { type: string }
+        auction_id:          { type: integer }
+        collection:          { type: string }
+        token_id:            { type: string }
+        seller:              { type: string }
+        standard:            { type: string, enum: [erc721, erc1155] }
+        reserve_price_wei:   { type: string }
+        highest_bid_wei:     { type: string }
+        highest_bidder:      { type: string }
+        min_increment_bps:   { type: integer }
+        starts_at:           { type: string, format: date-time }
+        ends_at:             { type: string, format: date-time }
+        status:              { type: string, enum: [active, settled, cancelled] }
+        create_tx:           { type: string }
+        name:                { type: string }
+        image_uri:           { type: string }
 
     BidRow:
       type: object
@@ -1022,29 +1022,29 @@ components:
     OfferRow:
       type: object
       properties:
-        OfferID:    { type: string }
-        Bidder:     { type: string }
-        Collection: { type: string }
-        TokenID:    { type: string }
-        AmountWei:  { type: string, description: "Principal wei (excludes fee)" }
-        FeeWei:     { type: string }
-        Units:      { type: integer }
-        Standard:   { type: string, enum: [erc721, erc1155] }
-        ExpiresAt:  { type: string, format: date-time }
-        Status:     { type: string, enum: [pending, accepted, cancelled, expired] }
-        MakeTx:     { type: string }
-        CreatedAt:  { type: string, format: date-time }
+        offer_id:    { type: string }
+        bidder:      { type: string }
+        collection:  { type: string }
+        token_id:    { type: string }
+        amount_wei:  { type: string, description: "Principal wei (excludes fee)" }
+        fee_wei:     { type: string }
+        units:       { type: integer }
+        standard:    { type: string, enum: [erc721, erc1155] }
+        expires_at:  { type: string, format: date-time }
+        status:      { type: string, enum: [pending, accepted, cancelled, expired] }
+        make_tx:     { type: string }
+        created_at:  { type: string, format: date-time }
 
     # ── Collections ───────────────────────────────────────────────────
     CollectionRow:
       type: object
       properties:
-        Address:     { type: string, description: "Note: Go field name (no json tag)" }
-        Name:        { type: string }
-        Symbol:      { type: string }
-        Standard:    { type: string, enum: [erc721, erc1155] }
-        DeployBlock: { type: integer }
-        Verified:    { type: boolean }
+        address:      { type: string }
+        name:         { type: string }
+        symbol:       { type: string }
+        standard:     { type: string, enum: [erc721, erc1155] }
+        deploy_block: { type: integer }
+        verified:     { type: boolean }
 
     CollectionDetail:
       type: object
@@ -1059,12 +1059,12 @@ components:
     TrendingScore:
       type: object
       properties:
-        Collection: { type: string, description: "Note: Go field name (no json tag)" }
-        Window:     { type: string }
-        Score:      { type: number, format: double }
-        Views:      { type: integer }
-        Bids:       { type: integer }
-        VolumeWei:  { type: string, description: "Volume in wei (note: Go field name)" }
+        collection: { type: string }
+        window:     { type: string }
+        score:      { type: number, format: double }
+        views:      { type: integer }
+        bids:       { type: integer }
+        volume_wei: { type: string, description: "Volume in wei" }
 
     # ── Wallet ────────────────────────────────────────────────────────
     OwnedNFT:
