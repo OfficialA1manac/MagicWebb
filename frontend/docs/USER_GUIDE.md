@@ -10,7 +10,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Go to **List an NFT**
 2. Find your token → click **List**
 3. Approve the Marketplace contract if prompted (one-time per collection)
-4. Enter price (FLR) and duration → click **List**
+4. Enter price (C2FLR) and duration → click **List**
 5. Cancel anytime via **Unlist** — your NFT stays in your wallet
 
 ## Batch list (up to 50 tokens at once)
@@ -42,14 +42,14 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 You can offer on **any** NFT — there is no eligibility gate, and offering is free:
 
 1. Browse to any token → click **Make Offer**
-2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your FLR is escrowed on-chain)
+2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your C2FLR is escrowed on-chain)
 3. The owner may accept, reject, or let it expire
 4. If accepted: the NFT transfers to you automatically
 5. Your offer is free and locked until accepted, rejected, or expired — then your full amount is refunded. Repeat offers on the same NFT stack into one position; there is no early withdrawal. If the automatic refund push fails, the amount is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund**.
 
 ## Accept an offer (owner)
 Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.
-NFT goes to bidder, you receive FLR minus 1.5% platform fee (native currency, C2FLR on testnet).
+NFT goes to bidder, you receive C2FLR minus 1.5% platform fee (native currency, C2FLR on testnet).
 
 ## No royalties
-MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted). The guide uses the native FLR currency throughout (C2FLR on Coston2 testnet, FLR on mainnet).
+MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted). The guide uses the native C2FLR currency throughout (Coston2 testnet).

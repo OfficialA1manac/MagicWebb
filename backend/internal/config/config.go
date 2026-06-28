@@ -66,9 +66,15 @@ type Config struct {
 	// v29 audit F-03: gas-fee ceilings for the keeper. Public RPCs can spike
 	// their suggestions during network congestion; without a cap, a single
 	// keeper tx could drain the keeper wallet. 0 = no cap (NOT recommended).
-	// Defaults 100/5 gwei leave plenty of headroom on Coston2 and even mainnet.
+	// Defaults 100/5 gwei leave plenty of headroom on Coston2.
 	MaxFeeCapGwei float64
 	MaxTipCapGwei float64
+
+	// Phase 4 V4.1: minimum keeper wallet balance (in wei). The keeper emits a
+	// warning at startup when its balance is below this threshold. Default 0.1
+	// FLR (0.1 × 1e18 wei) ensures ~20-50 settlements on Coston2 at 5 gwei.
+	// Set to 0 to disable the balance check.
+	KeeperMinBalanceWei string
 
 	// Admin token for IndexerService.Reindex (leave empty to disable)
 	ServiceToken string
@@ -97,12 +103,11 @@ func Load() {
 		// user-facing labels (toast summaries, ctaLabels, summary rows —
 		// wallet.js reads window.MW_NATIVE_CURRENCY/NETWORK_NAME), and
 		// explorer <a href="{{$.ExplorerURL}}/tx/..."> links. Defaults are
-		// Coston2-specific; a future mainnet promo just sets these in .env
-		// (NETWORK_NAME="Flare", NATIVE_CURRENCY="FLR", EXPLORER_URL=
-		// "https://flare-explorer.flare.network") and the entire frontend
-		// pivots without a redeploy. envOrDefault returns the .env-supplied
+		// Coston2-specific defaults. envOrDefault returns the .env-supplied
 		// value if non-empty, else the compile-time default — the deploy
 		// defaults are the FAILSAFE for misconfiguration.
+		// Use env vars (NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL) to
+		// configure for a different network.
 		NetworkName:    envOrDefault("NETWORK_NAME", "Flare Coston2"),
 		NativeCurrency: envOrDefault("NATIVE_CURRENCY", "C2FLR"),
 		ExplorerURL:    envOrDefault("EXPLORER_URL", "https://coston2-explorer.flare.network"),
@@ -137,6 +142,10 @@ func Load() {
 		MaxFeeCapGwei: optFloat64("KEEPER_MAX_FEE_CAP_GWEI", 100),
 		MaxTipCapGwei: optFloat64("KEEPER_MAX_TIP_CAP_GWEI", 5),
 
+		// Phase 4 V4.1: minimum keeper wallet balance. Default 0.1 FLR.
+		// Env: KEEPER_MIN_BALANCE_WEI (empty = 100000000000000000)
+		KeeperMinBalanceWei: envOrDefault("KEEPER_MIN_BALANCE_WEI", "100000000000000000"),
+
 		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
@@ -150,31 +159,17 @@ func Load() {
 	C.OfferBookAddr = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
 
-	// Chain metadata validation: fail fast when the configured chain's
-	// NETWORK_NAME / NATIVE_CURRENCY / EXPLORER_URL don't match the
-	// deployed CHAIN_ID. Without this check, a production deploy that
-	// sets CHAIN_ID=14 (Flare mainnet) but forgets to override the
-	// Costons2 defaults would surface misleading WalletConnect labels,
-	// user-facing "C2FLR" currency symbols on mainnet, and explorer
-	// links pointing to the wrong chain — every one of which is a
-	// support-ticket factory. The expected pairs below are the only
-	// supported chains; any unrecognised combination is assumed to be
-	// a staging/test configuration and the warning can be silenced by
-	// setting the three vars explicitly.
+	// Chain metadata validation — only Coston2 (chain 114) is supported.
+	// Any unrecognised chain ID is a fatal error: silently using Coston2
+	// defaults on a misconfigured deploy would produce incorrect labels
+	// and broken wallet pairing. Operators deploying to a different testnet
+	// must set NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL explicitly.
 	switch C.ChainID {
-	case 14:
-		if C.NetworkName == "Flare Coston2" || C.NativeCurrency == "C2FLR" || C.ExplorerURL == "https://coston2-explorer.flare.network" {
-			fmt.Fprintln(os.Stderr, "FATAL: CHAIN_ID=14 (mainnet) but metadata still matches Coston2 defaults; set NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL for mainnet")
-			os.Exit(1)
-		}
 	case 114:
 		// Coston2 — defaults are correct; no action.
 	default:
-		// Unknown chain: log a warning so operators know they must set
-		// the metadata vars explicitly. Not fatal because test/staging
-		// chains may legitimately use atypical values.
-		fmt.Fprintf(os.Stderr, "WARN: unknown CHAIN_ID=%d; NETWORK_NAME=%s, NATIVE_CURRENCY=%s, EXPLORER_URL=%s may be incorrect\n",
-			C.ChainID, C.NetworkName, C.NativeCurrency, C.ExplorerURL)
+		fmt.Fprintf(os.Stderr, "FATAL: unsupported CHAIN_ID=%d; this deployment targets Coston2 (chain 114) only.\n", C.ChainID)
+		os.Exit(1)
 	}
 
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
@@ -211,6 +206,18 @@ func Load() {
 	if C.ServiceToken != "" && len(C.ServiceToken) < 32 {
 		fmt.Fprintf(os.Stderr, "FATAL: SERVICE_TOKEN must be at least 32 characters when set\n")
 		os.Exit(1)
+	}
+
+	// Phase 4 V4.1: validate KeeperMinBalanceWei at startup. A typo like
+	// "0.1" (missing wei conversion — should be 100000000000000000) would
+	// silently skip the balance check with only a log line. Fail fast here
+	// so operators catch misconfiguration at deploy time.
+	if C.KeeperMinBalanceWei != "" {
+		minWei, ok := new(big.Int).SetString(C.KeeperMinBalanceWei, 10)
+		if !ok || minWei.Sign() < 0 {
+			fmt.Fprintf(os.Stderr, "FATAL: KEEPER_MIN_BALANCE_WEI=%q is not a valid non-negative decimal integer\n", C.KeeperMinBalanceWei)
+			os.Exit(1)
+		}
 	}
 
 	// v35: ADMIN_ALLOWLIST entry validation. Each entry must be a well-formed

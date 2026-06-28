@@ -1,127 +1,76 @@
-# tools/seed-testnet — MagicWebb testnet population SPEC emitter
+# Phase 5 — NFT Creation & Marketplace Seeding
 
-This tool emits a deterministic JSONL specification of how the
-MagicWebb marketplace would be populated with synthetic users,
-listings, bids and auctions.
+This directory contains the metadata and deployment scripts for seeding
+MagicWebb's Coston2 testnet with 4 production-quality anime NFTs.
 
-## What this tool IS
+## NFTs
 
-- A SPEC generator — produces a reproducible JSONL plan on stdout.
-- Deterministic — same inputs ⇒ identical output, byte for byte.
-- Audit-grade — every record carries `seeded_by = "sim-harness:v1"`
-  and a stable `run_id` so an operator can identify, reproduce, or
-  sweep the corresponding DB rows.
-- Self-contained — stdlib only, no third-party deps, builds in <1 s.
+| ID | Name | Anime | Price |
+|----|------|-------|-------|
+| 5  | Itachi Uchiha — Tears of the Crow | Naruto Shippuden | 5 C2FLR |
+| 6  | Garou — The Hero Hunter Awakened | One Punch Man | 5 C2FLR |
+| 7  | Cid Kagenou — I Am Atomic | The Eminence in Shadow | 5 C2FLR |
+| 8  | Will Serfort — The Sword That Defies Magic | Wistoria: Wand and Sword | 5 C2FLR |
 
-## What this tool IS NOT
+## Prerequisites
 
-- **Not a transaction executor.** It never signs or broadcasts txs.
-- **Not connected to a real signer pool.** Placeholder addresses are
-  SHA256-derived 40-char hex strings, NOT a real EOA. Operators MUST
-  replace every `address` field with a real signer address before
-  any on-chain leg of the plan runs.
-- **Not a faucet.** It does not direct any real chain or DB writes.
-  An executor implementation is out of scope for this seed-testnet
-  tool — see "Wiring the executor" below.
+1. **Foundry** installed (`forge` + `cast`)
+2. **PRIVATE_KEY** for a Coston2 wallet with C2FLR
+3. **4K anime images** generated and pinned to IPFS/Arweave
+4. **Metadata JSONs** updated with real `image` URIs
 
-## Flags
+## Image Generation (4K, 3840×2160)
 
-| Flag              | Default | Purpose                                                |
-|-------------------|---------|--------------------------------------------------------|
-| --dry-run         | true    | Print plan only (default behaviour — never executes).  |
-| --seed-users      | 8       | Synthetic users to mint.                               |
-| --seed-listings   | 5       | Listings per user (requires `--no-test-nft` removal).  |
-| --seed-bids       | 20      | Cumulative bids across all auctions.                   |
-| --seed-auctions   | 1       | Auctions to create.                                    |
-| --teardown        | false   | Emit a teardown plan (DELETE rows tagged sim-harness). |
-| --run-id          | auto    | Stable identifier for the run.                         |
+Generate or commission the 4 character images:
+- **Style:** Anime, cel-shaded, dramatic lighting
+- **Resolution:** 3840×2160 (4K)
+- **Format:** PNG (lossless) or WebP (lossy, smaller)
+- **Hosting:** Pin to IPFS via Pinata / web3.storage, or Arweave
 
-## Environment
+Recommended prompts (Midjourney / Stable Diffusion / manual art):
 
-The tools reads these env vars (none required — the tool runs even
-with zero env, in which case the executor must fill the gaps before
-any real write):
+- **Itachi Uchiha:** "Itachi Uchiha from Naruto, Akatsuki cloak, Mangekyo Sharingan active, crow on finger, crimson moon background, amaterasu flames at edges, dark cel-shaded anime style, 4K, dramatic lighting"
+- **Garou:** "Garou awakened form from One Punch Man, cosmic energy veins, silver hair, cracked monster skin, shattered Hero Association HQ background, dynamic action pose, anime style, 4K"
+- **Cid Kagenou:** "Cid Kagenou / Shadow from Eminence in Shadow, slime bodysuit, violet mana swirling, atomic pose with raised hand, galaxy nebula background, ethereal glow, anime style, 4K"
+- **Will Serfort:** "Will Serfort from Wistoria Wand and Sword, mid-sword-strike pose leaving light trails, magical tower background stretching infinitely upward, determined expression, sword trail motion effect, anime style, 4K"
 
-- `POSTGRES_URL` — Postgres connection string (operator's secret).
-- `RPC_URL` — Coston2 RPC endpoint.
-- `CHAIN_ID` — numeric (114 for Coston2).
-- `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR` — deployed contracts.
-- `SIM_TESTNFT_ADDR` — when set, the plan includes on-chain listing /
-  bid legs; when unset, the plan emits a `skip-onchain` record so
-  the operator knows to wire those steps themselves.
+## Usage
 
-## Quick start
+1. Generate/pin images to IPFS or Arweave. Use public HTTP gateway URLs
+   (e.g. `https://ipfs.io/ipfs/Qm...` or `https://arweave.net/...`).
+   The backend media proxy and CSP allow `ipfs.io`, `dweb.link`, and
+   `gateway.pinata.cloud` — so prefer those gateways for `image` URIs.
+2. Update each `metadata/*.json` `"image"` field with the real URI
+3. Pin the updated metadata JSONs to IPFS/Arweave — record the URIs
+
+**Metadata handling:** The MagicWebb indexer resolves NFT metadata
+off-chain via tokenURI → `nft_metadata` table. Once metadata JSONs
+are live at public URIs, the indexer will pick them up on the next
+metadata fetch cycle. The seed script uses `mint(address)` which
+auto-increments the token ID without setting an on-chain tokenURI —
+the metadata association happens through the indexer's metadata
+resolution, not on-chain.
 
 ```bash
-cd tools/seed-testnet
-go build .           # builds with NO third-party deps
+# Set up environment
+export PRIVATE_KEY=0x_your_coston2_private_key
+export RPC_URL=https://coston2-api.flare.network/ext/C/rpc
 
-# Plan only (default)
-./seed-testnet --dry-run --seed-users=12 | tee plan.jsonl
-
-# Teardown plan
-./seed-testnet --teardown --run-id=<the-id-from-logs>
+# Run seed script
+bash tools/seed-testnet/seed.sh
 ```
 
-Run output is JSONL on stdout — one record per planned event:
+The script will:
+1. Verify both contracts exist on-chain (code size + totalSupply)
+2. Mint token IDs 5-8 on the Coston2 MockERC721
+3. Approve the marketplace contract
+4. List each NFT for exactly 5 C2FLR (5,000,000,000,000,000,000 wei)
+5. Verify ownership and active marketplace listing for each token
 
-```
-{"kind":"plan","ts":...,"data":{"run_id":"...","seed_users":12, ...}}
-{"kind":"user","ts":...,"data":{"index":0,"handle":"🤖 SimBidder-001","address":"0x...","run_id":"..."}}
-{"kind":"fund-plan","ts":...,"data":{"to":"0x...","amount_wei":"1000000000000000000",...}}
-{"kind":"seed-list","ts":...,"data":{"seller":"0x...", ...}}
-{"kind":"seed-auction","ts":...,"data":{"seller":"0x...", ...}}
-{"kind":"seed-bid-plan","ts":...,"data":{"bidder":"0x...","amount_wei":"...",...}}
-{"kind":"users-table-plan","ts":...,"data":{"run_id":"...","sql":"INSERT INTO users..."}}
-{"kind":"done","ts":...,"data":{"run_id":"...","dry_run":true,"ok":true}}
-```
+## Metadata Structure
 
-## Wiring the executor
-
-Once you have a real signer pool and a real Postgres URL, the
-operator writes a daemon (separate repo) that:
-
-1. Reads JSONL line-by-line on stdin.
-2. For each `fund-plan` record, replaces the placeholder address
-   with a real EOA from the signer pool and broadcasts `value=1.0
-   C2FLR` to it.
-3. For each `seed-list` record, signs and broadcasts the
-   `MARKETPLACE.list(coll, tokenId, priceWei, expiresAt)` call with
-   the executor's own signer (synthetic users cannot be owners yet).
-4. For each `seed-auction` record, signs and broadcasts the
-   auction-create call.
-5. For each `seed-bid-plan` record, signs and broadcasts a `bid()` call
-   once the synthetic user has a real signer + token custody.
-6. For each `users-table-plan`, runs the embedded SQL with
-   `address` rewritten via the real signer pool assignments.
-
-Out of scope for `seed-testnet` because:
-- Real signer keys must NEVER enter this repo's source tree.
-- The executor requires a wallet framework (cast, ethers, ledger)
-  that this tool deliberately does not import to keep build times
-  sub-second on CI.
-
-## Audit-grade teardown
-
-Each `--teardown --run-id=<id>` emits a SQL plan marked with
-`sim-harness:v1`. Operators stamp every row their daemon writes with
-the same tag so a single `--teardown` sweep can be verified end-to-end:
-
-```sql
-DELETE FROM listings  WHERE seeded_by = 'sim-harness:v1' AND run_id = '<id>';
-DELETE FROM bids      WHERE seeded_by = 'sim-harness:v1' AND run_id = '<id>';
-DELETE FROM offers    WHERE seeded_by = 'sim-harness:v1' AND run_id = '<id>';
-DELETE FROM auctions  WHERE seeded_by = 'sim-harness:v1' AND run_id = '<id>';
-```
-
-Synthetic `users` rows are stamp-free (the column is reserved for
-entity data the indexer owns); the executor's run-time JSONL stream
-carries the addresses so a targeted `DELETE FROM users WHERE
-address IN (...)` finishes the sweep.
-
-## See also
-
-- `docs/USER_GUIDE.md` for the user-flow walkthrough the harness
-  exercises once the executor is wired.
-- `docs/AUDIT.md` for the v21 Priority Stack unlock that ensures
-  the indexer + DB layer is robust against hostile synthetic input.
+Each `metadata/*.json` follows the OpenSea/NFT standard:
+- `name`: Display name (formatted with series reference)
+- `description`: Rich, lore-accurate character description
+- `image`: URI to the 4K artwork (IPFS/Arweave)
+- `attributes[]`: 8 trait slots covering anime, character, affiliation, power, technique, rarity, art style, and background

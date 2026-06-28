@@ -3,6 +3,10 @@ name: CI
 on:
   push:
     branches: [main]
+    # Phase 5 V5.1: release-tag trigger — runs the FULL suite (Foundry + Slither)
+    # on version tags (v*). Normal pushes/PRs skip Foundry/Slither for speed;
+    # a release tag gate guarantees those pass before any release.
+    tags: ["v*"]
   pull_request:
     branches: [main]
 

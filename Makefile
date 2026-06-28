@@ -16,9 +16,17 @@ help: ## show available targets
 dev: ## run server locally (go run, no build step)
 	go run $(SERVER)
 
-build: ## compile single binary → bin/magicwebb (auto-rebuilds tailwind.css first)
+build: ## compile single binary → bin/magicwebb (auto-rebuilds tailwind.css + appkit-bridge first)
 	@mkdir -p bin
 	cd backend && go run ./cmd/buildtailwindcss || echo 'warning: tailwind rebuild failed (offline?); using committed tailwind.css'
+	# Build the self-hosted AppKit bridge bundle (no CDN dependency).
+	# Outputs app/dist/static/appkit-bridge.js; copy to frontend/static/ for Go embed.
+	# NOTE: bridge build FAILS the overall build when it cannot be produced,
+	# matching the stricter Docker behavior. The tailwind step above tolerates
+	# offline failures because a committed CSS fallback exists; the bridge must
+	# be current for wallet pairing to function.
+	cd app && npm run build:bridge
+	@cp app/dist/static/appkit-bridge.js frontend/static/appkit-bridge.js
 	# v23.1 — Inject git SHA via -ldflags so X-MW-Build-SHA on /healthz reports
 	#         what's actually compiled in. Falls back to `unknown` when HEAD
 	#         is detached/unreadable (e.g. an unpacked tarball); operators see
@@ -67,7 +75,7 @@ load-addrs: ## sync deployed contract addresses into .env
 
 regen-abi: ## regenerate wallet.js ABIs from forge build (updates static/wallet.js constants)
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
-	@echo "  ABIs embedded in backend/internal/ui/static/wallet.js — update manually if needed"
+	@echo "  ABIs embedded in frontend/static/wallet.js — update manually if needed"
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 

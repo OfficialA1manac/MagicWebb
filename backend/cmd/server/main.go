@@ -241,7 +241,7 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 			}
 		}
 		// v29 audit F-01: bind the signature to the running chain. Without
-		// this, a Coston2-signed payload replays as valid on mainnet because
+		// this, a signature replays as valid on another chain because
 		// the (message, signature, address) tuple is identical except for the
 		// chainId line. The wallet.js SIWE template now includes
 		// `Chain ID: N`; we require N == config.C.ChainID. Reject before

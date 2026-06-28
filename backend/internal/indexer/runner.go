@@ -35,6 +35,9 @@ type EthClient interface {
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	// Phase 4 V4.1: BalanceAt returns the native balance of an account at the
+	// given block (nil = latest). Used by the keeper startup balance check.
+	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
 }
 
 // KeeperGate blocks until this instance may run keeper broadcasts (cluster
@@ -100,36 +103,48 @@ func (r *Runner) Run(ctx context.Context) {
 	go func() { defer wg.Done(); r.runWithdrawalSweeper(ctx) }()
 
 	if r.cfg.KeeperKey != "" {
-		wg.Add(1)
-		go func() {
-			defer wg.Done()
-			// Acquire → run → (lock lost) → re-acquire, until shutdown. The
-			// keepers run under lockCtx so they stop the moment single-flight
-			// ownership can no longer be proven (no split-brain broadcasts).
-			for ctx.Err() == nil {
-				kctx, release := ctx, func() {}
-				if r.keeperGate != nil {
-					var err error
-					kctx, release, err = r.keeperGate(ctx)
-					if err != nil {
-						if ctx.Err() == nil {
-							log.Error().Err(err).Msg("keeper gate: acquisition failed")
+		// Phase 4 V4.1: one-shot keeper wallet balance check before any
+		// keeper goroutine starts. Runs once per process lifetime.
+		// Non-fatal on RPC failure.
+		key, keyErr := crypto.HexToECDSA(r.cfg.KeeperKey)
+		if keyErr != nil {
+			log.Error().Err(keyErr).Msg("keeper: invalid KEEPER_KEY at startup, keepers disabled")
+		} else {
+			keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
+			// Initial balance check (best-effort; non-fatal on RPC failure).
+			r.checkKeeperBalance(ctx, keeperAddr)
+
+			wg.Add(1)
+			go func() {
+				defer wg.Done()
+				// Acquire → run → (lock lost) → re-acquire, until shutdown. The
+				// keepers run under lockCtx so they stop the moment single-flight
+				// ownership can no longer be proven (no split-brain broadcasts).
+				for ctx.Err() == nil {
+					kctx, release := ctx, func() {}
+					if r.keeperGate != nil {
+						var err error
+						kctx, release, err = r.keeperGate(ctx)
+						if err != nil {
+							if ctx.Err() == nil {
+								log.Error().Err(err).Msg("keeper gate: acquisition failed")
+							}
+							return
 						}
-						return
+					}
+					var kwg sync.WaitGroup
+					kwg.Add(3)
+					go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
+					go func() { defer kwg.Done(); r.runOfferKeeper(kctx) }()
+					go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
+					kwg.Wait()
+					release()
+					if r.keeperGate == nil {
+						return // no gate: keepers only stop on shutdown
 					}
 				}
-				var kwg sync.WaitGroup
-				kwg.Add(3)
-				go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
-				go func() { defer kwg.Done(); r.runOfferKeeper(kctx) }()
-				go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
-				kwg.Wait()
-				release()
-				if r.keeperGate == nil {
-					return // no gate: keepers only stop on shutdown
-				}
-			}
-		}()
+			}()
+		}
 	}
 
 	wg.Wait()
@@ -643,7 +658,7 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	// public RPC can spike gas suggestions during congestion; without a
 	// cap, a single keeper tx could drain the keeper wallet. Defaults
 	// (100 gwei fee / 5 gwei tip via env) leave plenty of headroom on
-	// Coston2 and even mainnet while preventing grief. log.Warn + clamp
+	// Coston2 while preventing grief. log.Warn + clamp
 	// rather than abort: a clamped tx still gets included next block;
 	// aborting risks stuck auctions/offers.
 	feeCap := new(big.Int).Add(tipCap, new(big.Int).Mul(gasPrice, big.NewInt(2)))
@@ -684,6 +699,57 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 		return common.Hash{}, err
 	}
 	return signed.Hash(), nil
+}
+
+// checkKeeperBalance performs a one-shot balance check at keeper startup.
+// Logs a WARN when the keeper wallet is below the configured minimum
+// (default 0.1 FLR). A low balance risks tx failures under gas spikes;
+// a compromised KEEPER_KEY that drains the wallet is surfaced here on
+// every restart. Failing the balance RPC is non-fatal — the keeper starts
+// anyway and will retry on the next process restart.
+//
+// KeeperMinBalanceWei is validated at startup by config.Load() (non-negative
+// decimal integer required), so this function trusts the value and skips
+// runtime re-validation.
+func (r *Runner) checkKeeperBalance(ctx context.Context, keeperAddr common.Address) {
+	minStr := r.cfg.KeeperMinBalanceWei
+	if minStr == "" || minStr == "0" {
+		return // balance check disabled
+	}
+	// Trust config.Load() validation: SetString is guaranteed to succeed.
+	minWei, _ := new(big.Int).SetString(minStr, 10)
+	if minWei == nil || minWei.Sign() <= 0 {
+		return // defensive: shouldn't happen post-validation, but be safe
+	}
+
+	bctx, bcancel := context.WithTimeout(ctx, 5*time.Second)
+	defer bcancel()
+	// Phase 4 V4.1: use BalanceAt (eth_getBalance) — NOT CallContract
+	// (eth_call), which returns empty bytes for EOAs.
+	current, err := r.eth.BalanceAt(bctx, keeperAddr, nil)
+	if err != nil {
+		log.Warn().Err(err).Str("keeper", keeperAddr.Hex()).
+			Msg("keeper: balance RPC call failed — cannot verify keeper wallet funding")
+		return
+	}
+
+	flrVal, _ := new(big.Float).Quo(new(big.Float).SetInt(current), new(big.Float).SetFloat64(1e18)).Float64()
+	minVal, _ := new(big.Float).Quo(new(big.Float).SetInt(minWei), new(big.Float).SetFloat64(1e18)).Float64()
+
+	if current.Cmp(minWei) < 0 {
+		log.Warn().
+			Str("keeper", keeperAddr.Hex()).
+			Float64("balance", flrVal).
+			Float64("min_required", minVal).
+			Str("currency", r.cfg.NativeCurrency).
+			Msg("keeper: wallet balance below minimum — top up to avoid settlement failures under gas spikes")
+	} else {
+		log.Info().
+			Str("keeper", keeperAddr.Hex()).
+			Float64("balance", flrVal).
+			Str("currency", r.cfg.NativeCurrency).
+			Msg("keeper: wallet balance OK")
+	}
 }
 
 // waitMined polls for a successful receipt. Returns an error if the tx

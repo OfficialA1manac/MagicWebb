@@ -1,7 +1,7 @@
 # MagicWebb — Technical Whitepaper
 
 **Version 1.4 — 2026-05-14**  
-**Network:** Flare Coston2 (testnet), mainnet-ready architecture  
+**Network:** Flare Coston2 (testnet)  
 **License:** MIT
 
 ## 1. Abstract
@@ -129,7 +129,7 @@ Configuration source of truth:
 | Phase | Scope |
 |---|---|
 | Phase 1 | Coston2 with fixed-price, auctions, and on-chain escrowed offers. |
-| Phase 2 | Mainnet rollout and multisig operational hardening. |
+| Phase 2 | Multisig operational hardening. |
 | Phase 3 | UX/performance iteration and broader collection coverage. |
 
 ## 8. Appendix — core event families

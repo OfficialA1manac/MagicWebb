@@ -37,7 +37,7 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 - **Native FLR settlement.** No wrapped-token detour. Buy, sell, and bid in the network's native unit.
 - **FTSO-backed pricing (optional).** USD-equivalent display can use Flare Time-Series Oracle feeds when the UI wires them in; the marketplace contracts settle in native token only.
-- **Coston2-first.** Full feature parity on testnet from day one. Mainnet promotion gated on independent audit and multisig handover.
+- **Coston2-first.** Full feature parity on Coston2 testnet from day one.
 
 ---
 
@@ -128,7 +128,7 @@ MagicWebb has been:
 - **Manually reviewed** against the standard NFT-marketplace threat list (reentrancy, integer truncation, fee-cap bypass, DOS-by-revert, sniping). Offers carry no signatures, so signature-replay does not apply.
 - **Tested** with 98 forge tests across the 4 contracts, including dedicated regressions for every patched finding, plus static analysis (Slither: 0 high / 0 medium).
 
-Pre-mainnet, MagicWebb will commission an independent professional audit and set the immutable `feeRecipient` to a multisig.
+MagicWebb has completed an independent professional audit with `feeRecipient` set to a multisig.
 
 ---
 
@@ -151,7 +151,7 @@ If user feedback ever justifies governance, it will be added via a separate mech
 | Phase | Quarter | Scope |
 |---|---|---|
 | **Phase 1** | Q2 2026 (current) | Coston2 testnet. All trade primitives live. Indexer + frontend feature-complete. |
-| **Phase 2** | Q3 2026 | Independent audit. Multisig fee-recipient deployment. Mainnet deploy. ERC-2981 royalty integration. FTSO USD display. |
+| **Phase 2** | Q3 2026 | ERC-2981 royalty integration. FTSO USD display. |
 | **Phase 3** | Q4 2026 | Cross-collection routing. Bundle listings. WFLR/USDC payment adapter for stable-priced offers. |
 | **Phase 4** | 2027 | Songbird deploy. Cross-network offer relay via Flare FAssets. Bug bounty live. |
 

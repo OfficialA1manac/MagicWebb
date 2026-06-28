@@ -2,7 +2,6 @@ package api
 
 import (
 	"strconv"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 
@@ -24,7 +23,6 @@ func (s *AuctionsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/auctions", s.handleList)
 	api.Get("/auctions/:id", s.handleGet)
 	api.Get("/auctions/:id/bids", s.handleBids)
-	api.Get("/server-time", handleServerTime)
 }
 
 func (s *AuctionsService) handleList(c *fiber.Ctx) error {
@@ -95,6 +93,4 @@ func (s *AuctionsService) handleBids(c *fiber.Ctx) error {
 	return c.JSON(rows)
 }
 
-func handleServerTime(c *fiber.Ctx) error {
-	return c.JSON(fiber.Map{"unix_ms": time.Now().UnixMilli()})
-}
+

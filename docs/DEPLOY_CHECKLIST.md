@@ -1,6 +1,6 @@
-# MagicWebb v29 — Pre-Mainnet Deployment Checklist
+# MagicWebb — Deployment Checklist (Coston2)
 
-> **Status of this doc:** v29 working tree (uncommitted per user directive).
+> **Network:** Flare Coston2 (chain 114). This marketplace operates exclusively on Coston2 testnet.
 > Last reviewer pass: code-reviewer-minimax-m3 — APPROVED (with v29 cosmetic
 > residual noted in `contracts/AUDIT_REPORT.md` §Phase 4d cos-1).
 
@@ -30,9 +30,6 @@ slither . --filter-paths 'lib/|test/'              # zero findings
 | Network  | Chain ID | Required env        | Constructor `manager_`            |
 |:---------|:--------:|:--------------------|:----------------------------------|
 | Coston2  |   114    | `RPC_URL=https://coston2-api.flare.network/ext/C/rpc` | `address(0)` (ungated) — production-grade fallback |
-| Mainnet  |    14    | `RPC_URL=https://flare-api.flare.network/ext/C/rpc`     | `<GNOSIS_SAFE_ADDR>` multisig |
-
-`feeRecipient` MUST point to a multisig BEFORE mainnet deploy.
 
 ## Layer 2 — Backend (Go + Postgres + Fly.io)
 
@@ -66,20 +63,20 @@ fly deploy --strategy canary                              # Fly canary:
 ### Required env (Fly.io secrets, set via `flyctl secrets set`)
 
 ```
-RPC_URL=https://flare-api.flare.network/ext/C/rpc
-RPC_URLS=https://flare-api.flare.network/ext/C/rpc,...      # rotation
-CHAIN_ID=14
-NETWORK_NAME=Flare
-NATIVE_CURRENCY=FLR
-EXPLORER_URL=https://flare-explorer.flare.network
+RPC_URL=https://coston2-api.flare.network/ext/C/rpc
+RPC_URLS=https://coston2-api.flare.network/ext/C/rpc,...      # rotation
+CHAIN_ID=114
+NETWORK_NAME=Flare Coston2
+NATIVE_CURRENCY=C2FLR
+EXPLORER_URL=https://coston2-explorer.flare.network
 MARKETPLACE_ADDR=0x…   # post-deploy address; auto-injected to template
 AUCTION_ADDR=0x…
 OFFERBOOK_ADDR=0x…
 ROYALTY_ADDR=
 POSTGRES_URL=postgres://…  # Fly Postgres + IP allowlist
 JWT_SECRET=                 # 32+ chars; rotate via secret swap + restart
-SIWE_DOMAIN=magicwebb.xyz   # binds SIWE signature to legit origin
-FRONTEND_URL=https://magicwebb.xyz
+SIWE_DOMAIN=magicwebb.fly.dev   # binds SIWE signature to legit origin
+FRONTEND_URL=https://magicwebb.fly.dev
 WC_PROJECT_ID=…              # from cloud.walletconnect.com
 KEEPER_KEY=                  # hex, no 0x prefix; multisig-tier wallet
 KEEPER_MAX_FEE_CAP_GWEI=100
@@ -96,7 +93,9 @@ SERVICE_TOKEN=               # 32+ chars; gates IndexerService.Reindex RPC
       `disconnect`) registered on the WC session object only — no
       legacy `window.ethereum` re-introduction.
 - [x] `state: 'idle'|'connecting'|'connected'|'error'` driving navbar
-      pill + AED (auto-reconnect removed in v23.2).
+      pill. Silent auto-reconnect on page load restored in v35
+      (re-pairs returning users with saved addresses; no modal auto-pop
+      unless user explicitly clicked connect).
 - [x] Action modal gated on `opts.userInitiated` (v23.1) — no
       modal auto-show without explicit user click.
 - [x] Native `onclick="window.MW_CONNECT_WALLET()"` on the Connect
@@ -111,9 +110,8 @@ SERVICE_TOKEN=               # 32+ chars; gates IndexerService.Reindex RPC
 curl -fsSL https://magicwebb.fly.dev/ | grep -F '{{' ; \
   [ "$(curl -s https://magicwebb.fly.dev/ | grep -cF '{{')" = "0" ] && echo PASS
 
-# 2. Native currency injection (uses {{NATIVE_CURRENCY}} from .env — C2FLR on Coston2, FLR on mainnet)
-NATIVE_SYMBOL="${NATIVE_CURRENCY:-C2FLR}"
-curl -fsSL https://magicwebb.fly.dev/ | grep -cF "$NATIVE_SYMBOL"  # expect ≥4
+# 2. Native currency injection
+curl -fsSL https://magicwebb.fly.dev/ | grep -cF "C2FLR"  # expect ≥4
 
 # 3. Chain ID injection
 curl -fsSL https://magicwebb.fly.dev/ | grep -cF 'window.MW_NETWORK_ID'  # 1
@@ -129,13 +127,9 @@ curl -fsSL 'https://magicwebb.fly.dev/auth/nonce?address=0x000…000' \
 #    contracts/AUDIT_REPORT.md §Phase 4d F-01 for the curl payload)
 curl -fsS -X POST https://magicwebb.fly.dev/auth/verify \
   -H 'Content-Type: application/json' \
-  -d '{"message":"Sign in to MagicWebb\nChain ID: 14\nAddress: 0x…\nNonce: …",
+  -d '{"message":"Sign in to MagicWebb\nChain ID: 114\nAddress: 0x…\nNonce: …",
        "signature":"…","address":"…"}' | jq .error  # expect "chain id mismatch"
 ```
-
-## Post-deploy immutability transition
-
-See [`IMMUTABILITY_TRANSITION.md`](./IMMUTABILITY_TRANSITION.md).
 
 ## Post-launch monitoring
 

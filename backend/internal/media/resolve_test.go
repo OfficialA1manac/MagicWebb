@@ -136,19 +136,23 @@ func TestSafeDialContext_RejectsEmptyDNSResult(t *testing.T) {
 }
 
 func TestSafeDialContext_AllowsResolvedPublicHost(t *testing.T) {
-	// Use a TEST-NET-1 (RFC 5737) address: not flagged as private/loopback/etc.
-	// by Go's netip, but reserved and unrouteable on the public internet — so
-	// we provably do NOT open a real outbound connection in CI.
-	orig := dialResolver
-	defer func() { dialResolver = orig }()
+	// Use a synthetic DNS resolution (1.1.1.1) — NOT blocked by
+	// publicAddrAllowed: it is not private, loopback, link-local, multicast,
+	// unspecified, CGNAT, or TEST-NET. Uses a fakeDialer instead of actually
+	// connecting to the network, so the test is deterministic and isolated.
+	origR := dialResolver
+	origD := dialTCP
+	defer func() { dialResolver = origR; dialTCP = origD }()
+
 	dialResolver = &fakeResolver{addrs: []netip.Addr{
-		netip.MustParseAddr("192.0.2.1"),
+		netip.MustParseAddr("1.1.1.1"),
 	}}
-	tctx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
-	defer cancel()
-	_, err := safeDialContext(tctx, "tcp", "good.example:443")
+	fd := &fakeDialer{failAll: true}
+	dialTCP = fd.dial
+
+	_, err := safeDialContext(context.Background(), "tcp", "good.example:443")
 	if err == nil {
-		t.Skip("unexpectedly connected to 192.0.2.1 — skipping")
+		t.Fatal("expected synthetic error from fakeDialer (no real network connection)")
 	}
 	if strings.Contains(err.Error(), "dial blocked") || strings.Contains(err.Error(), "disallowed") {
 		t.Fatalf("non-private IP was mis-blocked: %v", err)
@@ -211,8 +215,8 @@ func TestSafeDialContext_HappyPathStopsOnFirstSuccess(t *testing.T) {
 	defer func() { dialResolver = origR; dialTCP = origD }()
 
 	dialResolver = &fakeResolver{addrs: []netip.Addr{
-		netip.MustParseAddr("192.0.2.1"),
-		netip.MustParseAddr("192.0.2.2"),
+		netip.MustParseAddr("1.1.1.1"),
+		netip.MustParseAddr("8.8.8.8"),
 	}}
 	fd := &fakeDialer{} // succeed every attempt
 	dialTCP = fd.dial
@@ -227,8 +231,8 @@ func TestSafeDialContext_HappyPathStopsOnFirstSuccess(t *testing.T) {
 	if len(fd.attempts) != 1 {
 		t.Fatalf("first-IP success should dial only once, got %d: %v", len(fd.attempts), fd.attempts)
 	}
-	if fd.attempts[0] != "192.0.2.1:443" {
-		t.Fatalf("expected first dial to be 192.0.2.1:443, got: %v", fd.attempts)
+	if fd.attempts[0] != "1.1.1.1:443" {
+		t.Fatalf("expected first dial to be 1.1.1.1:443, got: %v", fd.attempts)
 	}
 }
 
@@ -240,8 +244,8 @@ func TestSafeDialContext_FallsBackAcrossVettedIPs(t *testing.T) {
 	// Two-cap-record set: both TEST-NET-1 (public-by-Go-netip, unrouteable),
 	// but fakeDialer succeeds so we don't touch the OS dialer.
 	dialResolver = &fakeResolver{addrs: []netip.Addr{
-		netip.MustParseAddr("192.0.2.1"),
-		netip.MustParseAddr("192.0.2.2"),
+		netip.MustParseAddr("1.1.1.1"),
+		netip.MustParseAddr("8.8.8.8"),
 	}}
 	fd := &fakeDialer{failFirst: true} // first IP "unreachable"; second succeeds
 	dialTCP = fd.dial
@@ -258,8 +262,8 @@ func TestSafeDialContext_FallsBackAcrossVettedIPs(t *testing.T) {
 	}
 	// Order matters: pre-iteration ordering preserves DNS order, which lets
 	// Cloudflare's IPv6-first responses still find v4 if v6 is unreachable.
-	if fd.attempts[0] != "192.0.2.1:443" || fd.attempts[1] != "192.0.2.2:443" {
-		t.Fatalf("expected dial order 192.0.2.1:443 then 192.0.2.2:443, got: %v", fd.attempts)
+	if fd.attempts[0] != "1.1.1.1:443" || fd.attempts[1] != "8.8.8.8:443" {
+		t.Fatalf("expected dial order 1.1.1.1:443 then 8.8.8.8:443, got: %v", fd.attempts)
 	}
 }
 
@@ -267,10 +271,9 @@ func TestSafeDialContext_AggregatesErrorsPerIP(t *testing.T) {
 	origR := dialResolver
 	origD := dialTCP
 	defer func() { dialResolver = origR; dialTCP = origD }()
-
 	dialResolver = &fakeResolver{addrs: []netip.Addr{
-		netip.MustParseAddr("192.0.2.1"),
-		netip.MustParseAddr("192.0.2.2"),
+		netip.MustParseAddr("1.1.1.1"),
+		netip.MustParseAddr("8.8.8.8"),
 	}}
 	fd := &fakeDialer{failAll: true}
 	dialTCP = fd.dial
@@ -283,7 +286,7 @@ func TestSafeDialContext_AggregatesErrorsPerIP(t *testing.T) {
 		t.Fatalf("expected both IPs to be tried, got %d attempts: %v", len(fd.attempts), fd.attempts)
 	}
 	msg := err.Error()
-	if !strings.Contains(msg, "192.0.2.1") || !strings.Contains(msg, "192.0.2.2") {
+	if !strings.Contains(msg, "1.1.1.1") || !strings.Contains(msg, "8.8.8.8") {
 		t.Fatalf("errors.Join result should name every IP attempted, got: %v", err)
 	}
 }

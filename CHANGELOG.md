@@ -20,11 +20,10 @@ two deferred as LOW; one MEDIUM cosmetic pending.
   `cmd/server/main.go verifyHandler` parses `"Chain ID: 114"` and
   rejects payloads whose chainId != `config.C.ChainID` (401 chain
   id mismatch). Closes the cross-chain replay vector: a Coston2
-  signed payload no longer authenticates on a future mainnet
-  deploy, because `(message, signature, address)` differs at the
+  signed payload no longer authenticates on any other chain
+  because `(message, signature, address)` differs at the
   `Chain ID:` line and EIP-191 verify fails. The chain ID is
-  server-injected via `window.MW_NETWORK_ID = {{.ChainID}}` so a
-  FLR-pivot deploy (CHAIN_ID=14) re-skins without JS edits.
+  server-injected via `window.MW_NETWORK_ID = {{.ChainID}}`.
 - 🟠 **F-02 transfers-chunk abort (HIGH)** — `backend/internal/
   indexer/runner.go processTransfers` now returns `err` on
   `HeaderByNumber` failure instead of silently `continue`-ing.
@@ -66,11 +65,8 @@ two deferred as LOW; one MEDIUM cosmetic pending.
 - `contracts/AUDIT_REPORT.md` — updated to v29 with Phase 4d
   full-stack findings, before/after rationale, and cross-layer
   verification commands.
-- `docs/DEPLOY_CHECKLIST.md` — pre-mainnet narrative-walk
-  (NEW, untracked).
-- `docs/IMMUTABILITY_TRANSITION.md` — the Coston2→mainnet
-  transition plan with multisig requirements, role renounce
-  script, and source-verification walk (NEW, untracked).
+- `docs/DEPLOY_CHECKLIST.md` — Coston2 deployment checklist (NEW, untracked).
+- `docs/IMMUTABILITY_TRANSITION.md` — immutability notes for Coston2 (NEW, untracked).
 - `docs/MONITORING.md` — post-launch operational runbook
   (PushFailed events, pendingReturns sweep, keeper advisory-lock
   health, FTSO/State-Connector status) (NEW, untracked).
@@ -154,7 +150,7 @@ existing AuditFuzz harnesses under `contracts/test/`. See
 ## v19 — wallet.js (handover from prior release)
 
 The v19 rows F-01/F-02/F-03 are landed in
-`backend/internal/ui/static/wallet.js`: chainChanged /
+`frontend/static/wallet.js`: chainChanged /
 accountsChanged listeners on both eip1193 kinds, SIWE
 typed-error path, no silent auto-reconnect. Manual live
 verification on https://magicwebb.fly.dev confirms the fixes.

@@ -34,6 +34,7 @@ type ethNode interface {
 	SuggestGasTipCap(ctx context.Context) (*big.Int, error)
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
+	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
 	Close()
 }
 
@@ -226,6 +227,13 @@ func (p *Pool) SuggestGasTipCap(ctx context.Context) (*big.Int, error) {
 func (p *Pool) TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error) {
 	return call(p, ctx, "TransactionReceipt", 0, func(c context.Context, n ethNode) (*types.Receipt, error) {
 		return n.TransactionReceipt(c, txHash)
+	})
+}
+
+// Phase 4 V4.1: BalanceAt returns the native balance of an account.
+func (p *Pool) BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error) {
+	return call(p, ctx, "BalanceAt", 0, func(c context.Context, n ethNode) (*big.Int, error) {
+		return n.BalanceAt(c, account, blockNumber)
 	})
 }
 

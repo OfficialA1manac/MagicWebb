@@ -20,7 +20,7 @@ import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 ///   KEEPER_ADDR   -- keeper identity registered under KEEPER_ROLE
 contract DeployCoston2 is Script {
     function run() external {
-        require(block.chainid == 114, "WRONG_CHAIN: use DeployFlare.s.sol for mainnet");
+        require(block.chainid == 114, "WRONG_CHAIN: this script targets Coston2 (chain 114)");
         uint256 pk      = vm.envUint("PRIVATE_KEY");
         address creator = vm.envAddress("CREATOR_ADDR");
         address keeper  = vm.envOr("KEEPER_ADDR", address(0));

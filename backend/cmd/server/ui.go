@@ -57,7 +57,7 @@ func render(c *fiber.Ctx, name string, data any) error {
 		// via chains:[1]+optionalChains:[CHAIN_ID]+rpcMap:{CHAIN_ID:RPC_URL},
 		// and the JS-side wallet.js uses NATIVE_CURRENCY + NETWORK_NAME
 		// everywhere a label says "FLR" or "Flare Network" so a future
-		// mainnet deploy only needs to swap .env vars.
+		// Different networks can be configured via .env vars.
 		//
 		// RPCURL auto-inject is required because layout.html line 149
 		// references `{{.RPCURL}}` — without it the zero-value fallback
@@ -632,9 +632,16 @@ func mountAstro(app *fiber.App) {
 			return c.Next()
 		}
 
-		// Bare /profile and /profile/ are handled by uiProfileRedirect
-		// (JWT-based redirect). Normalise so both forms skip Astro.
+		// Bare /profile and /profile/ serve the Astro profile page
+		// (profile/index.html). If no address is in the URL path,
+		// the client-side JS shows a "Connect your wallet" prompt.
+		// Previously these were hand-rolled to uiProfileRedirect
+		// which 307'd to /listings when no session cookie was found.
 		if path == "/profile" || path == "/profile/" {
+			if idxPath := filepath.Join(distPath, "profile", "index.html"); fileExists(idxPath) {
+				c.Set("Cache-Control", "public, max-age=300")
+				return c.SendFile(idxPath)
+			}
 			return c.Next()
 		}
 

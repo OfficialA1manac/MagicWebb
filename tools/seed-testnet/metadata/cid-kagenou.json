@@ -1,0 +1,15 @@
+{
+  "name": "Cid Kagenou — I Am Atomic",
+  "description": "Cid Kagenou, or as the world knows him — Shadow, the enigmatic leader of Shadow Garden who operates from the deepest shadows. Beneath the unassuming exterior of a background character lies the most powerful being in the realm, a master of magic who has achieved the impossible: complete control over atomic-level mana manipulation.\n\nThis piece captures the moment Cid reveals his true power. Violet mana swirls around him like a galaxy given form as he raises his hand — the signature pose before uttering those three world-ending words. His slime bodysuit shimmers with latent energy, and behind those calm eyes burns the passion of a man who dedicated his entire life to becoming the Eminence in Shadow, not for power or fame, but because it's just that cool.",
+  "image": "PLACEHOLDER_IMAGE_URI",
+  "attributes": [
+    { "trait_type": "Anime", "value": "The Eminence in Shadow" },
+    { "trait_type": "Character", "value": "Cid Kagenou / Shadow" },
+    { "trait_type": "Affiliation", "value": "Shadow Garden" },
+    { "trait_type": "Power", "value": "Atomic Magic Manipulation" },
+    { "trait_type": "Signature Technique", "value": "I Am Atomic" },
+    { "trait_type": "Rarity Tier", "value": "Legendary" },
+    { "trait_type": "Art Style", "value": "Ethereal Glow" },
+    { "trait_type": "Background", "value": "Violet Nebula" }
+  ]
+}

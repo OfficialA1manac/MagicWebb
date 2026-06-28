@@ -283,8 +283,7 @@ function revertMessage(e) {
   }
   if (/revert|call_exception/i.test(raw)) {
     return 'Transaction reverted — the item may have just sold or changed. Refresh and retry.';
-  }
-  return raw || 'Transaction failed.';
+  }  return raw || 'Transaction failed.';
 }
 
 /* ─────────────────────────────────────────────────────────────────────────────
@@ -1238,7 +1237,7 @@ window.addEventListener('alpine:init', () => {
             // context before signing, but do NOT block: a flaky RPC
             // should not silently kill their flow on a perfectly valid
             // listing. The toast is INFORMAITONAL only, not a fail().
-            toast('Preflight flagged: ' + revertMessage(staticErr) + ' \u2014 your wallet will surface the same error if it is a real revert, so you can sign safely.', 'info');
+            toast('Preflight flagged: ' + revertMessage(staticErr) + ' — your wallet will surface the same error if it is a real revert, so you can sign safely.', 'info');
           } catch (_) {}
         }
         const tx = await writeContract.buy(collection, tokenId, seller, { value: BigInt(priceWei) });
@@ -1292,9 +1291,6 @@ window.addEventListener('alpine:init', () => {
           tx = await contract.list(collection, tokenId, BigInt(priceWei), Math.floor(expiresAt));
         }
         setStep(2, 'Waiting for confirmation…');
-        await tx.wait();
-        done({ txHash: tx.hash, title: 'Listed for sale', body: 'Live in ~2s of confirm.' });
-        window.dispatchEvent(new CustomEvent('mw-listed', { detail: { collection, tokenId, tx: tx.hash } }));
         await tx.wait();
         done({ txHash: tx.hash, title: 'Listed for sale', body: 'Live in ~2s of confirm.' });
         window.dispatchEvent(new CustomEvent('mw-listed', { detail: { collection, tokenId, tx: tx.hash } }));

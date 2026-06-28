@@ -85,13 +85,27 @@ func TestSubscriberCap(t *testing.T) {
 
 
 func TestPublishSaturationMetricsIncrement(t *testing.T) {
-	b := New()
+	// Use newNoLoop() so the loop goroutine doesn't drain events while we
+	// fill the channel. With the loop running, the 256-capacity channel
+	// could be partially drained by the loop between pushes, making
+	// saturation non-deterministic.
+	b := newNoLoop()
 	pre := DroppedTotal.Load()
 	for i := 0; i < 256; i++ { b.events <- Event{Type: "filler"} }
+	// Channel is now full; the next Publish must saturate.
 	b.Publish(Event{Type: "dropped"})
 	if DroppedTotal.Load()-pre < 1 { t.Fatal("expected drop") }
 	if SaturationStreak.Load() < 1 { t.Fatal("expected streak") }
-	for len(b.events) > 0 { <-b.events }
+	// Start the loop goroutine and drain so the channel has room again.
+	go b.loop()
+	for drain := true; drain; {
+		select {
+		case <-b.events:
+		default:
+			drain = false
+		}
+	}
+	// Now events channel has room; Publish should succeed and reset streak.
 	b.Publish(Event{Type: "ok"})
 	if SaturationStreak.Load() != 0 { t.Fatal("expected streak reset") }
 }

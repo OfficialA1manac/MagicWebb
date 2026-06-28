@@ -53,14 +53,21 @@ type Broadcaster struct {
 
 // New creates and starts a local-only Broadcaster.
 func New() *Broadcaster {
-	b := &Broadcaster{
+	b := newNoLoop()
+	go b.loop()
+	return b
+}
+
+// newNoLoop returns a Broadcaster without starting the loop goroutine.
+// Unexported; tests in this package use it to fill the events channel
+// deterministically before starting the loop (e.g., saturation-metric tests).
+func newNoLoop() *Broadcaster {
+	return &Broadcaster{
 		clients: make(map[string]chan string),
 		events:  make(chan Event, 256),
 		bridge:  make(chan Event, 256),
 		origin:  uuid.New().String(),
 	}
-	go b.loop()
-	return b
 }
 
 // NewBridged creates a Broadcaster that also fans events across instances via

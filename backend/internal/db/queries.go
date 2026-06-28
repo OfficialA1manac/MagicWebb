@@ -1409,6 +1409,8 @@ type MarketMetrics struct {
 	TotalSales          int64  `json:"totalSales"`
 	GrossVolumeWei      string `json:"grossVolumeWei"`
 	TotalAuctions       int64  `json:"totalAuctions"`
+	TotalBids           int64  `json:"totalBids"`
+	TotalOffers         int64  `json:"totalOffers"`
 }
 
 func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
@@ -1418,8 +1420,11 @@ func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
 			(SELECT COUNT(*)          FROM listings WHERE active = true)::bigint,
 			(SELECT COUNT(*)          FROM sales)::bigint,
 			COALESCE((SELECT SUM(price_wei)::text FROM sales), '0'),
-			(SELECT COUNT(*)          FROM auctions)::bigint
-	`).Scan(&m.TotalActiveListings, &m.TotalSales, &m.GrossVolumeWei, &m.TotalAuctions)
+			(SELECT COUNT(*)          FROM auctions)::bigint,
+			(SELECT COUNT(*)          FROM bids)::bigint,
+			(SELECT COUNT(*)          FROM offers)::bigint
+	`).Scan(&m.TotalActiveListings, &m.TotalSales, &m.GrossVolumeWei, &m.TotalAuctions,
+		&m.TotalBids, &m.TotalOffers)
 	return &m, err
 }
 

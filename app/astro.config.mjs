@@ -53,6 +53,10 @@ export default defineConfig({
     build: {
       // Output to dist/ relative to app/
       outDir: './dist',
+      // Note: the self-hosted AppKit bridge (appkit-bridge.js) is built
+      // SEPARATELY via vite.bridge.config.mjs → frontend/static/ so the
+      // Go embed picks it up. No rollupOptions needed here — any input
+      // here would produce an unused hashed bundle in _astro/.
     },
   },
 });

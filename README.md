@@ -2,9 +2,9 @@
 
 A fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network.
 
-MagicWebb is a fixed-price + auction + offer marketplace with a **taker-pays 1.5%** fee model and **zero-admin** smart contracts (no pause, no owner withdrawal, no upgrade proxy, immutable fee). Listings are free; the buyer/bidder/offerer pays the 1.5% on top, and the seller always receives 100% of their ask.
+MagicWebb is a fixed-price + auction + offer marketplace with a **seller-pays 1.5%** fee model and **zero-admin** smart contracts (no pause, no owner withdrawal, no upgrade proxy, immutable fee). Listings, auction creation, bidding, and making offers are free. On any successful sale, 1.5% is deducted from the seller's proceeds — the seller receives 98.5% of the sale price.
 
-> Network: **Coston2 testnet** (chain `114`). Flare mainnet (chain `14`) deploy is gated behind a readiness review.
+> Network: **Coston2 testnet** (chain `114`). This marketplace operates exclusively on Flare Coston2 testnet.
 
 ---
 

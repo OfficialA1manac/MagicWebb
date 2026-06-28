@@ -62,7 +62,7 @@ the live site, which surfaced three concrete defects:
   + `GET /profile/<addr>` round-trip).
 
 ### U-02 — `/favicon.ico` 404 (noisy console error) 🟡 P2 — FIXED
-- **Where:** `backend/internal/ui/templates/layout.html` `<head>`.
+- **Where:** `frontend/templates/layout.html` `<head>`.
 - **Key:** `v22-favicon-inline-svg`
 - **Scenario (historical):** Every page load logged a `GET /favicon.ico
   404` in browser console. Cosmetic but recurrent — DI'd every sweep
@@ -75,7 +75,7 @@ the live site, which surfaced three concrete defects:
 - **Status:** FIXED.
 
 ### U-03 — Stray `</div>` prematurely closed navbar right-cluster flex 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/templates/layout.html`, between
+- **Where:** `frontend/templates/layout.html`, between
   the dropdown's `Connection is non-custodial…` paragraph and the
   `<!-- Notification bell -->` comment.
 - **Key:** `v22-navbar-div-stacking`
@@ -129,12 +129,12 @@ neither can regress silently again.
 
 ### U-04 — Action modal auto-pops without a user click 🟠 P1 — FIXED
 - **Where:**
-  - `backend/internal/ui/static/wallet.js` — `MODAL_OPTS_FALLBACK`
+  - `frontend/static/wallet.js` — `MODAL_OPTS_FALLBACK`
     gains `userInitiated: true,` (line 93); the `Alpine.store('modals')
     .open(opts)` method gains the gate at line 347; both `runAction`
     callers (no-signer branch line 977, good-signer branch line 993)
     pass `userInitiated: true,` explicitly.
-  - `backend/internal/ui/templates/partials/action_modal.html` —
+  - `frontend/templates/partials/action_modal.html` —
     `x-on:open-action.window` listener gains a precondition gate that
     forwards only when `($event.detail || {}).userInitiated === true`;
     otherwise `console.warn` and silently ignore.
@@ -192,11 +192,11 @@ neither can regress silently again.
     in `nft_picker.html`) are untouched. Verifiable with:
     ```bash
     # Between the v22 merge (76e46a7^) and v23.1 (76e46a7):
-    git diff --numstat 76e46a7^ 76e46a7 -- backend/internal/ui/static/wallet.js
+    git diff --numstat 76e46a7^ 76e46a7 -- frontend/static/wallet.js
     # -> 26 0 (wallet.js gained 26 lines: userInitiated: true on
     #    MODAL_OPTS_FALLBACK + the gate block + 2 runAction callers)
-    git diff --name-only 76e46a7^ 76e46a7 -- backend/internal/ui/templates/partials
-    # -> backend/internal/ui/templates/partials/action_modal.html
+    git diff --name-only 76e46a7^ 76e46a7 -- frontend/templates/partials
+    # -> frontend/templates/partials/action_modal.html
     #    (only the listener gate; nft_picker.html and wc_qr_overlay.html
     #    do NOT appear in the output = untouched)
     ```
@@ -311,7 +311,7 @@ lands in one commit on `main`; force-deploy via `fly deploy
 deploy-drift gate green.
 
 ### U-04-modal — Live “Connect Wallet button missing” SyntaxError 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`, line 350:
+- **Where:** `frontend/static/wallet.js`, line 350:
   `console.warn('[mw] action modal auto-open blocked:', e.message, '\n` —
   the v23.1 modal-gate attempt accidentally embedded literal LF bytes
   inside a single-quoted `'\n'` string, so the entire `wallet.js`
@@ -332,7 +332,7 @@ deploy-drift gate green.
   follow-on corruption at line 355 where the prior
   `str_replace` accidentally merged the `// debounce.` comment
   line with the next statement's `if (...) {`.
-- **Verification:** `node --check backend/internal/ui/static/wallet.js`
+- **Verification:** `node --check frontend/static/wallet.js`
   returns clean; `go build ./cmd/server`, `go vet ./...`,
   `go test ./internal/ui -run TestRender` all pass; live
   `browser-use` confirms the Connect Wallet button is visible and
@@ -341,7 +341,7 @@ deploy-drift gate green.
 
 ### U-04-wc-only — Drop MetaMask / browser-injected entirely per user request 🟠 P1 — FIXED
 - **Where:**
-  - `backend/internal/ui/static/wallet.js` —
+  - `frontend/static/wallet.js` —
     `connect(kind, opts)` signature drops the `kind` parameter
     entirely (callers pass only `{ silent }` or no args); the
     `if (kind === 'walletconnect')` branch becomes the only flow;
@@ -352,7 +352,7 @@ deploy-drift gate green.
     listener `_onAccts` reloads unconditionally (the
     `if (kind !== 'walletconnect') location.reload()` branch goes
     away).
-  - `backend/internal/ui/templates/layout.html` — desktop dropdown
+  - `frontend/templates/layout.html` — desktop dropdown
     picker (Browser Wallet + WalletConnect two-row) collapses to a
     single WC button calling `@click="$store.wallet.connect()"`.
     Mobile drawer picker collapses to a single WC button. Navbar
@@ -360,7 +360,7 @@ deploy-drift gate green.
     `{ open: false }` (the dead `wcOpen` / `helpersOpen` flags are
     dropped per the post-fix wipe). The inline pairing chip
     template stays (it was already WC-only).
-  - `backend/internal/ui/templates/partials/nft_picker.html` —
+  - `frontend/templates/partials/nft_picker.html` —
     `connectInjected()` method dropped (only `connectWC()` remains);
     the connect-gate UI shows a single “Connect via WalletConnect”
     button instead of the two-row Browser Wallet + WalletConnect.
@@ -375,7 +375,7 @@ deploy-drift gate green.
   — scan a QR or use any deep link the user’s wallet exposes
   (mobile + hardware all share the same protocol).
 - **Verification (negative-side-effects audit):**
-  - `grep -rnE 'wallet\\.connect\\(\\x27injected\\x27|wallet\\.connect\\(\\x22injected\\x22|wallet\\.connect\\(\\x27walletconnect\\x27|wallet\\.connect\\(\\x22walletconnect\\x22' backend/internal/ui/templates/`
+  - `grep -rnE 'wallet\\.connect\\(\\x27injected\\x27|wallet\\.connect\\(\\x22injected\\x22|wallet\\.connect\\(\\x27walletconnect\\x27|wallet\\.connect\\(\\x22walletconnect\\x22' frontend/templates/`
     returns zero hits — no template still dispatches the old
     `connect('injected')` / `connect('walletconnect')` form.
   - All three callers now use `$store.wallet.connect()` (no args):
@@ -397,7 +397,7 @@ deploy-drift gate green.
 - **Status:** FIXED.
 
 ### U-04-no-silent-boot — Page-boot silent auto-reconnect removed entirely 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`,
+- **Where:** `frontend/static/wallet.js`,
   `async ensureSigner()`.
 - **Key:** `u04-no-silent-boot`
 - **Scenario:** The previous design (v9–v22) auto-reconnected on
@@ -469,7 +469,7 @@ v23.1 (`X-MW-Build-SHA` on `/healthz` == `origin/main`) and the ops-01
 gate run again at the end of this entry — sync check returns 0.
 
 ### U-04-wc-cdn-23 — `_WC_CDNS` cascade targets dead `@2.14.0` URLs 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js` lines 721–725; throw
+- **Where:** `frontend/static/wallet.js` lines 721–725; throw
   copy at line 749.
 - **Key:** `v233-wc-cdn-2-23-9`
 - **Empirical probe (live, mid-2026):** esm.sh transformed-style URLs at
@@ -497,10 +497,10 @@ gate run again at the end of this entry — sync check returns 0.
   if it persists.”* — names the recovery action (refresh / status
   page), not the (non-existent) injected-wallet path.
 - **Verification:**
-  - `node --check backend/internal/ui/static/wallet.js` clean.
-  - `grep -nE '@walletconnect/ethereum-provider' backend/internal/ui/static/wallet.js`
+  - `node --check frontend/static/wallet.js` clean.
+  - `grep -nE '@walletconnect/ethereum-provider' frontend/static/wallet.js`
     returns exactly three 2.23.9 lines (no 2.14.0 residual).
-  - `grep -nE 'MetaMask|Rabby|window\.ethereum|connectInjected' backend/internal/ui/static/wallet.js`
+  - `grep -nE 'MetaMask|Rabby|window\.ethereum|connectInjected' frontend/static/wallet.js`
     returns ONLY the historical-comment rationale describing v23.2's
     removal of these paths. No active code references remain.
   - Manual live verify on https://magicwebb.fly.dev/ (post-deploy): page
@@ -514,10 +514,10 @@ gate run again at the end of this entry — sync check returns 0.
   UNCHANGED. Verifiable with:
   ```bash
   # Between v23.2 (10049136^) and v23.3 (a5d2688):
-  git diff --numstat 10049136^ 10049136 -- backend/internal/ui/static/wallet.js
+  git diff --numstat 10049136^ 10049136 -- frontend/static/wallet.js
   # -> 26 0  (v23.2 — wallet.js gained the WC-only contract + page-boot
   #            no-silent-reconnect removal)
-  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/static/wallet.js
+  git diff --numstat 10049136 a5d2688 -- frontend/static/wallet.js
   # -> 4  4  (v23.3 — only the _WC_CDNS literal (3 lines) + throw-string
   #            rewrite (3 lines); positive-command protocol, MW_WC_URI
   #            cache, MW_WC_OPEN_OVERLAY, the silent path, the
@@ -529,13 +529,13 @@ gate run again at the end of this entry — sync check returns 0.
   `X-MW-Build-SHA` header).
 
 ### U-04-img-retry — "Image retrying" banner was a no-op; no real self-heal path 🟡 P2 — FIXED
-- **Where:** `backend/internal/ui/templates/layout.html` (single helper
+- **Where:** `frontend/templates/layout.html` (single helper
   script in the existing head `<script>` block) +
-  `backend/internal/ui/templates/partials/listing_cards.html` +
-  `backend/internal/ui/templates/partials/auction_cards.html` +
-  `backend/internal/ui/templates/partials/token_live.html` +
-  `backend/internal/ui/templates/partials/auction_live.html` +
-  `backend/internal/ui/templates/partials/nft_picker.html`.
+  `frontend/templates/partials/listing_cards.html` +
+  `frontend/templates/partials/auction_cards.html` +
+  `frontend/templates/partials/token_live.html` +
+  `frontend/templates/partials/auction_live.html` +
+  `frontend/templates/partials/nft_picker.html`.
 - **Key:** `v233-mw-retry-image-helper`
 - **Scenario (historical):** when a listing / auction / token / picker
   thumbnail failed to load, the user saw a bare 🖼 emoji with a banner
@@ -593,12 +593,12 @@ gate run again at the end of this entry — sync check returns 0.
 - **Negative-side-effects audit (literal evidence):** all changes are
   additive + scoped to image-fallback UX:
   ```bash
-  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/templates/partials/
+  git diff --numstat 10049136 a5d2688 -- frontend/templates/partials/
   # -> 5 files, all keep @click accept/reject/save logic + Alpine x-data
   #    untouched. The only template-string changes are img/onerror +
   #    .mw-img-fallback class assignments on the same lines that previously
   #    had plain .hidden.
-  git diff --numstat 10049136 a5d2688 -- backend/internal/ui/templates/layout.html
+  git diff --numstat 10049136 a5d2688 -- frontend/templates/layout.html
   # -> head <script> MW_* globals + 7 cache-buster bumps (?v=20 → ?v=21
   #    on self-hosted tailwind.css + htmx.min.js + sse.js +
   #    ethers.umd.min.js + wallet.js + qrcode.min.js + cdn.min.js).
@@ -606,7 +606,7 @@ gate run again at the end of this entry — sync check returns 0.
   No Alpine store surface, no `@click` directive, no `x-data`, no
   `class:` binding, no Tailwind @layer / @apply rule was modified.
   Verifiable with `git diff --name-only 10049136 a5d2688 -- backend/`
-  === `backend/internal/ui/static/wallet.js`, the 5 partials, and
+  === `frontend/static/wallet.js`, the 5 partials, and
   `layout.html` only.
 - **Verification:**
   - Live visual sweep on https://magicwebb.fly.dev/: navbar Connect
@@ -634,21 +634,21 @@ gate run again at the end of this entry — sync check returns 0.
 
 ### WC-04-click-fail — Connect modal occasionally stays hidden on click 🟠 P1 — FIXED
 - **Where:**
-  - `backend/internal/ui/templates/layout.html` — desktop navbar
+  - `frontend/templates/layout.html` — desktop navbar
     button (`@click="window.MW_CONNECT_WALLET()"` → native
     `onclick="window.MW_CONNECT_WALLET()"` at the ~line 232 anchor)
     and mobile drawer button (`@click="window.MW_CONNECT_WALLET(); open
     = false"` → `onclick="window.MW_CONNECT_WALLET(); open = false"`).
-  - `backend/internal/ui/templates/pages/offers.html` — empty-state
+  - `frontend/templates/pages/offers.html` — empty-state
     connect button (line 26 anchor).
-  - `backend/internal/ui/static/wallet.js` — the
+  - `frontend/static/wallet.js` — the
     `window.MW_CONNECT_WALLET = () => {...}` registration MOved from
     the END of the `window.addEventListener('alpine:init', () => {...})`
     handler to a top-level statement of the IIFE (still inside the
     closure so `Alpine`, `toast`, `revertMessage` remain in scope). The
     function is now defined the instant `wallet.js`'s defer-drain
     block runs — before alpine:init fires, before any user can interact.
-  - `backend/internal/ui/templates/layout.html` — 5 cache busters
+  - `frontend/templates/layout.html` — 5 cache busters
     bumped `?v=25 → ?v=26` (tailwind.css, wc-bundle.js, wallet.js,
     qrcode.min.js, cdn.min.js) plus a v23.9 annotation comment block
     describing the migration rationale for future readers of the
@@ -735,14 +735,14 @@ gate run again at the end of this entry — sync check returns 0.
     so the chips still toggle conditionally on session state. Native
     `onclick` does not require any layout shift.
 - **Verification:**
-  - `node --check backend/internal/ui/static/wallet.js` clean.
+  - `node --check frontend/static/wallet.js` clean.
   - `go build ./cmd/server` clean.
   - `grep @click=".*MW_CONNECT_WALLET` on all templates returns ZERO
     hits — migration is complete.
   - `grep onclick=".*MW_CONNECT_WALLET` returns the expected 3 hits
     (1 in `layout.html` desktop, 1 in `layout.html` mobile, 1 in
     `offers.html`).
-  - `grep window.MW_CONNECT_WALLET = backend/internal/ui/static/wallet.js`
+  - `grep window.MW_CONNECT_WALLET = frontend/static/wallet.js`
     returns 1 hit, at top-level of the IIFE (outside the
     `alpine:init` listener — verified by `grep -B5 -A5
     window.MW_CONNECT_WALLET = wallet.js | head -30` showing the
@@ -775,7 +775,7 @@ cache-buster bump on the active tags so returning browsers actually
 re-fetch the new `wallet.js` bytes.
 
 ### WC-04-reference-error — `kind is not defined` strict-mode throw on every successful pair 🔴 P0 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`, the post-`wc.connect()` success block inside `async connect({silent=false} = {})`.
+- **Where:** `frontend/static/wallet.js`, the post-`wc.connect()` success block inside `async connect({silent=false} = {})`.
 - **Key:** `wc04-reference-error-kind-undefined`
 - **Anchor:** the wallet.js IIFE opener `(function () { 'use strict'; ... })` activates strict mode for the entire file.
 - **Scenario (historical):** `connect(kind, opts)` was the v9-v22 signature. v23.2 introduced the WC-only refactor that dropped the `kind` parameter entirely + replaced every `kind === 'walletconnect'` gate with unconditional WC-only behaviour. The refactor was INCOMPLETE: TWO references to `kind === 'walletconnect'` survived in the post-`wc.connect()` success path:
@@ -786,13 +786,13 @@ re-fetch the new `wallet.js` bytes.
 - **Fix:** Both `kind` references removed. The disconnect listener now registers unconditionally (`if (eip1193?.on) { eip1193.on('disconnect', _onDisc) }`) — the only connect path is WalletConnect, v23.2 already removed every alternative provider source. The success toast collapses to the single-message `'Connected via WalletConnect'`.
 - **Negative side effects audited:** Listener registration logic preserved verbatim. `_onDisc = () => this.disconnect()` body unchanged. Belt: defensively preserve `eip1193?.on` (no-op when `on` is missing — protects against future EIP-1193 source changes).
 - **Verification (existing + added):**
-  - `node --check backend/internal/ui/static/wallet.js` clean.
-  - `grep -nE 'kind === .walletconnect' backend/internal/ui/static/wallet.js` returns ONLY historical-commentary hits (line 542 v23.2 narrative + the v24.0 narrative at the comment-block anchors); ZERO live-code references.
+  - `node --check frontend/static/wallet.js` clean.
+  - `grep -nE 'kind === .walletconnect' frontend/static/wallet.js` returns ONLY historical-commentary hits (line 542 v23.2 narrative + the v24.0 narrative at the comment-block anchors); ZERO live-code references.
   - Live browser-use verify on the deployed SHA: the click → pair → sign → setState('connected') chain now completes deterministically past `wc.connect()`.
 - **Status:** FIXED. Live at https://magicwebb.fly.dev/.
 
 ### WC-04-chains-wrong — `chains:[CHAIN_ID]` silently rejected by all mainstream wallets 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`, the `_EthereumProvider.init({...})` configuration object inside `_wcConnect()`.
+- **Where:** `frontend/static/wallet.js`, the `_EthereumProvider.init({...})` configuration object inside `_wcConnect()`.
 - **Key:** `wc04-chains-coston2-no-wallet-support`
 - **Anchor:** the WalletConnect v2 SDK's `chains` array — every wallet scanning the QR MUST currently be on those exact chains or the session is silently rejected at the relay level.
 - **Scenario (historical):** The previous init payload was `chains: [114]` (CHAIN_ID = Coston2). WalletConnect v2's `chains` config has the strict wallet-side requirement that the user's wallet MUST be on those exact chains to approve the pairing. Coston2 is NOT in the default supported chain set for MetaMask / Trust / Rainbow / Ledger / Trezor / most mobile wallets — they would see "this dApp is requesting a chain not supported by your wallet" and refuse the pair. The relay drops the session silently; `wc.connect()` hangs without erroring.
@@ -802,12 +802,12 @@ re-fetch the new `wallet.js` bytes.
   - The `wc.connect()` call still succeeds on the FIRST pair if the wallet is on chain 1. The post-pair path detects the chain mismatch and prompts re-pair — same UX shape as before, just one step more.
   - No ABI / contract addresses change.
 - **Verification:**
-  - `grep -nE 'chains:.*CHAIN_ID|chains:.*\[1\]' backend/internal/ui/static/wallet.js` returns the v24.0 entrance `chains: [1], optionalChains: [CHAIN_ID]`.
+  - `grep -nE 'chains:.*CHAIN_ID|chains:.*\[1\]' frontend/static/wallet.js` returns the v24.0 entrance `chains: [1], optionalChains: [CHAIN_ID]`.
   - The post-pair chainId validation remains in place and unchanged.
 - **Status:** FIXED. Live at https://magicwebb.fly.dev/.
 
 ### WC-04-overlay-race — Modal opens on later clicks but events fired before Alpine hydrates go into a void 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/templates/partials/wc_qr_overlay.html`, the `init()` method of the `window.MW_WC_OVERLAY_STATE()` x-data factory.
+- **Where:** `frontend/templates/partials/wc_qr_overlay.html`, the `init()` method of the `window.MW_WC_OVERLAY_STATE()` x-data factory.
 - **Key:** `wc04-overlay-init-buffered-event-recovery`
 - **Anchor:** the v23.9 hoist of `window.MW_CONNECT_WALLET` to a top-level IIFE statement so the bridge exists the moment `wallet.js` parses, BEFORE Alpine's `alpine:init` fires.
 - **Scenario (historical):** Hoisting the bridge OUT of `alpine:init` made it ready at parse time — a deliberate v23.9 fix. The flip side: a user click landing <50 ms after first paint can invoke `window.MW_CONNECT_WALLET()` → `_wcConnect()` → SDK init → `display_uri` emitted → `mw-wc-show` dispatched — BEFORE Alpine finishes hydrating the overlay partial's `init()` listener registration. The dispatch goes into the void (no listener attached). The cached `window.MW_WC_URI` is set but the modal stays at `offsetHeight: 0`. The user sees NO modal despite a successful SDK init that emitted a real `display_uri`.
@@ -821,12 +821,12 @@ re-fetch the new `wallet.js` bytes.
   - The hard-coded state-set `{connecting, awaiting}` is a literal comparison. v25 onwards may add intermediate states — adding new states to the check is a one-line change.
   - The `try { const r = document.getElementById('wc-modal-root'); if (r) r.style.display = ''; } catch (_)` line mirrors the same `style.display = ''` logic in the live mw-wc-show listener — exact alignment required for Alpine x-show's caching of the original `display: none` to behave correctly on first paint.
 - **Verification:**
-  - `grep -nE 'v24\.0 BUFFERED-EVENT|WINDOW_MW_WC_URI' backend/internal/ui/templates/partials/wc_qr_overlay.html` returns the v24.0 marker present.
+  - `grep -nE 'v24\.0 BUFFERED-EVENT|WINDOW_MW_WC_URI' frontend/templates/partials/wc_qr_overlay.html` returns the v24.0 marker present.
   - Live browser-use verify: connect flow completes the spinner→QR transition deterministically even on the fastest click.
 - **Status:** FIXED. Live at https://magicwebb.fly.dev/.
 
 ### Cache-buster bump — ?v=26 → ?v=27 so returning browsers re-fetch wallet.js
-- **Where:** `backend/internal/ui/templates/layout.html`, the 5 lock-step static-asset tags.
+- **Where:** `frontend/templates/layout.html`, the 5 lock-step static-asset tags.
 - **Key:** `v24-cache-buster-bump`
 - **Files affected (all in `layout.html`):**
   - `tailwind.css?v=26` → `?v=27`
@@ -835,7 +835,7 @@ re-fetch the new `wallet.js` bytes.
   - `qrcode.min.js?v=26` → `?v=27`
   - `cdn.min.js?v=26` → `?v=27`
 - **Scenario:** Without the bump, browsers that previously loaded `wallet.js?v=26` would continue serving the v23.9 wallet.js from disk cache despite the server now serving v24.0 bytes — URL is identical, the server has no way to invalidate the browser's cache. The cache-buster bump forces every browser to re-fetch atomically.
-- **Verification:** `grep -nE '\?v=(26|27)' backend/internal/ui/templates/layout.html` returns 5 hits on `?v=27` (lock-step) + 3 hits on `?v=23` (htmx/sse/ethers unchanged — no functional change needed). The v24.0 annotation comment block in the same file describes the three fixes for future readers of the v23.x trail.
+- **Verification:** `grep -nE '\?v=(26|27)' frontend/templates/layout.html` returns 5 hits on `?v=27` (lock-step) + 3 hits on `?v=23` (htmx/sse/ethers unchanged — no functional change needed). The v24.0 annotation comment block in the same file describes the three fixes for future readers of the v23.x trail.
 
 ### ops-01 — (carried-forward) Deploy-drift safety net remains GREEN
 - (No change in v24.0; the v23.1 contract holds. `tools/check-fly-sync.sh` returns 0 once the SHA-baked binary replaces the live machine. Force-deploy incantation stays canonical: `fly deploy --remote-only --no-cache --build-arg "GIT_SHA=$(git rev-parse HEAD)" --strategy rolling`.)
@@ -852,7 +852,7 @@ v22 merge landed:
 > reports *“fails to load/fetch dynamically imported module.”*
 
 ### v23-wc-multi-cdn-fallback 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`, the `_wcConnect`
+- **Where:** `frontend/static/wallet.js`, the `_wcConnect`
   method (anchored to the existing `_WC_CDNS` constant inside the
   function).
 - **Key:** `v23-wc-multi-cdn-fallback`
@@ -902,7 +902,7 @@ v22 merge landed:
 ## v19 — Frontend (wallet.js / SIWE)
 
 ### F-01 — `chainChanged` listener gated to WalletConnect only 🟠 P1 — FIXED
-- **Where:** `backend/internal/ui/static/wallet.js`, the provider init
+- **Where:** `frontend/static/wallet.js`, the provider init
   handler that registers EIP-1193 listeners. **Same anchor as F-02.**
 - **Key:** `f01-chainchanged-listener-scope`
 - **Scenario:** (historical) Injected providers (MetaMask, Rabby, Brave)
@@ -924,7 +924,7 @@ v22 merge landed:
 - **Status:** FIXED (same verification path).
 
 ### F-03 — Silent SIWE failure 🟠 P1 — FIXED
-- **Where:** SIWE connect path in `backend/internal/ui/static/wallet.js`,
+- **Where:** SIWE connect path in `frontend/static/wallet.js`,
   `_authenticate()` method.
 - **Key:** `f03-silent-siwe-failure`
 - **Scenario (historical):** `.catch` swallowed non-recoverable
@@ -997,7 +997,7 @@ findings get v22 entries.
   parser layer, no DB write, no goroutine burn.
 - **Verification:** Manual review against the audit's invariants plus
   the existing indexer integration test for legitimate TransferBatch
-  events. The maximum legitimate batch on Coston2 mainnet observed
+  events. The maximum legitimate batch on Coston2 observed
   to date is 256 (Polygon-style airdrops); 1024 is a 4× safety margin.
 - **Status:** FIXED. Committed, pushed to `main`.
 
@@ -1342,6 +1342,6 @@ and link each row to the commit SHA that landed the fix.
 - `backend/internal/db/migrations/` — Postgres schema under audit.
 - `contracts/src/AuctionHouse.sol` and `OfferBook.sol` — Solidity
   source under audit.
-- `backend/internal/ui/static/wallet.js` — JS source under audit (UI).
+- `frontend/static/wallet.js` — JS source under audit (UI).
 - `docs/USER_GUIDE.md` — end-user-action walkthrough.
 - `docs/FEATURE_FLOWS.md` — backend-event-source map (auto-generated).

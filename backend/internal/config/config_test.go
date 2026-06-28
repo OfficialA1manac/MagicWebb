@@ -3,6 +3,9 @@ package config
 import (
 	"crypto/ecdsa"
 	"encoding/hex"
+	"fmt"
+	"os"
+	"os/exec"
 	"strings"
 	"testing"
 
@@ -305,6 +308,123 @@ func TestOptFloat64EmptyUsesDefault(t *testing.T) {
 	result := optFloat64("TEST_OPT_FLOAT64_MISSING", 1.618)
 	if result != 1.618 {
 		t.Fatalf("optFloat64 with missing env = %f, want default 1.618", result)
+	}
+}
+
+// ── Chain ID validation (Coston2-only, chain 114) ────────────────────────
+
+func TestChainIDValidation(t *testing.T) {
+	// Chain 114 (Coston2) must be accepted; any other chain must be rejected.
+	// This mirrors the switch in Load() that calls os.Exit(1) for non-114 chains.
+	// Cannot test os.Exit directly, so we duplicate the switch logic inline
+	// (same pattern as TestProdSIWEDomainGuard).
+
+	chainPasses := func(id uint64) bool {
+		switch id {
+		case 114:
+			return true
+		default:
+			return false
+		}
+	}
+
+	// Coston2 passes.
+	if !chainPasses(114) {
+		t.Fatal("chain 114 (Coston2) must be accepted")
+	}
+
+	// Every other chain ID must be rejected.
+	rejected := []uint64{
+		0,           // unset
+		1,           // Ethereum mainnet
+		14,          // Flare mainnet
+		56,          // BNB Smart Chain
+		137,         // Polygon
+		42161,       // Arbitrum One
+		999999,      // random large
+		^uint64(0),  // max uint64
+	}
+	for _, id := range rejected {
+		if chainPasses(id) {
+			t.Fatalf("chain %d must be rejected (only Coston2/114 is supported)", id)
+		}
+	}
+}
+
+// ── Chain ID validation via os/exec subprocess (exercises Load() directly) ───
+
+func TestLoadChainID_Subprocess(t *testing.T) {
+	// This test exercises the chain-ID validation switch inside Load() via
+	// os/exec subprocess, because Load() calls os.Exit(1) for unsupported
+	// chain IDs — cannot be caught with a direct function call.
+	//
+	// Subprocess mode (GO_TEST_SUBPROCESS_LOAD_CHAIN=1):
+	//   Sets all required env vars to dummy values so Load() runs past
+	//   the required-field checks, then calls Load(). For chain 114 it
+	//   returns normally and we exit 0; for any other chain the switch
+	//   calls os.Exit(1) before returning.
+	//
+	// Parent mode: runs the test binary as a subprocess with specific
+	// CHAIN_ID env var values, then checks the exit code and stderr.
+
+	if os.Getenv("GO_TEST_SUBPROCESS_LOAD_CHAIN") == "1" {
+		// ── Subprocess: call Load() and let os.Exit happen ──
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("MARKETPLACE_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("AUCTION_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("OFFERBOOK_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		// CHAIN_ID is inherited from parent cmd.Env
+		Load()
+		os.Exit(0) // only reached for chain 114
+		return
+	}
+
+	// ── Parent process ──
+
+	// Chain 114 (Coston2) must pass: Load() returns normally, subprocess exits 0.
+	t.Run("chain_114_passes", func(t *testing.T) {
+		cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
+		cmd.Env = append(os.Environ(),
+			"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
+			"CHAIN_ID=114")
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("chain 114 should pass Load(), got err=%v\noutput:\n%s", err, out)
+		}
+	})
+
+	// All other chains must fail: Load() hits the default switch case → os.Exit(1).
+	failing := []struct {
+		id   uint64
+		name string
+	}{
+		{0, "unset"},
+		{1, "ethereum_mainnet"},
+		{14, "flare_mainnet"},
+		{56, "bsc"},
+		{137, "polygon"},
+		{42161, "arbitrum"},
+		{999999, "random_large"},
+		{^uint64(0), "max_uint64"},
+	}
+	for _, tc := range failing {
+		t.Run("chain_"+tc.name, func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
+			cmd.Env = append(os.Environ(),
+				"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
+				fmt.Sprintf("CHAIN_ID=%d", tc.id))
+			out, err := cmd.CombinedOutput()
+			if err == nil {
+				t.Fatalf("chain %d should fail Load() but exited 0\noutput:\n%s", tc.id, out)
+			}
+			// Verify the failure originates from our chain-ID validation,
+			// not from a missing required env var.
+			if !strings.Contains(string(out), "unsupported CHAIN_ID") {
+				t.Fatalf("chain %d: expected 'unsupported CHAIN_ID' in stderr, got:\n%s", tc.id, out)
+			}
+		})
 	}
 }
 

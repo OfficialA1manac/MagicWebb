@@ -31,16 +31,10 @@ import (
 // Type-Options=nosniff across all responses prevents MIME sniffing even
 // where image handlers already set it.
 const (
-	cspHeader = "default-src 'self'; " +
-		// Self-hosted JS bundles (htmx/ethers/alpinejs/walletconnect-sdk)
-		// all live under /static, served same-origin. The self-hosted
-		// wc-bundle.js is the fallback; the Reown AppKit bridge
-		// (appkit-bridge.js) loads the official Reown SDK from esm.sh
-		// as an ES module — esm.sh is allow-listed in script-src for
-		// this single module import. All transitive imports resolve
-		// against esm.sh's origin, not the page origin, so a compromised
-		// esm.sh could inject JS — the self-hosted WC bundle is the
-		// fallback when esm.sh is unreachable.
+	cspHeader = "default-src 'self'; " +	// All JS bundles are SELF-HOSTED under /static (htmx, ethers, alpinejs,
+	// qrcode, wc-bundle, wallet.js, sse.js). No third-party CDN script
+	// dependencies remain. The AppKit bridge (appkit-bridge.js) is built
+	// by Astro/Vite from app/src/appkit-bridge.js and served same-origin.
 		// Alpine.js evaluates expressions via `new Function()` at runtime, so
 		// 'unsafe-eval' is required for any x-data / x-show / x-if to mount
 		// under CSP. The alternative (@alpinejs/csp) requires a maintained
@@ -56,22 +50,22 @@ const (
 		// JS — Go's html/template auto-escapes the injected strings — so the
 		// 'unsafe-inline' tradeoff is the standard practical match for
 		// self-hosted Alpine + dynamic injection.
-	"script-src 'self' 'unsafe-inline' 'unsafe-eval' https://esm.sh; " +
+	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
-		"font-src 'self' https://fonts.gstatic.com https://fonts.reown.com; " +
+		// font-src: Google Fonts (Inter, JetBrains Mono) + Reown AppKit fonts
+		// (KHTeka, KHTekaMono). AppKit's self-hosted web components load these
+		// from fonts.reown.com via @font-face CSS rules inside wc-bundle.js.
+	"font-src 'self' https://fonts.gstatic.com https://fonts.reown.com; " +
 		"img-src 'self' data: blob: https: ipfs:; " +
-		// v24.1 — Reown AppKit CSP: AppKit (the Reown SDK used via appkit-bridge.js)
-		// needs access to its own config API, wallet SDK domains, and relay endpoints.
-		// The previous CSP blocked api.web3modal.org (project config) and
-		// cca-lite.coinbase.com (Coinbase Wallet SDK), which silently prevented
-		// the AppKit modal from initialising — users only saw the raw WC URI fallback.
-		//
-		// connect-src additions:
-		//   * api.web3modal.org — AppKit remote project config (required for init)
-		//   * cca-lite.coinbase.com — Coinbase Wallet SDK amp endpoint
-		//   * *.reown.com — Reown CDN / API (fonts, assets, future endpoints)
-		//   * rpc.walletconnect.com — WalletConnect RPC proxy
-	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://api.reown.com https://esm.sh https://api.web3modal.org https://cca-lite.coinbase.com https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org https://*.reown.com wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org; " +
+		// connect-src: WalletConnect relay and RPC endpoints required for
+		// wallet pairing and blockchain interaction. The self-hosted WC bundle
+		// (wc-bundle.js) handles wallet pairing via WalletConnect relay.
+		// AppKit bridge is also self-hosted — no CDN dependencies for scripts —
+		// but Reown AppKit's init() fetches project configuration from
+		// api.reown.com (formerly api.web3modal.org) via fetch(), which is
+		// governed by connect-src, not script-src. cca-lite.coinbase.com is
+		// the Coinbase Wallet SDK amp endpoint loaded by AppKit internally.
+	"connect-src 'self' https://coston2-api.flare.network https://ipfs.io https://dweb.link https://gateway.pinata.cloud https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org https://api.reown.com https://api.web3modal.org https://cca-lite.coinbase.com https://*.reown.com; " +
 		// worker-src: blob workers needed by WalletConnect SDK crypto relay.
 	"worker-src 'self' blob:; " +
 		// frame-src: WalletConnect + Reown verify iframes + explorer panel.

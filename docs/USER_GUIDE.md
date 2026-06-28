@@ -2,9 +2,9 @@
 
 MagicWebb is a fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network. This guide is a complete walk-through: every user action, what happens on-chain, what the backend records, and what the UI does in response. Use this when onboarding a new contributor, during customer-support escalations, or as the post-deploy smoke-test checklist.
 
-> **Network:** MagicWebb runs on **Coston2 testnet** (chain id 114 / `0x72`). Flare mainnet (chain id 14) is gated behind a separate readiness review. The wallet picker auto-fills the chain when you connect.
+> **Network:** MagicWebb runs on **Coston2 testnet** (chain id 114 / `0x72`). The wallet picker auto-fills the chain when you connect.
 
-> **Fee model:** taker-pays 1.5% on every sale. **Listings and offers are free.** Sellers receive 98.5% of every sale; offer-acceptance deducts the 1.5% from the seller. There is no admin, no pause, and no upgrade proxy on any contract.
+> **Fee model:** seller-pays 1.5% on every sale (deducted from seller's proceeds). **Listings, auction creation, bidding, and making offers are all free.** Sellers receive 98.5% of every sale; the platform fee is a Solidity `constant` — no admin key can change it. There is no admin, no pause, and no upgrade proxy on any contract.
 
 ---
 
@@ -12,7 +12,7 @@ MagicWebb is a fast, **unstoppable** NFT marketplace on the [Flare](https://flar
 
 - **Live site:** https://magicwebb.fly.dev/
 - **Smart contracts:** `contracts/src/Marketplace.sol`, `contracts/src/AuctionHouse.sol`, `contracts/src/OfferBook.sol`
-- **Backend API:** see `docs/INTEGRATION.md` (REST `/api/v1/*` + `/events` SSE)
+- **Backend API:** see `frontend/docs/API.md` (REST `/api/v1/*` + `/events` SSE)
 - **Live indexer status:** `GET /healthz` and `GET /api/v1/indexer/status` on the deployed host
 
 ---
@@ -20,13 +20,11 @@ MagicWebb is a fast, **unstoppable** NFT marketplace on the [Flare](https://flar
 ## Get started
 
 1. **Open** https://magicwebb.fly.dev/.
-2. **`Connect Wallet`** in the top-right. Two options:
-   - **Injected** — MetaMask, Rabby, Brave, Coinbase Wallet.
-   - **WalletConnect v2** — QR pairing for mobile wallets.
+2. **`Connect Wallet`** in the top-right. MagicWebb opens the **Reown AppKit** wallet picker (or the self-hosted **WalletConnect v2** overlay as fallback) — scan the QR code with any mobile or hardware wallet, or use a deep-link from your wallet app.
 3. The wallet picker handles the Coston2 chain add automatically. If your wallet can't auto-switch, manually switch the chain to Coston2 (RPC `https://coston2-api.flare.network/ext/C/rpc`, native `C2FLR`).
 4. After SIWE (Sign-In-with-Ethereum) sign-in, the navbar shows your address, the bell (notifications), and the Search bar.
 
-> **Tip:** MagicWebb never auto-reconnects on page load. If you return, click the **Reconnect** pill in the navbar — this is by design (your wallet never gets poked without your consent).
+> **Tip:** MagicWebb silently attempts to auto-reconnect your previously-connected wallet on page load. If the session is still valid, the saved-wallet pill collapses and you're connected. If the session expired, the saved-wallet pill stays visible with Reconnect/Forget buttons — click Reconnect to re-pair via QR.
 
 ---
 
@@ -36,13 +34,13 @@ Every user action is documented below as a 4-step trace: **UI click → wallet J
 
 ### A. Connect your wallet
 
-1. **Navbar → "Connect Wallet"** opens the wallet picker (Alpine `modals` store).
-2. Pick Injected or WalletConnect. `wallet.js :: connect()`:
-   - Calls `eth_requestAccounts` via the chosen provider.
-   - Switches the chain to Coston2 if needed (3 retries × 200 ms).
+1. **Navbar → "Connect Wallet"** opens the Reown AppKit wallet picker (or the self-hosted WalletConnect v2 QR overlay as fallback).
+2. `wallet.js :: connect()`:
+   - Initialises the WalletConnect SDK (self-hosted UMD bundle) or Reown AppKit (Vite-built, ethers adapter) for the QR pairing flow.
+   - Calls `eth_requestAccounts` via the connected provider.
    - Reissues SIWE (nonce + sign + verify).
-   - JWT issued and stored as HttpOnly cookie `mw_s_<addr>` + as Bearer header.
-3. On any non-recoverable failure the toast surfaces the exact reason (domain mismatch, user rejection, etc.). On success, `mw_addr` is persisted to localStorage and the **Saved wallet** pill is cleared.
+   - JWT issued and stored as HttpOnly cookie `mw_s_<addr>` + in-memory Bearer header.
+3. On any non-recoverable failure the toast surfaces the exact reason (domain mismatch, user rejection, chain mismatch, etc.). On success, `mw_addr` is persisted to localStorage and the **Saved wallet** pill is cleared.
 
 ### B. Browse the marketplace
 
@@ -201,6 +199,16 @@ Profile page (`/profile/:addr`) shows **owned**, **listings**, **offers made**, 
 | `site.xy/api/v1/auctions` returns 502 | The indexer is behind. Keepers re-attempt via the `backfill()` retry pattern. Should self-heal within 1–2 RPC cycles (≤ 4 s) | Wait then retry; if persistent > 30 s, page on-call |
 
 ---
+
+## Reference — quick links
+
+- **Audit ledger:** `docs/AUDIT.md` — every finding from C-01 through R-04 with severity, status, and verification
+- **Deployment checklist:** `docs/DEPLOY_CHECKLIST.md` — Coston2 deployment and env var reference
+- **Immutability transition:** `docs/IMMUTABILITY_TRANSITION.md` — contract immutability notes for Coston2
+- **Monitoring runbook:** `docs/MONITORING.md` — per-alert-class actions and event cheat-sheet
+- **API reference:** `frontend/docs/API.md` — all REST endpoints, auth flow, and rate limits
+- **Technical whitepaper:** `frontend/docs/WHITEPAPER_TECHNICAL.md` — contract design and threat model
+- **FAQ:** `frontend/docs/FAQ.md` — common questions and troubleshooting
 
 ## Reference — event-to-feature map
 

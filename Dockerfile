@@ -18,8 +18,12 @@ RUN npm install --legacy-peer-deps
 # Copy source files
 COPY app/ ./
 
-# Build Astro → static output to /astro/dist/
-RUN npx astro build
+# Build Astro + AppKit bridge → static output to /astro/dist/
+# `npm run build` runs `astro build` first (clears dist/, builds pages),
+# then `npm run build:bridge` (appends the self-hosted AppKit bundle to
+# dist/static/). Astro clears dist/ on every build, so the bridge MUST be
+# built after Astro. The Go stage copies the bridge from here (next stage).
+RUN npm run build
 
 # ── Go builder ───────────────────────────────────────────────────────────────────
 FROM golang:1.25-alpine AS go-build
@@ -36,6 +40,15 @@ RUN cd backend && go mod download
 # Copy all source files
 COPY backend/ ./backend/
 COPY frontend/ ./frontend/
+
+# ── Wire self-hosted AppKit bridge from Astro stage ──
+# The bridge is built by `npm run build:bridge` (from the astro-build stage)
+# and output to /astro/dist/static/appkit-bridge.js. The Go embed
+# (frontend/embed.go) expects it at frontend/static/appkit-bridge.js, so we
+# copy it here BEFORE go build. If the file doesn't exist (bridge build
+# failed), this COPY fails the build — we WANT a hard failure because the
+# self-hosted bridge is required for wallet pairing on the HTMX pages.
+COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 
 RUN echo "Baking GIT_SHA=${GIT_SHA} into api.MWServerBuildSHA"
 RUN cd backend && CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=${GIT_SHA}" -o /magicwebb ./cmd/server

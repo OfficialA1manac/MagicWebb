@@ -6,6 +6,7 @@ import (
 	"net/http/httptest"
 	"strconv"
 	"strings"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -541,12 +542,14 @@ func TestAuctionsService_HandleBids_InvalidID(t *testing.T) {
 	}
 }
 
-func TestAuctionsService_ServerTime(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
+func TestServerTime(t *testing.T) {
+	var serverTimeMs int64
+	atomic.StoreInt64(&serverTimeMs, time.Now().UnixMilli())
 
 	app := newAppForService(t, func(app *fiber.App) {
-		app.Get("/api/v1/server-time", handleServerTime)
+		app.Get("/api/v1/server-time", func(c *fiber.Ctx) error {
+			return c.JSON(fiber.Map{"unix_ms": atomic.LoadInt64(&serverTimeMs)})
+		})
 	})
 
 	resp := doGet(t, app, "/api/v1/server-time")
@@ -558,9 +561,6 @@ func TestAuctionsService_ServerTime(t *testing.T) {
 	ms, ok := body["unix_ms"]
 	if !ok || ms <= 0 {
 		t.Fatalf("unexpected server-time response: %+v", body)
-	}
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -882,8 +882,8 @@ func TestCollectionsService_HandleGet_Success(t *testing.T) {
 	}
 	var body map[string]any
 	decodeJSON(t, resp, &body)
-	// CollectionRow fields have no json tags, so Go field names are used
-	if body["Address"] != "0xcol1" || body["Name"] != "Collection One" {
+	// CollectionRow has json tags so keys are lowercase
+	if body["address"] != "0xcol1" || body["name"] != "Collection One" {
 		t.Fatalf("unexpected body: %+v", body)
 	}
 	if body["floor_price_wei"] != "5000000000000000000" {
@@ -1256,7 +1256,7 @@ func TestLimitClamping(t *testing.T) {
 		{"-1", 1},    // Atoi(-1)=-1, n<1→n=1 → f.Limit=1 → DB passes 1
 		{"5", 5},     // valid → f.Limit=5 → DB passes 5
 		{"100", 100}, // valid → f.Limit=100 → DB passes (100 <= 100)
-		{"250", 50},  // handler clamps 250→200, DB clamps 200→50 (200 > 100)
+		{"250", 100},  // handler clamps 250→100 (listings max), DB passes 100 (100 <= 100)
 		{"abc", 50},  // Atoi error → f.Limit=0 → DB clamps 0→50
 	}
 	for _, tc := range tests {

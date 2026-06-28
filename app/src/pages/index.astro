@@ -34,8 +34,7 @@ import WalletConnect from '../components/WalletConnect';
     </p>
 
     <!-- CTA buttons -->
-    <div class="reveal" style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;margin-bottom:3rem;">
-      <a href="/listings" class="btn-sky" style="padding:0.875rem 1.75rem;border-radius:0.875rem;color:#09090b;font-weight:800;font-size:0.9375rem;transition:all 0.2s;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);display:inline-flex;align-items:center;gap:0.5rem;">
+    <div class="reveal" style="display:flex;gap:0.75rem;justify-content:center;flex-wrap:wrap;margin-bottom:3rem;">        <a href="/listings" class="btn-sky" style="padding:0.875rem 1.75rem;border-radius:0.875rem;color:#fafafa;font-weight:800;font-size:0.9375rem;transition:all 0.2s;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);display:inline-flex;align-items:center;gap:0.5rem;">
         Browse Listings
         <span style="font-size:1.125rem;">→</span>
       </a>
@@ -136,7 +135,7 @@ import WalletConnect from '../components/WalletConnect';
       <div class="float" style="position:absolute;top:-40px;right:-40px;width:160px;height:160px;border-radius:50%;background:radial-gradient(circle,rgba(125,211,252,0.2),transparent 70%);pointer-events:none;"></div>
       <h2 style="font-size:1.75rem;font-weight:800;margin-bottom:0.75rem;color:#fafafa;position:relative;">Ready to start trading?</h2>
       <p style="color:rgba(255,255,255,0.5);margin-bottom:1.5rem;font-size:0.9375rem;position:relative;">Connect your wallet and join the marketplace on Flare Network.</p>
-      <a href="/listings" class="btn-sky" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.875rem 1.75rem;border-radius:0.875rem;color:#09090b;font-weight:800;font-size:0.9375rem;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);position:relative;transition:all 0.2s;">
+      <a href="/listings" class="btn-sky" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.875rem 1.75rem;border-radius:0.875rem;color:#fafafa;font-weight:800;font-size:0.9375rem;box-shadow:0 0 30px -4px rgba(56,189,248,0.45),0 8px 20px -8px rgba(14,165,233,0.3);position:relative;transition:all 0.2s;">
         Explore Listings <span style="font-size:1.125rem;">→</span>
       </a>
     </div>
@@ -238,7 +237,7 @@ import WalletConnect from '../components/WalletConnect';
 
       try {
         // Fetch trending collections
-        const tRes = await fetch('/api/v1/metrics/trending');
+        const tRes = await fetch('/api/v1/trending');
         if (tRes.ok) {
           const trending = await tRes.json();
           const grid = document.getElementById('trending-grid');

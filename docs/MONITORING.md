@@ -1,7 +1,7 @@
 # MagicWebb v29 — Post-Launch Monitoring & Operations Runbook
 
 > Companion to `contracts/AUDIT_REPORT.md` Phase 4d → Phase 6.
-> Applies to Coston2 now, mainnet on pivot.
+> Applies to Coston2 only.
 
 ## Event lore (chain-side monitoring)
 
@@ -131,7 +131,7 @@ If the v29 chain-id substring check in `verifyHandler` increases
 rejection rate above ~0.1% of total verifications:
 
 - Investigate whether the `WALLET_MISCONFIG` herd is using a sticker
-  wallet that auto-flips `chainId` between testnet + mainnet.
+  wallet that auto-flips `chainId`.
 - Or whether `CHAIN_ID` env changed mid-flight without coordinated
   Redis cache clear (the page would otherwise re-render with stale
   chain metadata).

@@ -186,18 +186,21 @@
        the entire "CDN-dependent SDK" failure class. Unique per release:
        the cache-buster `?v=23` is bumped in lock-step with wallet.js so
        atomic re-fetch. -->      <script src="/static/wc-bundle.js?v=34" defer></script>
-      <!-- appkit-bridge.js: Reown AppKit ES module (ethers adapter). Loads the
-           official Reown SDK from esm.sh and initialises the full wallet-selection
-           modal (wallet list + QR code + deep links). If esm.sh is unreachable
-           or the init fails, the bridge stays undefined and wallet.js falls back
-           to the self-hosted wc-bundle.js + wc-overlay.js approach.
+      <!-- appkit-bridge.js: Reown AppKit ES module (ethers adapter).
+           Phase 4 V7.1 fix: SELF-HOSTED (no CDN dependency). Previously loaded
+           from esm.sh CDN; now built by Astro/Vite from npm node_modules and
+           output to app/dist/static/appkit-bridge.js. No third-party CDN trust
+           dependency — the bundle is same-origin and CSP-compatible.
+
+           Fallback: if the bridge init fails, window.__MW_APPKIT__ stays undefined
+           and wallet.js falls through to the self-hosted wc-bundle.js + wc-overlay.js.
 
            MUST load BEFORE wallet.js as a <script type="module"> — module scripts
            execute AFTER deferred scripts per the HTML spec, but the bridge sets
            window.__MW_APPKIT__ synchronously (the init() is async via the .ready
            promise). wallet.js checks window.__MW_APPKIT__ on user click, which is
            always after the module has parsed. -->
-      <script type="module" src="/static/appkit-bridge.js?v=34"></script>
+      <script type="module" src="/static/appkit-bridge.js?v=35"></script>
       <!-- qrcode.min.js: QR Code Generator — renders the WalletConnect URI
            into a scannable QR code image. Used by wc-overlay.js as a fallback
            when AppKit is unavailable. -->

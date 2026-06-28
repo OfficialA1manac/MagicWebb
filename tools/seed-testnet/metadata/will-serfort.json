@@ -1,0 +1,15 @@
+{
+  "name": "Will Serfort — The Sword That Defies Magic",
+  "description": "Will Serfort, the magicless swordsman who climbed the Tower on sheer willpower alone. In a world where magic determines your worth, Will wields nothing but a blade and an unshakeable promise to reach the top and reunite with his childhood friend. Every scar on his body tells a story of impossibility overcome — of spells shattered by steel, of mages who couldn't comprehend how a boy with zero magical power could stand before them.\n\nThis piece captures Will mid-strike in the upper floors of the Tower. His sword arcs through the air, leaving trails of light that cut through even the densest magical barriers. The Tower stretches infinitely above him, but his eyes are fixed forward — never up, because the climb isn't about looking at the peak. It's about the next step, the next swing, the next impossible victory.",
+  "image": "PLACEHOLDER_IMAGE_URI",
+  "attributes": [
+    { "trait_type": "Anime", "value": "Wistoria: Wand and Sword" },
+    { "trait_type": "Character", "value": "Will Serfort" },
+    { "trait_type": "Affiliation", "value": "Regarden Magical Academy" },
+    { "trait_type": "Power", "value": "Magicless Swordsmanship" },
+    { "trait_type": "Signature Technique", "value": "Arc Slash" },
+    { "trait_type": "Rarity Tier", "value": "Legendary" },
+    { "trait_type": "Art Style", "value": "Sword Trail Motion" },
+    { "trait_type": "Background", "value": "The Infinite Tower" }
+  ]
+}

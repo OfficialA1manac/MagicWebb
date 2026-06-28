@@ -1,0 +1,92 @@
+# ── Phase 5 V5.1: Nightly full-suite cron ─────────────────────────────────────
+# Runs every day at 04:00 UTC. Surfaces regressions that CI on push might
+# miss (e.g. a dependency CVE that breaks `go vet`, a weekly Slither rule
+# update that surfaces a new HIGH, or a Foundry test that became flaky on a
+# fresh submodule pull). Failure emails the committer of the last change.
+#
+# Why a separate workflow instead of extending `ci.yml`:
+#   `ci.yml` gates every push + PR. Adding a nightly job there would run
+#   Foundry + Slither on every push, adding 5-10 min to the dev loop.
+#   The nightly workflow runs the FULL suite (Go race + Foundry + Slither
+#   + gitleaks) on a schedule; push-gating stays tight with just go test.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: Nightly full suite
+
+on:
+  schedule:
+    - cron: "0 4 * * *" # 04:00 UTC daily
+  # Allow manual trigger for debugging / release prep
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  backend:
+    name: Go (build + vet + race)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4.2.0
+      - uses: actions/setup-go@v5.4.0
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: backend/go.sum
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+      - name: Test (race detector)
+        working-directory: backend
+        run: go test ./... -race -count=1 -timeout 180s
+
+  contracts:
+    name: Contracts (Foundry build + test)
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1.2.0
+      - name: Build
+        working-directory: contracts
+        run: forge build --sizes
+      - name: Test (full suite)
+        working-directory: contracts
+        run: forge test -vvv
+
+  slither:
+    name: Slither static analysis
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          submodules: recursive
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1.2.0
+      - name: Slither
+        uses: crytic/slither-action@v0.4.0
+        with:
+          target: contracts/
+          slither-config: contracts/slither.config.json
+          fail-on: high
+
+  gitleaks:
+    name: Secret scan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          fetch-depth: 0
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@v2.5.0
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"

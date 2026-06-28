@@ -6,7 +6,7 @@
 **Solidity Version:** 0.8.26 (Cancun EVM)
 **Compiler:** solc 0.8.26 with `via_ir = true`, optimizer 1,000,000 runs
 **Static Analysis:** Slither (zero findings — clean against all detectors)
-**Target Chain:** Flare Network mainnet (chain-id 14), testnet Coston2 (chain-id 114)
+**Target Chain:** Flare Network Coston2 testnet (chain-id 114)
 **Commit Under Review:** `main` branch, with uncommitted changes to `AuctionHouse.sol`, `Marketplace.sol`, `MarketplaceCore.sol`, `OfferBook.sol`, and `AuditFuzz.t.sol` covering the full remediation history:
 
 | Pass | Scope | Notes |
@@ -87,7 +87,7 @@ All state-changing operations emit events with correct indexed parameters. The `
 | Gas mechanics | Flare blocks have 12.5M gas limit. The `refundLosers` 200-batch with gas:50_000 per call = ~10M gas worst case, fits within a single block. ✅ |
 | Block times | ~12 seconds on Flare. All timestamp-based logic (`endsAt`, `expiresAt`, `stalledAt`) works correctly at this granularity. ✅ |
 | Address format | Standard 20-byte Ethereum-format addresses. ✅ |
-| Chain ID | Deployment scripts correctly gate on chain-id (14 mainnet, 114 Coston2). ✅ |
+| Chain ID | Deployment scripts correctly gate on chain-id (114 Coston2). ✅ |
 
 ---
 
@@ -188,7 +188,7 @@ Top-up offers cannot reduce an existing position's expiry. ✅
 
 The core contracts (`Marketplace`, `AuctionHouse`, `OfferBook`) have **zero** privileged functions. No admin, no pause, no upgrade. All state-changing functions are either permissionless or seller-owner-only (for `cancel` and `rejectOffer`).
 
-The `MarketplaceManager` uses OpenZeppelin `AccessControl` with role-based permissions. The deploy script correctly transfers admin + operator roles to `CREATOR_ADDR` and renounces deployer roles. On mainnet, `CREATOR_ADDR` must be a multisig contract (enforced in deployment script). ✅
+The `MarketplaceManager` uses OpenZeppelin `AccessControl` with role-based permissions. The deploy script correctly transfers admin + operator roles to `CREATOR_ADDR` and renounces deployer roles. ✅
 
 #### 3.9 Fund Safety Invariants
 
@@ -285,9 +285,9 @@ slot 2: endsAt (8) + tokenId (32) → actually tokenId is uint256 → separate s
 
 **Location:** `MarketplaceManager.sol`
 
-**Description:** `DEFAULT_ADMIN_ROLE` is the admin for all roles (operator, keeper, fee_manager). If the admin key is compromised, the attacker can grant/revoke any role. However, per the architectural invariant, the manager can only halt entries — it cannot move funds. The mainnet deployment script requires a multisig for `CREATOR_ADDR`.
+**Description:** `DEFAULT_ADMIN_ROLE` is the admin for all roles (operator, keeper, fee_manager). If the admin key is compromised, the attacker can grant/revoke any role. However, per the architectural invariant, the manager can only halt entries — it cannot move funds.
 
-**Impact:** Minimal. The worst case is halted entries (no fund loss). The mainnet multisig requirement is the correct mitigation.
+**Impact:** Minimal. The worst case is halted entries (no fund loss).
 
 ### I-05: Missing Event on Failed Push Payments (Informational)
 
@@ -468,12 +468,12 @@ The prior rounds audited exclusively from the smart-contract lens. A fresh adver
 ### F-01 [High] — SIWE Payload Lacks Cross-Chain Binding → **FIXED**
 
 **Location:**
-- `backend/internal/ui/static/wallet.js` — `_authenticate()` SIWE template.
+- `frontend/static/wallet.js` — `_authenticate()` SIWE template.
 - `backend/cmd/server/main.go` — `verifyHandler()`.
 
 **Description:** The signed SIWE message read `Sign in to MagicWebb\nAddress: ${address}\nNonce: ${nonce}`. It contained NO chain identifier and NO origin binding at the signature level (the cross-site dimension is enforced separately via `SIWEDomain` substring check).
 
-Exploit shape: an attacker on Coston2 captures the user's `(message, signature, address)` tuple, then replays it against a *future* mainnet deployment (still in ownership phase). The signature verifies, the nonce is single-use so the same nonce can't be reused against the testnet backend, but on mainnet the same nonce is unknown → signature alone is accepted because:
+Exploit shape: an attacker captures the user's `(message, signature, address)` tuple and replays it against another chain. The signature verifies, the nonce is single-use so the same nonce can't be reused against the Coston2 backend, but on another chain the same nonce is unknown → signature alone would be accepted because:
 1. EIP-191 over the message passes,
 2. Recovered `address == requested_address` is true,
 3. SIWEDomain substring matches the configured domain,
@@ -482,7 +482,7 @@ Exploit shape: an attacker on Coston2 captures the user's `(message, signature, 
 Result: a signed testnet message authenticates the user against a ChaseBank-class wire-transfer-tier target. Off-chain checkout flow consists entirely of signed confirmation of intent; replay is fatal for a high-value marketplace.
 
 **Fix Applied:**
-1. **`wallet.js`** — SIWE template now includes `Chain ID: ${chainId}` line, where `chainId = Number(window.MW_NETWORK_ID || 114)` is the server-injected `{{.ChainID}}` (layout.html line 148). Reading from server-injected window global means a future mainnet pivot (CHAIN_ID=14 → set in `.env`) re-skins automatically with zero JS edit.
+1. **`wallet.js`** — SIWE template now includes `Chain ID: ${chainId}` line, where `chainId = Number(window.MW_NETWORK_ID || 114)` is the server-injected `{{.ChainID}}` (layout.html line 148).
 2. **`main.go verifyHandler`** — after the SIWEDomain check, the handler parses the literal substring `"Chain ID: <N>"` from `req.Message` and rejects if `N != config.C.ChainID`. Returns HTTP 401 with body `{"error": "chain id mismatch"}`. The order is `domain → chain-id → EIP-191` — chain-id check precedes EIP-191 cost so a forged-claim can't burn verify cycles.
 3. The `URI: ${origin}` line is bounded separately by the existing unchanged `SIWEDomain` substring check; no independent server-side URI verification was added (the line is documentation-of-signing, not enforcement).
 4. `config.C.ChainID == 0` skips the chain-id check (defensive: a deploy that accidentally leaves `CHAIN_ID` unset still functions), and the existing pre-flight reject path catches misconfigured deploys.
@@ -632,7 +632,7 @@ Three new tests added as regression guards:
 
 ## Phase 5: Gas Analysis
 
-### Per-Operation Gas Estimates (Flare mainnet, Cancun EVM)
+### Per-Operation Gas Estimates (Coston2, Cancun EVM)
 
 | Operation | Estimated Gas | Notes |
 |:----------|:-------------:|:------|
@@ -655,15 +655,14 @@ Three new tests added as regression guards:
 
 ## Deployment Recommendations
 
-### Pre-Mainnet Checklist
+### Deployment Checklist
 
-1. ~~**Fix the AuditFuzz test** (M-01)~~ ✅ DONE — test updated and all 143 tests pass.
-2. ~~**Run full test suite**~~ ✅ DONE — 143/143 tests + 1 invariant pass.
+1. ~~**Fix the AuditFuzz test** (M-01)~~ ✅ DONE — test updated and all tests pass.
+2. ~~**Run full test suite**~~ ✅ DONE — all tests + invariant pass.
 3. ~~**Run Slither**~~ ✅ DONE — zero findings.
-4. **Verify on Coston2 first** — deploy to testnet, run the full e2e script (`e2e_coston2.sh`).
-5. **Multisig for admin** — `CREATOR_ADDR` must be a Gnosis Safe or equivalent on mainnet.
-6. **Keeper bot testing** — verify the backend keeper correctly handles settlement, loser refunds, and expired offer refunds on testnet before mainnet.
-7. **Source verification** — prepare flattened source or multi-file verification for Flare's block explorer.
+4. **Verify on Coston2** — deploy to testnet, run the full e2e script (`e2e_coston2.sh`).
+5. **Keeper bot testing** — verify the backend keeper correctly handles settlement, loser refunds, and expired offer refunds.
+6. **Source verification** — prepare flattened source or multi-file verification for Flare's block explorer.
 
 ### Post-Deployment Monitoring
 
@@ -736,7 +735,7 @@ The Magic Webb NFT marketplace system demonstrates exceptional security engineer
 - **cos-1** `URI: ${origin}` line in wallet.js SIWE template is informational only (cross-site binding is enforced via SIWEDomain, not via a URI substring parse). Recommend followup str_replace to drop the URI line + comment, or add a server `expected_origin` parse. Deferred to next pass.
 - **F-04 / F-05** deferred as LOW.
 
-**The system is ready for Flare mainnet deployment** after final testnet validation.
+**The system is ready for Coston2 deployment** after final testnet validation.
 
 ---
 
@@ -946,7 +945,7 @@ curl -X POST http://localhost:8080/auth/verify \
 11. ✅ Keeper gas caps with EIP-1559 invariant (F-03)
 12. ✅ StalledAt timer immutable (R-04)
 13. ✅ NonReentrant on all state-changing externals (R-05)
-14. ✅ Deploy admin as multisig on mainnet
+14. ✅ Deploy admin as multisig
 15. ✅ Source verification on Flare block explorer
 
 ---
@@ -1110,7 +1109,7 @@ Per the **$75k+ full-stack engagement** directive, Round 8 performs a comprehens
 
 **Location:** `backend/cmd/server/main.go` — `verifyHandler()` / `siweChainIDMatches()`.
 
-**Description:** The Round 4 F-01 fix added chain-binding via `strings.Contains(req.Message, "Chain ID: 114")` — a substring match. This shared the same vulnerability class as the old domain check (R-07): an attacker could trick a user into signing a SIWE message for chain 1 (Ethereum mainnet) with `"Chain ID: 114"` embedded in the URI or Statement field. The substring check would find the target chain ID and accept the stolen signature, enabling cross-chain replay of testnet signatures against mainnet.
+**Description:** The Round 4 F-01 fix added chain-binding via `strings.Contains(req.Message, "Chain ID: 114")` — a substring match. This shared the same vulnerability class as the old domain check (R-07): an attacker could trick a user into signing a SIWE message for chain 1 (Ethereum) with `"Chain ID: 114"` embedded in the URI or Statement field. The substring check would find the target chain ID and accept the stolen signature, enabling cross-chain replay.
 
 **Fix Applied:**
 1. Added `siweChainIDMatches(msg string, expected uint64) bool` function that:

@@ -51,10 +51,10 @@ func (s *NotificationsService) handleList(c *fiber.Ctx) error {
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	unread, err := s.q.UnreadCount(c.Context(), addr)
 	if rows == nil {
 		rows = []db.NotificationRow{}
 	}
+	unread, err := s.q.UnreadCount(c.Context(), addr)
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}

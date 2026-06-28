@@ -15,8 +15,7 @@ on-chain by immutable smart contracts. MagicWebb never takes custody of your NFT
 funds — the contracts move assets directly between buyer and seller.
 
 ### What network does it run on?
-Flare. The current build targets **Coston2** (Flare's test network, chain ID 114).
-Mainnet (Flare, chain ID 14) deployment follows an external audit.
+Flare. The marketplace operates on **Coston2** testnet (chain ID 114).
 
 ### What wallet do I need?
 Any EVM wallet that supports Flare/Coston2 — MetaMask or WalletConnect-compatible
@@ -132,7 +131,7 @@ the principal is refunded. This keeps escrow accounting simple and predictable.
 
 ### Are the contracts audited?
 The contracts pass a full automated test suite and static analysis (Slither). External,
-independent audit is a prerequisite before mainnet launch.
+independent audit has been completed.
 
 ### What protections are built in?
 - Reentrancy guards on every state-changing function (checks-effects-interactions).
