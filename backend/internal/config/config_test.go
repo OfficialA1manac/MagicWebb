@@ -349,9 +349,7 @@ func TestChainIDValidation(t *testing.T) {
 			t.Fatalf("chain %d must be rejected (only Coston2/114 is supported)", id)
 		}
 	}
-}
-
-// ── Chain ID validation via os/exec subprocess (exercises Load() directly) ───
+}	// ── Chain ID validation via os/exec subprocess (exercises Load() directly) ───
 
 func TestLoadChainID_Subprocess(t *testing.T) {
 	// This test exercises the chain-ID validation switch inside Load() via
@@ -366,6 +364,8 @@ func TestLoadChainID_Subprocess(t *testing.T) {
 	//
 	// Parent mode: runs the test binary as a subprocess with specific
 	// CHAIN_ID env var values, then checks the exit code and stderr.
+	// Uses a minimal environment (only PATH + required vars) so the
+	// subprocess is not influenced by unrelated parent env vars.
 
 	if os.Getenv("GO_TEST_SUBPROCESS_LOAD_CHAIN") == "1" {
 		// ── Subprocess: call Load() and let os.Exit happen ──
@@ -383,12 +383,18 @@ func TestLoadChainID_Subprocess(t *testing.T) {
 
 	// ── Parent process ──
 
+	// Minimal env for subprocess isolation: PATH (needed to find the binary)
+	// plus the test-specific vars. Inheriting the full parent environment
+	// makes the test depend on unrelated variables.
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
+	}
+
 	// Chain 114 (Coston2) must pass: Load() returns normally, subprocess exits 0.
 	t.Run("chain_114_passes", func(t *testing.T) {
 		cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
-		cmd.Env = append(os.Environ(),
-			"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
-			"CHAIN_ID=114")
+		cmd.Env = append(append([]string{}, minimalEnv...), "CHAIN_ID=114")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("chain 114 should pass Load(), got err=%v\noutput:\n%s", err, out)
@@ -412,8 +418,7 @@ func TestLoadChainID_Subprocess(t *testing.T) {
 	for _, tc := range failing {
 		t.Run("chain_"+tc.name, func(t *testing.T) {
 			cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
-			cmd.Env = append(os.Environ(),
-				"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
+			cmd.Env = append(append([]string{}, minimalEnv...),
 				fmt.Sprintf("CHAIN_ID=%d", tc.id))
 			out, err := cmd.CombinedOutput()
 			if err == nil {

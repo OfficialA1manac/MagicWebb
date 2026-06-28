@@ -43,7 +43,7 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
-      function weiToFLR(w,d){d=d||4;try{var bi=BigInt(w||'0');var div=BigInt(10)**BigInt(18);var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
+      function weiToFLR(w,d){d=d||4;try{var bi=BigInt(w||'0');var div=BigInt('1000000000000000000');var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){if(!t)return'';var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
 
@@ -77,6 +77,11 @@ import WalletConnect from '../components/WalletConnect';
 
       if (!addr) {
         root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
+        // Listen for wallet-connect events to refresh when user connects
+        window.addEventListener('mw-wallet-changed', function _onConnect(){
+          window.removeEventListener('mw-wallet-changed', _onConnect);
+          location.reload();
+        });
         return;
       }
 

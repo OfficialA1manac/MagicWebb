@@ -42,7 +42,9 @@ become 100% immutable and autonomous on Flare mainnet after final deployment."
 | Post-deploy sanity: feeRecipient, manager, admin, operator, keeper | ✅ |
 | Console output for `.env` pasting | ✅ |
 
-### DeployFlare.s.sol (Chain 14)
+### DeployFlare.s.sol (Chain 14 — ARCHIVED)
+*This script has been removed from the repo. The table below is retained for historical reference only.*
+
 | Check | Status |
 |-------|--------|
 | Requires `block.chainid == 14` | ✅ |
@@ -166,7 +168,11 @@ on Coston2 with automated CI/CD + deploy-drift detection + rolling releases.
 | 4 | **Load test the backend** — no load testing infrastructure exists. A `k6` or `wrk` script against `/api/v1/listings` and `/api/v1/search` would validate capacity before mainnet traffic. | Low |
 | 5 | **Pin npm dependencies with lockfile integrity** — `app/package.json` uses `^` ranges; the `package-lock.json` should be committed and verified in CI. | Low |
 
-### Mainnet Pivot Checklist
+### Mainnet Pivot Checklist (ARCHIVED — Historical Reference)
+
+The checklist below documents the original mainnet (chain 14) pivot plan and is
+retained for historical context only. The project operates exclusively on Coston2
+(chain 114); DeployFlare.s.sol has been removed from the repo.
 
 When pivoting from Coston2 (114) to Mainnet (14):
 

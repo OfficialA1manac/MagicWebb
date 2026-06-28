@@ -131,7 +131,8 @@ for TID in $TOKEN_IDS; do
             ALL_OK=false
         fi
     else
-        echo "  ⚠ Token $TID listing not found (may need metadata URI set)"
+        echo "  ✗ Token $TID listing not found — marketplace verification FAILED"
+        ALL_OK=false
     fi
 done
 echo ""

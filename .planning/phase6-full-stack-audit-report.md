@@ -360,7 +360,7 @@ curl -fsS -N https://magicwebb.fly.dev/events | head -c 32   # ": connected"
 | Testing | ✅ 15/15 Go packages, all race-free; 🔶 Forge/Slither pending environment |
 | Documentation | ✅ All 11 docs verified 100% accurate against codebase |
 
-**Recommendation:** Deploy to Flare mainnet after completing the two pending checks (Forge tests + Slither audit) and setting the multisig `feeRecipient`.
+**Recommendation:** Deploy to Coston2 after completing the two pending checks (Forge tests + Slither audit). The project operates exclusively on Coston2 (chain 114); Flare mainnet (chain 14) is not an active deployment target.
 
 ---
 

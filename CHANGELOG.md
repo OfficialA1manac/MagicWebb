@@ -21,9 +21,10 @@ two deferred as LOW; one MEDIUM cosmetic pending.
   rejects payloads whose chainId != `config.C.ChainID` (401 chain
   id mismatch). Closes the cross-chain replay vector: a Coston2
   signed payload no longer authenticates on any other chain
-  because `(message, signature, address)` differs at the
-  `Chain ID:` line and EIP-191 verify fails. The chain ID is
-  server-injected via `window.MW_NETWORK_ID = {{.ChainID}}`.
+  because the `Chain ID:` line embedded in the signed message
+  differs and EIP-191 verify rejects the mismatched message.
+  The chain ID is server-injected via `window.MW_NETWORK_ID =
+  {{.ChainID}}`.
 - 🟠 **F-02 transfers-chunk abort (HIGH)** — `backend/internal/
   indexer/runner.go processTransfers` now returns `err` on
   `HeaderByNumber` failure instead of silently `continue`-ing.
@@ -65,8 +66,8 @@ two deferred as LOW; one MEDIUM cosmetic pending.
 - `contracts/AUDIT_REPORT.md` — updated to v29 with Phase 4d
   full-stack findings, before/after rationale, and cross-layer
   verification commands.
-- `docs/DEPLOY_CHECKLIST.md` — Coston2 deployment checklist (NEW, untracked).
-- `docs/IMMUTABILITY_TRANSITION.md` — immutability notes for Coston2 (NEW, untracked).
+- `docs/DEPLOY_CHECKLIST.md` — Coston2 deployment checklist.
+- `docs/IMMUTABILITY_TRANSITION.md` — immutability notes for Coston2.
 - `docs/MONITORING.md` — post-launch operational runbook
   (PushFailed events, pendingReturns sweep, keeper advisory-lock
   health, FTSO/State-Connector status) (NEW, untracked).

@@ -103,11 +103,12 @@ func Load() {
 		// user-facing labels (toast summaries, ctaLabels, summary rows —
 		// wallet.js reads window.MW_NATIVE_CURRENCY/NETWORK_NAME), and
 		// explorer <a href="{{$.ExplorerURL}}/tx/..."> links. Defaults are
-		// Coston2-specific defaults. envOrDefault returns the .env-supplied
-		// value if non-empty, else the compile-time default — the deploy
-		// defaults are the FAILSAFE for misconfiguration.
-		// Use env vars (NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL) to
-		// configure for a different network.
+		// Coston2-specific. envOrDefault returns the .env-supplied value if
+		// non-empty, else the compile-time default — the deploy defaults are
+		// the FAILSAFE for misconfiguration. This build targets Coston2 (chain
+		// 114) exclusively; NETWORK_NAME, NATIVE_CURRENCY, and EXPLORER_URL
+		// allow operators to customise display labels WITHOUT changing the
+		// underlying chain or the chain-ID validation below.
 		NetworkName:    envOrDefault("NETWORK_NAME", "Flare Coston2"),
 		NativeCurrency: envOrDefault("NATIVE_CURRENCY", "C2FLR"),
 		ExplorerURL:    envOrDefault("EXPLORER_URL", "https://coston2-explorer.flare.network"),

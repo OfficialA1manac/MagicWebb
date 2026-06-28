@@ -55,7 +55,8 @@ import WalletConnect from '../components/WalletConnect';
             if(results) results.innerHTML =
               '<p style="font-size:0.8125rem;color:rgba(255,255,255,0.4);margin-bottom:1rem;">'+items.length+' results for "<span style="color:#7dd3fc;font-weight:700;">'+esc(q)+'</span>"</p>'+
               '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">'+items.map(function(r){
-                var href = r.kind==='nft' ? '/token/'+r.collection+'/'+r.token_id : '/collection/'+r.collection;
+                var encC=encodeURIComponent(r.collection||''); var encT=encodeURIComponent(r.token_id||'');
+                var href = r.kind==='nft' ? '/token/'+encC+'/'+encT : '/collection/'+encC;
                 var label = r.kind==='nft' ? 'NFT' : 'Collection';
                 var name = r.name||shortAddr(r.collection);
                 var img = r.image_uri ? '/api/v1/media?url='+encodeURIComponent(r.image_uri) : '';

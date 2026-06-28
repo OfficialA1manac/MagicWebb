@@ -97,13 +97,12 @@ func TestPublishSaturationMetricsIncrement(t *testing.T) {
 	if DroppedTotal.Load()-pre < 1 { t.Fatal("expected drop") }
 	if SaturationStreak.Load() < 1 { t.Fatal("expected streak") }
 	// Start the loop goroutine and drain so the channel has room again.
-	go b.loop()
-	for drain := true; drain; {
-		select {
-		case <-b.events:
-		default:
-			drain = false
-		}
+	// Drain one event directly from b.events without spawning a loop
+	// goroutine — this avoids a lingering goroutine that can make the
+	// test nondeterministic on future operations.
+	select {
+	case <-b.events:
+	default:
 	}
 	// Now events channel has room; Publish should succeed and reset streak.
 	b.Publish(Event{Type: "ok"})

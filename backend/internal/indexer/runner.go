@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"math"
 	"math/big"
+	"strings"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -106,7 +107,10 @@ func (r *Runner) Run(ctx context.Context) {
 		// Phase 4 V4.1: one-shot keeper wallet balance check before any
 		// keeper goroutine starts. Runs once per process lifetime.
 		// Non-fatal on RPC failure.
-		key, keyErr := crypto.HexToECDSA(r.cfg.KeeperKey)
+		// Normalise optional 0x prefix before parsing (config.Load()
+		// validates the hex but does not strip the prefix from C.KeeperKey).
+		keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
+		key, keyErr := crypto.HexToECDSA(keeperKeyHex)
 		if keyErr != nil {
 			log.Error().Err(keyErr).Msg("keeper: invalid KEEPER_KEY at startup, keepers disabled")
 		} else {
@@ -503,7 +507,8 @@ func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
 
 func (r *Runner) runAuctionKeeper(ctx context.Context) {
-	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
+	key, err := crypto.HexToECDSA(keeperKeyHex)
 	if err != nil {
 		log.Error().Err(err).Msg("keeper: invalid KEEPER_KEY, keeper disabled")
 		return
@@ -583,7 +588,8 @@ func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, fr
 var refundOfferSelector = crypto.Keccak256([]byte("refundExpiredOffer(address,uint256,address)"))[:4]
 
 func (r *Runner) runOfferKeeper(ctx context.Context) {
-	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
+	key, err := crypto.HexToECDSA(keeperKeyHex)
 	if err != nil {
 		log.Error().Err(err).Msg("offer keeper: invalid KEEPER_KEY")
 		return

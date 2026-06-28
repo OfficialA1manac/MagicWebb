@@ -5,12 +5,14 @@ MagicWebb's Coston2 testnet with 4 production-quality anime NFTs.
 
 ## NFTs
 
-| ID | Name | Anime | Price |
-|----|------|-------|-------|
-| 5  | Itachi Uchiha — Tears of the Crow | Naruto Shippuden | 5 C2FLR |
-| 6  | Garou — The Hero Hunter Awakened | One Punch Man | 5 C2FLR |
-| 7  | Cid Kagenou — I Am Atomic | The Eminence in Shadow | 5 C2FLR |
-| 8  | Will Serfort — The Sword That Defies Magic | Wistoria: Wand and Sword | 5 C2FLR |
+| ID (example) | Name | Price |
+|-------------|------|-------|
+| totalSupply+1 | Itachi Uchiha — Tears of the Crow | 5 C2FLR |
+| totalSupply+2 | Garou — The Hero Hunter Awakened | 5 C2FLR |
+| totalSupply+3 | Cid Kagenou — I Am Atomic | 5 C2FLR |
+| totalSupply+4 | Will Serfort — The Sword That Defies Magic | 5 C2FLR |
+
+> **Token IDs are not fixed.** The seed script reads `totalSupply()` from the NFT contract before minting, so the actual IDs depend on the contract's current state. The table above shows IDs relative to the pre-mint total supply.
 
 ## Prerequisites
 
@@ -29,10 +31,10 @@ Generate or commission the 4 character images:
 
 Recommended prompts (Midjourney / Stable Diffusion / manual art):
 
-- **Itachi Uchiha:** "Itachi Uchiha from Naruto, Akatsuki cloak, Mangekyo Sharingan active, crow on finger, crimson moon background, amaterasu flames at edges, dark cel-shaded anime style, 4K, dramatic lighting"
-- **Garou:** "Garou awakened form from One Punch Man, cosmic energy veins, silver hair, cracked monster skin, shattered Hero Association HQ background, dynamic action pose, anime style, 4K"
-- **Cid Kagenou:** "Cid Kagenou / Shadow from Eminence in Shadow, slime bodysuit, violet mana swirling, atomic pose with raised hand, galaxy nebula background, ethereal glow, anime style, 4K"
-- **Will Serfort:** "Will Serfort from Wistoria Wand and Sword, mid-sword-strike pose leaving light trails, magical tower background stretching infinitely upward, determined expression, sword trail motion effect, anime style, 4K"
+- **Ninja:** "Cloaked shinobi with glowing eyes, standing under a crimson moon, crows circling overhead, dark cel-shaded anime style, 4K, dramatic lighting"
+- **Hero:** "A warrior in awakened form with cosmic energy flowing through veins, shattered building background, dynamic action pose, anime style, 4K"
+- **Shadow:** "Mysterious figure in dark bodysuit with purple mana swirling around, galaxy nebula background, ethereal glow, dramatic stance, anime style, 4K"
+- **Mage:** "Sword-wielding warrior mid-strike with light trails, magical tower background, determined expression, motion effect, anime style, 4K"
 
 ## Usage
 
@@ -46,15 +48,19 @@ Recommended prompts (Midjourney / Stable Diffusion / manual art):
 **Metadata handling:** The MagicWebb indexer resolves NFT metadata
 off-chain via tokenURI → `nft_metadata` table. Once metadata JSONs
 are live at public URIs, the indexer will pick them up on the next
-metadata fetch cycle. The seed script uses `mint(address)` which
-auto-increments the token ID without setting an on-chain tokenURI —
-the metadata association happens through the indexer's metadata
-resolution, not on-chain.
+metadata fetch cycle. The seed script should set a token URI during
+minting so the indexer can associate each token with its metadata.
+
+If the NFT contract supports `setTokenURI(tokenId, uri)`, update the
+seed script to call it after each `mint()`. The metadata JSONs in
+`./metadata/` should be pinned to IPFS and their URIs recorded as
+environment variables or passed as script arguments.
 
 ```bash
 # Set up environment
 export PRIVATE_KEY=0x_your_coston2_private_key
 export RPC_URL=https://coston2-api.flare.network/ext/C/rpc
+export METADATA_BASE=https://ipfs.io/ipfs/QmYourMetadataCID
 
 # Run seed script
 bash tools/seed-testnet/seed.sh
@@ -62,7 +68,7 @@ bash tools/seed-testnet/seed.sh
 
 The script will:
 1. Verify both contracts exist on-chain (code size + totalSupply)
-2. Mint token IDs 5-8 on the Coston2 MockERC721
+2. Mint token IDs derived from contract state (not hardcoded)
 3. Approve the marketplace contract
 4. List each NFT for exactly 5 C2FLR (5,000,000,000,000,000,000 wei)
 5. Verify ownership and active marketplace listing for each token

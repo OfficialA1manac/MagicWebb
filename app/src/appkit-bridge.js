@@ -76,6 +76,7 @@ async function init() {
     });
 
     _ready = true;
+    flushPendingCallbacks();
     console.log('[mw-appkit] Reown AppKit bridge initialised (self-hosted, ethers adapter)');
     window.dispatchEvent(new CustomEvent('mw-appkit-ready'));
     return true;
@@ -157,9 +158,31 @@ function disconnect() {
 }
 
 /* ── State change callback ── */
+var _pendingCallbacks = [];
+var _onStateUnsub = null;
+
 function onStateChange(cb) {
-  if (!_ready || !_appKit || typeof cb !== 'function') return function () {};
+  if (typeof cb !== 'function') return function () {};
+  if (!_ready || !_appKit) {
+    // Not ready yet — queue the callback to be flushed once init completes.
+    _pendingCallbacks.push(cb);
+    return function () {
+      var idx = _pendingCallbacks.indexOf(cb);
+      if (idx >= 0) _pendingCallbacks.splice(idx, 1);
+    };
+  }
   return _appKit.subscribeState(cb);
+}
+
+// Flush any callbacks that were registered before init() completed.
+// Called from the ready promise resolution path.
+function flushPendingCallbacks() {
+  if (!_ready || !_appKit || _pendingCallbacks.length === 0) return;
+  var cbs = _pendingCallbacks.slice();
+  _pendingCallbacks = [];
+  _onStateUnsub = _appKit.subscribeState(function (state) {
+    cbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
+  });
 }
 
 /* ── Assemble and expose the bridge ── */

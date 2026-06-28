@@ -77,9 +77,10 @@ export default function () {
   // ── SSE events ──
   group('sse - events', () => {
     const res = http.get(`${TARGET}/events`, { headers: { Accept: 'text/event-stream' }, timeout: '5s' });
-    check(res, {
+    const ok = check(res, {
       'SSE preamble': (r) => r.body.startsWith(': connected\n\n'),
     });
+    errorRate.add(!ok); // track SSE connection failures in the errors metric
   });
 
   // Pace iterations: ~1-2s between each VU's iteration to simulate real-ish traffic.
