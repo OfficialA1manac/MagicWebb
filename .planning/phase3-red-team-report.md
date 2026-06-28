@@ -2,7 +2,7 @@
 
 **Date:** 2026-06-27
 **Branch:** main
-**Project:** MagicWebb NFT Marketplace — Flare Network (Coston2 → Mainnet)
+**Project:** MagicWebb NFT Marketplace — Flare Network (Coston2, chain 114)
 **Auditor Role:** Principal Blockchain Security Architect
 **Methodology:** STRIDE + DREAD threat modeling, economic game theory, Flare-specific adversary modeling
 

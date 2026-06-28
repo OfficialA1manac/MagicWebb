@@ -28,10 +28,10 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.0
         with:
           persist-credentials: false
-      - uses: actions/setup-go@v5.4.0
+      - uses: actions/setup-go@f111f3307d8850f501ac008e886eec1fd1932a34 # v5.4.0
         with:
           go-version: "1.25"
           cache: true
@@ -51,12 +51,12 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 30
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.0
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1.2.0
+        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
       - name: Build
         working-directory: contracts
         run: forge build --sizes
@@ -69,14 +69,14 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 20
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.0
         with:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1.2.0
+        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
       - name: Slither
-        uses: crytic/slither-action@v0.4.0
+        uses: crytic/slither-action@3f839d464f8fb1b50c16776c12f3fda52cf4171f # v0.4.0
         with:
           target: contracts/
           slither-config: contracts/slither.config.json
@@ -87,11 +87,11 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 5
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@11bd71901bbe5b1630ceea73d27597364c9af683 # v4.2.0
         with:
           fetch-depth: 0
           persist-credentials: false
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2.5.0
+        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149 # v2.5.0
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"

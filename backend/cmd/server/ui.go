@@ -698,7 +698,7 @@ func mountAstro(app *fiber.App) {
 			{"profile/", "profile"},
 			{"auction/", "auction"},
 			{"collection/", "collection"},
-			{"search", "search"},
+			{"search/", "search"},
 		}
 		for _, ca := range catchAlls {
 			if strings.HasPrefix(cleanRel, ca.prefix) && cleanRel != ca.dir {

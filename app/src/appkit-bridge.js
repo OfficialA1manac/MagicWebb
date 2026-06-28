@@ -188,11 +188,17 @@ function flushPendingCallbacks() {
 /* ── Assemble and expose the bridge ── */
 const readyPromise = init();
 
-window.__MW_APPKIT__ = {
-  ready: readyPromise,
-  connect: connect,
-  disconnect: disconnect,
-  onStateChange: onStateChange,
-};
+// Only expose the bridge when init succeeds. On failure, __MW_APPKIT__
+// stays undefined so wallet.js falls back to the self-hosted WC bundle.
+readyPromise.then(function(success) {
+  if (success) {
+    window.__MW_APPKIT__ = {
+      ready: readyPromise,
+      connect: connect,
+      disconnect: disconnect,
+      onStateChange: onStateChange,
+    };
+  }
+});
 
 })();

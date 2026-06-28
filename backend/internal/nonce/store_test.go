@@ -18,9 +18,18 @@ func TestMemStoreSetIfFreeRejectsSecondIssue(t *testing.T) {
 	// expiresAt is in the past). Use a different address so the live
 	// entry above isn't disturbed — this genuinely exercises the
 	// expiry path in SetIfFree, not a manual GetDel clearing.
-	s.SetIfFree("0xexpired", "expired", -time.Second)
+	// SetIfFree returns true because the slot is free (no live entry).
+	if !s.SetIfFree("0xexpired", "expired", -time.Second) {
+		t.Fatal("first SetIfFree with negative TTL should succeed (insert fresh entry)")
+	}
+	// Entry was stored but immediately expired; GetDel returns false.
+	// The important check is that the next SetIfFree succeeds (slot is reusable).
 	if !s.SetIfFree("0xexpired", "n3", time.Minute) {
 		t.Fatal("SetIfFree should succeed after prior entry's TTL has expired")
+	}
+	// Verify the replacement was stored with a live TTL.
+	if v, ok := s.GetDel("0xexpired"); !ok || v != "n3" {
+		t.Fatalf("expected live replacement entry: got %q %v", v, ok)
 	}
 }
 

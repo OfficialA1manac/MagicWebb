@@ -90,12 +90,13 @@ func TestPublishSaturationMetricsIncrement(t *testing.T) {
 	// could be partially drained by the loop between pushes, making
 	// saturation non-deterministic.
 	b := newNoLoop()
-	pre := DroppedTotal.Load()
+	preDrop := DroppedTotal.Load()
+	preStreak := SaturationStreak.Load()
 	for i := 0; i < 256; i++ { b.events <- Event{Type: "filler"} }
 	// Channel is now full; the next Publish must saturate.
 	b.Publish(Event{Type: "dropped"})
-	if DroppedTotal.Load()-pre < 1 { t.Fatal("expected drop") }
-	if SaturationStreak.Load() < 1 { t.Fatal("expected streak") }
+	if DroppedTotal.Load()-preDrop < 1 { t.Fatal("expected drop") }
+	if SaturationStreak.Load()-preStreak < 1 { t.Fatal("expected streak increase") }
 	// Start the loop goroutine and drain so the channel has room again.
 	// Drain one event directly from b.events without spawning a loop
 	// goroutine — this avoids a lingering goroutine that can make the

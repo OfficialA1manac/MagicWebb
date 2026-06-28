@@ -3,7 +3,6 @@
 MagicWebb is a fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network. This guide is a complete walk-through: every user action, what happens on-chain, what the backend records, and what the UI does in response. Use this when onboarding a new contributor, during customer-support escalations, or as the post-deploy smoke-test checklist.
 
 > **Network:** MagicWebb runs on **Coston2 testnet** (chain id 114 / `0x72`). The wallet picker auto-fills the chain when you connect.
-
 > **Fee model:** seller-pays 1.5% on every sale (deducted from seller's proceeds). **Listings, auction creation, bidding, and making offers are all free.** Sellers receive 98.5% of every sale; the platform fee is a Solidity `constant` — no admin key can change it. There is no admin, no pause, and no upgrade proxy on any contract.
 
 ---

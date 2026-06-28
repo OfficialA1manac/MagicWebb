@@ -1,9 +1,10 @@
 // ── Phase 5 V5.1: k6 load-testing script ─────────────────────────────────────
-// Validates backend capacity before mainnet traffic. Run with:
+// Validates backend capacity for Coston2 traffic. Run with:
 //   k6 run tools/load-test.js --vus 10 --duration 30s
 //
 // Targets the key public endpoints (no auth). Adjust TARGET env for staging:
 //   k6 run -e TARGET=https://magicwebb.fly.dev tools/load-test.js --vus 20 --duration 60s
+//   k6 run -e SSE_TEST=true tools/load-test.js          # also probe SSE events
 //
 // Install k6: https://k6.io/docs/get-started/installation/
 // ─────────────────────────────────────────────────────────────────────────────
@@ -74,14 +75,17 @@ export default function () {
     get('/healthz', 200);
   });
 
-  // ── SSE events ──
-  group('sse - events', () => {
-    const res = http.get(`${TARGET}/events`, { headers: { Accept: 'text/event-stream' }, timeout: '5s' });
-    const ok = check(res, {
-      'SSE preamble': (r) => r.body.startsWith(': connected\n\n'),
+  // ── SSE events (gated — only runs when SSE_TEST=true to avoid skewing
+  // latency/error metrics with the 5s streaming GET).
+  if (__ENV.SSE_TEST === 'true') {
+    group('sse - events', () => {
+      const res = http.get(`${TARGET}/events`, { headers: { Accept: 'text/event-stream' }, timeout: '5s' });
+      const ok = check(res, {
+        'SSE preamble': (r) => r.body.startsWith(': connected\n\n'),
+      });
+      errorRate.add(!ok); // track SSE connection failures in the errors metric
     });
-    errorRate.add(!ok); // track SSE connection failures in the errors metric
-  });
+  }
 
   // Pace iterations: ~1-2s between each VU's iteration to simulate real-ish traffic.
   // Phase 5 V5.1: use __VU + __ITER for VU-varied pacing (same rationale as search).

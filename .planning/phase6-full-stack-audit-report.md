@@ -3,7 +3,7 @@
 **Version:** v29 + Audit Fixes  
 **Date:** June 27, 2026  
 **Auditor:** Principal Blockchain Security Architect & Full-Stack Web3 Engineering Lead  
-**Network:** Flare Coston2 (testnet, chain ID 114) → Mainnet (chain ID 14)  
+**Network:** Flare Coston2 (testnet, chain ID 114)  
 **Engagement Scope:** Full-repository — smart contracts, backend, frontend, CI/CD, docs
 
 ---
