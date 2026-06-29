@@ -78,6 +78,6 @@ jobs:
         with:
           fetch-depth: 0
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@v2.5.0
+        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149 # v2.5.0
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
