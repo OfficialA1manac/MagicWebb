@@ -5,11 +5,6 @@ primary_region = "iad"
   dockerfile = "Dockerfile"
   [build.args]
     REOWN_PROJECT_ID = "af6aba4c71274871c3d77a60050171ba"
-    # GIT_SHA default ("unknown" fallback for local/manual builds).
-    # CI writes the real SHA to build-sha.txt before `fly deploy`;
-    # the Dockerfile reads that file directly (v36 file-based approach).
-    # `--build-arg` does NOT propagate to Fly's remote builder.
-    GIT_SHA = "unknown"
 
 # Non-secret config. WalletConnect project IDs are PUBLIC client identifiers
 # (used by the dApp at runtime to look up the pairing relay) — embedding

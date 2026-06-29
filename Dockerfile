@@ -1,10 +1,3 @@
-# ── Global build args (overridable via --build-arg or fly.toml [build.args]) ──
-# GIT_SHA: stamped into the binary at link time, served as X-MW-Build-SHA.
-# Default "unknown" for local builds. CI replaces this line with sed so the
-# real commit hash is baked into the Dockerfile before `fly deploy` ships
-# the build context to Fly's remote builder.
-ARG GIT_SHA=unknown
-
 # ── Astro (Node) builder ────────────────────────────────────────────────────────
 FROM node:22-alpine AS astro-build
 WORKDIR /astro
@@ -34,7 +27,6 @@ RUN npm run build
 
 # ── Go builder ───────────────────────────────────────────────────────────────────
 FROM golang:1.25-alpine AS go-build
-ARG GIT_SHA
 WORKDIR /src
 
 # Copy go.mod files first (layer caching)
@@ -57,8 +49,7 @@ COPY frontend/ ./frontend/
 # self-hosted bridge is required for wallet pairing on the HTMX pages.
 COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 
-RUN echo "Baking GIT_SHA=${GIT_SHA} into api.MWServerBuildSHA" && \
-    cd backend && CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=${GIT_SHA}" -o /magicwebb ./cmd/server
+RUN cd backend && CGO_ENABLED=0 go build -ldflags="-s -w" -o /magicwebb ./cmd/server
 
 # ── Final image ───────────────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot
