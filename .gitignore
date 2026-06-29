@@ -80,9 +80,6 @@ backend/internal/ui/static/uploads/
 # project policy this is dev-only on the working machine.
 /~/
 
-# Build SHA stamp (written by CI deploy.yml, read by Dockerfile)
-build-sha.txt
-
 # Foundry (audit install only — never commit lib/)
 contracts/lib/
 contracts/foundry.lock

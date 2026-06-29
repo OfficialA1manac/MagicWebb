@@ -101,16 +101,18 @@ jobs:
         run: |
           curl -fsSL https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-      - name: Stamp build SHA
-        # v36 — write the commit SHA to a file so the Dockerfile can COPY
-        # it into the go-build stage and link it into the binary.
-        # `fly deploy --remote-only --build-arg` does NOT propagate
-        # --build-arg to Fly's remote builder (it only works with local
-        # builds). A file in the build context is reliably shipped to the
-        # remote builder regardless of build mode.
+      - name: Stamp build SHA into Dockerfile
+        # v37 — sed-replace the ARG GIT_SHA=unknown default with the real
+        # commit hash in the Dockerfile before `fly deploy` ships the build
+        # context to Fly's remote builder. No --build-arg, no RUN --mount,
+        # no file copying — the SHA is literally in the Dockerfile.
+        # `--build-arg` doesn't propagate to Fly's remote builder, and
+        # `RUN --mount=type=bind` is BuildKit-dependent and unreliable.
+        # sed on the Dockerfile is guaranteed to work with every builder.
+        # Local builds keep "unknown" because sed only runs in CI.
         run: |
-          echo "$GITHUB_SHA" > build-sha.txt
-          echo "  stamped build-sha.txt → $GITHUB_SHA"
+          sed -i "s/ARG GIT_SHA=unknown/ARG GIT_SHA=$GITHUB_SHA/" Dockerfile
+          echo "  stamped Dockerfile ARG GIT_SHA → $GITHUB_SHA"
       - name: Deploy (Fly remote build → rolling release)
         # FLY_API_TOKEN scoped to this single step — narrower blast
         # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
@@ -118,10 +120,7 @@ jobs:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           echo "  deploying commit $GITHUB_SHA"
-          # v36 — file-based SHA (build-sha.txt) is the primary mechanism.
-          # --build-arg is a belt-and-suspenders backup now that ARG GIT_SHA
-          # is declared globally in the Dockerfile (before the first FROM).
-          fly deploy --remote-only --strategy rolling --build-arg "GIT_SHA=$GITHUB_SHA"
+          fly deploy --remote-only --strategy rolling
       - name: Post-deploy smoke check (curl /healthz)
         # Catches the class of failure where `fly deploy` succeeds
         # (image pushes, machine replaces) but the new binary boots

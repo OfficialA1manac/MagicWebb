@@ -1,8 +1,8 @@
 # ── Global build args (overridable via --build-arg or fly.toml [build.args]) ──
 # GIT_SHA: stamped into the binary at link time, served as X-MW-Build-SHA.
-# Default "unknown" for local builds. CI writes the real SHA to
-# build-sha.txt (picked up by RUN --mount below) so the remote builder
-# stamps the exact commit regardless of --build-arg propagation quirks.
+# Default "unknown" for local builds. CI replaces this line with sed so the
+# real commit hash is baked into the Dockerfile before `fly deploy` ships
+# the build context to Fly's remote builder.
 ARG GIT_SHA=unknown
 
 # ── Astro (Node) builder ────────────────────────────────────────────────────────
@@ -37,19 +37,6 @@ FROM golang:1.25-alpine AS go-build
 ARG GIT_SHA
 WORKDIR /src
 
-# ── Build SHA stamp (v36 — file-first, ARG fallback) ──
-# CI writes $GITHUB_SHA to build-sha.txt before `fly deploy`. The
-# `RUN --mount=type=bind,required=false` makes the file optional:
-#   • CI / remote build:  file exists  →  SHA stamped from file
-#   • local `docker build`: file absent  →  falls back to ARG default ("unknown")
-# This is more reliable than --build-arg with Fly's remote builder, and
-# `required=false` keeps local builds working without the file.
-RUN --mount=type=bind,source=build-sha.txt,target=/tmp/build-sha.txt,required=false \
-    GIT_SHA_FILE=$(cat /tmp/build-sha.txt 2>/dev/null || echo "") && \
-    GIT_SHA="${GIT_SHA_FILE:-${GIT_SHA}}" && \
-    echo "Baking GIT_SHA=${GIT_SHA} into api.MWServerBuildSHA" && \
-    echo "${GIT_SHA}" > /tmp/build-sha-resolved.txt
-
 # Copy go.mod files first (layer caching)
 COPY backend/go.mod backend/go.sum ./backend/
 COPY frontend/go.mod ./frontend/
@@ -70,7 +57,8 @@ COPY frontend/ ./frontend/
 # self-hosted bridge is required for wallet pairing on the HTMX pages.
 COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 
-RUN cd backend && CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=$(cat /tmp/build-sha-resolved.txt)" -o /magicwebb ./cmd/server
+RUN echo "Baking GIT_SHA=${GIT_SHA} into api.MWServerBuildSHA" && \
+    cd backend && CGO_ENABLED=0 go build -ldflags="-s -w -X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=${GIT_SHA}" -o /magicwebb ./cmd/server
 
 # ── Final image ───────────────────────────────────────────────────────────────────
 FROM gcr.io/distroless/static-debian12:nonroot
