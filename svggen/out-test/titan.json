@@ -1,0 +1,31 @@
+{
+  "name": "Titan — The Cosmic Awakening",
+  "description": "A warrior breaking through cosmic restraints, channeling the raw energy of collapsing stars. The awakening shakes reality itself.",
+  "image": "titan.svg",
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "Cosmic Nebula"
+    },
+    {
+      "trait_type": "Signature Technique",
+      "value": "Void-Shattering Strike"
+    },
+    {
+      "trait_type": "Element",
+      "value": "Cosmic / Golden Energy"
+    },
+    {
+      "trait_type": "Faction",
+      "value": "The Wild Hunt"
+    },
+    {
+      "trait_type": "Series",
+      "value": "Original"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Mythic"
+    }
+  ]
+}

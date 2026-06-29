@@ -1,0 +1,31 @@
+{
+  "name": "Raven — Shadow of the Crimson Moon",
+  "description": "A solitary figure beneath a blood-red eclipse, wielding abyssal flame. The crows carry whispers of forgotten truths.",
+  "image": "raven.svg",
+  "attributes": [
+    {
+      "trait_type": "Background",
+      "value": "Crimson Eclipse"
+    },
+    {
+      "trait_type": "Signature Technique",
+      "value": "Abyssal Flare"
+    },
+    {
+      "trait_type": "Element",
+      "value": "Shadow / Crimson Flame"
+    },
+    {
+      "trait_type": "Faction",
+      "value": "The Veil Order"
+    },
+    {
+      "trait_type": "Series",
+      "value": "Original"
+    },
+    {
+      "trait_type": "Rarity",
+      "value": "Mythic"
+    }
+  ]
+}
