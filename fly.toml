@@ -5,6 +5,10 @@ primary_region = "iad"
   dockerfile = "Dockerfile"
   [build.args]
     REOWN_PROJECT_ID = "af6aba4c71274871c3d77a60050171ba"
+    # GIT_SHA is overridden by CI (fly deploy --build-arg "GIT_SHA=$GITHUB_SHA") so
+    # every deploy stamps the binary with the exact commit it was built from.
+    # The /healthz endpoint returns it as X-MW-Build-SHA for deploy-verification.
+    GIT_SHA = "unknown"
 
 # Non-secret config. WalletConnect project IDs are PUBLIC client identifiers
 # (used by the dApp at runtime to look up the pairing relay) — embedding
