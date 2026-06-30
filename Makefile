@@ -13,8 +13,16 @@ help: ## show available targets
 
 # ── App ───────────────────────────────────────────────────────────────────────
 
-dev: ## run server locally (go run, no build step)
-	go run $(SERVER)
+dev: ## run backend (:8080) + Astro frontend (:4321) together
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@echo "  Go backend     → http://localhost:8080"
+	@echo "  Astro frontend → http://localhost:4321"
+	@echo "  Open :4321 — Astro hot-reloads + proxies API"
+	@echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
+	@trap 'kill $$BACKEND_PID $$FRONTEND_PID 2>/dev/null' EXIT; \
+	go run $(SERVER) & BACKEND_PID=$$!; \
+	cd app && npm run dev & FRONTEND_PID=$$!; \
+	wait $$BACKEND_PID $$FRONTEND_PID
 
 build: ## compile single binary → bin/magicwebb (auto-rebuilds tailwind.css + appkit-bridge first)
 	@mkdir -p bin

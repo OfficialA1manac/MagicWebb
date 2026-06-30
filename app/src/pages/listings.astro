@@ -111,7 +111,7 @@ const sortParam = urlParams.get('sort') || 'recent';
 
       function isEthAddr(s){
         if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
-        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        for(let i=2;i<42;i++){const c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
         return true;
       }
 
@@ -119,35 +119,33 @@ const sortParam = urlParams.get('sort') || 'recent';
 
       // Convert FLR decimal string to exact wei (no float rounding)
       function flrToWei(decimalStr){
-        var s = String(decimalStr||'').trim();
+        const s = String(decimalStr||'').trim();
         if(!s) return null;
         if(!/^\d+(\.\d+)?$/.test(s)) return null;
-        var parts = s.split('.');
-        var whole = parts[0] || '0';
-        var frac = (parts[1] || '').padEnd(18, '0').slice(0, 18);
-        var weiStr = whole + frac;
-        try { var bi = BigInt(weiStr); if(bi <= 0n) return null; return bi.toString(); }
+        const parts = s.split('.');
+        const whole = parts[0] || '0';
+        const frac = (parts[1] || '').padEnd(18, '0').slice(0, 18);
+        const weiStr = whole + frac;
+        try { const bi = BigInt(weiStr); if(bi <= 0n) return null; return bi.toString(); }
         catch(_) { return null; }
       }
 
-      var collectionInput = document.getElementById('filter-collection');
-      var datalist = document.getElementById('collection-datalist');
-      var minPriceInput = document.getElementById('filter-min-price');
-      var maxPriceInput = document.getElementById('filter-max-price');
-      var sortSelect = document.getElementById('filter-sort');
-      var applyBtn = document.getElementById('apply-filters-btn');
-      var clearBtn = document.getElementById('clear-filters-btn');
-      var traitSection = document.getElementById('trait-filters-section');
-      var traitContainer = document.getElementById('trait-filters-container');
-      var activeTraitCount = document.getElementById('active-trait-count');
-      var countBadge = document.getElementById('listing-count-badge');
-
-      var currentUrlParams = new URLSearchParams(window.location.search);
-      var activeTraits = (function(){
-        var t = {};
-        var ts = currentUrlParams.get('traits') || '';
+      const collectionInput = document.getElementById('filter-collection');
+      const datalist = document.getElementById('collection-datalist');
+      const minPriceInput = document.getElementById('filter-min-price');
+      const maxPriceInput = document.getElementById('filter-max-price');
+      const sortSelect = document.getElementById('filter-sort');
+      const applyBtn = document.getElementById('apply-filters-btn');
+      const clearBtn = document.getElementById('clear-filters-btn');
+      const traitSection = document.getElementById('trait-filters-section');
+      const traitContainer = document.getElementById('trait-filters-container');
+      const activeTraitCount = document.getElementById('active-trait-count');
+      const currentUrlParams = new URLSearchParams(window.location.search);
+      let activeTraits = (function(){
+        const t = {};
+        const ts = currentUrlParams.get('traits') || '';
         if(ts) ts.split(',').forEach(function(p){
-          var parts = p.split(':');
+          const parts = p.split(':');
           if(parts.length===2) t[parts[0]] = parts[1];
         });
         return t;
@@ -156,13 +154,13 @@ const sortParam = urlParams.get('sort') || 'recent';
       // ── Load collections into datalist ──
       async function loadCollections(){
         try {
-          var res = await fetch('/api/v1/collections?limit=200');
+          const res = await fetch('/api/v1/collections?limit=200');
           if(!res.ok) return;
-          var cols = await res.json();
+          const cols = await res.json();
           if(!Array.isArray(cols)) return;
           datalist.innerHTML = cols.map(function(c){
-            var addr = c.address || '';
-            var name = c.name || '';
+            const addr = c.address || '';
+            const name = c.name || '';
             return '<option value="'+esc(addr)+'" data-name="'+esc(name)+'">'+(name ? esc(name)+' ('+esc(shortAddr(addr))+')' : esc(shortAddr(addr)))+'</option>';
           }).join('');
         } catch(_) {}
@@ -178,26 +176,26 @@ const sortParam = urlParams.get('sort') || 'recent';
           return;
         }
         try {
-          var res = await fetch('/api/v1/collections/'+encodeURIComponent(collectionAddr)+'/traits');
+          const res = await fetch('/api/v1/collections/'+encodeURIComponent(collectionAddr)+'/traits');
           if(!res.ok) throw new Error('HTTP '+res.status);
-          var traits = await res.json();
+          const traits = await res.json();
           if(!traits || Object.keys(traits).length === 0){
             traitSection.style.display = 'none';
             return;
           }
           traitSection.style.display = 'block';
-          var html = '';
-          var activeCount = 0;
+          let html = '';
+          let activeCount = 0;
           Object.keys(traits).sort().forEach(function(tt){
-            var vals = traits[tt];
+            const vals = traits[tt];
             if(!vals||!vals.length) return;
-            var activeVal = activeTraits[tt] || '';
+            const activeVal = activeTraits[tt] || '';
             if(activeVal) activeCount++;
             html += '<div class="trait-group" style="display:flex;flex-direction:column;gap:0.25rem;">'+
               '<span style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;">'+esc(tt)+'</span>'+
               '<div style="display:flex;flex-wrap:wrap;gap:0.25rem;">';
             vals.sort().forEach(function(v){
-              var sel = (v === activeVal) ? '1' : '0';
+              const sel = (v === activeVal) ? '1' : '0';
               html += '<button class="trait-chip" data-trait="'+esc(tt)+'" data-value="'+esc(v)+'" data-selected="'+sel+'" style="padding:0.25rem 0.5rem;border-radius:0.375rem;border:1px solid '+(sel==='1'?'rgba(125,211,252,0.4)':'rgba(255,255,255,0.06)')+';background:'+(sel==='1'?'rgba(125,211,252,0.12)':'rgba(255,255,255,0.03)')+';color:'+(sel==='1'?'#7dd3fc':'rgba(255,255,255,0.5)')+';font-size:0.6875rem;font-weight:'+(sel==='1'?'800':'600')+';cursor:pointer;font-family:inherit;transition:all 0.15s;">'+esc(v)+'</button>';
             });
             html += '</div></div>';
@@ -208,9 +206,9 @@ const sortParam = urlParams.get('sort') || 'recent';
           // Trait click handler — deselect sibling chips for same trait
           traitContainer.querySelectorAll('.trait-chip').forEach(function(btn){
             btn.addEventListener('click', function(){
-              var tt = btn.dataset.trait;
-              var v = btn.dataset.value;
-              var sel = btn.dataset.selected === '1';
+              const tt = btn.dataset.trait;
+              const v = btn.dataset.value;
+              const sel = btn.dataset.selected === '1';
               if(sel){
                 delete activeTraits[tt];
                 btn.dataset.selected = '0';
@@ -236,7 +234,7 @@ const sortParam = urlParams.get('sort') || 'recent';
                 btn.style.color = '#7dd3fc';
                 btn.style.fontWeight = '800';
               }
-              var count = Object.keys(activeTraits).length;
+              const count = Object.keys(activeTraits).length;
               if(activeTraitCount) activeTraitCount.textContent = count > 0 ? count+' active' : '';
             });
           });
@@ -247,19 +245,19 @@ const sortParam = urlParams.get('sort') || 'recent';
 
       // ── Apply filters ──
       function applyFilters(){
-        var params = new URLSearchParams();
+        const params = new URLSearchParams();
 
-        var coll = (collectionInput.value || '').trim();
+        const coll = (collectionInput.value || '').trim();
         if(coll && isEthAddr(coll)) params.set('collection', coll);
 
         // Convert FLR amounts to wei using integer-safe helper
-        var minWei = flrToWei(minPriceInput.value);
-        var maxWei = flrToWei(maxPriceInput.value);
+        const minWei = flrToWei(minPriceInput.value);
+        const maxWei = flrToWei(maxPriceInput.value);
         if(minWei) params.set('min_price', minWei);
         if(maxWei) params.set('max_price', maxWei);
 
         // Trait filters
-        var traitPairs = [];
+        const traitPairs = [];
         Object.keys(activeTraits).forEach(function(k){
           traitPairs.push(k+':'+activeTraits[k]);
         });
@@ -268,8 +266,8 @@ const sortParam = urlParams.get('sort') || 'recent';
         // Sort
         if(sortSelect && sortSelect.value !== 'recent') params.set('sort', sortSelect.value);
 
-        var qs = params.toString();
-        var newUrl = qs ? '/listings?'+qs : '/listings';
+        const qs = params.toString();
+        const newUrl = qs ? '/listings?'+qs : '/listings';
         location.href = newUrl;
       }
 
@@ -282,7 +280,7 @@ const sortParam = urlParams.get('sort') || 'recent';
       if(collectionInput){
         collectionInput.addEventListener('focus', function(){loadCollections();});
         collectionInput.addEventListener('input', function(){
-          var v = this.value.trim();
+          const v = this.value.trim();
           // Reset activeTraits when collection changes to empty/invalid
           if(!isEthAddr(v)){
             activeTraits = {};
@@ -319,9 +317,9 @@ const sortParam = urlParams.get('sort') || 'recent';
       loadCollections();
 
       // ── Saved Searches ──────────────────────────────────────────────
-      var saveBtn = document.getElementById('save-search-btn');
-      var savedBtn = document.getElementById('saved-searches-btn');
-      var savedDropdown = document.getElementById('saved-searches-dropdown');
+      const saveBtn = document.getElementById('save-search-btn');
+      const savedBtn = document.getElementById('saved-searches-btn');
+      const savedDropdown = document.getElementById('saved-searches-dropdown');
 
       function getJWT(){
         try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
@@ -332,17 +330,17 @@ const sortParam = urlParams.get('sort') || 'recent';
       }
 
       function hasActiveFilters(){
-        var coll = (collectionInput ? collectionInput.value.trim() : '');
-        var minP = parseFloat(minPriceInput ? minPriceInput.value : '');
-        var maxP = parseFloat(maxPriceInput ? maxPriceInput.value : '');
-        var sort = sortSelect ? sortSelect.value : 'recent';
-        var hasTraits = Object.keys(activeTraits).length > 0;
-        return coll || (!isNaN(minP) && minP > 0) || (!isNaN(maxP) && maxP > 0) || sort !== 'recent' || hasTraits;
+        const coll = (collectionInput ? collectionInput.value.trim() : '');
+        const minP = parseFloat(minPriceInput ? minPriceInput.value : '');
+        const maxP = parseFloat(maxPriceInput ? maxPriceInput.value : '');
+        const sort = sortSelect ? sortSelect.value : 'recent';
+        const hasTraits = Object.keys(activeTraits).length > 0;
+        return (coll && isEthAddr(coll)) || (!isNaN(minP) && minP > 0) || (!isNaN(maxP) && maxP > 0) || sort !== 'recent' || hasTraits;
       }
 
       function checkWalletAndShowButtons(){
-        var jwt = getJWT();
-        var addr = getConnectedAddr();
+        const jwt = getJWT();
+        const addr = getConnectedAddr();
         if(jwt && addr && isEthAddr(addr)){
           if(hasActiveFilters()) saveBtn.style.display = 'inline-flex';
           else saveBtn.style.display = 'none';
@@ -360,14 +358,14 @@ const sortParam = urlParams.get('sort') || 'recent';
 
       // ── Load saved searches ──
       async function loadSavedSearches(){
-        var jwt = getJWT();
+        const jwt = getJWT();
         if(!jwt || !savedDropdown) return;
         try {
-          var res = await fetch('/api/v1/saved-searches?limit=20&page=listings', {
-            headers: {'Authorization': 'Bearer '+jwt}
-          });
+          const res = await fetch('/api/v1/saved-searches?limit=20&page=listings', {
+        headers: {'Authorization': 'Bearer '+jwt}
+      });
           if(!res.ok) throw new Error('HTTP '+res.status);
-          var searches = await res.json();
+          let searches = await res.json();
           if(!Array.isArray(searches)) searches = [];
 
           // Filter to listings page only (server-side page param should handle this)
@@ -391,14 +389,14 @@ const sortParam = urlParams.get('sort') || 'recent';
             btn.addEventListener('click', async function(e){
               e.preventDefault();
               e.stopPropagation();
-              var id = btn.dataset.id;
-              var jwt2 = getJWT();
+              const id = btn.dataset.id;
+              const jwt2 = getJWT();
               if(!jwt2 || !id) return;
               try {
-                var delRes = await fetch('/api/v1/saved-searches/'+id, {
-                  method: 'DELETE',
-                  headers: {'Authorization': 'Bearer '+jwt2}
-                });
+                const delRes = await fetch('/api/v1/saved-searches/'+id, {
+              method: 'DELETE',
+              headers: {'Authorization': 'Bearer '+jwt2}
+            });
                 if(delRes.ok || delRes.status === 204){
                   loadSavedSearches();
                 }
@@ -413,10 +411,10 @@ const sortParam = urlParams.get('sort') || 'recent';
       // ── Save search modal ──
       if(saveBtn){
         saveBtn.addEventListener('click', function(){
-          var overlay = document.createElement('div');
+          const overlay = document.createElement('div');
           overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.6);backdrop-filter:blur(4px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;animation:fadeIn 0.15s ease;';
 
-          var modal = document.createElement('div');
+          const modal = document.createElement('div');
           modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;padding:1.5rem;max-width:380px;width:100%;box-shadow:0 20px 50px rgba(0,0,0,0.5);animation:modalSlideUp 0.2s ease;';
 
           modal.innerHTML =
@@ -437,7 +435,7 @@ const sortParam = urlParams.get('sort') || 'recent';
           overlay.appendChild(modal);
           document.body.appendChild(overlay);
 
-          var nameInput = document.getElementById('save-search-name');
+          const nameInput = document.getElementById('save-search-name');
           if(nameInput) setTimeout(function(){nameInput.focus();}, 100);
 
           function closeSaveModal(){if(overlay.parentNode) overlay.parentNode.removeChild(overlay);}
@@ -446,18 +444,18 @@ const sortParam = urlParams.get('sort') || 'recent';
           document.getElementById('save-search-cancel').addEventListener('click', closeSaveModal);
           overlay.addEventListener('click', function(e){if(e.target===overlay) closeSaveModal();});
 
-          var confirmBtn = document.getElementById('save-search-confirm');
-          var statusEl = document.getElementById('save-search-status');
+          const confirmBtn = document.getElementById('save-search-confirm');
+          const statusEl = document.getElementById('save-search-status');
 
           confirmBtn.addEventListener('click', async function(){
-            var name = nameInput ? nameInput.value.trim() : '';
+            const name = nameInput ? nameInput.value.trim() : '';
             if(!name){
               statusEl.style.display = 'block';
               statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please enter a name</p>';
               return;
             }
 
-            var jwt = getJWT();
+            const jwt = getJWT();
             if(!jwt){
               statusEl.style.display = 'block';
               statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please reconnect your wallet</p>';
@@ -465,14 +463,14 @@ const sortParam = urlParams.get('sort') || 'recent';
             }
 
             // Build current params
-            var params = new URLSearchParams();
-            var coll = (collectionInput ? collectionInput.value.trim() : '');
+            const params = new URLSearchParams();
+            const coll = (collectionInput ? collectionInput.value.trim() : '');
             if(coll && isEthAddr(coll)) params.set('collection', coll);
-            var minWei2 = flrToWei(minPriceInput ? minPriceInput.value : '');
-            var maxWei2 = flrToWei(maxPriceInput ? maxPriceInput.value : '');
+            const minWei2 = flrToWei(minPriceInput ? minPriceInput.value : '');
+            const maxWei2 = flrToWei(maxPriceInput ? maxPriceInput.value : '');
             if(minWei2) params.set('min_price', minWei2);
             if(maxWei2) params.set('max_price', maxWei2);
-            var traitPairs = [];
+            const traitPairs = [];
             Object.keys(activeTraits).forEach(function(k){traitPairs.push(k+':'+activeTraits[k]);});
             if(traitPairs.length) params.set('traits', traitPairs.join(','));
             if(sortSelect && sortSelect.value !== 'recent') params.set('sort', sortSelect.value);
@@ -483,26 +481,25 @@ const sortParam = urlParams.get('sort') || 'recent';
             statusEl.style.display = 'none';
 
             try {
-              var res = await fetch('/api/v1/saved-searches', {
-                method: 'POST',
-                headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwt},
-                body: JSON.stringify({name: name, page: 'listings', params: params.toString()})
-              });
+              const res = await fetch('/api/v1/saved-searches', {
+            method: 'POST',
+            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwt},
+            body: JSON.stringify({name: name, page: 'listings', params: params.toString()})
+          });
               if(res.ok || res.status === 201){
                 statusEl.style.display = 'block';
                 statusEl.style.color = '#7dd3fc';
                 statusEl.innerHTML = '<p style="color:#7dd3fc;font-size:0.75rem;font-weight:600;">✓ Saved!</p>';
                 setTimeout(function(){closeSaveModal();}, 600);
               } else {
-                var errData;
+                let errData;
                 try{errData=await res.json();}catch(_){errData={error:'Failed to save'};}
                 statusEl.style.display = 'block';
                 statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ '+esc(errData.error||'Failed to save')+'</p>';
                 confirmBtn.disabled = false;
                 confirmBtn.textContent = 'Save';
                 confirmBtn.style.opacity = '1';
-              }
-            } catch(err) {
+              }              } catch(_err) {
               statusEl.style.display = 'block';
               statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">✗ Network error</p>';
               confirmBtn.disabled = false;
@@ -519,7 +516,7 @@ const sortParam = urlParams.get('sort') || 'recent';
       // ── Saved searches dropdown ──
       if(savedBtn){
         savedBtn.addEventListener('click', function(){
-          var isOpen = savedDropdown.style.display === 'block';
+          const isOpen = savedDropdown.style.display === 'block';
           if(isOpen){
             savedDropdown.style.display = 'none';
           } else {

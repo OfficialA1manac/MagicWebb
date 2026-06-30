@@ -8,6 +8,11 @@
     "build": "astro build && npm run build:bridge",
     "build:bridge": "vite build --config vite.bridge.config.mjs",
     "preview": "astro preview --port 4321",
+    "check": "astro check",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/",
+    "lint:fix": "eslint src/ --fix",
+    "test": "vitest run",
     "astro": "astro"
   },
   "dependencies": {
@@ -25,5 +30,22 @@
     "svelte": "^5.56.4",
     "viem": "^2.22.0",
     "wagmi": "^2.14.0"
+  },
+  "devDependencies": {
+    "@astrojs/check": "^0.9.9",
+    "@eslint/js": "^10.0.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.3.2",
+    "@testing-library/user-event": "^14.6.1",
+    "@vitejs/plugin-react": "^4.7.0",
+    "eslint": "^10.6.0",
+    "eslint-plugin-astro": "^2.1.1",
+    "eslint-plugin-svelte": "^3.20.0",
+    "globals": "^17.7.0",
+    "jsdom": "^29.1.1",
+    "svelte-eslint-parser": "^1.8.0",
+    "typescript": "^5.9.3",
+    "typescript-eslint": "^8.62.1",
+    "vitest": "^4.1.9"
   }
 }

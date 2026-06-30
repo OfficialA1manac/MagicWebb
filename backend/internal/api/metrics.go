@@ -35,7 +35,12 @@ func NewMetricsService(q *db.Q) *MetricsService {
 // RegisterRoutes registers metrics and activity routes under the given router group.
 func (s *MetricsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/metrics", s.handleMetrics)
-	api.Get("/activity", s.handleRecentActivity)
+	api.Get("/activity", ValidateQuery(QuerySchema{
+		{Name: "limit", Type: ParamInt},
+		{Name: "address", Type: ParamAddress},
+		{Name: "collection", Type: ParamAddress},
+		{Name: "token_id"},
+	}), s.handleRecentActivity)
 }
 
 func (s *MetricsService) handleMetrics(c *fiber.Ctx) error {
@@ -53,15 +58,60 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 		}
 	}
 	address := strings.ToLower(c.Query("address"))
+	collection := strings.ToLower(c.Query("collection"))
+	tokenID := c.Query("token_id")
+
 	var rows []db.ActivityRow
 	var err error
-	if address != "" {
+
+	// Route to the most specific query based on which params are present.
+	// Priority: all-three (AND) > collection+token > address > global.
+	// Reject partial token filters: collection+token_id must be together;
+	// address mixed with collection (without token_id) is also invalid.
+	// Map TokenActivityRow → ActivityRow so the JSON shape (camelCase
+	// fields like amountWei, tokenId) stays consistent regardless of
+	// which DB query was used.
+	var tokenRows []db.TokenActivityRow
+	switch {
+	case collection != "" && tokenID != "" && address != "":
+		tokenRows, err = s.q.GetTokenActivityByAddress(c.Context(), collection, tokenID, address, limit)
+	case collection != "" && tokenID != "":
+		tokenRows, err = s.q.GetTokenActivity(c.Context(), collection, tokenID, limit)
+	case address != "" && collection != "":
+		return writeErr(c, fiber.StatusBadRequest, "address and collection together require token_id")
+	case collection != "":
+		return writeErr(c, fiber.StatusBadRequest, "collection requires token_id")
+	case tokenID != "":
+		return writeErr(c, fiber.StatusBadRequest, "token_id requires collection")
+	case address != "":
 		rows, err = s.q.GetRecentTransactionsByAddress(c.Context(), address, limit)
-	} else {
+	default:
 		rows, err = s.q.GetRecentTransactions(c.Context(), limit)
 	}
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	// Map token rows → ActivityRow for consistent camelCase JSON shape.
+	// Only runs when the token path was taken (collection+token_id case);
+	// for address-only and global paths, rows is already populated by the
+	// DB query above and tokenRows stays nil, so we skip the mapping.
+	if tokenRows != nil {
+		mapped := make([]db.ActivityRow, 0, len(tokenRows))
+		for _, tr := range tokenRows {
+			mapped = append(mapped, db.ActivityRow{
+				Type:       tr.Type,
+				Collection: collection,
+				TokenID:    tokenID,
+				AmountWei:  tr.AmountWei,
+				Timestamp:  tr.Timestamp,
+				TxHash:     tr.TxHash,
+			})
+		}
+		rows = mapped
+	}
+	// Guarantee `[]` not `null` for empty responses (avoids JSON `null`).
+	if rows == nil {
+		rows = []db.ActivityRow{}
 	}
 	return c.JSON(rows)
 }

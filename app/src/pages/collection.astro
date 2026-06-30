@@ -34,33 +34,34 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-      function weiToFLR(w){try{var bi=BigInt(w||'0');var div=BigInt('1000000000000000000');var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,2);return whole+'.'+frac;}catch(_){return'0.00';}}
+      function weiToFLR(w,precision){try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const prec=typeof precision==='number'?precision:2;const frac=(bi%div).toString().padStart(18,'0').slice(0,prec);return whole+'.'+frac;}catch(_){return precision===4?'0.0000':'0.00';}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
 
-      var addr = window.location.pathname.replace('/collection/','').replace('/collection','');
-      var root = document.getElementById('collection-page');
+      const addr = window.location.pathname.replace('/collection/','').replace('/collection','');
+      const root = document.getElementById('collection-page');
       if (!addr || addr.length<10) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid collection address</div>'; return; }
 
       (async function(){
         try {
-          var [colRes, listRes] = await Promise.all([
-            fetch('/api/v1/collections/'+addr),
-            fetch('/api/v1/listings?collection='+addr+'&limit=48')
-          ]);
-          var col = colRes.ok ? (await colRes.json()) : null;
-          var listings = listRes.ok ? (await listRes.json()) : [];
+          const [colRes, listRes] = await Promise.all([
+        fetch('/api/v1/collections/'+addr),
+        fetch('/api/v1/listings?collection='+addr+'&limit=48')
+      ]);
+          const col = colRes.ok ? (await colRes.json()) : null;
+          const listings = listRes.ok ? (await listRes.json()) : [];
 
-          var name = (col&&col.name)||shortAddr(addr);
-          var standard = (col&&col.standard)||'erc721';
-          var verified = col&&col.verified;
-          var sym = col&&col.symbol||'';
+          const name = (col&&col.name)||shortAddr(addr);
+          const standard = (col&&col.standard)||'erc721';
+          const verified = col&&col.verified;
+          const sym = col&&col.symbol||'';
 
-          var floor = '0', vol24 = '0', listedCount = Array.isArray(listings)?listings.length:0;
+          let floor = '0', vol24 = '0';
+          const listedCount = Array.isArray(listings)?listings.length:0;
           if (Array.isArray(listings)&&listings.length) {
-            var prices = listings.map(function(l){try{return Number(BigInt(l.price_wei||'0'));}catch(_){return Infinity;}}).filter(function(p){return !isNaN(p)&&p>0;});
-            if(prices.length){floor=weiToFLR(String(Math.min.apply(null,prices)));}
-            var tot=listings.reduce(function(s,l){try{return s+Number(BigInt(l.price_wei||'0'));}catch(_){return s;}},0);
-            vol24=weiToFLR(String(tot));
+            let minWei=null,sumWei=0n;
+            for(let i=0;i<listings.length;i++){try{const bi=BigInt(listings[i].price_wei||'0');if(bi>0n){if(minWei===null||bi<minWei)minWei=bi;sumWei+=bi;}}catch(_){}}
+            if(minWei!==null)floor=weiToFLR(String(minWei));
+            vol24=weiToFLR(String(sumWei));
           }
 
           root.innerHTML =
@@ -84,10 +85,10 @@ import WalletConnect from '../components/WalletConnect';
               (!Array.isArray(listings)||!listings.length
                 ? '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No active listings in this collection</div>'
                 : '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">'+listings.map(function(l){
-                    var price=weiToFLR(l.price_wei||'0',4);
-                    var nm=l.name||('#'+l.token_id);
-                    var img=l.image_uri?'/api/v1/media?url='+encodeURIComponent(l.image_uri):'';
-                    var tid=l.token_id||'';
+                    const price=weiToFLR(l.price_wei||'0',4);
+                    const nm=l.name||('#'+l.token_id);
+                    const img=l.image_uri?'/api/v1/media?url='+encodeURIComponent(l.image_uri)+'&id='+encodeURIComponent(l.token_id||''):'';
+                    const tid=l.token_id||'';
                     return '<a href="/token/'+esc(l.collection)+'/'+esc(tid)+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                       '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                         (img?'<img src="'+esc(img)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+

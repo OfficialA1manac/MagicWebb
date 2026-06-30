@@ -895,9 +895,13 @@ type TokenActivityRow struct {
 }
 
 // GetTokenActivity returns the on-chain activity for one token across sales
-// and bids (offer-level activity). Orders newest first, capped at 30 rows.
+// and bids (offer-level activity). Orders newest first. Accepts a limit
+// parameter to cap results instead of using a fixed LIMIT.
 // Used by /token/:addr/:id to show the token's transaction history.
-func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string) ([]TokenActivityRow, error) {
+func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string, limit int) ([]TokenActivityRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
 	rows, err := q.pool.Query(ctx, `
 		SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash
 		  FROM sales WHERE collection=$1 AND token_id=$2
@@ -911,8 +915,47 @@ func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string) ([
 		SELECT 'BidPlaced', b.amount_wei::text, b.bidder, '', b.placed_at, b.tx_hash
 		  FROM bids b JOIN auctions a ON a.auction_id=b.auction_id
 		 WHERE a.collection=$1 AND a.token_id=$2
-		ORDER BY ts DESC LIMIT 30
-	`, collection, tokenID)
+	ORDER BY ts DESC LIMIT $4
+`, collection, tokenID, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TokenActivityRow
+	for rows.Next() {
+		var r TokenActivityRow
+		if err := rows.Scan(&r.Type, &r.AmountWei, &r.FromAddr, &r.ToAddr, &r.Timestamp, &r.TxHash); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GetTokenActivityByAddress returns the on-chain activity for a specific token
+// WHERE the given address appears as seller, buyer, bidder, or offer maker.
+// ANDs all three filters together: collection + token_id + address.
+// Orders newest first. Accepts a limit parameter instead of a fixed cap.
+// Used by /api/v1/activity when all three query params are present.
+func (q *Q) GetTokenActivityByAddress(ctx context.Context, collection, tokenID, address string, limit int) ([]TokenActivityRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 30
+	}
+	rows, err := q.pool.Query(ctx, `
+		SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash
+		  FROM sales WHERE collection=$1 AND token_id=$2 AND (seller=$3 OR buyer=$3)
+		UNION ALL
+		SELECT CASE WHEN status='accepted' THEN 'OfferAccepted'
+		            WHEN status='cancelled' THEN 'OfferCancelled'
+		            ELSE 'OfferMade' END,
+		       principal_wei::text, bidder, '', created_at, COALESCE(make_tx,'')
+		  FROM offers WHERE collection=$1 AND token_id=$2 AND bidder=$3
+		UNION ALL
+		SELECT 'BidPlaced', b.amount_wei::text, b.bidder, '', b.placed_at, b.tx_hash
+		  FROM bids b JOIN auctions a ON a.auction_id=b.auction_id
+		 WHERE a.collection=$1 AND a.token_id=$2 AND b.bidder=$3
+	ORDER BY ts DESC LIMIT $5
+`, collection, tokenID, address, limit)
 	if err != nil {
 		return nil, err
 	}

@@ -18,7 +18,6 @@ import { EthersAdapter } from '@reown/appkit-adapter-ethers';
 let _appKit = null;
 let _ethersAdapter = null;
 let _ready = false;
-let _initError = null;
 
 const projectId = (window.MW_WC_PROJECT_ID || '').trim();
 if (!projectId) {
@@ -81,7 +80,6 @@ async function init() {
     window.dispatchEvent(new CustomEvent('mw-appkit-ready'));
     return true;
   } catch (e) {
-    _initError = e;
     console.error('[mw-appkit] Init failed — falling back to self-hosted WC bundle:', e.message || e);
     return false;
   }
@@ -159,8 +157,6 @@ function disconnect() {
 
 /* ── State change callback ── */
 var _pendingCallbacks = [];
-var _onStateUnsub = null;
-
 function onStateChange(cb) {
   if (typeof cb !== 'function') return function () {};
   if (!_ready || !_appKit) {
@@ -180,7 +176,7 @@ function flushPendingCallbacks() {
   if (!_ready || !_appKit || _pendingCallbacks.length === 0) return;
   var cbs = _pendingCallbacks.slice();
   _pendingCallbacks = [];
-  _onStateUnsub = _appKit.subscribeState(function (state) {
+  _appKit.subscribeState(function (state) {
     cbs.forEach(function (cb) { try { cb(state); } catch (_) {} });
   });
 }

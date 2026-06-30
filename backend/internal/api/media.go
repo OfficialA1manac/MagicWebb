@@ -39,7 +39,9 @@ func NewMediaService(q *db.Q, eth chain.Caller, rl *ratelimit.Limiter) *MediaSer
 // RegisterRoutes registers all media-related routes.
 // The app-level /api/v1/img/:sha256 route is registered separately in Mount().
 func (s *MediaService) RegisterRoutes(api fiber.Router) {
-	api.Get("/media", s.handleProxy)
+	api.Get("/media", ValidateQuery(QuerySchema{
+		{Name: "url", Required: true, Type: ParamString},
+	}), s.handleProxy)
 	api.Post("/img/retry", s.handleRetry)
 }
 
@@ -48,7 +50,15 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	if raw == "" {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
-	if h := imagestore.ExtractHash(raw); h != "" {
+
+	// Resolve ipfs://, bare CIDs (Qm…/baf…), and ar:// to HTTP gateway
+	// URLs BEFORE the ProxyAllowedContext check, which only accepts
+	// http/https schemes. The {id} placeholder can be filled when the
+	// caller passes ?id=<token_id> alongside ?url=.
+	tokenID := c.Query("id")
+	resolved := media.ResolveURI(raw, tokenID)
+
+	if h := imagestore.ExtractHash(resolved); h != "" {
 		// Resolve local blob hash via the imagestore directly instead of
 		// calling imageByHash(c) which expects c.Params("sha256") from
 		// the /api/v1/img/:sha256 route. Construct a synthetic context
@@ -75,6 +85,23 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 		c.Set("X-Imagestore-Sha256", h)
 		return c.Send(blob.Body)
 	}
+
+	// data: URIs are self-contained; FetchBytes decodes them locally
+	// without any network call, so skip the SSRF proxy check entirely.
+	if strings.HasPrefix(resolved, "data:") {
+		body, err := media.FetchBytes(c.Context(), raw, tokenID)
+		if err != nil {
+			return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
+		}
+		ct, ok := media.SniffImage(body)
+		if !ok {
+			return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
+		}
+		c.Set("Content-Type", ct)
+		c.Set("Cache-Control", "public, max-age=86400")
+		return c.Send(body)
+	}
+
 	// Use the DNS-aware ProxyAllowedContext at the entry gate instead of
 	// the syntactic-only ProxyAllowed. Without this, an attacker could
 	// supply a URL whose hostname is a legitimate public domain that
@@ -82,10 +109,10 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	// to a private IP — the entry-gate ProxyAllowed check only validated
 	// the hostname syntax, not its resolved addresses, leaving a
 	// DNS-rebinding SSRF window between the entry gate and the fetch.
-	if !media.ProxyAllowedContext(c.Context(), raw) {
+	if !media.ProxyAllowedContext(c.Context(), resolved) {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
-	body, err := media.FetchBytes(c.Context(), raw, "")
+	body, err := media.FetchBytes(c.Context(), raw, tokenID)
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 	}

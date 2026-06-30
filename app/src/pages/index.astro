@@ -145,9 +145,9 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     // Fetch with retry helper (defined before use via hoisting)
     async function fetchWithRetry(url, retries) {
-      for (var i = 0; i <= retries; i++) {
+      for (let i = 0; i <= retries; i++) {
         try {
-          var res = await fetch(url);
+          const res = await fetch(url);
           if (res.ok) return res;
           if (res.status < 500) return res;
         } catch(e) {
@@ -169,15 +169,15 @@ import WalletConnect from '../components/WalletConnect';
 
       try {
         // Fetch metrics for counters
-        var mRes = await fetch('/api/v1/metrics');
+        const mRes = await fetch('/api/v1/metrics');
         if (mRes.ok) {
-          var m = await mRes.json();
+          const m = await mRes.json();
           document.getElementById('counter-listings').textContent = m.listing_count || m.totalActiveListings || 0;
           document.getElementById('counter-auctions').textContent = m.auction_count || m.totalAuctions || 0;
           document.getElementById('counter-collections').textContent = m.collection_count || 0;
-          var volWei = m.volume_24h_wei || m.grossVolumeWei;
+          const volWei = m.volume_24h_wei || m.grossVolumeWei;
           if (volWei) {
-            var vol = weiToFLR(volWei);
+            const vol = weiToFLR(volWei);
             document.getElementById('counter-volume').innerHTML = vol + ' <span style="font-size:0.75rem;">C2FLR</span>';
           }
         } else {
@@ -187,26 +187,26 @@ import WalletConnect from '../components/WalletConnect';
           document.getElementById('counter-volume').innerHTML = '—';
         }
       } catch(_) {
-        var c1 = document.getElementById('counter-listings'); var c2 = document.getElementById('counter-auctions'); var c3 = document.getElementById('counter-collections'); var c4 = document.getElementById('counter-volume');
+        const c1 = document.getElementById('counter-listings'); const c2 = document.getElementById('counter-auctions'); const c3 = document.getElementById('counter-collections'); const c4 = document.getElementById('counter-volume');
         if (c1) c1.textContent = '—'; if (c2) c2.textContent = '—'; if (c3) c3.textContent = '—'; if (c4) c4.textContent = '—';
       }
 
       // Fetch recent listings with retry logic
       try {
-        var lRes = await fetchWithRetry('/api/v1/listings?limit=8&sort=recent', 2);
-        var grid = document.getElementById('recent-listings-grid');
+        const lRes = await fetchWithRetry('/api/v1/listings?limit=8&sort=recent', 2);
+        const grid = document.getElementById('recent-listings-grid');
         if (lRes.ok) {
           try {
-            var listings = await lRes.json();
+            let listings = await lRes.json();
             if (!Array.isArray(listings)) listings = [];
             if (listings.length) {
               grid.innerHTML = listings.map(function(item) {
-                var price = weiToFLR(item.price_wei||'0', 4);
-                var name = item.name || ('#' + (item.token_id||item.tokenID||''));
-                var tokenId = item.token_id || item.tokenID || '';
-                var coll = item.collection || '';
-                var imgSrc = item.image_uri ? '/api/v1/media?url=' + encodeURIComponent(item.image_uri) : '';
-                var verified = item.collection_verified || item.collectionVerified;
+                const price = weiToFLR(item.price_wei||'0', 4);
+                const name = item.name || ('#' + (item.token_id||item.tokenID||''));
+                const tokenId = item.token_id || item.tokenID || '';
+                const coll = item.collection || '';
+                const imgSrc = item.image_uri ? '/api/v1/media?url=' + encodeURIComponent(item.image_uri) + '&id=' + encodeURIComponent(item.token_id || '') : '';
+                const verified = item.collection_verified || item.collectionVerified;
                 return '<a href="/token/' + esc(coll) + '/' + esc(tokenId) + '" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
                   '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +
                     (imgSrc ? '<img src="' + esc(imgSrc) + '" alt="' + esc(name) + '" loading="lazy" style="width:100%;height:100%;object-fit:cover;transition:transform 0.5s;" onerror="this.parentElement.innerHTML=\'<div style=display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.15);font-size:3rem;\\>🖼</div>\'">' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.15);font-size:3rem;">🖼</div>') +
@@ -230,8 +230,8 @@ import WalletConnect from '../components/WalletConnect';
         } else {
           if (grid) grid.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — <button onclick="location.reload()" style="background:none;border:none;color:#7dd3fc;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">retry</button></div>';
         }
-      } catch(e) {
-        var gridEl = document.getElementById('recent-listings-grid');
+    } catch(_e) {
+      const gridEl = document.getElementById('recent-listings-grid');
         if (gridEl) gridEl.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load listings — <button onclick="location.reload()" style="background:none;border:none;color:#7dd3fc;font-weight:700;cursor:pointer;font-family:inherit;text-decoration:underline;">retry</button></div>';
       }
 
@@ -254,28 +254,28 @@ import WalletConnect from '../components/WalletConnect';
           }
         }
       } catch(_) {
-        var grid2 = document.getElementById('trending-grid');
+        const grid2 = document.getElementById('trending-grid');
         if (grid2) grid2.innerHTML = '<div style="padding:3rem;border-radius:1rem;background:rgba(239,68,68,0.06);border:1px solid rgba(239,68,68,0.15);text-align:center;color:#fca5a5;grid-column:1/-1;">Could not load trending — please try again</div>';
       }
     })();
 
     // 3D tilt effect on cards
     document.addEventListener('mouseover', function(e) {
-      var card = e.target.closest('.tilt-card');
+      const card = e.target.closest('.tilt-card');
       if (!card) return;
-      var rect = card.getBoundingClientRect();
-      var x = e.clientX - rect.left;
-      var y = e.clientY - rect.top;
-      var centerX = rect.width / 2;
-      var centerY = rect.height / 2;
-      var rotateX = (y - centerY) / centerY * -8;
-      var rotateY = (x - centerX) / centerX * 8;
+      const rect = card.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+      const centerX = rect.width / 2;
+      const centerY = rect.height / 2;
+      const rotateX = (y - centerY) / centerY * -8;
+      const rotateY = (x - centerX) / centerX * 8;
       card.style.transform = 'perspective(1000px) rotateX(' + rotateX + 'deg) rotateY(' + rotateY + 'deg) scale3d(1.02,1.02,1.02)';
       card.style.boxShadow = '0 20px 60px rgba(139,92,246,0.2)';
       card.style.borderColor = 'rgba(167,139,250,0.4)';
     });
     document.addEventListener('mouseout', function(e) {
-      var card = e.target.closest('.tilt-card');
+      const card = e.target.closest('.tilt-card');
       if (!card) return;
       if (card.contains(e.relatedTarget)) return;
       card.style.transform = 'perspective(1000px) rotateX(0deg) rotateY(0deg) scale3d(1,1,1)';

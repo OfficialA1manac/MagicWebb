@@ -8,5 +8,5 @@
       "@/*": ["src/*"]
     }
   },
-  "include": ["src/**/*.ts", "src/**/*.svelte", "src/**/*.astro"]
+  "include": ["src/**/*.ts", "src/**/*.tsx"]
 }

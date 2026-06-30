@@ -28,15 +28,11 @@
     return `${whole}.${remainderStr}`;
   });
 
-  let sellerShort = $derived(
-    `${item.seller.slice(0, 6)}...${item.seller.slice(-4)}`
-  );
-
   let imageError = $state(false);
 
   let imageSrc = $derived(
     item.image_uri
-      ? `/api/v1/media?uri=${encodeURIComponent(item.image_uri)}`
+      ? `/api/v1/media?url=${encodeURIComponent(item.image_uri)}&id=${encodeURIComponent(item.token_id)}`
       : ''
   );
 

@@ -17,11 +17,11 @@ function getTargetChain() {
   if (typeof window === 'undefined') {
     return { id: 114, name: 'Flare Coston2', nativeCurrency: { name: 'Coston2 Flare', symbol: 'C2FLR', decimals: 18 }, rpcUrls: { default: { http: ['https://coston2-api.flare.network/ext/C/rpc'] } }, blockExplorers: { default: { name: 'Coston2 Explorer', url: 'https://coston2-explorer.flare.network' } } };
   }
-  const chainId = Number((window as any).MW_CHAIN_ID || 114);
-  const rpcUrl = (window as any).MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
-  const name = (window as any).MW_NETWORK_NAME || 'Flare Coston2';
-  const currency = (window as any).MW_NATIVE_CURRENCY || 'C2FLR';
-  const explorer = (window as any).MW_EXPLORER || 'https://coston2-explorer.flare.network';
+  const chainId = Number(window.MW_CHAIN_ID || '114');
+  const rpcUrl = window.MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
+  const name = window.MW_NETWORK_NAME || 'Flare Coston2';
+  const currency = window.MW_NATIVE_CURRENCY || 'C2FLR';
+  const explorer = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
   const currencyName = name === 'Flare' ? 'Flare' : 'Coston2 Flare';
   return {
     id: chainId,
@@ -33,6 +33,8 @@ function getTargetChain() {
 }
 
 const targetChain = getTargetChain();
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- AppKitNetwork type differs between library versions; cast once at the boundary
+const targetAppKitNetwork = targetChain as any;
 
 const chains = [targetChain];
 const transports = {
@@ -40,7 +42,14 @@ const transports = {
 };
 
 function getProjectId(): string {
-  return (import.meta.env.PUBLIC_REOWN_PROJECT_ID as string) || '';
+  // Primary: Astro build-time env var (PUBLIC_REOWN_PROJECT_ID in app/.env).
+  let id = (import.meta.env.PUBLIC_REOWN_PROJECT_ID as string) || '';
+  // Fallback: the Go backend injects window.MW_WC_PROJECT_ID on HTMX pages;
+  // also works on Astro pages when served through the Go binary in production.
+  if (!id && typeof window !== 'undefined') {
+    id = window.MW_WC_PROJECT_ID || '';
+  }
+  return id;
 }
 
 function WalletButton() {
@@ -49,7 +58,7 @@ function WalletButton() {
   const { address, isConnected, status } = useAppKitAccount();
   const { chainId, switchNetwork } = useAppKitNetwork();
 
-  const connecting = status === 'connecting' || status === 'reconnecting' || status === 'initializing';
+  const connecting = (status as string) === 'connecting' || (status as string) === 'reconnecting' || (status as string) === 'initializing';
   const wrongNetwork = isConnected && chainId !== undefined && chainId !== targetChain.id;
 
   // Check localStorage for previously connected wallet
@@ -100,15 +109,15 @@ function WalletButton() {
   // Expose globals so the mobile menu / external triggers can open AppKit
   useEffect(() => {
     if (typeof window !== 'undefined') {
-      (window as any).__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
-      (window as any).__MW_APPKIT_DISCONNECT__ = () => { disconnect(); };
-      (window as any).__MW_APPKIT_READY__ = true;
+      window.__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
+      window.__MW_APPKIT_DISCONNECT__ = () => { disconnect(); };
+      window.__MW_APPKIT_READY__ = true;
     }
     return () => {
       if (typeof window !== 'undefined') {
-        try { delete (window as any).__MW_APPKIT_OPEN__; } catch (_) {}
-        try { delete (window as any).__MW_APPKIT_DISCONNECT__; } catch (_) {}
-        try { delete (window as any).__MW_APPKIT_READY__; } catch (_) {}
+        delete window.__MW_APPKIT_OPEN__;
+        delete window.__MW_APPKIT_DISCONNECT__;
+        delete window.__MW_APPKIT_READY__;
       }
     };
   }, [isConnected, connecting, open, disconnect]);
@@ -236,7 +245,7 @@ function WalletButton() {
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', boxShadow: '0 0 18px -4px rgba(251,191,36,0.45)' }}>
         <span style={{ fontSize: '0.625rem', fontWeight: 700, color: '#fde68a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>⚠ Wrong Network</span>
         <button
-          onClick={() => switchNetwork(targetChain.id)}
+          onClick={() => switchNetwork(targetAppKitNetwork)}
           style={{
             padding: '0.375rem 0.75rem',
             borderRadius: '0.5rem',
@@ -315,6 +324,7 @@ function WalletButton() {
   );
 }
 
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- holds wagmi Config from adapter; type varies by adapter/version
 let _wagmiConfig: any = null;
 let _appKitReady = false;
 let _initFailed = false;
@@ -328,10 +338,11 @@ async function initAppKit(): Promise<void> {
     const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
     createAppKit({
-      adapters: [adapter], networks: chains as any, defaultNetwork: targetChain, projectId,
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any -- chains matches AppKitNetwork structurally but type defs differ
+      adapters: [adapter], networks: chains as any, defaultNetwork: targetAppKitNetwork, projectId,
       metadata: { name: 'MagicWebb', description: 'NFT Marketplace on Flare Network', url: 'https://magicwebb.fly.dev', icons: ['/favicon.ico'] },
       features: { analytics: false, email: false, socials: false },
-      themeMode: 'dark', enableWalletSelector: true, enableNetworkSelector: true,
+      themeMode: 'dark',
     });
     _appKitReady = true;
   } catch (e) { console.error('[mw-wc] AppKit init failed:', e); _initFailed = true; }

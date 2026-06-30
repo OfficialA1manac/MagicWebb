@@ -23,7 +23,15 @@ func NewListingsService(q *db.Q, eth chain.Caller) *ListingsService {
 
 // RegisterRoutes registers all listing-related routes under the given router group.
 func (s *ListingsService) RegisterRoutes(api fiber.Router) {
-	api.Get("/listings", s.handleList)
+	api.Get("/listings", ValidateQuery(QuerySchema{
+		{Name: "collection", Type: ParamAddress},
+		{Name: "seller", Type: ParamAddress},
+		{Name: "sort", OneOf: []string{"recent", "price_asc", "price_desc"}},
+		{Name: "limit", Type: ParamInt},
+		{Name: "min_price", Type: ParamWei},
+		{Name: "max_price", Type: ParamWei},
+		{Name: "traits"},
+	}), s.handleList)
 	api.Get("/listings/:collection/:id/preflight", s.handlePreflight)
 	api.Get("/listings/:collection/:id", s.handleGet)
 	api.Post("/token/:collection/:id/view", s.handleTokenView)

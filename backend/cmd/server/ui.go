@@ -368,7 +368,7 @@ func tokenPageData(ctx context.Context, q *db.Q, addr, id string) fiber.Map {
 		Limit:      20,
 	})
 	traits, _ := q.GetTokenAttributes(ctx, addr, id)
-	activity, _ := q.GetTokenActivity(ctx, addr, id)
+	activity, _ := q.GetTokenActivity(ctx, addr, id, 30)
 	_, description, _, animationURI, metadataURI, fetchedAt, _ := q.GetTokenFullMetadata(ctx, addr, id)
 	return fiber.Map{
 		"Listing":            listing,

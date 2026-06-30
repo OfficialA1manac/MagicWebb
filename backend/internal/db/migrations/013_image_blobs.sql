@@ -26,7 +26,7 @@
 -- refcount is bumped atomically on every Store() so the same image reused
 -- across N tokens is one row + N refcounts, and a future GC job can drop
 -- unused rows.
-CREATE TABLE nft_image_blobs (
+CREATE TABLE IF NOT EXISTS nft_image_blobs (
     sha256       CHAR(64)        PRIMARY KEY,
     mime         TEXT            NOT NULL,
     byte_length  INTEGER         NOT NULL,
@@ -36,12 +36,16 @@ CREATE TABLE nft_image_blobs (
     inserted_at  TIMESTAMPTZ     NOT NULL DEFAULT now(),
     last_seen_at TIMESTAMPTZ     NOT NULL DEFAULT now()
 );
-CREATE INDEX nft_image_blobs_inserted_idx ON nft_image_blobs (inserted_at);
+CREATE INDEX IF NOT EXISTS nft_image_blobs_inserted_idx ON nft_image_blobs (inserted_at);
 
 -- Strip the Postgres PUBLIC default grant so anon / authenticated have NO
 -- path to this table. The next statement re-grants to the runtime role only.
 REVOKE ALL ON nft_image_blobs FROM PUBLIC;
-GRANT SELECT, INSERT, UPDATE ON nft_image_blobs TO postgres;
+-- Grant to CURRENT_USER (the role running migrations) instead of hardcoded 'postgres'
+-- so this works on Neon, Supabase, and plain Postgres alike.
+DO $$ BEGIN
+    EXECUTE format('GRANT SELECT, INSERT, UPDATE ON nft_image_blobs TO %I', current_user);
+END $$;
 
 -- +goose StatementEnd
 

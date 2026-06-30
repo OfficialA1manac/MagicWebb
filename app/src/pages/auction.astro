@@ -29,73 +29,73 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-      function weiToFLR(w,d){d=d||4;try{var bi=BigInt(w||'0');var div=BigInt('1000000000000000000');var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
+      function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
-      function timeAgo(t){var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
-      function fmtTimeLeft(endsAt,now){var s=Math.max(0,endsAt-now);if(s<=0)return'Ended';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';var d=Math.floor(s/86400);return d+'d '+Math.floor((s%86400)/3600)+'h';}
+      function timeAgo(t){const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+      function fmtTimeLeft(endsAt,now){const s=Math.max(0,endsAt-now);if(s<=0)return'Ended';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';const d=Math.floor(s/86400);return d+'d '+Math.floor((s%86400)/3600)+'h';}
 
-      var aid = window.location.pathname.replace('/auction/','').replace('/auction','');
-      var root = document.getElementById('auction-detail');
+      const aid = window.location.pathname.replace('/auction/','').replace('/auction','');
+      const root = document.getElementById('auction-detail');
       if (!aid||!aid.match(/^\d+$/)) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);">Invalid auction ID</div>'; return; }
 
       (async function(){
         try {
-          var [aucRes,bidsRes,offRes] = await Promise.all([
-            fetch('/api/v1/auctions/'+aid),
-            fetch('/api/v1/auctions/'+aid+'/bids'),
-            fetch('/api/v1/auctions/'+aid).then(function(r){return r.json();}).then(function(a){
-              if(!a||!a.collection)return null;
-              return fetch('/api/v1/offers?collection='+a.collection+'&token_id='+a.token_id+'&status=pending&limit=5');
-            })
-          ]);
+          const [aucRes,bidsRes,offRes] = await Promise.all([
+        fetch('/api/v1/auctions/'+aid),
+        fetch('/api/v1/auctions/'+aid+'/bids'),
+        fetch('/api/v1/auctions/'+aid).then(function(r){return r.json();}).then(function(a){
+          if(!a||!a.collection)return null;
+          return fetch('/api/v1/offers?collection='+a.collection+'&token_id='+a.token_id+'&status=pending&limit=5');
+        })
+      ]);
 
-          var a = aucRes.ok ? (await aucRes.json()) : null;
+          const a = aucRes.ok ? (await aucRes.json()) : null;
           if (!a) { if(root)root.innerHTML='<div style="text-align:center;padding:4rem;color:#fca5a5;">Auction not found</div>'; return; }
 
-          var bids = bidsRes.ok ? (await bidsRes.json()) : [];
-          var offers = offRes && offRes.ok ? (await offRes.json()) : [];
+          const bids = bidsRes.ok ? (await bidsRes.json()) : [];
+          const offers = offRes && offRes.ok ? (await offRes.json()) : [];
 
-          var now = Math.floor(Date.now()/1000);
-          var endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
-          var ended = endsAt <= now;
-          var ending = !ended && (endsAt - now < 180);
-          var name = a.name || ('#'+a.token_id);
-          var img = a.image_uri ? '/api/v1/media?url='+encodeURIComponent(a.image_uri) : '';
-          var reserve = weiToFLR(a.reserve_price_wei||'0');
-          var highest = a.highest_bid_wei&&a.highest_bid_wei!=='0' ? weiToFLR(a.highest_bid_wei) : null;
-          var hasBids = !!highest;
-          var leader = a.highest_bidder||'';
-          var minBps = a.min_increment_bps||0;
+          const now = Math.floor(Date.now()/1000);
+          const endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
+          const ended = endsAt <= now;
+          const ending = !ended && (endsAt - now < 180);
+          const name = a.name || ('#'+a.token_id);
+          const img = a.image_uri ? '/api/v1/media?url='+encodeURIComponent(a.image_uri)+'&id='+encodeURIComponent(a.token_id||'') : '';
+          const reserve = weiToFLR(a.reserve_price_wei||'0');
+          const highest = a.highest_bid_wei&&a.highest_bid_wei!=='0' ? weiToFLR(a.highest_bid_wei) : null;
+          const hasBids = !!highest;
+          const leader = a.highest_bidder||'';
+          const minBps = a.min_increment_bps||0;
 
           // Compute max offer
-          var maxOfferWei = '0';
+          let maxOfferWei = '0';
           if (Array.isArray(offers)) {
             offers.forEach(function(o){
-              try{var v=BigInt(o.amount_wei||o.principal_wei||'0');if(v>BigInt(maxOfferWei))maxOfferWei=v.toString();}catch(_){}
+              try{const v=BigInt(o.amount_wei||o.principal_wei||'0');if(v>BigInt(maxOfferWei))maxOfferWei=v.toString();}catch(_){}
             });
           }
 
           // Floor calculation (simplified from Alpine.js — JS BigInt is natively available)
           function calcFloor(prevWei,reserveWei,offerWei,minBps){
             try{
-              var prev=BigInt(prevWei||'0'),res=BigInt(reserveWei||'0'),off=BigInt(offerWei||'0');
-              var hasL=prev>0n, base=hasL?(prev>off?prev:off):(res>off?res:off);
-              var lou=base+1n;
+              const prev=BigInt(prevWei||'0'),res=BigInt(reserveWei||'0'),off=BigInt(offerWei||'0');
+              const hasL=prev>0n, base=hasL?(prev>off?prev:off):(res>off?res:off);
+              const lou=base+1n;
               if(!hasL) return lou;
               if(minBps===0) return lou;
-              var pct=(prev*BigInt(minBps)+9999n)/10000n;
-              var pctFloor=pct<1n?1n:pct;
+              const pct=(prev*BigInt(minBps)+9999n)/10000n;
+              const pctFloor=pct<1n?1n:pct;
               return lou>(prev+pctFloor)?lou:prev+pctFloor;
             }catch(_){return 0n;}
           }
           function bigToFLR(bi){try{return(Number(bi)/1e18).toFixed(4);}catch(_){return'0.0000';}}
 
-          var floorWei = calcFloor(a.highest_bid_wei||'0', a.reserve_price_wei||'0', maxOfferWei, minBps);
-          var floorFLR = bigToFLR(floorWei);
+          const floorWei = calcFloor(a.highest_bid_wei||'0', a.reserve_price_wei||'0', maxOfferWei, minBps);
+          const floorFLR = bigToFLR(floorWei);
           // AuctionRow doesn't include collection_verified — fetch separately if needed
 
           // Bid history
-          var bidList = Array.isArray(bids) ? bids.slice(0,20) : [];
+          const bidList = Array.isArray(bids) ? bids.slice(0,20) : [];
 
           root.innerHTML =
             '<div class="reveal" style="display:grid;grid-template-columns:1fr;gap:2rem;">'+
@@ -152,7 +152,7 @@ import WalletConnect from '../components/WalletConnect';
                 (!bidList.length
                   ? '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>'
                   : '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bidList.map(function(b,i){
-                      var isLeader = i===0 && hasBids;
+                      const isLeader = i===0 && hasBids;
                       return '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isLeader?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isLeader?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';">'+
                         '<div style="display:flex;align-items:center;gap:0.75rem;">'+
                           '<span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span>'+
@@ -168,17 +168,17 @@ import WalletConnect from '../components/WalletConnect';
             '</div>';
 
           // Live countdown timer — uses mutable currentEndsAt so SSE refreshes update it
-          var currentEndsAt = endsAt;
+          let currentEndsAt = endsAt;
           setInterval(function(){
-            var now2 = Math.floor(Date.now()/1000);
-            var el = document.getElementById('countdown-display');
+            const now2 = Math.floor(Date.now()/1000);
+            const el = document.getElementById('countdown-display');
             if (el) el.textContent = fmtTimeLeft(currentEndsAt, now2);
           }, 1000);
 
           // SSE: refresh bids AND price display (not full page reload)
           try {
-            var sse = new EventSource('/events');
-            var sseReloading = false;
+            const sse = new EventSource('/events');
+            let sseReloading = false;
             sse.addEventListener('auction-updated',function(){
               if (sseReloading) return;
               sseReloading = true;
@@ -192,23 +192,23 @@ import WalletConnect from '../components/WalletConnect';
                   results[1].ok ? results[1].json() : []
                 ]);
               }).then(function(_ref2){
-                var au=_ref2[0], bList=_ref2[1];
+                const au=_ref2[0], bList=_ref2[1];
                 if(!au)return;
-                var pHas=au.highest_bid_wei&&au.highest_bid_wei!=='0';
-                var now2=Math.floor(Date.now()/1000);
+                const pHas=au.highest_bid_wei&&au.highest_bid_wei!=='0';
+                const now2=Math.floor(Date.now()/1000);
                 // Update countdown (also updates shared currentEndsAt ref)
                 if(au.ends_at){currentEndsAt=new Date(au.ends_at).getTime()/1000;}
-                var cd=document.getElementById('countdown-display');
+                const cd=document.getElementById('countdown-display');
                 if(cd){cd.textContent=fmtTimeLeft(currentEndsAt,now2);}
                 // Update the static "Ends …" label to reflect extended deadline
-                var el=document.getElementById('ends-label');
+                const el=document.getElementById('ends-label');
                 if(el){el.textContent='Ends '+new Date(au.ends_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}
                 // Full re-render of price display
-                var pEl=document.getElementById('price-display');
+                const pEl=document.getElementById('price-display');
                 if(pEl){pEl.innerHTML='<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;"><span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(pHas?'Top bid':'Reserve')+'</span></div><p style="font-size:2rem;font-weight:900;color:'+(pHas?'#fde68a':'#fafafa')+';line-height:1;">'+esc(pHas?weiToFLR(au.highest_bid_wei):weiToFLR(au.reserve_price_wei||'0'))+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></p>'+(pHas?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(au.highest_bidder||''))+'</p>':'');}
                 // Full re-render of bid list (uses pHas from fresh data, not closure)
-                var bl=document.getElementById('bid-list');
-                if(bl&&Array.isArray(bList)){var bSub=bList.slice(0,20);if(!bSub.length){bl.innerHTML='<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>';}else{bl.innerHTML='<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bSub.map(function(bd,i){var isL=i===0&&pHas;return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isL?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isL?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(bd.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(bd.placed_at)+'</p></div></div><span style="font-size:0.9375rem;font-weight:900;color:'+(isL?'#fde68a':'#fafafa')+';">'+weiToFLR(bd.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span></div>';}).join('')+'</div>';}}
+                const bl=document.getElementById('bid-list');
+                if(bl&&Array.isArray(bList)){const bSub=bList.slice(0,20);if(!bSub.length){bl.innerHTML='<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>';}else{bl.innerHTML='<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bSub.map(function(bd,i){const isL=i===0&&pHas;return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isL?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isL?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(bd.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(bd.placed_at)+'</p></div></div><span style="font-size:0.9375rem;font-weight:900;color:'+(isL?'#fde68a':'#fafafa')+';">'+weiToFLR(bd.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span></div>';}).join('')+'</div>';}}
               }).catch(function(){});
               setTimeout(function(){sseReloading=false;},3000);
             });

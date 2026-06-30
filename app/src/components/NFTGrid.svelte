@@ -84,11 +84,11 @@
     <div class="loading-grid">
       {#each Array(8) as _, i}
         <div class="card-skeleton" style="animation-delay: {i * 0.05}s">
-          <div class="skeleton-image" />
+          <div class="skeleton-image"></div>
           <div class="skeleton-body">
-            <div class="skeleton-line" style="width:75%" />
-            <div class="skeleton-line" style="width:50%" />
-            <div class="skeleton-line" style="width:66%" />
+            <div class="skeleton-line" style="width:75%"></div>
+            <div class="skeleton-line" style="width:50%"></div>
+            <div class="skeleton-line" style="width:66%"></div>
           </div>
         </div>
       {/each}

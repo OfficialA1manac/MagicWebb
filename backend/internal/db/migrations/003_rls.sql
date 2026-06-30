@@ -1,6 +1,11 @@
 -- +goose Up
 -- +goose StatementBegin
 
+-- Create roles that exist in Supabase but may not exist in plain Postgres (Neon).
+-- Using DO blocks so migration doesn't fail when roles already exist.
+DO $$ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
+
 -- ── Enable RLS on every table ──────────────────────────────────────────────
 ALTER TABLE collections     ENABLE ROW LEVEL SECURITY;
 ALTER TABLE nft_tokens      ENABLE ROW LEVEL SECURITY;

@@ -43,36 +43,36 @@ import WalletConnect from '../components/WalletConnect';
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
-      function weiToFLR(w,d){d=d||4;try{var bi=BigInt(w||'0');var div=BigInt('1000000000000000000');var whole=(bi/div).toString();var frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
+      function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
-      function timeAgo(t){if(!t)return'';var d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+      function timeAgo(t){if(!t)return'';const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
 
       function isEthAddr(s){
         if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
-        for(var i=2;i<42;i++){var c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
+        for(let i=2;i<42;i++){const c=s.charCodeAt(i);if(!((c>=48&&c<=57)||(c>=65&&c<=70)||(c>=97&&c<=102)))return false;}
         return true;
       }
 
       // Parse address from URL or localStorage
-      var addr = (function(){
-        var p = window.location.pathname.replace('/profile/','').replace('/profile','');
-        if (isEthAddr(p)) return p.toLowerCase();
-        try { var s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
-      })();
+      const addr = (function(){
+    const p = window.location.pathname.replace('/profile/','').replace('/profile','');
+    if (isEthAddr(p)) return p.toLowerCase();
+    try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
+  })();
 
       // Connected wallet address (for showing Edit button)
-      var connectedAddr = (function(){
-        try { var s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
-      })();
+      const connectedAddr = (function(){
+    try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
+  })();
 
       // JWT for authenticated requests
       function getJWT(){
         try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
       }
 
-      var isOwnProfile = connectedAddr && addr && connectedAddr === addr;
+      const isOwnProfile = connectedAddr && addr && connectedAddr === addr;
 
-      var root = document.getElementById('profile-root');
+      const root = document.getElementById('profile-root');
       if (!root) return;
 
       // Listen for wallet-connect events to refresh page on connect/disconnect/switch
@@ -86,32 +86,32 @@ import WalletConnect from '../components/WalletConnect';
         return;
       }
 
-      var encAddr = encodeURIComponent(addr);
+      const encAddr = encodeURIComponent(addr);
 
       (async function(){
         try {
-          var [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
-            fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
-            fetch('/api/v1/wallet/'+encAddr+'/nfts').catch(function(){return null;}),
-            fetch('/api/v1/listings?seller='+encAddr+'&limit=24').catch(function(){return null;}),
-            fetch('/api/v1/auctions?seller='+encAddr+'&limit=20').catch(function(){return null;}),
-            fetch('/api/v1/offers?bidder='+encAddr+'&limit=50').catch(function(){return null;}),
-            fetch('/api/v1/offers?owner='+encAddr+'&limit=50').catch(function(){return null;}),
-            fetch('/api/v1/metrics').catch(function(){return null;}),
-            fetch('/api/v1/activity?address='+encAddr+'&limit=20').catch(function(){return null;})
-          ]);
+          const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
+        fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
+        fetch('/api/v1/wallet/'+encAddr+'/nfts').catch(function(){return null;}),
+        fetch('/api/v1/listings?seller='+encAddr+'&limit=24').catch(function(){return null;}),
+        fetch('/api/v1/auctions?seller='+encAddr+'&limit=20').catch(function(){return null;}),
+        fetch('/api/v1/offers?bidder='+encAddr+'&limit=50').catch(function(){return null;}),
+        fetch('/api/v1/offers?owner='+encAddr+'&limit=50').catch(function(){return null;}),
+        fetch('/api/v1/metrics').catch(function(){return null;}),
+        fetch('/api/v1/activity?address='+encAddr+'&limit=20').catch(function(){return null;})
+      ]);
 
           function ok(r){return r&&r.ok;}
           async function safeJson(r){try{return await r.json();}catch(_){return null;}}
 
-          var profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
-          var nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
-          var listings    = ok(listRes) ? (await safeJson(listRes)) : [];
-          var auctions    = ok(aucRes)  ? (await safeJson(aucRes))  : [];
-          var offersSent  = ok(offSentRes) ? (await safeJson(offSentRes)) : [];
-          var offersRecv  = ok(offRecvRes) ? (await safeJson(offRecvRes)) : [];
-          var metrics     = ok(metRes)  ? ((await safeJson(metRes)) || {})  : {};
-          var activity    = ok(actRes)  ? (await safeJson(actRes))  : [];
+          const profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
+          let nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
+          let listings    = ok(listRes) ? (await safeJson(listRes)) : [];
+          let auctions    = ok(aucRes)  ? (await safeJson(aucRes))  : [];
+          let offersSent  = ok(offSentRes) ? (await safeJson(offSentRes)) : [];
+          let offersRecv  = ok(offRecvRes) ? (await safeJson(offRecvRes)) : [];
+          const metrics     = ok(metRes)  ? ((await safeJson(metRes)) || {})  : {};
+          let activity    = ok(actRes)  ? (await safeJson(actRes))  : [];
 
           if (!Array.isArray(nfts)) nfts = [];
           if (!Array.isArray(listings)) listings = [];
@@ -120,35 +120,35 @@ import WalletConnect from '../components/WalletConnect';
           if (!Array.isArray(offersRecv)) offersRecv = [];
           if (!Array.isArray(activity)) activity = [];
 
-          var displayName = (profile && profile.display_name) || shortAddr(addr);
-          var bio         = (profile && profile.bio) || '';
-          var avatar      = (profile && profile.avatar_uri) || '';
-          var verified    = profile && profile.verified;
+          const displayName = (profile && profile.display_name) || shortAddr(addr);
+          const bio         = (profile && profile.bio) || '';
+          const avatar      = (profile && profile.avatar_uri) || '';
+          const verified    = profile && profile.verified;
 
           // Compute user's total earnings from listings + auctions
-          var totalListedWei = listings.reduce(function(s,l){try{return s+BigInt(l.price_wei||'0');}catch(_){return s;}},0n);
-          var totalSentWei   = offersSent.reduce(function(s,o){try{return s+BigInt(o.amount_wei||'0');}catch(_){return s;}},0n);
-          var totalRecvWei   = offersRecv.reduce(function(s,o){try{return s+BigInt(o.amount_wei||'0');}catch(_){return s;}},0n);
+          const totalListedWei = listings.reduce(function(s,l){try{return s+BigInt(l.price_wei||'0');}catch(_){return s;}},0n);
+          const totalSentWei   = offersSent.reduce(function(s,o){try{return s+BigInt(o.amount_wei||'0');}catch(_){return s;}},0n);
+          const totalRecvWei   = offersRecv.reduce(function(s,o){try{return s+BigInt(o.amount_wei||'0');}catch(_){return s;}},0n);
 
           // Platform metrics
-          var mListings = metrics.totalActiveListings || metrics.listing_count || 0;
-          var mSales    = metrics.totalSales || metrics.sales_count || 0;
-          var mAuctions = metrics.totalAuctions || metrics.auction_count || 0;
-          var mVolWei   = metrics.grossVolumeWei || metrics.volume_all || '0';
+          const mListings = metrics.totalActiveListings || metrics.listing_count || 0;
+          const mSales    = metrics.totalSales || metrics.sales_count || 0;
+          const mAuctions = metrics.totalAuctions || metrics.auction_count || 0;
+          const mVolWei   = metrics.grossVolumeWei || metrics.volume_all || '0';
 
           function imgTag(src, fallback){
             if(!src) return '<span style="font-size:2.5rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
-            return '<img src="'+esc(src)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\\'none\\';this.nextElementSibling.style.display=\\'flex\\';"><span style="display:none;align-items:center;justify-content:center;position:absolute;inset:0;font-size:2.5rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
+            return '<img src="'+esc(src)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';"><span style="display:none;align-items:center;justify-content:center;position:absolute;inset:0;font-size:2.5rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
           }
 
           function renderNFTGrid(items){
             if(!items||!items.length) return '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No items</div>';
             return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">'+items.map(function(it){
-              var coll=it.collection||''; var tid=it.token_id||it.tokenID||'';
-              var nm=it.name||('#'+esc(tid));
-              var encC=encodeURIComponent(coll); var encT=encodeURIComponent(tid);
-              var src=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri):'';
-              var price=it.price_wei?weiToFLR(it.price_wei,4):'';
+              const coll=it.collection||''; const tid=it.token_id||it.tokenID||'';
+              const nm=it.name||('#'+esc(tid));
+              const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
+              const src=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri)+'&id='+encodeURIComponent(it.token_id||''):'';
+              const price=it.price_wei?weiToFLR(it.price_wei,4):'';
               return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                   imgTag(src,'🖼')+
@@ -179,8 +179,8 @@ import WalletConnect from '../components/WalletConnect';
           function renderOffers(items, type){
             if(!items||!items.length) return '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);">No '+type+' offers</div>';
             return '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+items.map(function(o){
-              var label = type==='sent' ? esc(shortAddr(o.collection))+' #'+esc(o.token_id) : 'From '+esc(shortAddr(o.bidder));
-              var borderColor = type==='sent' ? 'rgba(252,211,77,0.12)' : 'rgba(125,211,252,0.12)';
+              const label = type==='sent' ? esc(shortAddr(o.collection))+' #'+esc(o.token_id) : 'From '+esc(shortAddr(o.bidder));
+              const borderColor = type==='sent' ? 'rgba(252,211,77,0.12)' : 'rgba(125,211,252,0.12)';
               return '<a href="/token/'+encodeURIComponent(o.collection)+'/'+encodeURIComponent(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid '+borderColor+';transition:all 0.2s;">'+
                 '<div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+label+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div>'+
                 '<span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.5625rem;opacity:0.6;">C2FLR</span></span></a>';
@@ -189,9 +189,9 @@ import WalletConnect from '../components/WalletConnect';
 
           function renderActivity(items){
             if(!items||!items.length) return '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);">No recent activity</div>';
-            var colorMap={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa',OfferMade:'#fcd34d',OfferAccepted:'#7dd3fc'};
+            const colorMap={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa',OfferMade:'#fcd34d',OfferAccepted:'#7dd3fc'};
             return '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+items.map(function(a){
-              var c=colorMap[a.type]||'rgba(255,255,255,0.4)';
+              const c=colorMap[a.type]||'rgba(255,255,255,0.4)';
               return '<div style="display:flex;align-items:center;justify-content:space-between;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.04);">'+
                 '<div style="display:flex;align-items:center;gap:0.75rem;">'+
                   '<span style="padding:0.125rem 0.5rem;border-radius:0.375rem;background:rgba(255,255,255,0.04);font-size:0.5625rem;font-weight:700;text-transform:uppercase;color:'+c+';">'+esc(a.type)+'</span>'+
@@ -205,19 +205,19 @@ import WalletConnect from '../components/WalletConnect';
           }
 
           // Build the complete profile page
-          var tabs = [
-            {id:'nfts',     label:'NFTs ('+nfts.length+')',     color:'#7dd3fc'},
-            {id:'listings', label:'Listings ('+listings.length+')', color:'#fcd34d'},
-            {id:'auctions', label:'Auctions ('+auctions.length+')', color:'#a78bfa'},
-            {id:'offers',   label:'Offers ('+(offersSent.length+offersRecv.length)+')', color:'#fcd34d'},
-            {id:'activity', label:'Activity ('+activity.length+')', color:'#7dd3fc'},
-          ];
+          const tabs = [
+        {id:'nfts',     label:'NFTs ('+nfts.length+')',     color:'#7dd3fc'},
+        {id:'listings', label:'Listings ('+listings.length+')', color:'#fcd34d'},
+        {id:'auctions', label:'Auctions ('+auctions.length+')', color:'#a78bfa'},
+        {id:'offers',   label:'Offers ('+(offersSent.length+offersRecv.length)+')', color:'#fcd34d'},
+        {id:'activity', label:'Activity ('+activity.length+')', color:'#7dd3fc'},
+      ];
 
           root.innerHTML =
             // Header with avatar, name, bio
             '<div style="display:flex;flex-wrap:wrap;align-items:flex-start;gap:1.5rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);backdrop-filter:blur(8px);">'+
               '<div style="width:4.5rem;height:4.5rem;border-radius:1rem;overflow:hidden;flex-shrink:0;position:relative;display:flex;align-items:center;justify-content:center;background:linear-gradient(135deg,rgba(125,211,252,0.2),rgba(124,58,237,0.15));border:1px solid rgba(255,255,255,0.08);">'+
-                (avatar?'<img src="'+esc(avatar)+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\\'none\\';this.nextElementSibling.style.display=\\'flex\\';">':'')+
+                (avatar?'<img src="'+esc(avatar)+'" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+
                 '<span style="display:'+(avatar?'none':'flex')+';align-items:center;justify-content:center;width:100%;height:100%;font-size:2rem;">👤</span>'+
               '</div>'+
               '<div style="flex:1;min-width:0;">'+
@@ -276,7 +276,7 @@ import WalletConnect from '../components/WalletConnect';
 
           // Tab switching
           function renderTab(id){
-            var tc = document.getElementById('tab-content');
+            const tc = document.getElementById('tab-content');
             if(!tc) return;
             switch(id){
               case 'nfts':     tc.innerHTML = renderNFTGrid(nfts); break;
@@ -292,37 +292,37 @@ import WalletConnect from '../components/WalletConnect';
             }
           }
 
-          var tabBar = document.getElementById('tab-bar');
+          const tabBar = document.getElementById('tab-bar');
           if(tabBar){
             tabBar.querySelectorAll('.profile-tab').forEach(function(btn){
               btn.addEventListener('click', function(){
                 tabBar.querySelectorAll('.profile-tab').forEach(function(b){b.style.color='rgba(255,255,255,0.35)';b.style.borderBottomColor='transparent';});
-                var t = tabs.find(function(t){return t.id===btn.dataset.tab;});
+                const t = tabs.find(function(t){return t.id===btn.dataset.tab;});
                 btn.style.color = t?t.color:'#7dd3fc';
                 btn.style.borderBottomColor = t?t.color:'#7dd3fc';
                 renderTab(btn.dataset.tab);
               });
             });
-            var first = tabBar.querySelector('.profile-tab');
+            const first = tabBar.querySelector('.profile-tab');
             if(first) first.click();
           }
 
           // ── Edit Profile Modal ─────────────────────────────────────────────
-          var editBtn = document.getElementById('edit-profile-btn');
+          const editBtn = document.getElementById('edit-profile-btn');
           if(editBtn && isOwnProfile){
             editBtn.addEventListener('click', function(){
-              var overlay = document.createElement('div');
+              const overlay = document.createElement('div');
               overlay.id = 'edit-profile-overlay';
               overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;animation:fadeIn 0.2s ease;';
 
-              var modal = document.createElement('div');
+              const modal = document.createElement('div');
               modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1.25rem;padding:2rem;max-width:480px;width:100%;box-shadow:0 25px 60px rgba(0,0,0,0.5);animation:modalSlideUp 0.25s ease;';
 
-              var currentDisplayName = profile && profile.display_name ? esc(profile.display_name) : '';
-              var currentBio = profile && profile.bio ? esc(profile.bio) : '';
-              var currentAvatar = profile && profile.avatar_uri ? esc(profile.avatar_uri) : '';
-              var currentTwitter = profile && profile.twitter ? esc(profile.twitter) : '';
-              var currentWebsite = profile && profile.website ? esc(profile.website) : '';
+              const currentDisplayName = profile && profile.display_name ? esc(profile.display_name) : '';
+              const currentBio = profile && profile.bio ? esc(profile.bio) : '';
+              const currentAvatar = profile && profile.avatar_uri ? esc(profile.avatar_uri) : '';
+              const currentTwitter = profile && profile.twitter ? esc(profile.twitter) : '';
+              const currentWebsite = profile && profile.website ? esc(profile.website) : '';
 
               modal.innerHTML =
                 '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">'+
@@ -356,7 +356,7 @@ import WalletConnect from '../components/WalletConnect';
               document.body.appendChild(overlay);
 
               // Focus first input
-              var firstInput = modal.querySelector('input[name="display_name"]');
+              const firstInput = modal.querySelector('input[name="display_name"]');
               if(firstInput) setTimeout(function(){firstInput.focus();firstInput.select();}, 100);
 
               function closeModal(){
@@ -364,9 +364,9 @@ import WalletConnect from '../components/WalletConnect';
               }
 
               // Close handlers
-              var closeBtn = document.getElementById('edit-profile-close');
+              const closeBtn = document.getElementById('edit-profile-close');
               if(closeBtn) closeBtn.addEventListener('click', closeModal);
-              var cancelBtn = document.getElementById('edit-profile-cancel');
+              const cancelBtn = document.getElementById('edit-profile-cancel');
               if(cancelBtn) cancelBtn.addEventListener('click', closeModal);
               overlay.addEventListener('click', function(e){if(e.target===overlay) closeModal();});
 
@@ -381,27 +381,27 @@ import WalletConnect from '../components/WalletConnect';
               });
 
               // Submit handler
-              var form = document.getElementById('edit-profile-form');
-              var statusEl = document.getElementById('edit-profile-status');
-              var saveBtn = document.getElementById('edit-profile-save');
+              const form = document.getElementById('edit-profile-form');
+              const statusEl = document.getElementById('edit-profile-status');
+              const saveBtn = document.getElementById('edit-profile-save');
 
               form.addEventListener('submit', async function(e){
                 e.preventDefault();
-                var jwt = getJWT();
+                const jwt = getJWT();
                 if(!jwt){
                   statusEl.style.display = 'block';
                   statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;font-weight:600;">Please reconnect your wallet to edit</p>';
                   return;
                 }
 
-                var formData = new FormData(form);
-                var payload = {
-                  display_name: (formData.get('display_name')||'').trim(),
-                  bio: (formData.get('bio')||'').trim(),
-                  avatar_uri: (formData.get('avatar_uri')||'').trim(),
-                  twitter: (formData.get('twitter')||'').trim(),
-                  website: (formData.get('website')||'').trim()
-                };
+                const formData = new FormData(form);
+                const payload = {
+              display_name: (formData.get('display_name')||'').trim(),
+              bio: (formData.get('bio')||'').trim(),
+              avatar_uri: (formData.get('avatar_uri')||'').trim(),
+              twitter: (formData.get('twitter')||'').trim(),
+              website: (formData.get('website')||'').trim()
+            };
 
                 saveBtn.disabled = true;
                 saveBtn.textContent = 'Saving…';
@@ -409,14 +409,14 @@ import WalletConnect from '../components/WalletConnect';
                 statusEl.style.display = 'none';
 
                 try {
-                  var res = await fetch('/api/v1/profile/'+encAddr, {
-                    method: 'PUT',
-                    headers: {
-                      'Content-Type': 'application/json',
-                      'Authorization': 'Bearer '+jwt
-                    },
-                    body: JSON.stringify(payload)
-                  });
+                  const res = await fetch('/api/v1/profile/'+encAddr, {
+                method: 'PUT',
+                headers: {
+                  'Content-Type': 'application/json',
+                  'Authorization': 'Bearer '+jwt
+                },
+                body: JSON.stringify(payload)
+              });
 
                   if(res.ok){
                     statusEl.style.display = 'block';
@@ -426,7 +426,7 @@ import WalletConnect from '../components/WalletConnect';
                       location.reload();
                     }, 800);
                   } else {
-                    var errData;
+                    let errData;
                     try { errData = await res.json(); } catch(_){ errData = {error:'Unknown error'}; }
                     statusEl.style.display = 'block';
                     statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;font-weight:600;">✗ '+esc(errData.error||'Failed to save')+'</p>';

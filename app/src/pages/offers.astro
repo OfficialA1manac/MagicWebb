@@ -55,14 +55,14 @@ import WalletConnect from '../components/WalletConnect';
       function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
 
-      var addr = new URLSearchParams(window.location.search).get('addr') || '';
+      let addr = new URLSearchParams(window.location.search).get('addr') || '';
       if (!addr) {
         try { addr = localStorage.getItem('mw_addr') || ''; } catch(_) {}
       }
 
-      var loading = document.getElementById('offers-loading');
-      var prompt = document.getElementById('connect-prompt');
-      var tabBar = document.getElementById('offers-tab-bar');
+      const loading = document.getElementById('offers-loading');
+      const prompt = document.getElementById('connect-prompt');
+      const tabBar = document.getElementById('offers-tab-bar');
 
       if (!addr) {
         if (loading) loading.style.display = 'none';
@@ -70,17 +70,17 @@ import WalletConnect from '../components/WalletConnect';
         return;
       }
 
-      var received = [];
-      var sent = [];
+      let received = [];
+      let sent = [];
 
       (async function(){
         try {
           // OfferRow has no "owner" field — the REST API separates sent vs received via query params.
           // fetch both sides in parallel
-          var [sentRes, recvRes] = await Promise.all([
-            fetch('/api/v1/offers?bidder='+addr+'&limit=50'),
-            fetch('/api/v1/offers?owner='+addr+'&limit=50')
-          ]);
+          const [sentRes, recvRes] = await Promise.all([
+        fetch('/api/v1/offers?bidder='+addr+'&limit=50'),
+        fetch('/api/v1/offers?owner='+addr+'&limit=50')
+      ]);
 
           sent   = sentRes.ok ? (await sentRes.json()) : [];
           received = recvRes.ok ? (await recvRes.json()) : [];
@@ -95,9 +95,9 @@ import WalletConnect from '../components/WalletConnect';
           document.getElementById('count-sent').textContent = sent.length;
 
           function renderTab(id) {
-            var tc = document.getElementById('offers-tab-content');
+            const tc = document.getElementById('offers-tab-content');
             if (!tc) return;
-            var items = id==='received' ? received : sent;
+            const items = id==='received' ? received : sent;
             if (!items.length) {
               tc.innerHTML = '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No '+id+' offers</div>';
               return;
@@ -117,7 +117,7 @@ import WalletConnect from '../components/WalletConnect';
           tabBar.querySelectorAll('.offers-tab').forEach(function(btn){
             btn.addEventListener('click', function(){
               tabBar.querySelectorAll('.offers-tab').forEach(function(b){b.style.color='rgba(255,255,255,0.35)';b.style.borderBottomColor='transparent';});
-              var color = btn.dataset.tab==='received'?'#7dd3fc':'#fcd34d';
+              const color = btn.dataset.tab==='received'?'#7dd3fc':'#fcd34d';
               btn.style.color = color;
               btn.style.borderBottomColor = color;
               renderTab(btn.dataset.tab);
@@ -125,7 +125,7 @@ import WalletConnect from '../components/WalletConnect';
           });
 
           // Default: received tab
-          var first = tabBar.querySelector('.offers-tab');
+          const first = tabBar.querySelector('.offers-tab');
           if (first) first.click();
 
         } catch(e) {

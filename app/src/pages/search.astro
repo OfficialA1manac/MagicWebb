@@ -30,36 +30,34 @@ import WalletConnect from '../components/WalletConnect';
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
-      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
-
-      var input = document.getElementById('search-input');
-      var btn = document.getElementById('search-btn');
-      var results = document.getElementById('search-results');
-      var searching = false;
+      const input = document.getElementById('search-input');
+      const btn = document.getElementById('search-btn');
+      const results = document.getElementById('search-results');
+      let searching = false;
 
       // Pre-fill from URL query param
-      var qp = new URLSearchParams(window.location.search);
-      var q = qp.get('q')||'';
+      const qp = new URLSearchParams(window.location.search);
+      const q = qp.get('q')||'';
       if (input && q) { input.value = q; doSearch(); }
 
       function doSearch(){
-        var q = input.value.trim();
+        const q = input.value.trim();
         if (!q||q.length<2||searching) return;
         searching = true;
         if(results) results.innerHTML = '<p style="text-align:center;padding:3rem 0;color:rgba(255,255,255,0.2);">Searching…</p>';
         fetch('/api/v1/search?q='+encodeURIComponent(q))
           .then(function(r){if(!r.ok)throw new Error('HTTP '+r.status);return r.json();})
           .then(function(data){
-            var items = Array.isArray(data) ? data : [];
+            const items = Array.isArray(data) ? data : [];
             if (!items.length) { if(results)results.innerHTML = '<p style="text-align:center;padding:4rem 0;color:rgba(255,255,255,0.2);">No results found</p>'; searching=false; return; }
             if(results) results.innerHTML =
               '<p style="font-size:0.8125rem;color:rgba(255,255,255,0.4);margin-bottom:1rem;">'+items.length+' results for "<span style="color:#7dd3fc;font-weight:700;">'+esc(q)+'</span>"</p>'+
               '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">'+items.map(function(r){
-                var encC=encodeURIComponent(r.collection||''); var encT=encodeURIComponent(r.token_id||'');
-                var href = r.kind==='nft' ? '/token/'+encC+'/'+encT : '/collection/'+encC;
-                var label = r.kind==='nft' ? 'NFT' : 'Collection';
-                var name = r.name||shortAddr(r.collection);
-                var img = r.image_uri ? '/api/v1/media?url='+encodeURIComponent(r.image_uri) : '';
+                const encC=encodeURIComponent(r.collection||''); const encT=encodeURIComponent(r.token_id||'');
+                const href = r.kind==='nft' ? '/token/'+encC+'/'+encT : '/collection/'+encC;
+                const label = r.kind==='nft' ? 'NFT' : 'Collection';
+                const name = r.name||shortAddr(r.collection);
+                const img = r.image_uri ? '/api/v1/media?url='+encodeURIComponent(r.image_uri)+'&id='+encodeURIComponent(r.token_id||'') : '';
                 return '<a href="'+href+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                   '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                     (img?'<img src="'+esc(img)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+
