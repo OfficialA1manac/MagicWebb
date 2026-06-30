@@ -20,7 +20,7 @@ CHAIN_ID=114
 MARKETPLACE="${MARKETPLACE_ADDR:-0xe5e27Ba24Da24B78e5793c88BA232276F045659f}"
 NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
 
-# ── Metadata base URI (IPFS/Arweave directory containing metadata/*.json)
+# ── Metadata base URI (public HTTP base URL for metadata/*.json files)
 # Each token's metadata URI will be:  $METADATA_BASE/<filename>.json
 # If empty, the script skips setTokenURI calls and logs a warning.
 METADATA_BASE="${METADATA_BASE:-}"

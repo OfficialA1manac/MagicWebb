@@ -27,7 +27,7 @@ Generate or commission the 4 character images:
 - **Style:** Anime, cel-shaded, dramatic lighting
 - **Resolution:** 3840×2160 (4K)
 - **Format:** PNG (lossless) or WebP (lossy, smaller)
-- **Hosting:** Pin to IPFS via Pinata / web3.storage, or Arweave
+- **Hosting:** Upload to any public HTTP server (or self-host via the app's imagestore)
 
 Recommended prompts (Midjourney / Stable Diffusion / manual art):
 
@@ -38,44 +38,44 @@ Recommended prompts (Midjourney / Stable Diffusion / manual art):
 
 ## Usage
 
-1. Generate/pin images to IPFS or Arweave. Use public HTTP gateway URLs
-   (e.g. `https://ipfs.io/ipfs/Qm...` or `https://arweave.net/...`).
-   The backend media proxy and CSP allow `ipfs.io`, `dweb.link`, and
-   `gateway.pinata.cloud` — so prefer those gateways for `image` URIs.
-2. Update each `metadata/*.json` `"image"` field with the real URI
-3. Pin the updated metadata JSONs to IPFS/Arweave — record the URIs
+1. Upload images to any public HTTP server (or host them anywhere accessible via http/https).
+2. Update each `metadata/*.json` `"image"` field with the real URL.
+3. The backend media proxy will fetch and self-host images on first access — no Pinata, no IPFS needed.
 
 **Metadata handling:** The MagicWebb indexer resolves NFT metadata
-off-chain via tokenURI → `nft_metadata` table. Once metadata JSONs
-are live at public URIs, the indexer will pick them up on the next
-metadata fetch cycle. The seed script should set a token URI during
-minting so the indexer can associate each token with its metadata.
-
-If the NFT contract supports `setTokenURI(tokenId, uri)`, update the
-seed script to call it after each `mint()`. The metadata JSONs in
-`./metadata/` should be pinned to IPFS and their URIs recorded as
-environment variables or passed as script arguments.
+off-chain via tokenURI → `nft_metadata` table. The indexer fetches the
+metadata JSON, extracts the `image` field, downloads the image bytes,
+stores them in the local imagestore (Postgres BYTEA), and rewrites
+`image_uri` to `/api/v1/img/<sha256>`. From that point on, the image
+is served from the local database — no upstream dependency at render time.
 
 ## Minting with Metadata URIs
 
-The current NFT contract on Coston2 may or may not expose a public `setTokenURI(uint256,string)` function. The seed script handles both cases:
+The current NFT contract on Coston2 may or may not expose a public
+`setTokenURI(uint256,string)` function. The seed script handles both cases:
 
-- **If METADATA_BASE is set:** After each mint, the script calls `setTokenURI(tokenId, METADATA_BASE/<filename>.json)`. If the contract doesn't support this selector, the call silently fails and a warning is logged — the token is still minted and listed, just without an on-chain metadata link.
-- **If METADATA_BASE is empty (default):** The script skips `setTokenURI` calls entirely. Tokens are minted and listed but the indexer won't resolve metadata via `tokenURI()`.
+- **If METADATA_BASE is set:** After each mint, the script calls
+  `setTokenURI(tokenId, METADATA_BASE/<filename>.json)`. If the contract
+  doesn't support this selector, the call silently fails and a warning
+  is logged — the token is still minted and listed, just without an
+  on-chain metadata link.
+- **If METADATA_BASE is empty (default):** The script skips `setTokenURI`
+  calls entirely. Tokens are minted and listed but the indexer won't
+  resolve metadata via `tokenURI()`.
 
 ```bash
 # Set up environment
 export PRIVATE_KEY=0x_your_coston2_private_key
 export RPC_URL=https://coston2-api.flare.network/ext/C/rpc
 
-# Optional: base URL for pinned metadata JSONs
+# Optional: base URL for metadata JSONs hosted on any public HTTP endpoint
 # Each file in ./metadata/ will be available as:
 #   $METADATA_BASE/itachi-uchiha.json
 #   $METADATA_BASE/garou.json
 #   $METADATA_BASE/cid-kagenou.json
 #   $METADATA_BASE/will-serfort.json
-# Pin all 4 files to IPFS/Arweave first, then set:
-export METADATA_BASE=https://ipfs.io/ipfs/QmYourMetadataCID
+# Host all 4 files at a public HTTP URL first, then set:
+export METADATA_BASE=https://example.com/metadata
 
 # Run seed script
 bash tools/seed-testnet/seed.sh
@@ -94,5 +94,5 @@ The script will:
 Each `metadata/*.json` follows the OpenSea/NFT standard:
 - `name`: Display name (formatted with series reference)
 - `description`: Rich, lore-accurate character description
-- `image`: URI to the 4K artwork (IPFS/Arweave) — **must be set to a real image URI before minting**
+- `image`: URI to the 4K artwork (public HTTP URL) — **must be set to a real image URI before minting**
 - `attributes[]`: 8 trait slots covering anime, character, affiliation, power, technique, rarity, art style, and background

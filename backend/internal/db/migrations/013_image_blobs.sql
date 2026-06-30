@@ -20,7 +20,7 @@
 -- runtime role. We do NOT enable RLS — the Go binary is the real access
 -- control boundary, and a permissive ``USING(true)`` policy was documented
 -- as "documentation-as-control" (per-row evaluation cost with no actual
--- gating). If this project ever switches to Supabase-auth driven reads,
+-- gating). If this project ever moves to JWT-auth driven reads,
 -- re-evaluate the GRANT and add a restrictive RLS policy THEN, not now.
 
 -- refcount is bumped atomically on every Store() so the same image reused

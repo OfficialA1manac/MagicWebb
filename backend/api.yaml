@@ -432,14 +432,16 @@ paths:
       summary: Media proxy
       description: |
         Proxies external NFT images through same-origin with SSRF guards.
-        Accepts http/https/ipfs URLs. When the URL is a local blob path,
-        short-circuits to /api/v1/img/:sha256.
+        Accepts http/https URLs (ipfs:// URIs are resolved server-side).
+        When the URL is a local blob path, short-circuits to
+        /api/v1/img/:sha256. All fetched images are self-hosted into the
+        local Postgres BYTEA store on first access — no IPFS/Pinata needed.
       tags: [Media]
       parameters:
         - name: url
           in: query
           required: true
-          schema: { type: string, example: "https://ipfs.io/ipfs/QmABC..." }
+          schema: { type: string, example: "https://example.com/nft.png" }
       responses:
         "200":
           description: Image bytes with correct Content-Type
