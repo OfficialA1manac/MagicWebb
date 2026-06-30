@@ -21,6 +21,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ws"
 )
 
 // Strict-transport / content-security baseline. CSP locks scripts to self +
@@ -115,7 +116,7 @@ func securityHeaders() fiber.Handler {
 // Docker layer cache pinned the previous binary's static assets.
 var MWServerBuildSHA = "unknown"
 
-// Mount registers all REST + SSE routes on the Fiber app.
+// Mount registers all REST + SSE + WebSocket routes on the Fiber app.
 // serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
 // endpoint reads it under the rate-limited api group.
 func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64) {
@@ -200,6 +201,12 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	})
 
 	app.Get("/events", sseHandler(bcast))
+
+	// WebSocket endpoint for bidirectional real-time communication.
+	// Registered at app level (like /events) to avoid rate-limit conflicts.
+	// Supports authenticated (SIWE JWT cookie) and unauthenticated connections.
+	wsHandler := ws.NewHandler(cfg, bcast, func() int64 { return atomic.LoadInt64(serverTimeMs) })
+	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 

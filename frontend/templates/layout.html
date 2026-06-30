@@ -128,6 +128,12 @@
              spinner so the user sees progress. -->
   <script src="/static/htmx.min.js?v=34" defer></script>
   <script src="/static/sse.js?v=34" defer></script>
+  <!-- WebSocket client for bidirectional real-time communication.
+       Complements the SSE-based /events subscription with client-to-server
+       messaging capabilities (live bidding, ping/keepalive, action dispatch).
+       Self-contained — no external dependencies. Exposes window.MW_WS API
+       for Alpine / inline scripts. -->
+  <script src="/static/ws.js?v=34" defer></script>
   <script src="/static/ethers.umd.min.js?v=34" defer></script>
   <script>
     // Server-injected runtime config (single source of truth: backend env).
