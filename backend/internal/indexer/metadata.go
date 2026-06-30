@@ -90,7 +90,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	}
 
 	// Self-host the metadata JSON: store its bytes keyed by SHA-256 so the
-	// frontend never has to reach the IPFS gateway again for this token.
+	// frontend never has to reach an upstream gateway again for this token.
 	// FALL BACK to the upstream resolved URI when self-hosting fails (body
 	// rejected by the JSON sniffer is the main case — a contract whose
 	// tokenURI returns non-JSON); the indexer MUST NOT loop forever on a

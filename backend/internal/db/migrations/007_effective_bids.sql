@@ -8,7 +8,7 @@ CREATE INDEX IF NOT EXISTS idx_bids_auction_bidder ON bids (auction_id, bidder);
 
 -- +goose StatementBegin
 -- security_invoker so the querying role's RLS on `bids` applies to the view
--- (Postgres 15+; Supabase). bids already grants anon SELECT via 003_rls.sql.
+-- (Postgres 15+). bids already grants anon SELECT via 003_rls.sql.
 CREATE VIEW effective_bids
     WITH (security_invoker = true) AS
     SELECT auction_id,

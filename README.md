@@ -27,7 +27,7 @@ Browser (HTMX + Alpine + ethers.js)
 └───────────────┬─────────────────────────┘
                 │ pgx
                 ▼
-        Postgres (Supabase)
+        Postgres (Neon)
 ```
 
 The browser talks to the **contracts directly** (wallet signs txs via ethers.js); the backend **observes** the chain through its indexer and projects state into Postgres for fast reads and live updates.
@@ -39,7 +39,7 @@ The browser talks to the **contracts directly** (wallet signs txs via ethers.js)
 | Contracts | Solidity 0.8.26, Foundry, OpenZeppelin v5 |
 | Backend | Go 1.25, [Fiber](https://gofiber.io) v2, pgx v5, goose migrations, go-ethereum, zerolog |
 | Frontend | HTMX 2, Alpine.js 3, ethers.js 6, Tailwind, WalletConnect v2 (served from the Go binary via `embed.FS`) |
-| Data | PostgreSQL (Supabase); `LISTEN/NOTIFY` as the real-time bus |
+| Data | PostgreSQL (Neon); `LISTEN/NOTIFY` as the real-time bus |
 | Auth | Sign-In-with-Ethereum (EIP-191) → JWT |
 
 ## Repository layout
@@ -63,7 +63,7 @@ docs/             Project documentation (user guide, whitepaper, FAQ)
 
 - [Go](https://go.dev/dl/) **1.25+**
 - [Foundry](https://book.getfoundry.sh/getting-started/installation) (`forge`)
-- A PostgreSQL database (e.g. a free [Supabase](https://supabase.com) project)
+- A PostgreSQL database (e.g. a free [Neon](https://neon.tech) serverless Postgres project)
 - Optionally [slither](https://github.com/crytic/slither) for contract static analysis
 
 ## Configuration

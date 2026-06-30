@@ -10,7 +10,7 @@ primary_region = "iad"
 # (used by the dApp at runtime to look up the pairing relay) — embedding
 # them in the non-secret env block keeps WC working without requiring a
 # `fly secrets set`. Secrets (POSTGRES_URL, JWT_SECRET, KEEPER_KEY,
-# SERVICE_TOKEN, PINATA_JWT) go through `fly secrets set`.
+# SERVICE_TOKEN) go through `fly secrets set`.
 [env]
   ENV = "production"
   HTTP_ADDR = ":8080"

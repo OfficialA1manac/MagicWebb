@@ -3,18 +3,18 @@
 
 -- RLS for the 006_rework tables (they shipped without it) + close the 003 gap
 -- where public reads were granted TO anon only, locking out the authenticated
--- role under Supabase PostgREST. The Go backend connects as a privileged role
--- and is unaffected; these policies govern direct Supabase REST/JS access.
+-- role under PostgREST. The Go backend connects as a privileged role
+-- and is unaffected; these policies govern direct REST/JS access.
 --
 -- Conventions:
 --   * JWT subject is normalized with lower() — the backend stores lowercase
 --     addresses, while a wallet-provided `sub` may be EIP-55 checksummed.
 --   * Every CREATE POLICY is preceded by DROP POLICY IF EXISTS so a policy
---     applied manually (e.g. via the Supabase dashboard) never fails goose
+--     applied manually (e.g. via Neon dashboard) never fails goose
 --     and blocks startup.
 --   * Column-level UPDATE grants keep users from rewriting server-owned
 --     columns (notification content, profiles.verified).
---   * Requires the Supabase `anon` / `authenticated` roles (as does 003).
+--   * Requires the `anon` / `authenticated` roles (as does 003).
 
 -- ── Enable RLS on every 006 table ──────────────────────────────────────────
 ALTER TABLE nft_ownership       ENABLE ROW LEVEL SECURITY;

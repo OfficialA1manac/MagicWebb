@@ -3,13 +3,13 @@
 // its bytes, so identical bytes from different NFT contracts dedupe to one
 // row, and the server can prove content integrity without trusting any
 // upstream gateway at serve time. Frontends hit /api/v1/img/<sha256> on the
-// same origin — IPFS, Cloudflare and Pinata are not in the render path
-// after ingest.
+// same origin — the upstream gateway is not in the render path after ingest,
+// all assets are served from the self-hosted BYTEA store.
 //
 // Storage model: a single Postgres row per SHA-256 (BYTEA body + mime +
 // byte_length + source_uri + refcount). Body cap (MaxBlobBytes) is enforced
 // before the INSERT so a malicious contract cannot bloat the table. Capacity
-// is bounded by the Supabase / Postgres free-tier limit; if a deployment
+// is bounded by the Postgres free-tier limit; if a deployment
 // outgrows it, the same API can be swapped to a backend that streams from
 // disk (S3-compatible / local volume) by changing only the body column + Store.
 package imagestore
@@ -50,7 +50,7 @@ const MaxBlobCountPerCollection = 1_000
 
 // MaxTotalBlobBytes caps the cumulative byte volume of all blobs across
 // every collection. Without this, a large generative collection could fill
-// the disk / Supabase free-tier allocation. 256 MiB (~32 avg-size images at
+// the disk / Postgres free-tier allocation. 256 MiB (~32 avg-size images at
 // 8 MiB each) provides generous headroom while keeping the table small
 // enough for frequent read/write operations. When the cap is exceeded, new
 // blobs are silently skipped (not rejected) — the Get/Proxy fallback still
@@ -132,7 +132,7 @@ var ErrInvalidHash = errors.New("imagestore: invalid sha256 hash")
 // Store is the public ingest response. The returned hex hash is the
 // same-origin reference the indexer embeds into nft_metadata.image_uri (or
 // metadata_uri) so the frontend hits /api/v1/img/<hash> instead of the
-// original IPFS / gateway URL. Inserted is false when the row pre-existed and
+// original gateway URL. Inserted is false when the row pre-existed and
 // refcount was bumped rather than the body re-inserted (best-effort hint).
 // Skipped is true when the blob was not stored because a quota cap was
 // exceeded — the caller should fall back to proxying the upstream URL.

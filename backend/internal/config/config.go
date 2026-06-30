@@ -57,8 +57,6 @@ type Config struct {
 	ScoreWVolume float64
 	ScoreDecay   float64
 
-	// Pinata (IPFS uploads)
-	PinataJWT string
 
 	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
 	KeeperKey string
@@ -135,7 +133,6 @@ func Load() {
 		ScoreWVolume: optFloat64("SCORE_W_VOLUME", 0.2),
 		ScoreDecay:   optFloat64("SCORE_DECAY", 0.05),
 
-		PinataJWT: envOrDefault("PINATA_JWT", ""),
 
 		KeeperKey: envOrDefault("KEEPER_KEY", ""),
 

@@ -657,9 +657,8 @@ func (q *Q) ListTokensWithUpstreamImages(ctx context.Context, limit int) ([]Imag
 //
 // nft_image_blobs: SHA-256 keyed, BYTEA-backed content-addressed store. Every
 // row is dedup-by-hash so identical image bytes from different contracts share
-// one entry + a refcount, capped at imagestore.MaxBlobBytes per row. The body
-// is what the frontend serves from /api/v1/img/<sha256> — IPFS / Cloudflare /
-// Pinata are not in the render path after ingest.
+// one entry + a refcount, capped at imagestore.MaxBlobBytes per row. The body	// is what the frontend serves from /api/v1/img/<sha256> — no upstream
+	// gateways are in the render path after ingest.
 //
 // Compile-time assertion pinning *Q as an imagestore.Store so future signature
 // drift breaks the build immediately rather than at the first ingest request

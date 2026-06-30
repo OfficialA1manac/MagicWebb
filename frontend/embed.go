@@ -173,11 +173,11 @@ var baseFuncMap = template.FuncMap{
 	"unix": func(t time.Time) int64 {
 		return t.Unix()
 	},
-	// isUpstream reports whether a stored image_uri is an http(s)/(ipfs)
-	// URL we still need to self-host — drives the user-triggerable retry
-	// banner. Empty / local /api/v1/img/<sha> values are NOT upstream (the
+	// isUpstream reports whether a stored image_uri is an http(s) URL we
+	// still need to self-host — drives the user-triggerable retry banner.
+	// Empty / local /api/v1/img/<sha> values are NOT upstream (the
 	// slow-path worker has already cached them or the token never had a
-	// usable image).
+	// usable image). ipfs:// URIs are also upstream (resolved server-side).
 	"isUpstream": func(uri string) bool {
 		return strings.HasPrefix(uri, "http://") ||
 			strings.HasPrefix(uri, "https://") ||

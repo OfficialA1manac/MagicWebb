@@ -7,7 +7,7 @@ Docker needed.
 
 Cost note: Fly has no permanent free tier — new accounts get trial credit,
 then a single shared-cpu-1x/512MB machine runs ≈ $3–4/mo. DB stays on
-Supabase free tier.
+Neon Postgres free tier.
 
 ## 1. One-time setup
 
@@ -27,7 +27,7 @@ addresses, RPC, `INDEX_FROM_BLOCK`). Set the rest:
 
 ```bash
 fly secrets set \
-  POSTGRES_URL='<Supabase direct DSN (port 5432, sslmode=require)>' \
+  POSTGRES_URL='<Neon Postgres DSN (port 5432, sslmode=require)>' \
   JWT_SECRET="$(openssl rand -hex 32)" \
   KEEPER_KEY='<keeper private key from backend/.env.keeper>'
 # optional:

@@ -1810,30 +1810,16 @@ window.addEventListener('mw-notification', () => {
 
 /* ─────────────────────────────────────────────────────────────────────────────
  * URI helpers — used by inline JS in templates
+ * All URI resolution is delegated server-side to /api/v1/media proxy.
  * ───────────────────────────────────────────────────────────────────────────── */
-function isBareIPFSCID(uri) {
-  return (uri.startsWith('Qm') && uri.length >= 44) || (uri.startsWith('baf') && uri.length >= 59);
-}
-function resolveURI(uri) {
-  uri = (uri || '').trim();
-  if (!uri || uri.startsWith('data:')) return uri;
-  if (uri.startsWith('ipfs://ipfs/')) return 'https://ipfs.io/ipfs/' + uri.slice(13);
-  if (uri.startsWith('ipfs://'))      return 'https://ipfs.io/ipfs/' + uri.slice(7);
-  if (isBareIPFSCID(uri))             return 'https://ipfs.io/ipfs/' + uri;
-  if (uri.startsWith('ar://'))        return 'https://arweave.net/' + uri.slice(5);
-  return uri;
-}
 function mediaURL(uri) {
   if (!uri) return uri;
   if (uri.startsWith('/api/v1/img/') || uri.startsWith('data:') || uri.startsWith('/')) return uri;
   if (uri.startsWith('http://') || uri.startsWith('https://')) {
     return '/api/v1/media?url=' + encodeURIComponent(uri);
   }
-  const resolved = resolveURI(uri);
-  if (resolved.startsWith('http://') || resolved.startsWith('https://')) {
-    return '/api/v1/media?url=' + encodeURIComponent(resolved);
-  }
-  return uri;
+  // ipfs://, ar://, bare CIDs — resolve server-side through the proxy
+  return '/api/v1/media?url=' + encodeURIComponent(uri);
 }
 
 // Expose globals for inline Alpine / template JS calls. The IIFE runs

@@ -1,17 +1,17 @@
 // Command sslprobe verifies that the active POSTGRES_URL advertises the
-// SSL posture we expect from Supabase. It actively connects with three modes
+// SSL posture we expect from Neon. It actively connects with three modes
 // and reports the result so operators and CI can eyeball that strict-require
 // TLS is fail-closed.
 //
 // Expected posture (matches the active production URL):
 //
 //   sslmode=require  -> CONNECTED   (production path; must succeed)
-//   sslmode=disable  -> REJECTED    (Supabase refuses plaintext)
+//   sslmode=disable  -> REJECTED    (Neon refuses plaintext)
 //   sslmode=prefer   -> CONNECTED   (auto-negotiates TLS as a sanity probe)
 //
 // Exit 0 = gate passed. Non-zero = posture drifted from expectation; do NOT
 // keep this binary as a CI step expecting green without verifying the new
-// expectation lines up with whatever Supabase now does.
+// expectation lines up with whatever Neon now does.
 //
 // Usage:
 //
@@ -29,12 +29,12 @@ import (
 )
 
 // expected is the connection result each sslmode MUST produce against the
-// active Supabase direct URL. Edit this map if the deploy target's policy
+// active Neon Postgres direct URL. Edit this map if the deploy target's policy
 // changes; the probe is intentionally explicit so the assert does not
 // silently drift into "always pass".
 var expected = map[string]bool{
 	"require": true,  // MUST connect (the active production posture)
-	"disable": false, // MUST be rejected (Supabase refuses plaintext)
+	"disable": false, // MUST be rejected (Neon refuses plaintext)
 	"prefer":  true,  // MUST connect (auto-negotiates TLS)
 }
 

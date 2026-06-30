@@ -21,7 +21,7 @@ CREATE INDEX saved_searches_user_idx ON saved_searches (user_addr, created_at DE
 -- RLS: users may only read/write their own rows.
 ALTER TABLE saved_searches ENABLE ROW LEVEL SECURITY;
 
--- RLS policies use the Supabase JWT convention (same as 011_rls_rework).
+-- RLS policies use the same JWT convention (same as 011_rls_rework).
 -- The Go backend connects as a privileged role and is unaffected.
 DROP POLICY IF EXISTS saved_searches_self_select ON saved_searches;
 CREATE POLICY saved_searches_self_select ON saved_searches FOR SELECT TO authenticated

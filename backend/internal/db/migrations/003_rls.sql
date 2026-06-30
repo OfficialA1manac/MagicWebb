@@ -1,7 +1,7 @@
 -- +goose Up
 -- +goose StatementBegin
 
--- Create roles that exist in Supabase but may not exist in plain Postgres (Neon).
+-- Create roles that exist in Neon but may not exist in plain Postgres.
 -- Using DO blocks so migration doesn't fail when roles already exist.
 DO $$ BEGIN CREATE ROLE anon; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
 DO $$ BEGIN CREATE ROLE authenticated; EXCEPTION WHEN duplicate_object THEN NULL; END $$;
@@ -49,7 +49,7 @@ CREATE POLICY users_self_update ON users FOR UPDATE TO authenticated
     WITH CHECK (address = current_setting('request.jwt.claims', true)::jsonb->>'sub');
 
 -- ── Service role bypasses all policies ────────────────────────────────────
--- (service_role is the Supabase server-side role; RLS is bypassed automatically)
+-- (service_role is the Postgres server-side role; RLS is bypassed automatically)
 
 -- ── indexer_state: backend service only ───────────────────────────────────
 -- No anon/authenticated policy → only service_role can read/write

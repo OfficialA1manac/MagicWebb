@@ -6,13 +6,13 @@
 -- by SHA-256 of its bytes, so identical images from different NFT contracts
 -- dedupe automatically and we can prove byte-equality without trusting the
 -- upstream gateway. The blob is served by the same-origin Go binary at
--- /api/v1/img/<sha256>, so the frontend never touches IPFS / Cloudflare /
--- Pinata — only our PG row is hit at render time. No third-party object
--- storage, no egress fees; capacity is the Supabase free-tier DB bound.
+-- /api/v1/img/<sha256>, so the frontend never touches an upstream gateway
+-- at render time — only our PG row is hit. No third-party object
+-- storage, no egress fees; capacity is the Postgres free-tier DB bound.
 --
 -- ── Access model ────────────────────────────────────────────────────────────
 -- Direct connection only. The application role (pgxpool) is the sole
--- reader/writer of this table; the Supabase ``anon`` and ``authenticated``
+-- reader/writer of this table; the ``anon`` and ``authenticated``
 -- roles MUST NOT be able to enumerate our self-hosted blobs. Postgres
 -- creates every new table with default privileges for the PUBLIC pseudo-
 -- role (so anon / authenticated inherit SELECT through PUBLIC unless we
@@ -42,7 +42,7 @@ CREATE INDEX IF NOT EXISTS nft_image_blobs_inserted_idx ON nft_image_blobs (inse
 -- path to this table. The next statement re-grants to the runtime role only.
 REVOKE ALL ON nft_image_blobs FROM PUBLIC;
 -- Grant to CURRENT_USER (the role running migrations) instead of hardcoded 'postgres'
--- so this works on Neon, Supabase, and plain Postgres alike.
+-- so this works on Neon and plain Postgres alike.
 DO $$ BEGIN
     EXECUTE format('GRANT SELECT, INSERT, UPDATE ON nft_image_blobs TO %I', current_user);
 END $$;

@@ -21,19 +21,12 @@ import (
 const maxFetchBytes = 8 << 20
 
 // IPFS gateways tried in order when resolving ipfs:// or bare CIDs.
-// cloudflare-ipfs.com is intentionally omitted: Cloudflare sunset the
-// dedicated IPFS gateway and the endpoint now returns fast 404s, which the
-// proxy bubbles as 502. Add a working gateway at the HEAD of this list (and
-// a corresponding TestIPFSGatewayPrimary_IsPublic assertion below) so the
-// first request doesn't waste fetchClient.Timeout on a dead host.
-//
-// w3s.link (web3.storage) and nftstorage.link (nft.storage) are added as
-// reliable fallbacks — they pin content widely and are maintained by
-// Protocol Labs alongside the IPFS public gateways.
+// No paid gateways (Pinata removed). Free public IPFS gateways only;
+// assets are self-hosted into the local imagestore on first fetch
+// so the frontend never depends on any gateway at render time.
 var ipfsGateways = []string{
 	"https://ipfs.io/ipfs/",
 	"https://dweb.link/ipfs/",
-	"https://gateway.pinata.cloud/ipfs/",
 	"https://w3s.link/ipfs/",
 	"https://nftstorage.link/ipfs/",
 }
