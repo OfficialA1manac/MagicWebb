@@ -17,7 +17,7 @@ RPC="${RPC_URL:-https://coston2-api.flare.network/ext/C/rpc}"
 CHAIN_ID=114
 
 # ── Contract addresses (Coston2 v2 deploy) ──
-MARKETPLACE="${MARKETPLACE_ADDR:-0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37}"
+MARKETPLACE="${MARKETPLACE_ADDR:-0xe5e27Ba24Da24B78e5793c88BA232276F045659f}"
 NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
 
 # ── Metadata base URI (IPFS/Arweave directory containing metadata/*.json)
@@ -40,10 +40,11 @@ if [ "$CHAIN" != "$CHAIN_ID" ]; then
     exit 1
 fi
 
-# ── Check seller has C2FLR ──
-BAL=$(cast balance "$SELLER" --rpc-url "$RPC" | awk '{print int($1/1e14)/10000}')
+# ── Check seller has C2FLR (use awk to avoid bash integer overflow) ──
+BAL_WEI=$(cast balance "$SELLER" --rpc-url "$RPC")
+BAL=$(echo "$BAL_WEI" | awk '{printf "%.4f", $1/1e18}')
 echo "Seller balance: $BAL C2FLR"
-if [ "$(cast balance "$SELLER" --rpc-url "$RPC" | awk '{print $1}')" -lt 100000000000000000 ]; then
+if echo "$BAL_WEI" | awk '{exit $1 < 100000000000000000 ? 0 : 1}'; then
     echo "WARNING: seller balance < 0.1 C2FLR. Gas may be insufficient." >&2
 fi
 echo ""
@@ -70,42 +71,55 @@ echo "  Marketplace: $MP_CODE bytes code at $MARKETPLACE"
 echo "  NFT: $NFT_CODE bytes code at $NFT (totalSupply=$NFT_TOTAL)"
 echo ""
 
-# ── Mint 4 tokens (derive IDs from contract state, not hardcoded) ──
+# ── Mint 4 tokens (discover token IDs via ownerOf scan after minting) ──
 echo "== Minting 4 NFTs =="
-TOKEN_IDS=""
 
-# Read current totalSupply before minting to derive real token IDs.
-PRE_TOTAL=$(cast call "$NFT" "totalSupply()(uint256)" --rpc-url "$RPC" 2>/dev/null || echo "0")
-PRE_TOTAL=${PRE_TOTAL:-0}
+# Record balance before minting
+BAL_BEFORE=$(cast call "$NFT" "balanceOf(address)(uint256)" "$SELLER" --rpc-url "$RPC" 2>/dev/null || echo "0")
+BAL_BEFORE=${BAL_BEFORE:-0}
+echo "  Pre-mint balance: $BAL_BEFORE"
 
 for i in $(seq 0 3); do
-    echo "  Minting token $((PRE_TOTAL + i + 1))..."
+    echo "  Minting token $((i + 1)) of 4..."
     cast send "$NFT" "mint(address)" "$SELLER" \
         --private-key "$PRIVATE_KEY" --rpc-url "$RPC" --gas-limit 150000 >/dev/null
-    # Read the actual minted token ID from on-chain totalSupply after mint.
-    POST_TOTAL=$(cast call "$NFT" "totalSupply()(uint256)" --rpc-url "$RPC" 2>/dev/null || echo "0")
-    TID=$((POST_TOTAL))
-    TOKEN_IDS="$TOKEN_IDS $TID"
-    echo "  ✓ Token $TID minted to $SELLER"
+    echo "  ✓ Mint tx sent"
 
     # ── Set token URI from metadata ──
     if [ -n "$METADATA_BASE" ]; then
         META_NAME="${METADATA_FILES[$i]}"
-        META_URI="${METADATA_BASE%/}/${META_NAME}"
-        echo "    Setting tokenURI for token $TID → $META_URI"
-        # Attempt setTokenURI(tokenId, uri). Some NFT contracts use
-        # setBaseURI() instead — try setTokenURI first, log a warning
-        # if the function selector is not recognised (silent skip).
-        if ! cast send "$NFT" "setTokenURI(uint256,string)" "$TID" "$META_URI" \
-            --private-key "$PRIVATE_KEY" --rpc-url "$RPC" --gas-limit 100000 2>&1; then
-            echo "    ⚠ setTokenURI failed — the NFT contract may not support it. Token $TID still minted without on-chain metadata link."
-        fi
-    else
-        echo "    ⚠ METADATA_BASE not set — skipping tokenURI assignment (token $TID has no on-chain metadata link)"
+        echo "    (tokenURI will be set after ID discovery, see below)"
     fi
-
-    PRE_TOTAL=$POST_TOTAL
 done
+
+# Discover actual token IDs by scanning ownerOf from 0 upwards.
+# This is needed because the mock NFT doesn't implement totalSupply().
+BAL_AFTER=$(cast call "$NFT" "balanceOf(address)(uint256)" "$SELLER" --rpc-url "$RPC" 2>/dev/null || echo "0")
+BAL_AFTER=${BAL_AFTER:-0}
+echo "  Post-mint balance: $BAL_AFTER"
+
+echo "  Scanning for owned token IDs..."
+TOKEN_IDS=""
+MAX_SCAN=200
+for tid in $(seq 0 $MAX_SCAN); do
+    OWNER=$(cast call "$NFT" "ownerOf(uint256)(address)" "$tid" --rpc-url "$RPC" 2>/dev/null || echo "0x0000000000000000000000000000000000000000")
+    if [ "$OWNER" = "$SELLER" ]; then
+        TOKEN_IDS="$TOKEN_IDS $tid"
+        echo "    Found owned token: $tid"
+    fi
+    # Stop once we have all our tokens
+    FOUND=$(echo "$TOKEN_IDS" | wc -w)
+    if [ "$FOUND" -ge "$BAL_AFTER" ] 2>/dev/null && [ "$FOUND" -gt 0 ] 2>/dev/null; then
+        break
+    fi
+done
+
+TOKEN_IDS=$(echo "$TOKEN_IDS" | xargs)  # trim whitespace
+if [ -z "$TOKEN_IDS" ]; then
+    echo "ERROR: Could not find minted token IDs on-chain." >&2
+    exit 1
+fi
+echo "  Discovered token IDs: $TOKEN_IDS"
 echo ""
 
 # ── Approve marketplace ──
@@ -150,14 +164,18 @@ for TID in $TOKEN_IDS; do
         echo "  ✗ Token $TID NOT owned by seller (got $OWNER)"
         ALL_OK=false
     fi
-    # Verify listing is active on marketplace
-    LISTING=$(cast call "$MARKETPLACE" "listings(address,uint256)(address,uint128,uint64)" "$NFT" "$TID" --rpc-url "$RPC" 2>/dev/null || echo "")
+    # Verify listing is active on marketplace.
+    # The listings mapping is keyed by (collection, tokenId, seller): 3 keys, not 2.
+    # cast call returns the tuple as multi-line output; use awk 'NR==1' to
+    # extract only the first field of the first line (the seller address).
+    LISTING=$(cast call "$MARKETPLACE" "listings(address,uint256,address)(address,uint64,uint8,uint128,uint128)" "$NFT" "$TID" "$SELLER" --rpc-url "$RPC" 2>/dev/null || echo "")
     if [ -n "$LISTING" ]; then
-        L_OWNER=$(echo "$LISTING" | awk '{print $1}')
-        if [ "$L_OWNER" = "$SELLER" ]; then
-            echo "  ✓ Token $TID listing active on marketplace"
+        L_SELLER=$(echo "$LISTING" | awk 'NR==1{print $1}')
+        L_EXPIRES=$(echo "$LISTING" | awk 'NR==2{print $1}')
+        if [ "$L_SELLER" = "$SELLER" ]; then
+            echo "  ✓ Token $TID listing active on marketplace (expires @$L_EXPIRES)"
         else
-            echo "  ✗ Token $TID listing owner mismatch (expected $SELLER got $L_OWNER)"
+            echo "  ✗ Token $TID listing seller mismatch (expected $SELLER got $L_SELLER)"
             ALL_OK=false
         fi
     else
