@@ -5,11 +5,35 @@ UI assets and DB migrations are embedded — the image is the binary, nothing
 else. Repo ships `Dockerfile` + `fly.toml`; Fly builds remotely, no local
 Docker needed.
 
-Cost note: Fly has no permanent free tier — new accounts get trial credit,
-then a single shared-cpu-1x/512MB machine runs ≈ $3–4/mo. DB stays on
-Neon Postgres free tier.
+**Cost:** Fly has no permanent free tier — new accounts get trial credit,
+then a single shared-cpu-1x/512MB machine runs ≈ $3–4/mo.
+
+**Database:** [Neon Postgres](https://neon.tech) free tier (0.5 GB storage,
+100 CU-hours/mo, up to 10k pooled connections).
+
+**Images:** All NFT assets are self-hosted in Postgres BYTEA — no IPFS,
+no Pinata, no external CDN costs.
 
 ## 1. One-time setup
+
+### 1a. Create a Neon Postgres project
+
+1. Sign up at [neon.tech](https://neon.tech) (no credit card).
+2. Create a project in `us-east-2` (same region as Fly.io `iad` for low latency).
+3. Copy the **pooled connection string** from the dashboard:
+   ```
+   postgresql://user:password@ep-<project>-<pooler>.us-east-2.aws.neon.tech/neondb?sslmode=require
+   ```
+4. Optionally create a named database:
+   ```bash
+   psql "<connection-string>" -c "CREATE DATABASE magicwebb;"
+   ```
+
+> Neon's built-in PgBouncer handles connection pooling. Use the pooled
+> endpoint (default port 5432). The direct un-pooled port (6543) is only
+> needed for `pg_dump` or long-running transactions.
+
+### 1b. Create the Fly.io app
 
 ```bash
 # install CLI (Windows PowerShell)
@@ -23,14 +47,17 @@ fly apps create magicwebb        # pick another name if taken — then update
 ## 2. Secrets
 
 Everything non-secret already lives in `fly.toml` `[env]` (v2 contract
-addresses, RPC, `INDEX_FROM_BLOCK`). Set the rest:
+addresses, RPC, `INDEX_FROM_BLOCK`). Set secrets via `fly secrets set`:
 
 ```bash
+# PostgreSQL — your Neon pooled connection string
+# No IPFS/Pinata keys needed — all images self-hosted in Postgres BYTEA
 fly secrets set \
-  POSTGRES_URL='<Neon Postgres DSN (port 5432, sslmode=require)>' \
+  POSTGRES_URL='postgresql://user:password@ep-<project>-<pooler>.us-east-2.aws.neon.tech/magicwebb?sslmode=require' \
   JWT_SECRET="$(openssl rand -hex 32)" \
   KEEPER_KEY='<keeper private key from backend/.env.keeper>'
-# optional:
+
+# Optional:
 # fly secrets set WC_PROJECT_ID='...' SERVICE_TOKEN='...' ADMIN_ALLOWLIST='0x...'
 ```
 

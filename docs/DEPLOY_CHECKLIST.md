@@ -31,7 +31,7 @@ slither . --filter-paths 'lib/|test/'              # zero findings
 |:---------|:--------:|:--------------------|:----------------------------------|
 | Coston2  |   114    | `RPC_URL=https://coston2-api.flare.network/ext/C/rpc` | `address(0)` (ungated) — production-grade fallback |
 
-## Layer 2 — Backend (Go + Postgres + Fly.io)
+## Layer 2 — Backend (Go + Neon Postgres + Fly.io)
 
 ```bash
 cd backend
@@ -73,7 +73,7 @@ MARKETPLACE_ADDR=0x…   # post-deploy address; auto-injected to template
 AUCTION_ADDR=0x…
 OFFERBOOK_ADDR=0x…
 ROYALTY_ADDR=
-POSTGRES_URL=postgres://…  # Fly Postgres + IP allowlist
+POSTGRES_URL=postgresql://user:password@ep-<project>-<pooler>.us-east-2.aws.neon.tech/magicwebb?sslmode=require  # Neon pooled connection
 JWT_SECRET=                 # 32+ chars; rotate via secret swap + restart
 SIWE_DOMAIN=magicwebb.fly.dev   # binds SIWE signature to legit origin
 FRONTEND_URL=https://magicwebb.fly.dev
