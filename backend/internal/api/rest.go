@@ -219,10 +219,14 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewMetricsService(q).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
-	// Image-by-hash route registered under /api/v1 so it shares the
-	// rateLimitMiddleware applied to the api router — the old app-level
-	// registration bypassed rate limiting entirely.
-	api.Get("/img/:sha256", ms.HandleImageByHash())
+	// Image-by-hash route: registered at app level (NOT under the rate-limited
+	// /api/v1 group) because it serves locally-stored blobs from the database
+	// — there is no outbound HTTP fetch involved, so the SSRF / abuse surface
+	// is minimal (it can only serve bytes already committed to the image store).
+	// Pages with 48+ listing cards each load their image from this endpoint;
+	// rate limiting that would block legitimate page loads. The /api/v1/media
+	// proxy endpoint (which DOES make outbound fetches) remains rate-limited.
+	app.Get("/api/v1/img/:sha256", ms.HandleImageByHash())
 
 	// Server-time endpoint (used by auction countdown timers). Moved
 	// from mountUI's bare app.Get into the rate-limited api group so

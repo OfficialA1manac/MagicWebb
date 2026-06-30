@@ -26,10 +26,16 @@ const maxFetchBytes = 8 << 20
 // proxy bubbles as 502. Add a working gateway at the HEAD of this list (and
 // a corresponding TestIPFSGatewayPrimary_IsPublic assertion below) so the
 // first request doesn't waste fetchClient.Timeout on a dead host.
+//
+// w3s.link (web3.storage) and nftstorage.link (nft.storage) are added as
+// reliable fallbacks — they pin content widely and are maintained by
+// Protocol Labs alongside the IPFS public gateways.
 var ipfsGateways = []string{
 	"https://ipfs.io/ipfs/",
 	"https://dweb.link/ipfs/",
 	"https://gateway.pinata.cloud/ipfs/",
+	"https://w3s.link/ipfs/",
+	"https://nftstorage.link/ipfs/",
 }
 
 var fetchClient = &http.Client{
