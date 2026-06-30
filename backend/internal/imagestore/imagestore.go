@@ -16,7 +16,6 @@ package imagestore
 
 import (
 	"context"
-	"crypto/sha256"
 	"encoding/hex"
 	"errors"
 	"fmt"
@@ -84,11 +83,16 @@ func PublicPath(sha256hex string) string {
 
 // Hash returns the SHA-256 hex digest of body, or an empty string for an
 // empty body (which we never store).
+//
+// The hash computation is pluggable via build tags:
+//   - Default (no tag): uses Go's crypto/sha256
+//   - zigmedia tag:      uses Zig-accelerated SHA-256 via CGO
+// Both implementations produce identical results.
 func Hash(body []byte) string {
 	if len(body) == 0 {
 		return ""
 	}
-	sum := sha256.Sum256(body)
+	sum := hashBytes(body)
 	return hex.EncodeToString(sum[:])
 }
 

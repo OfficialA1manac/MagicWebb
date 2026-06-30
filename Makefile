@@ -85,6 +85,27 @@ regen-abi: ## regenerate wallet.js ABIs from forge build (updates static/wallet.
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
 	@echo "  ABIs embedded in frontend/static/wallet.js — update manually if needed"
 
+# ── Zig Accelerated SHA-256 ──────────────────────────────────────────────────
+
+zigmedia-build: ## compile Zig SHA-256 library + build Go binary with zigmedia tag
+	@mkdir -p bin
+	@echo "  Compiling Zig SHA-256 library..."
+	cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig
+	@echo "  Building Go binary with -tags zigmedia..."
+	$(eval MW_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown))
+	cd backend && CGO_ENABLED=1 go build -tags zigmedia -ldflags "-X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=$(MW_GIT_SHA)" -o ../$(BINARY) $(SERVER:./backend/%=./%)
+	@echo "  built: $(BINARY)  [zigmedia]  sha=$(MW_GIT_SHA)"
+
+zigmedia-test: ## run Zig unit tests (no Go needed)
+	cd backend/zigsha256 && zig test zigsha256.zig
+
+zigmedia-bench: ## benchmark Zig vs Go SHA-256
+	@echo "  Run Go benchmark: go test -bench=BenchmarkHash -benchmem ./internal/imagestore/"
+	@echo "  Run Zig benchmark: cd backend/zigsha256 && zig build -Doptimize=ReleaseFast"
+	@echo "  (Add a benchmark main.zig to backend/zigsha256/ for isolated Zig bench)"
+
+.PHONY: zigmedia-build zigmedia-test zigmedia-bench
+
 # ── Quality ───────────────────────────────────────────────────────────────────
 
 test: ## run Go test suite with the race detector
