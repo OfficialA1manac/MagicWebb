@@ -6,6 +6,7 @@ import {Marketplace}        from "../src/Marketplace.sol";
 import {AuctionHouse}       from "../src/AuctionHouse.sol";
 import {OfferBook}          from "../src/OfferBook.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
+import {MagicWebbNFT}       from "../src/MagicWebbNFT.sol";
 
 /// @notice Deploy Magic Webb to Flare Coston2 (chain 114).
 ///         Single hardcoded 1.5% platform fee — sent directly to CREATOR_ADDR wallet.
@@ -35,6 +36,11 @@ contract DeployCoston2 is Script {
         // and every deployer role renounced before the broadcast ends.
         MarketplaceManager manager = new MarketplaceManager(deployer);
 
+        // C-03: Production ERC-721 NFT contract. Ownable (owner=creator), sequential
+        // mint, per-token URI storage. Replaces the previous out-of-repo mock at
+        // 0x0E513BfE29E00E160ADE7516AD9363F070a101bF.
+        MagicWebbNFT  nft         = new MagicWebbNFT("Magic Webb Animi", "ANIMI", creator);
+
         Marketplace  marketplace = new Marketplace (creator, address(manager));
         AuctionHouse auction     = new AuctionHouse(creator, address(manager));
         OfferBook    offerBook   = new OfferBook   (creator, address(manager));
@@ -58,6 +64,7 @@ contract DeployCoston2 is Script {
         console2.log("MARKETPLACE_ADDR=", address(marketplace));
         console2.log("AUCTION_ADDR=",     address(auction));
         console2.log("OFFERBOOK_ADDR=",   address(offerBook));
+        console2.log("NFT_ADDR=",         address(nft));
         console2.log("CREATOR_ADDR=",     creator);
         console2.log("FEE=",              "1.5% (150 bps, hardcoded, seller-pays on sale)");
         // Sanity: every contract must report the same immutable fee recipient and manager.
@@ -67,6 +74,7 @@ contract DeployCoston2 is Script {
         require(marketplace.manager() == address(manager), "MARKETPLACE manager mismatch");
         require(auction.manager()     == address(manager), "AUCTION manager mismatch");
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
+        require(nft.owner()           == creator,          "NFT owner mismatch");
         require(manager.entriesAllowed(), "manager must deploy unpaused");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
         require(manager.hasRole(manager.OPERATOR_ROLE(), creator),        "creator must hold operator");

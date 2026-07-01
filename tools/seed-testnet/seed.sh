@@ -17,6 +17,11 @@ RPC="${RPC_URL:-https://coston2-api.flare.network/ext/C/rpc}"
 CHAIN_ID=114
 
 # ── Contract addresses (Coston2 v2 deploy) ──
+# C-03: NFT_ADDR now points to contracts/src/MagicWebbNFT.sol — a source-controlled,
+# tested, production-grade ERC-721 (OZ ERC721 + ERC721URIStorage + Ownable).
+# Deployed by contracts/script/DeployCoston2.s.sol alongside the marketplace cores.
+# The previous unaudited mock at 0x0E513BfE29E00E160ADE7516AD9363F070a101bF is
+# deprecated and should no longer be used.
 MARKETPLACE="${MARKETPLACE_ADDR:-0xe5e27Ba24Da24B78e5793c88BA232276F045659f}"
 NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
 

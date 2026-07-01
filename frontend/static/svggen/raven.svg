@@ -1,0 +1,255 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 1000 1000" width="100%" height="100%">
+<defs>
+<style>
+@keyframes moonPulse {
+  0%, 100% { r: 120; opacity: 0.85; }
+  50%       { r: 135; opacity: 1; }
+}
+@keyframes moonGlow {
+  0%, 100% { opacity: 0.4; r: 140; }
+  50%       { opacity: 0.7; r: 160; }
+}
+@keyframes crowFly {
+  0%   { transform: rotate(0deg) translateX(-280px) rotate(0deg); }
+  100% { transform: rotate(360deg) translateX(-280px) rotate(-360deg); }
+}
+@keyframes crowFly2 {
+  0%   { transform: rotate(120deg) translateX(-320px) rotate(-120deg); }
+  100% { transform: rotate(480deg) translateX(-320px) rotate(-480deg); }
+}
+@keyframes crowFly3 {
+  0%   { transform: rotate(240deg) translateX(-240px) rotate(-240deg); }
+  100% { transform: rotate(600deg) translateX(-240px) rotate(-600deg); }
+}
+@keyframes floatUp {
+  0%   { transform: translateY(0px) scale(1); opacity: 0; }
+  20%  { opacity: 0.6; }
+  80%  { opacity: 0.3; }
+  100% { transform: translateY(-400px) scale(0.5); opacity: 0; }
+}
+@keyframes eyePulse {
+  0%, 100% { opacity: 0.7; }
+  50%       { opacity: 1; }
+}
+@keyframes mistWave {
+  0%   { transform: translateX(0) scaleY(1); opacity: 0.15; }
+  25%  { transform: translateX(30px) scaleY(1.2); opacity: 0.25; }
+  50%  { transform: translateX(0) scaleY(1); opacity: 0.15; }
+  75%  { transform: translateX(-30px) scaleY(1.2); opacity: 0.25; }
+  100% { transform: translateX(0) scaleY(1); opacity: 0.15; }
+}
+@keyframes featherFall {
+  0%   { transform: translateY(0) rotate(0deg); opacity: 0; }
+  10%  { opacity: 0.8; }
+  90%  { opacity: 0.4; }
+  100% { transform: translateY(500px) rotate(720deg); opacity: 0; }
+}
+@keyframes vortexSpin {
+  0%   { transform: rotate(0deg); opacity: 0.15; }
+  50%  { opacity: 0.3; }
+  100% { transform: rotate(360deg); opacity: 0.15; }
+}
+@keyframes textGlow {
+  0%, 100% { opacity: 0.6; }
+  50%       { opacity: 1; }
+}
+</style>
+</defs>
+<rect width="1000" height="1000" fill="url(#bgGrad)"/>
+
+  <!-- Background stars -->
+  <g opacity="0.3">
+    <circle cx="120" cy="80" r="1.5" fill="#fff"><animate attributeName="opacity" values="0.3;1;0.3" dur="3s" repeatCount="indefinite"/></circle>
+    <circle cx="850" cy="150" r="1" fill="#fff"><animate attributeName="opacity" values="0.5;1;0.5" dur="2.5s" repeatCount="indefinite"/></circle>
+    <circle cx="200" cy="300" r="1.2" fill="#fff"><animate attributeName="opacity" values="0.2;0.9;0.2" dur="4s" repeatCount="indefinite"/></circle>
+    <circle cx="750" cy="400" r="1" fill="#fff"><animate attributeName="opacity" values="0.4;1;0.4" dur="3.5s" repeatCount="indefinite"/></circle>
+    <circle cx="100" cy="600" r="1.3" fill="#fff"><animate attributeName="opacity" values="0.3;0.8;0.3" dur="2.8s" repeatCount="indefinite"/></circle>
+    <circle cx="900" cy="700" r="1" fill="#fff"><animate attributeName="opacity" values="0.5;0.9;0.5" dur="3.2s" repeatCount="indefinite"/></circle>
+  </g>
+
+  <!-- Crimson moon glow aura -->
+  <circle cx="500" cy="350" fill="url(#moonGlow)" opacity="0">
+    <animate attributeName="opacity" values="0.3;0.6;0.3" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="r" values="140;160;140" dur="4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Crimson moon -->
+  <circle cx="500" cy="350" fill="url(#moonGrad)" opacity="0">
+    <animate attributeName="opacity" values="0.85;1;0.85" dur="4s" repeatCount="indefinite"/>
+    <animate attributeName="r" values="120;135;120" dur="4s" repeatCount="indefinite"/>
+  </circle>
+
+  <!-- Moon crater details -->
+  <circle cx="460" cy="320" r="25" fill="rgba(180,30,30,0.15)"/>
+  <circle cx="540" cy="370" r="18" fill="rgba(180,30,30,0.12)"/>
+  <circle cx="480" cy="390" r="12" fill="rgba(180,30,30,0.1)"/>
+
+  <!-- Moon crescent shadow -->
+  <path d="M500 230 A120 120 0 0 0 500 470 A100 100 0 0 1 500 230Z" fill="rgba(80,10,10,0.4)"/>
+
+  <!-- Vortex ring -->
+  <g transform="translate(500,500)" style="animation: vortexSpin 20s linear infinite;">
+    <ellipse cx="0" cy="0" rx="200" ry="60" fill="none" stroke="rgba(180,40,40,0.15)" stroke-width="4">
+      <animateTransform attributeName="transform" type="rotate" from="0" to="360" dur="20s" repeatCount="indefinite"/>
+    </ellipse>
+    <ellipse cx="0" cy="0" rx="200" ry="60" fill="none" stroke="rgba(200,50,50,0.08)" stroke-width="2" transform="rotate(90)"/>
+  </g>
+
+  <!-- Flying crows -->
+  <g transform="translate(500,350)">
+    <g style="animation: crowFly 6s linear infinite;">
+      <path d="M-15,0 L-5,-8 L0,0 L5,-6 L15,0 L5,2 L0,-2 L-5,2 Z" fill="#0a0a0a"/>
+    </g>
+    <g style="animation: crowFly2 8s linear infinite;">
+      <path d="M-12,0 L-4,-6 L0,0 L4,-5 L12,0 L4,2 L0,-1 L-4,2 Z" fill="#1a1a1a"/>
+    </g>
+    <g style="animation: crowFly3 10s linear infinite;">
+      <path d="M-10,0 L-3,-5 L0,0 L3,-4 L10,0 L3,1 L0,-1 L-3,1 Z" fill="#2a2a2a"/>
+    </g>
+  </g>
+
+  <!-- Shadow figure silhouette -->
+  <g transform="translate(500,680)">
+    <!-- Cloak / body -->
+    <path d="M-80,0 C-90,-120 -60,-200 -20,-220 C10,-230 30,-220 50,-200 C80,-170 90,-100 80,0 Z" fill="url(#shadowGrad)"/>
+    <!-- Head -->
+    <ellipse cx="0" cy="-200" rx="35" ry="40" fill="#0a0a0a"/>
+    <!-- Shoulder pauldrons -->
+    <path d="M-80,0 C-95,-30 -85,-60 -70,-70 L-60,-60 C-75,-50 -80,-30 -75,0 Z" fill="#1a1a1a"/>
+    <path d="M80,0 C95,-30 85,-60 70,-70 L60,-60 C75,-50 80,-30 75,0 Z" fill="#1a1a1a"/>
+    <!-- Chest armor -->
+    <path d="M-30,-160 L-25,-80 L25,-80 L30,-160 Z" fill="#1a1a1a" stroke="rgba(200,50,50,0.3)" stroke-width="1"/>
+
+    <!-- Pulsing crimson eye -->
+    <ellipse cx="0" cy="-195" rx="12" ry="6" fill="#ff2020" filter="url(#crimsonGlow)" style="animation: eyePulse 2s ease-in-out infinite;"/>
+    <ellipse cx="0" cy="-195" rx="4" ry="2" fill="#ff6060"/>
+
+    <!-- Left eye (dim) -->
+    <ellipse cx="-18" cy="-195" rx="8" ry="4" fill="#ff1010" filter="url(#crimsonGlow)" opacity="0.4"/>
+
+    <!-- Energy lines on cloak -->
+    <path d="M-40,-100 C-30,-80 -20,-60 -10,-40" stroke="rgba(200,50,50,0.3)" stroke-width="1" fill="none"/>
+    <path d="M40,-100 C30,-80 20,-60 10,-40" stroke="rgba(200,50,50,0.3)" stroke-width="1" fill="none"/>
+  </g>
+
+  <!-- Blood mist wisps -->
+  <g>
+    <path d="M300,800 Q350,750 320,700 Q290,650 330,600" fill="none" stroke="rgba(180,40,40,0.2)" stroke-width="30" stroke-linecap="round" filter="url(#mistBlur)" opacity="0">
+      <animate attributeName="opacity" values="0;0.25;0.15;0.25;0" dur="8s" repeatCount="indefinite"/>
+    </path>
+    <path d="M700,820 Q650,770 680,720 Q710,670 670,620" fill="none" stroke="rgba(180,40,40,0.2)" stroke-width="25" stroke-linecap="round" filter="url(#mistBlur)" opacity="0">
+      <animate attributeName="opacity" values="0;0.2;0.1;0.2;0" dur="10s" repeatCount="indefinite" begin="2s"/>
+    </path>
+  </g>
+
+  <!-- Floating shadow particles -->
+  <g>
+    
+    <circle cx="200.0" cy="750.0" r="2.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="750.0;400.0" dur="3.5s" begin="0.0s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.5s" begin="0.0s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="350.0" cy="800.0" r="3.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="800.0;450.0" dur="4.0s" begin="0.7s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="4.0s" begin="0.7s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="650.0" cy="780.0" r="2.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="780.0;430.0" dur="3.8s" begin="1.4s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.8s" begin="1.4s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="780.0" cy="820.0" r="2.5" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="820.0;470.0" dur="3.2s" begin="2.1s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.2s" begin="2.1s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="150.0" cy="700.0" r="1.5" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="700.0;350.0" dur="4.5s" begin="2.8s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="4.5s" begin="2.8s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="450.0" cy="850.0" r="2.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="850.0;500.0" dur="3.0s" begin="3.5s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.0s" begin="3.5s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="550.0" cy="790.0" r="3.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="790.0;440.0" dur="4.2s" begin="4.2s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="4.2s" begin="4.2s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="300.0" cy="720.0" r="2.0" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="720.0;370.0" dur="3.5s" begin="4.9s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.5s" begin="4.9s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="700.0" cy="750.0" r="1.5" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="750.0;400.0" dur="3.8s" begin="5.6s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.8s" begin="5.6s" repeatCount="indefinite"/>
+    </circle>
+    <circle cx="250.0" cy="830.0" r="2.5" fill="rgba(180,40,40,0.6)" opacity="0">
+      <animate attributeName="cy" values="830.0;480.0" dur="3.0s" begin="6.3s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.6;0" dur="3.0s" begin="6.3s" repeatCount="indefinite"/>
+    </circle>
+  </g>
+
+  <!-- Falling feathers -->
+  <g>
+    
+    <g transform="translate(400.0,200.0)" opacity="0">
+      <path d="M0,0 C-5,-3 -8,-1 -5,4 C-2,9 0,14 0,14 C0,14 2,9 5,4 C8,-1 5,-3 0,0Z" fill="rgba(40,10,10,0.7)"/>
+      <animateTransform attributeName="transform" type="translate" values="400.0,200.0;430.0,600.0" dur="5s" begin="%!d(float64=0)s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="5s" begin="%!d(float64=0)s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(550.0,250.0)" opacity="0">
+      <path d="M0,0 C-5,-3 -8,-1 -5,4 C-2,9 0,14 0,14 C0,14 2,9 5,4 C8,-1 5,-3 0,0Z" fill="rgba(40,10,10,0.7)"/>
+      <animateTransform attributeName="transform" type="translate" values="550.0,250.0;580.0,650.0" dur="5s" begin="%!d(float64=1)s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="5s" begin="%!d(float64=1)s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(320.0,180.0)" opacity="0">
+      <path d="M0,0 C-5,-3 -8,-1 -5,4 C-2,9 0,14 0,14 C0,14 2,9 5,4 C8,-1 5,-3 0,0Z" fill="rgba(40,10,10,0.7)"/>
+      <animateTransform attributeName="transform" type="translate" values="320.0,180.0;350.0,580.0" dur="5s" begin="%!d(float64=2)s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="5s" begin="%!d(float64=2)s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(680.0,220.0)" opacity="0">
+      <path d="M0,0 C-5,-3 -8,-1 -5,4 C-2,9 0,14 0,14 C0,14 2,9 5,4 C8,-1 5,-3 0,0Z" fill="rgba(40,10,10,0.7)"/>
+      <animateTransform attributeName="transform" type="translate" values="680.0,220.0;710.0,620.0" dur="5s" begin="%!d(float64=3)s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="5s" begin="%!d(float64=3)s" repeatCount="indefinite"/>
+    </g>
+    <g transform="translate(450.0,300.0)" opacity="0">
+      <path d="M0,0 C-5,-3 -8,-1 -5,4 C-2,9 0,14 0,14 C0,14 2,9 5,4 C8,-1 5,-3 0,0Z" fill="rgba(40,10,10,0.7)"/>
+      <animateTransform attributeName="transform" type="translate" values="450.0,300.0;480.0,700.0" dur="5s" begin="%!d(float64=4)s" repeatCount="indefinite"/>
+      <animate attributeName="opacity" values="0;0.7;0" dur="5s" begin="%!d(float64=4)s" repeatCount="indefinite"/>
+    </g>
+  </g>
+
+  <!-- Top mist overlay -->
+  <rect x="0" y="0" width="1000" height="200" fill="url(#topMist)" opacity="0.3">
+    <animate attributeName="opacity" values="0.2;0.4;0.2" dur="6s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Foreground fog -->
+  <rect x="0" y="850" width="1000" height="150" fill="url(#fogGrad)" opacity="0">
+    <animate attributeName="opacity" values="0.2;0.4;0.2" dur="5s" repeatCount="indefinite"/>
+  </rect>
+
+  <!-- Character name -->
+  <g transform="translate(500,940)">
+    <text text-anchor="middle" fill="rgba(200,50,50,0.6)" font-family="Georgia, serif" font-size="22" font-style="italic" letter-spacing="6" style="animation: textGlow 3s ease-in-out infinite;">
+      ✦ Shadow of the Crimson Moon ✦
+    </text>
+  </g>
+
+<radialGradient id="bgGrad" cx="0.50" cy="0.60" r="0.90"><stop offset="0%" stop-color="#0a0008" stop-opacity="1.00"/><stop offset="30%" stop-color="#1a0008" stop-opacity="1.00"/><stop offset="60%" stop-color="#2a0500" stop-opacity="1.00"/><stop offset="100%" stop-color="#050005" stop-opacity="1.00"/></radialGradient>
+<radialGradient id="moonGrad" cx="0.50" cy="0.35" r="0.40"><stop offset="0%" stop-color="#ff3030" stop-opacity="1.00"/><stop offset="40%" stop-color="#cc1010" stop-opacity="1.00"/><stop offset="100%" stop-color="#660000" stop-opacity="1.00"/></radialGradient>
+<radialGradient id="moonGlow" cx="0.50" cy="0.35" r="0.30"><stop offset="0%" stop-color="rgba(255,50,50,0.3)" stop-opacity="1.00"/><stop offset="100%" stop-color="rgba(255,50,50,0)" stop-opacity="1.00"/></radialGradient>
+<radialGradient id="shadowGrad" cx="0.50" cy="0.60" r="0.80"><stop offset="0%" stop-color="#1a1a1a" stop-opacity="1.00"/><stop offset="60%" stop-color="#0a0a0a" stop-opacity="1.00"/><stop offset="100%" stop-color="#000000" stop-opacity="1.00"/></radialGradient>
+<linearGradient id="topMist" x1="0.00" y1="0.00" x2="0.00" y2="1.00"><stop offset="0%" stop-color="rgba(100,10,10,0.4)" stop-opacity="1.00"/><stop offset="100%" stop-color="rgba(100,10,10,0)" stop-opacity="1.00"/></linearGradient>
+<linearGradient id="fogGrad" x1="0.00" y1="0.00" x2="0.00" y2="1.00"><stop offset="0%" stop-color="rgba(80,10,10,0)" stop-opacity="1.00"/><stop offset="100%" stop-color="rgba(80,10,10,0.3)" stop-opacity="1.00"/></linearGradient>
+<filter id="crimsonGlow" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="4.0" result="blur"/>
+  <feFlood flood-color="#ff2020" flood-opacity="0.6" result="glowColor"/>
+  <feComposite in="glowColor" in2="blur" operator="in" result="coloredBlur"/>
+  <feMerge>
+    <feMergeNode in="coloredBlur"/>
+    <feMergeNode in="SourceGraphic"/>
+  </feMerge>
+</filter><filter id="mistBlur" x="-50%" y="-50%" width="200%" height="200%">
+  <feGaussianBlur in="SourceGraphic" stdDeviation="15"/>
+</filter>
+</svg>
