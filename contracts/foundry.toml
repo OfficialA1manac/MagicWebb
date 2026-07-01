@@ -18,6 +18,8 @@ bracket_spacing = false
 
 [rpc_endpoints]
 coston2 = "https://coston2-api.flare.network/ext/C/rpc"
+mainnet = "https://flare-api.flare.network/ext/C/rpc"
 
 [etherscan]
 coston2 = { key = "${ROUTESCAN_API_KEY}", chain = 114, url = "https://api.routescan.io/v2/network/testnet/evm/114/etherscan" }
+mainnet = { key = "${ROUTESCAN_API_KEY}", chain = 14, url = "https://api.routescan.io/v2/network/mainnet/evm/14/etherscan" }
