@@ -220,6 +220,11 @@ contract AuctionHouseSettleSafetyTest is Test {
 
         // Warp past STALL_WINDOW from original stall time
         vm.warp(uint256(firstStalled) + ah.STALL_WINDOW());
+        // Unblock ETH reception so reclaim() can push the refund.
+        // The bidder's receive() reverts when blockReceive==true (factory default),
+        // which would make reclaim() fall back to pendingReturns and leave the
+        // balance unchanged.
+        bidder.setBlockReceive(false);
         uint256 winnerBefore = address(bidder).balance;
         ah.reclaim(id);
         assertEq(address(bidder).balance, winnerBefore + 2 ether, "reclaim refunds winner");

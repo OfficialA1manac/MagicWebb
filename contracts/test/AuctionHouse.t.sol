@@ -526,7 +526,10 @@ contract AuctionHouseTest is Test {
 
     function test_reclaimNotStalledReverts() public {
         (uint256 id,) = _create();
-        vm.expectRevert(NotActive.selector);       // no auction (seller==address(0))
+        // _create() sets a seller, so the auction exists and is active.
+        // reclaim() first checks seller==0 || settled (passes), then checks
+        // stalledAt==0 → reverts with NotStalled().
+        vm.expectRevert(NotStalled.selector);
         ah.reclaim(id);
     }
 }
