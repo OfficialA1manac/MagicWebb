@@ -122,6 +122,24 @@ fi
 echo "  Discovered token IDs: $TOKEN_IDS"
 echo ""
 
+# ── Set token metadata URIs ──
+if [ -n "$METADATA_BASE" ]; then
+    echo "== Setting token URIs =="
+    i=0
+    for TID in $TOKEN_IDS; do
+        META_NAME="${METADATA_FILES[$i]}"
+        URI="${METADATA_BASE%/}/${META_NAME}"
+        echo "  Token $TID -> $URI"
+        cast send "$NFT" "setTokenURI(uint256,string)" "$TID" "$URI" \
+            --private-key "$PRIVATE_KEY" --rpc-url "$RPC" --gas-limit 120000 >/dev/null
+        echo "  ✓ URI set"
+        i=$((i + 1))
+    done
+    echo ""
+else
+    echo "WARNING: METADATA_BASE unset — tokens will mint with no metadata URI." >&2
+fi
+
 # ── Approve marketplace ──
 echo "== Approving marketplace =="
 cast send "$NFT" "setApprovalForAll(address,bool)" "$MARKETPLACE" true \

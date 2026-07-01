@@ -67,6 +67,15 @@ contract AuctionHouse is MarketplaceCore {
     ///         the winner in full and cancels the auction. Prevents a seller
     ///         from monopolising the winner's escrow indefinitely.
     uint64 public constant STALL_WINDOW        = 7 days;
+    /// @notice Absolute cap on total anti-snipe extensions. On Flare mainnet
+    ///         FLR trades at sub-cent values, making 0.001 ETH/FLR per flip
+    ///         economically negligible for griefers who could alternate
+    ///         minimum-increment bids and keep extending the auction
+    ///         indefinitely. Capping total extensions to 24h bounds
+    ///         worst-case griefing without redeploy-time tuning per network.
+    ///         startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION = the
+    ///         absolute latest possible endsAt, regardless of extension count.
+    uint64 public constant MAX_TOTAL_EXTENSION = 24 hours;
     /// @notice Minimum absolute increment when both `minIncrementBps` and
     ///         `minIncrementFlat` are zero (or both below this floor). Prevents
     ///         collusive 1-wei bid exchanges that perpetually satisfy the
@@ -315,11 +324,19 @@ contract AuctionHouse is MarketplaceCore {
         // Anti-snipe — gated on `newLead` so sub-threshold accumulation cannot
         // extend the timer. Underflow-safe: the AuctionEnded check above
         // guarantees block.timestamp < a.endsAt here.
+        // M-01 fix: cap total cumulative extensions at 24h beyond the
+        // original auction window so griefers on low-gas/high-throughput
+        // networks (Flare mainnet at sub-cent FLR) cannot keep the auction
+        // alive indefinitely by alternating the lead by min increment.
         unchecked {
             if (newLead && a.endsAt - block.timestamp < EXTENSION_WINDOW) {
-                uint64 newEnd = uint64(block.timestamp) + EXTENSION_WINDOW;
-                a.endsAt = newEnd;
-                emit AuctionExtended(id, newEnd);
+                uint64 hardCap = a.startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION;
+                uint64 newEnd  = uint64(block.timestamp) + EXTENSION_WINDOW;
+                if (newEnd > hardCap) newEnd = hardCap;
+                if (newEnd > a.endsAt) {
+                    a.endsAt = newEnd;
+                    emit AuctionExtended(id, newEnd);
+                }
             }
         }
 
