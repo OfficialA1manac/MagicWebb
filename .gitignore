@@ -88,3 +88,7 @@ contracts/lib/
 contracts/foundry.lock
 # seed-testnet built binary (run via `go run` from tools/seed-testnet)
 tools/seed-testnet/seed-testnet
+
+# NUL device files (Windows artifact)
+nul
+app/nul
