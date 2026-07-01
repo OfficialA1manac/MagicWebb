@@ -187,7 +187,7 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "rng failed"})
 		}
 		n := hex.EncodeToString(rb[:])
-		if !ns.SetIfFree(address, n, 5*time.Minute) {
+		if !ns.SetIfFree(address, n, config.C.NonceTTL) {
 			// Live nonce exists — caller must consume it first. Rate-limit
 			// prevents tight retry loops from a legitimate user.
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce already issued, consume it or wait for expiry"})
@@ -430,6 +430,7 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/token/:addr/:id", uiToken(q))
 	app.Get("/search", uiSearch(q))
 	app.Get("/metrics", uiMetrics(q))
+	app.Get("/admin/stalled", uiAdminStalled(q))
 	app.Get("/docs", uiDocsIndex())
 	app.Get("/docs/:slug", uiDoc())
 

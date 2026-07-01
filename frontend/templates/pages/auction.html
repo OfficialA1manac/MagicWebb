@@ -128,10 +128,50 @@
       }
       $store.wallet.bid({{.AuctionID}}, this.parseBidWei(this.bidAmt).toString(), {{.EndsAt.Unix}});
     },
+    // ── WebSocket channel subscription ─────────────────────────────────────
+    wsChannel: 'token:{{lower .Collection}}:{{.TokenID}}',
+    wsSubscribed: false,
     init() {
       setInterval(() => { this.now = Math.floor(Date.now()/1000); }, 1000);
       this.refreshHighestOffer();
       this.refreshPrevBid();
+
+      // ── WebSocket subscribe for instant bid updates ───────────────────────
+      var self = this;
+      var doSub = function () {
+        if (window.MW_WS && window.MW_WS.subscribe) {
+          window.MW_WS.subscribe([self.wsChannel]);
+          self.wsSubscribed = true;
+        }
+      };
+      if (window.MW_WS && window.MW_WS.connected) {
+        doSub();
+      }
+      // Re-subscribe on every (re)connect — the server has no memory of
+      // this channel across a dropped/reopened socket.
+      window.addEventListener('mw-ws-open', doSub);
+      window.addEventListener('mw-ws-close', function () { self.wsSubscribed = false; });
+      window.addEventListener('pagehide', function () {
+        if (window.MW_WS && window.MW_WS.unsubscribe) {
+          window.MW_WS.unsubscribe([self.wsChannel]);
+          self.wsSubscribed = false;
+        }
+      }, { once: true });
+
+      // ── Watch $store.ws.lastState for instant bid floor updates ────────────
+      // When a WebSocket action response arrives (via MW_WS.getAuction()), the
+      // state is written to $store.ws.lastState. If the data matches this
+      // auction, update prevBidWei immediately — faster than the 3s polling.
+      try {
+        this.$watch('$store.ws.lastState', function (newState) {
+          if (!newState || !newState.auction_id) return;
+          if (Number(newState.auction_id) !== {{.AuctionID}}) return;
+          if (newState.highest_bid_wei !== undefined) {
+            self.prevBidWei = String(newState.highest_bid_wei);
+          }
+        });
+      } catch (_) { /* $watch not available — fallback to polling */ }
+
       // Re-check highest offer + prev bid every 3s while the tab is
       // visible so the floor guard doesn't go stale mid-page. The live
       // partial on the left column re-renders the data region but the
@@ -181,6 +221,16 @@
       <a href="/collection/{{.Collection}}" class="text-sm text-sky-200 hover:text-sky-100 transition font-bold">{{shortAddr .Collection}}</a>
       <span class="text-white/40">·</span>
       <span class="text-sm text-white/40">#{{.TokenID}}</span>
+      <!-- Live badge: visible when WebSocket is subscribed to this token's channel -->
+      <span x-show="wsSubscribed" x-cloak
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider"
+            title="Receiving live updates via WebSocket">
+        <span class="relative flex w-1.5 h-1.5">
+          <span class="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" style="animation-duration: 1.8s;"></span>
+          <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        </span>
+        Live
+      </span>
     </div>
 
     <div class="bg-gradient-to-br from-ink-900 to-ink-900/80 border border-violet-400/30 rounded-2xl p-5 mb-5 glow-violet backdrop-blur">

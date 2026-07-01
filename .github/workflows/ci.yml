@@ -23,6 +23,25 @@ jobs:
       # v35: pinned to full semver tags (immutable git references) instead
       # of mutable major-version tags (@v4). Dependabot will bump these.
       - uses: actions/checkout@v4.2.0
+      # ── Disk space recovery ──────────────────────────────────────────────────
+      # GitHub-hosted runners start with ~29 GB free but can drop below 1 GB
+      # after checkout + tool downloads. Go's test cache, module cache, and
+      # build artifacts can exhaust the remaining space mid-run, producing
+      # cryptic ENOSPC (no space left on device) failures. The cleanup below
+      # frees ~30+ GB by removing pre-installed toolchains (.NET, Android,
+      # Haskell, Swift, etc.) and Docker images we never use. Hazard: if
+      # Go's module cache was previously populated, `go clean -modcache`
+      # purges it — the next `go build` re-downloads modules, but this is
+      # cheaper than an ENOSPC crash mid-pipeline.
+      - name: Free disk space
+        run: |
+          echo "=== Before cleanup ==="
+          df -h /
+          sudo rm -rf /usr/share/dotnet /usr/local/lib/android /opt/ghc /usr/local/.ghcup
+          sudo rm -rf /usr/local/share/powershell /usr/share/swift /usr/local/julia
+          sudo docker image prune -af || true
+          echo "=== After cleanup ==="
+          df -h /
       - uses: actions/setup-go@v5.4.0
         with:
           go-version: "1.25"

@@ -124,6 +124,8 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 //     always present even when the metrics query races with a transient
 //     DB outage — the saturation panel renders correctly while the
 //     "metrics temporarily unavailable" banner is shown;
+//   - the stalled auction counts are appended so ops can see at a glance
+//     whether auctions are backing up (keeper/refund-sweeper health);
 //   - the metrics_unavailable sentinel is appended AFTER flat-key merge
 //     so a future market field that happens to share that name cannot
 //     silently clobber it.
@@ -164,6 +166,23 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 	for k, v := range flat {
 		out[k] = v
 	}
+
+	// Append stalled auction counts. Best-effort: a DB failure here does
+	// not taint the rest of the metrics response — the counts are simply
+	// absent from the JSON when the query fails.
+	if stalled, serr := s.q.GetStalledAuctionCounts(ctx); serr == nil && stalled != nil {
+		b2, merr2 := json.Marshal(stalled)
+		if merr2 == nil {
+			var flat2 map[string]any
+			if uerr2 := json.Unmarshal(b2, &flat2); uerr2 == nil {
+				reattachIntFields(flat2)
+				for k, v := range flat2 {
+					out[k] = v
+				}
+			}
+		}
+	}
+
 	out["metrics_unavailable"] = ""
 	return out
 }

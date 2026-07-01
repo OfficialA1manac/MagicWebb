@@ -122,6 +122,7 @@ ORDER BY block_number, log_index;
 | Indexer 60 s behind     | indexer (auto)    | Wait one tick; if persistent, rotate `RPC_URLS` priority    |
 | Keeper lock lost        | on-call (P1)     | Confirm the rotate was intentional (`<CONTRACT_ADMIN>` grantRole trace) |
 | Postgres trailing       | DBA (P2)         | Check `pg_stat_replication`; if application-side pool saturated, deploy a fresh instance |
+| Image quota exhausted   | indexer operator | See F-09 runbook below; check `nft_image_blobs` total bytes + per-collection counts; raise cap or offload to object storage |
 
 ## === v29-Specific Monitoring ===
 
@@ -152,6 +153,314 @@ If `log.Warn("keeper: feeCap above max; clamping")` fires more than
 - Hold the keeper off-air until fees normalize.
 - Or accept that the keeper queue is backed up and gas spend is
   capped.
+
+### F-04 stalled auction dashboard
+
+An admin dashboard for inspecting auctions that require manual attention
+is served at two endpoints:
+
+**Admin page (HTMX/Alpine):** `GET /admin/stalled`
+- Renders an Alpine.js dashboard with count cards, a breakdown bar chart,
+  and a detail table of stalled auction rows.
+- Fetches data client-side from the API endpoint below.
+- Auto-refreshes every 30 seconds.
+- Requires a connected wallet with admin privileges (401/403 errors are
+  surfaced inline).
+
+**API (JSON):** `GET /api/v1/admin/auctions/stalled?limit=N`
+- JWT + `IsAdmin` gated. Returns both summary counts and the full row list.
+- Default limit 100, max 200.
+
+Response shape:
+```json
+{
+  "counts": {
+    "expiredUnsettled": 5,
+    "inactiveNoBids": 2,
+    "unrefunded": 12
+  },
+  "rows": [
+    {
+      "auction_id": 142,
+      "collection": "0xabc…def",
+      "token_id": "12345",
+      "seller": "0x…",
+      "status": "active",
+      "stall_reason": "expired_unsettled",
+      "ends_at": "2026-06-28T12:00:00Z",
+      "starts_at": "2026-06-27T12:00:00Z",
+      "highest_bid_wei": "5000000000000000000",
+      "highest_bidder": "0x…",
+      "reserve_price_wei": "1000000000000000000",
+      "create_tx": "0x…"
+    }
+  ]
+}
+```
+
+`stall_reason` is one of:
+- `expired_unsettled` — status='active' and ends_at < now() (keeper hasn't settled)
+- `inactive_no_bids` — status='active', no leader, started >30 min ago (should be cancelled)
+- `unrefunded` — settled/cancelled, losers_refunded=false, not attempted in last 2 min
+
+**Covering indexes (migration 019):**
+- `idx_auctions_inactive_no_bids` on `auctions(starts_at)` WHERE `status='active' AND highest_bidder IS NULL`
+- The expired_unsettled query is covered by the existing `idx_auctions_active (ends_at) WHERE status='active'` from migration 002.
+- The unrefunded branch uses the existing `idx_auctions_refund_pending (auction_id) WHERE status IN ('settled','cancelled') AND NOT losers_refunded` from migration 010.
+
+### F-05 GraphQL query endpoint
+
+A read-only GraphQL endpoint exposes the full data model (collections, listings,
+auctions, offers, tokens, profiles, activity, metrics, trending, search) through
+a single `POST /graphql` query endpoint. The schema is auto-loaded at startup
+from `backend/internal/graphql/schema.graphql`.
+
+**Endpoint:** `POST /graphql`
+- Accepts `{"query": "...", "variables": {...}}` JSON body.
+- Read-only (only `query` operations accepted; mutations/subscriptions rejected).
+- No authentication required — access control mirrors the REST API (public data).
+- Playground at `GET /graphiql` (serves the GraphiQL IDE for interactive exploration).
+- Schema documentation at `GET /graphql` (returns a rendered docs page).
+
+**Available top-level queries (26 total):**
+
+| Category | Queries |
+|----------|---------|
+| Collections | `collection(address)`, `collections(limit)`, `collectionStats(collection)`, `traitValues(collection)`, `countCollections` |
+| Listings | `listing(collection, tokenID)`, `listings(collection, seller, sort, limit, minPrice, maxPrice, traits)`, `countActiveListings` |
+| Auctions | `auction(id)`, `auctions(collection, seller, status, limit, minPrice, maxPrice)`, `countActiveAuctions` |
+| Offers | `offers(collection, tokenID, bidder, owner, status, limit)`, `offerPositions(collection, tokenID)` |
+| Tokens | `tokenMeta(collection, tokenID)`, `tokenFullMetadata(collection, tokenID)`, `tokenAttributes(collection, tokenID)`, `tokenActivity(collection, tokenID, limit)` |
+| Activity | `activity(limit, address, collection, tokenID)` |
+| Profiles | `profile(address)`, `notifications(address, limit)`, `savedSearches(address, page, limit)` |
+| Wallet | `walletNFTs(owner)` |
+| Search | `search(query, limit)` |
+| Metrics | `metrics`, `trending(window, limit)`, `totalVolume24h` |
+
+**Nested sub-queries (computed):**
+- `Collection.stats`, `Collection.floorPrice`, `Collection.volume24h`, `Collection.listedCount` — resolved via `GetCollectionStats`
+- `Collection.listings(limit, sort)` — resolved via `ListActiveListings`
+- `Collection.auctions(limit, status)` — resolved via `ListAuctions`
+- `Auction.bids` — resolved via `GetBidsForAuction`
+- `Auction.effectiveBids` — resolved via `GetEffectiveBids`
+
+**Example query:**
+```graphql
+{
+  collection(address: "0xabc…") {
+    name
+    stats { floorPriceWei listedCount }
+    listings(limit: 5, sort: "price_asc") {
+      tokenID priceWei imageURI
+    }
+  }
+  metrics {
+    totalActiveListings totalSales grossVolumeWei
+  }
+}
+```
+
+**Monitoring considerations:**
+- The executor walks selection sets dynamically — deep or recursive queries are
+  bounded by the schema (no cycles in `Collection → listings → collection`).
+- No query cost analysis is applied; a single query that requests all nested
+  sub-fields on a large result set may trigger N+1 DB queries (e.g.
+  `auctions { bids { ... } }` on a listing page). Monitor slow query
+  log for unexpected patterns.
+- The GraphiQL playground (`GET /graphiql`) is served from `backend/internal/graphql/handler.go`
+  and renders the GraphiQL HTML.
+
+### F-06 WebSocket bidirectional endpoint
+
+The SSE `/events` endpoint is now complemented by a bidirectional WebSocket
+endpoint at `/ws` that supports client-to-server actions, channel-based
+subscriptions, and server-to-client push over the same connection.
+
+**Endpoint:** `wss://magicwebb.fly.dev/ws` (or `ws://localhost:8080/ws` locally)
+- Upgrades HTTP to WebSocket via `fasthttp/websocket`.
+- Authenticated via JWT cookie (`mw_s_<addr>` prefix) or `Authorization: Bearer <jwt>` header.
+- Unauthenticated connections are accepted but limited to public data actions.
+
+**Message types (client → server):**
+
+| Type | Direction | Payload | Description |
+|------|-----------|---------|-------------|
+| `ping` | client → server | `{}` | Keepalive; server responds with `pong` |
+| `action` | client → server | `{"action":"get_listing","params":{"collection":"0x…","token_id":"123"}}` | Lightweight state query (no wallet signature needed) |
+| `subscribe` | client → server | `{"channels":["token:0xabc:123","collection:0xabc"]}` | Subscribe to event channels for targeted push filtering |
+| `unsubscribe` | client → server | `{"channels":["token:0xabc:123"]}` | Unsubscribe from event channels |
+
+**Message types (server → client):**
+
+| Type | Direction | Payload | Description |
+|------|-----------|---------|-------------|
+| `ack` | server → client | `{"status":"ok","message":"connected"}` | Confirmation of connection or action receipt |
+| `pong` | server → client | `{"server_time_ms": …}` | Response to client ping |
+| `error` | server → client | `{"status":"error","message":"…"}` | Error response (malformed message, unknown action, DB error) |
+| `state` | server → client | `{collection, token_id, name, …}` | Result of an `action` query |
+| `subscribed` / `unsubscribed` | server → client | `{"channels":[…]}` | Confirmation of subscription changes |
+| Event types (`listing-updated`, `auction-updated`, `offer-updated`, `notification`, `activity`) | server → client | Event-specific JSON | SSE events bridged to WS; clients without active subscriptions receive all events |
+
+**Available actions (`action` → `state`):**
+- `get_listing` — params: `{collection, token_id}` → returns `ListingRow`
+- `get_auction` — params: `{auction_id}` → returns `AuctionRow`
+- `get_offer` — params: `{offer_id}` → returns `OfferRow`
+- `get_token` — params: `{collection, token_id}` → returns full token metadata + attributes
+
+**Connection limits:**
+- Per-IP: 20 concurrent connections (returns 429 when exceeded)
+- Global: 5,000 concurrent connections (returns 503 when exceeded)
+- Read limit: 4 KB per message
+- Read deadline: 60 s (extended by pong handler)
+- Write deadline: 10 s
+- Send buffer: 64 messages (slow clients have messages dropped)
+
+**Monitoring:**
+- Active connection count via `ws.Handler.ActiveConns()` — consider exposing as a
+  Prometheus gauge or logging on tick if >80% of the 5,000 cap is reached.
+- Per-IP connection churn: if a single IP rapidly opens/closes connections it
+  may indicate a misconfigured client or a DoS attempt.
+- SSE bridge filter drops: when a client subscribes to specific channels and the
+  SSE bridge goroutine filters out an event, no log is emitted — the client
+  simply doesn't receive it. If expected events aren't arriving, verify the
+  subscription channel names match the SSE event types.
+
+### F-07 Self-hosted image store (imagestore) and quota enforcement
+
+NFT images and metadata JSON are self-hosted in Postgres BYTEA columns
+(catalogued in `nft_image_blobs`) keyed by SHA-256 hash, so the frontend
+serves all media from the same origin (`/api/v1/img/<sha256>`) instead of
+proxying external IPFS/HTTP gateways on every page load.
+
+**Key constants (hard-coded in `backend/internal/imagestore/imagestore.go`):**
+
+| Constant | Value | Purpose |
+|----------|-------|---------|
+| `MaxBlobBytes` | 8 MiB | Rejects individual blobs larger than this before INSERT |
+| `MaxBlobCountPerCollection` | 1,000 | Caps distinct blobs per collection (dedup hits bypass) |
+| `MaxTotalBlobBytes` | 256 MiB | Caps cumulative blob volume across all collections |
+
+When a quota cap is exceeded, `Put()` returns `Skipped=true` and the caller falls
+back to proxying the upstream URL (the frontend still renders the image, just not
+from the local store). The image retry worker retries periodically.
+
+**Endpoints:**
+- `GET /api/v1/img/<sha256>` — serves a blob by hash (Content-Type from sniff, `Cache-Control: immutable`)
+- `GET /api/v1/media?url=…` — proxy fallback for pre-ingest / un-stored URIs
+- `POST /api/v1/img/retry?coll=0x…&id=<token_id>` — user-triggered retry (rate-limited: 10 req/min per IP)
+
+**Image retry workers:**
+- **Slow-path worker:** runs every 60 min, retries up to 50 tokens per tick where
+  `image_uri` is still an upstream URL. Found in `indexer/runImageRetryWorker()`.
+- **Metadata worker:** runs every 30 s, fetches missing token metadata + images
+  with semaphore-bounded parallelism (`METADATA_CONCURRENCY` env var, default 3).
+
+**Relevant migrations:**
+- `013_image_blobs.sql` — creates `nft_image_blobs` table (BYTEA + mime + refcount)
+- `014_image_retry_backoff.sql` — adds retry columns to `nft_metadata`
+- `015_image_retry_recompute.sql` — computes initial retry candidates
+- `017_listings_price_expr_index.sql` — expression index for listings price queries
+- `018_image_blobs_collection.sql` — adds `collection` column for per-collection quota
+
+**Monitoring: quota-exceeded log signatures:**
+```
+log.Warn().Bool("skipped",true).Msg("metadata: self-host meta body rejected or quota exceeded")
+log.Warn().Msg("image-retry: quota exceeded, will retry later")
+log.Warn().Int("count",n).Msg("image-retry: attempting self-host for upstream image URIs")
+```
+
+If these logs appear in production:
+1. Check total blob volume: `SELECT sum(byte_length) FROM nft_image_blobs`
+2. Check per-collection blob counts: `SELECT collection, count(*) FROM nft_image_blobs GROUP BY collection ORDER BY count DESC`
+3. If `MaxTotalBlobBytes` (256 MiB) is regularly hit, raise the cap in `imagestore.go`
+   and deploy. The cap exists to protect the Postgres free-tier limit — for
+   paid/self-hosted Postgres it can safely be increased.
+
+### F-08 Astro frontend app (SSR + client-side hydration)
+
+The Astro frontend (`app/`) is a separate build target that produces static HTML
++ client-side JS bundles served from `app/dist/`. It coexists with the Go HTMX
+backend via the `mountAstro()` middleware in `cmd/server/ui.go`.
+
+**Architecture:**
+- Astro pages are built with `astro build` → output to `app/dist/`
+- Go middleware serves Astro-built pages at their URL paths (e.g. `/listings`)
+  and falls through to Go HTMX handlers when no Astro page matches
+- Paths like `/api/`, `/auth/`, `/static/`, `/events`, `/healthz` bypass the
+  Astro middleware entirely
+- Dynamic routes (`/token/:addr/:id`, `/auction/:id`, `/collection/:addr`,
+  `/profile/:addr`) use catch-all index.html pages where client-side JS parses
+  params from `window.location.pathname`
+
+**Key files:**
+- `app/astro.config.mjs` — Astro config with Svelte integration
+- `app/src/layouts/BaseLayout.astro` — shared page layout
+- `app/src/pages/` — Astro page components per route
+- `app/src/components/` — Svelte components (NFT cards, wallet connect)
+- `app/src/appkit-bridge.js` — Reown AppKit bridge for WalletConnect
+- `app/vite.bridge.config.mjs` — Vite config for bundling the AppKit bridge
+
+**Data store:**
+- `app/.astro/data-store.json` — Astro content layer data store (auto-generated)
+- `app/.astro/settings.json` — Astro content layer settings
+
+**Monitoring considerations:**
+- The Astro middleware uses `os.Stat` on every request to check for file
+  existence. Under high load, this can generate significant filesystem I/O.
+  If latency spikes are observed, consider a startup-time in-memory map of
+  known page paths to reduce per-request stat calls.
+- Cache headers: HTML pages get 5-min `max-age=300`; hashed Vite assets
+  (JS/CSS) get 1-year `max-age=31536000, immutable`.
+- The `ASTRO_DIST_DIR` env var (default `../app/dist`) must point to a valid
+  build output directory. A missing or empty dist dir silently passes all
+  requests through to Go HTMX handlers — no 500, just missing Astro pages.
+- Svelte components use client-side hydration; if the JS bundle fails to load
+  (CSP block, network error), the Svelte components render as empty divs with
+  no fallback. Monitor browser console error rates for `appkit-bridge.js` and
+  Svelte chunk load failures.
+- The Astro dev server (port 4321) proxies to Go on :8080 in development.
+  Production uses pre-built static files only — no Node process required.
+
+### F-09 Runbook: image quota exceeded alerts
+
+When imagestore quota caps are hit, images fall back to proxying from upstream
+URLs — the frontend still works but without the latency/privacy benefits of
+self-hosting. Persistent quota exhaustion means the blob store needs attention.
+
+**Alert signal:** Log patterns matching:
+- `log.Warn().Str("coll",…).Str("token",…).Msg("image-retry: quota exceeded, will retry later")`
+- `log.Warn().Bool("skipped",true).Msg("metadata: self-host meta body rejected or quota exceeded")`
+
+**Investigation steps:**
+1. Check per-collection blob counts:
+   ```sql
+   SELECT collection, count(*) AS blobs, sum(byte_length) AS total_bytes
+   FROM nft_image_blobs
+   GROUP BY collection
+   ORDER BY blobs DESC;
+   ```
+2. Check total blob volume:
+   ```sql
+   SELECT count(*) AS total_blobs, sum(byte_length) AS total_bytes FROM nft_image_blobs;
+   ```
+3. Identify the collection(s) hitting `MaxBlobCountPerCollection` (1,000):
+   any collection with `count(*) >= 1000` is throttled.
+4. Check if `MaxTotalBlobBytes` (256 MiB) is the bottleneck:
+   `sum(byte_length) > 256 * 1024 * 1024` means the global cap is hit.
+
+**Resolution options:**
+- **Short-term:** Increase `MaxTotalBlobBytes` in `imagestore/imagestore.go` and
+  redeploy. For paid/self-hosted Postgres instances, 1 GiB or more is safe.
+- **Short-term:** Increase `MaxBlobCountPerCollection` (currently 1,000). Most
+  collections have far fewer distinct image hashes; if a single collection has
+  genuinely exceeded 1,000 unique images, the cap may be too conservative.
+- **Long-term:** Consider offloading blob storage to object storage (S3/R2) with
+  Postgres as the metadata catalog. The current BYTEA-based store is designed
+  for the Postgres free tier (512 MB); at scale, a dedicated blob store with
+  CDN fronting is more cost-effective.
+- **Monitoring:** Add a periodic health check that queries `count(*)` and
+  `sum(byte_length)` from `nft_image_blobs` and emits a warning metric when
+  either approaches 80% of its cap.
 
 ## === Keepalive: tests + audits replay nightly ===
 

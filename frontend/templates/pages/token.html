@@ -20,8 +20,39 @@
     listPrice:   '', listDays: '30',
     offerAmt:    '', offerDays: '3',
     auctionReserve: '', auctionDays: '3',
+    wsChannel:   'token:{{lower .Contract}}:{{.TokenID}}',
     get isSeller() { return this.sellerAddr && this.sellerAddr !== '' && $store.wallet.address === this.sellerAddr; },
     get isOwner()  { return this.ownerAddr  && this.ownerAddr  !== '' && $store.wallet.address === this.ownerAddr;  },
+    // ── WebSocket channel subscription ─────────────────────────────────────
+    // Subscribes to the token's event channel on page load so real-time
+    // updates (listing-updated, auction-updated, offer-updated) arrive
+    // directly via WebSocket. Unsubscribes on pagehide (covers bfcache).
+    // The channel is pre-lowercased server-side (Go template {{lower}}).
+    wsSubscribed:   false,
+    init() {
+      // Subscribe to the token's WS channel. If the WebSocket isn't connected
+      // yet (race: ws.js starts connecting but onopen hasn't fired before
+      // Alpine initialises), defer until mw-ws-open fires.
+      var self = this;
+      var doSub = function () {
+        if (window.MW_WS && window.MW_WS.subscribe) {
+          window.MW_WS.subscribe([self.wsChannel]);
+          self.wsSubscribed = true;
+        }
+      };
+      if (window.MW_WS && window.MW_WS.connected) {
+        doSub();
+      } else {
+        window.addEventListener('mw-ws-open', doSub, { once: true });
+      }
+      // Unsubscribe when navigating away (pagehide covers bfcache too).
+      window.addEventListener('pagehide', function () {
+        if (window.MW_WS && window.MW_WS.unsubscribe) {
+          window.MW_WS.unsubscribe([self.wsChannel]);
+          self.wsSubscribed = false;
+        }
+      }, { once: true });
+    },
   }" class="grid lg:grid-cols-5 gap-8">
 
   <!-- ── Left column: live data region. Image + traits + details + offers.
@@ -58,6 +89,16 @@
         <a href="/collection/{{.Contract}}" class="text-sm text-sky-200 hover:text-sky-100 transition font-bold">{{shortAddr .Contract}}</a>
         <span class="text-white/40">·</span>
         <span class="text-sm text-white/40 font-mono">#{{.TokenID}}</span>
+        <!-- Live badge: visible when WebSocket is subscribed to this token's channel -->
+        <span x-show="wsSubscribed" x-cloak
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider"
+              title="Receiving live updates via WebSocket">
+          <span class="relative flex w-1.5 h-1.5">
+            <span class="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" style="animation-duration: 1.8s;"></span>
+            <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          </span>
+          Live
+        </span>
         {{if .CollectionVerified}}
         <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-200 text-[10px] font-extrabold uppercase tracking-wider glow-violet" title="Verified collection">✓ Verified</span>
         {{end}}

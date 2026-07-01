@@ -2,9 +2,31 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, NotStalled, StallNotOver, InvalidAmount, CannotCancel, BidOverflow} from "../src/AuctionHouse.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
+
+/// @dev Contract bidder that blocks ERC-1155 onERC1155Received (buyer-fault).
+contract MaliciousBidderForTest {
+    bool public blockERC1155Receive = true;
+
+    constructor() payable {}
+
+    receive() external payable {}
+
+    function setBlockERC1155Receive(bool b) external { blockERC1155Receive = b; }
+
+    function onERC1155Received(address, address, uint256, uint256, bytes calldata)
+        external view returns (bytes4)
+    {
+        if (blockERC1155Receive) revert("no ERC1155");
+        return this.onERC1155Received.selector;
+    }
+
+    function bidOn(AuctionHouse ah, uint256 id) external payable {
+        ah.bid{value: msg.value}(id);
+    }
+}
 
 contract AuctionHouseTest is Test {
     AuctionHouse ah;
@@ -355,5 +377,156 @@ contract AuctionHouseTest is Test {
         ah.settle(id);
         assertEq(feeRecipient.balance - vb, _fee(amt));
         assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
+    }
+
+    // ── Exact reserve match boundary ──────────────────────────────────────────
+
+    /// @dev Bid amount that equals the reserve exactly (not above) must still
+    ///      take the lead. The condition is `newTotal >= a.reserve`.
+    function test_exactReserveMatchTakesLead() public {
+        (uint256 id,) = _create();                 // reserve = 1 ether
+        _bid(id, alice, 1 ether);                  // exactly the reserve
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, alice, "exact reserve match must lead");
+        assertEq(t, 1 ether);
+    }
+
+    /// @dev Bid one wei below reserve must accumulate but NOT take the lead.
+    function test_oneWeiBelowReserveDoesNotLead() public {
+        (uint256 id,) = _create();                 // reserve = 1 ether
+        _bid(id, alice, 1 ether - 1);              // 1 wei below
+        (address l,) = _leader(id);
+        assertEq(l, address(0), "one wei below reserve does not lead");
+        assertEq(ah.cumulative(id, alice), 1 ether - 1);
+    }
+
+    // ── Anti-snipe: non-newLead does NOT extend ───────────────────────────────
+
+    /// @dev Sub-threshold accumulation (below leader, no lead change) must NOT
+    ///      trigger anti-snipe extension. Only `newLead=true` extends the timer.
+    function test_antiSnipeNotTriggeredByAccumulation() public {
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        uint64 end = uint64(block.timestamp + 1 hours);
+        uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
+        vm.stopPrank();
+        _bid(id, alice, 2 ether);                  // alice leads at 2 ETH
+        vm.warp(end - 1 minutes);                  // inside extension window
+        _bid(id, bob, 0.5 ether);                  // below leader, no lead change
+        (,,,,,,uint64 newEnd,,,,,,,) = ah.auctions(id);
+        assertEq(newEnd, end, "timer NOT extended for sub-threshold bid");
+        // Now bob overtakes with a qualifying bid → timer extends
+        _bid(id, bob, 2 ether);                    // cumulative 2.5 > 2.1 min next
+        (,,,,,,newEnd,,,,,,,) = ah.auctions(id);
+        assertGt(newEnd, end, "timer extended on newLead");
+    }
+
+    // ── Leader self top-up ────────────────────────────────────────────────────
+
+    /// @dev When the current leader bids more, leaderTotal rises but no
+    ///      OutbidNotification is emitted (leadership unchanged).
+    function test_leaderSelfTopUpIncreasesTotal() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, alice); assertEq(t, 1 ether);
+        _bid(id, alice, 0.5 ether);                // self top-up
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice, "alice still leader");
+        assertEq(t2, 1.5 ether, "leaderTotal increased");
+        assertEq(ah.cumulative(id, alice), 1.5 ether);
+    }
+
+    // ── MIN_BID_INCREMENT floor for 0/0 increment config ──────────────────────
+
+    /// @dev audit-#5: When both minIncrementBps and minIncrementFlat are 0,
+    ///      the bid() path falls through to MIN_BID_INCREMENT (0.001 ether)
+    ///      to prevent 1-wei collusive loop that extends the timer forever.
+    function test_minBidIncrementFloorPreventsOneWeiLoop() public {
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        // minIncBps=0, minIncFlat=0 → floor is MIN_BID_INCREMENT
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 0, 0);
+        vm.stopPrank();
+        _bid(id, alice, 1 ether);                  // alice leads
+        // Bob tries to overtake with just 1 wei above — must be rejected.
+        vm.prank(bob);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 1 ether + 1 wei}(id);        // 1 wei above leader, but MIN_BID_INCREMENT=0.001E
+
+        // Bob bids enough to clear MIN_BID_INCREMENT.
+        uint128 qualifying = 1 ether + ah.MIN_BID_INCREMENT();
+        vm.deal(bob, uint256(qualifying) + 10 ether);
+        _bid(id, bob, qualifying);
+        (address l,) = _leader(id);
+        assertEq(l, bob, "bob leads after meeting min increment floor");
+    }
+
+    // ── settleUnstuck when not stalled ────────────────────────────────────────
+
+    function test_settleUnstuckNotStalledReverts() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 2 ether);
+        vm.warp(block.timestamp + 8 days);
+        ah.settle(id);                              // settled, not stalled
+        vm.expectRevert(NotActive.selector);        // settled → NotActive
+        ah.settleUnstuck(id);
+    }
+
+    function test_settleUnstuckActiveAuctionReverts() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 2 ether);
+        vm.expectRevert(NotStalled.selector);
+        ah.settleUnstuck(id);                      // active, not stalled
+    }
+
+    // ── reclaim after STALL_WINDOW ────────────────────────────────────────────
+
+    /// @dev Full reclaim path: stall → wait STALL_WINDOW → reclaim refunds winner
+    ///      and cancels the auction. Uses ERC-1155 buyer-fault stall scenario.
+    function test_reclaimAfterStallWindow() public {
+        MaliciousBidderForTest bidder = new MaliciousBidderForTest();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        MockERC1155 multi2 = new MockERC1155();
+        multi2.mint(seller, 7, 5);
+        multi2.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(address(multi2), 7, 5, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 2 ether}(id);
+        vm.warp(block.timestamp + 2 days);
+
+        // settle() stalls (ERC-1155 buyer-fault)
+        ah.settle(id);
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertGt(a.stalledAt, 0, "stalled");
+        assertFalse(a.settled, "not settled");
+
+        // reclaim before stall window → reverts
+        vm.expectRevert(StallNotOver.selector);
+        ah.reclaim(id);
+
+        // Warp past stall window
+        vm.warp(block.timestamp + ah.STALL_WINDOW());
+        uint256 winnerBefore = address(bidder).balance;
+        ah.reclaim(id);
+
+        a = ah.getAuction(id);
+        assertTrue(a.settled, "settled after reclaim");
+        assertEq(a.stalledAt, 0, "stalledAt cleared");
+        assertEq(address(bidder).balance, winnerBefore + 2 ether, "winner refunded");
+    }
+
+    // ── reclaim not stalled ───────────────────────────────────────────────────
+
+    function test_reclaimNotStalledReverts() public {
+        (uint256 id,) = _create();
+        vm.expectRevert(NotActive.selector);       // no auction (seller==address(0))
+        ah.reclaim(id);
     }
 }

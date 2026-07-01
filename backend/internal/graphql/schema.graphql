@@ -1,0 +1,330 @@
+# ── Types ───────────────────────────────────────────────────────────────────
+
+scalar Time
+scalar Map
+
+"""NFT collection registered on the marketplace."""
+type Collection {
+  address:      String!
+  name:         String!
+  symbol:       String!
+  standard:     String!          # "erc721" | "erc1155"
+  deployBlock:  Int!
+  verified:     Boolean!
+  stats:        CollectionStats!
+  floorPrice:   String!          # wei
+  volume24h:    String!          # wei
+  listedCount:  Int!
+  listings(limit: Int, sort: String): [Listing!]!
+  auctions(limit: Int, status: String): [Auction!]!
+}
+
+"""Aggregated stats for a collection."""
+type CollectionStats {
+  floorPriceWei: String!
+  volume24hWei:  String!
+  listedCount:   Int!
+}
+
+"""An active NFT listing."""
+type Listing {
+  collection:           String!
+  tokenID:              String!
+  seller:               String!
+  priceWei:             String!
+  amount:               Int!
+  standard:             String!
+  expiresAt:            Time!
+  listedAt:             Time!
+  txHash:               String!
+  name:                 String!
+  imageURI:             String!
+  collectionVerified:   Boolean!
+}
+
+"""A marketplace auction."""
+type Auction {
+  auctionID:        Int!
+  collection:       String!
+  tokenID:          String!
+  seller:           String!
+  standard:         String!
+  reservePriceWei:  String!
+  highestBidWei:    String!
+  highestBidder:    String!
+  minIncrementBps:  Int!
+  startsAt:         Time!
+  endsAt:           Time!
+  status:           String!     # "active" | "settled" | "cancelled"
+  createTx:         String!
+  name:             String!
+  imageURI:         String!
+  bids:             [Bid!]!
+  effectiveBids:    [EffectiveBid!]!
+}
+
+"""A single bid on an auction."""
+type Bid {
+  bidder:     String!
+  amountWei:  String!
+  txHash:     String!
+  placedAt:   Time!
+}
+
+"""Cumulative bid position on an auction."""
+type EffectiveBid {
+  bidder:         String!
+  effectiveWei:   String!
+  bidCount:       Int!
+  lastBidAt:      Time!
+}
+
+"""An offer position on an NFT token."""
+type Offer {
+  offerID:    String!
+  bidder:     String!
+  collection: String!
+  tokenID:    String!
+  amountWei:  String!
+  feeWei:     String!
+  units:      Int!
+  standard:   String!
+  expiresAt:  Time!
+  status:     String!
+  makeTx:     String!
+  createdAt:  Time!
+}
+
+"""Minimal token metadata."""
+type TokenMeta {
+  name:     String!
+  imageURI: String!
+}
+
+"""Full token metadata with all fields."""
+type TokenFullMetadata {
+  name:          String!
+  description:   String!
+  imageURI:      String!
+  animationURI:  String!
+  metadataURI:   String!
+  fetchedAt:     Time!
+}
+
+"""An NFT trait/attribute."""
+type Trait {
+  type:   String!
+  value:  String!
+}
+
+"""A single activity/transaction event."""
+type Activity {
+  type:       String!
+  collection: String!
+  tokenID:    String!
+  amountWei:  String!
+  timestamp:  Time!
+  txHash:     String!
+}
+
+"""Token-specific activity row."""
+type TokenActivity {
+  type:       String!
+  amountWei:  String!
+  fromAddr:   String!
+  toAddr:     String!
+  timestamp:  Time!
+  txHash:     String!
+}
+
+"""User/creator profile."""
+type Profile {
+  address:     String!
+  displayName: String!
+  bio:         String!
+  avatarURI:   String!
+  bannerURI:   String!
+  twitter:     String!
+  website:     String!
+  verified:    Boolean!
+}
+
+"""A notification for a user."""
+type Notification {
+  id:         Int!
+  kind:       String!
+  title:      String!
+  body:       String!
+  link:       String!
+  read:       Boolean!
+  createdAt:  Time!
+}
+
+"""Aggregate market metrics."""
+type MarketMetrics {
+  totalActiveListings:  Int!
+  totalSales:           Int!
+  grossVolumeWei:       String!
+  totalAuctions:        Int!
+  totalBids:            Int!
+  totalOffers:          Int!
+}
+
+"""Trending score for a collection."""
+type TrendingScore {
+  collection: String!
+  window:     String!
+  score:      Float!
+  views:      Int!
+  bids:       Int!
+  volumeWei:  String!
+}
+
+"""Search result (NFT or collection)."""
+type SearchResult {
+  kind:       String!    # "nft" | "collection"
+  collection: String!
+  tokenID:    String!
+  name:       String!
+  imageURI:   String!
+}
+
+"""An NFT owned by a wallet."""
+type OwnedNFT {
+  collection: String!
+  tokenID:    String!
+  units:      String!
+  standard:   String!
+  name:       String!
+  imageURI:   String!
+}
+
+"""A saved search filter."""
+type SavedSearch {
+  id:         Int!
+  userAddr:   String!
+  name:       String!
+  page:       String!
+  params:     String!
+  createdAt:  Time!
+}
+
+"""Aggregated offer positions on a token."""
+type OfferSummary {
+  collection: String!
+  tokenID:    String!
+  positions:  [Offer!]!
+  count:      Int!
+  highest:    String!
+  totalWei:   String!
+  truncated:  Boolean!
+}
+
+# ── Queries ──────────────────────────────────────────────────────────────────
+
+type Query {
+  """Fetch a single collection by contract address."""
+  collection(address: String!): Collection!
+
+  """List tracked collections."""
+  collections(limit: Int): [Collection!]!
+
+  """Fetch a single listing."""
+  listing(collection: String!, tokenID: String!): Listing!
+
+  """List active listings with optional filters."""
+  listings(
+    collection: String
+    seller:     String
+    sort:       String      # "recent" | "price_asc" | "price_desc"
+    limit:      Int
+    minPrice:   String      # wei
+    maxPrice:   String      # wei
+    traits:     String      # "trait_type:value,trait_type:value"
+  ): [Listing!]!
+
+  """Fetch a single auction by ID."""
+  auction(id: Int!): Auction!
+
+  """List auctions with optional filters."""
+  auctions(
+    collection: String
+    seller:     String
+    status:     String      # "active" | "settled" | "cancelled"
+    limit:      Int
+    minPrice:   String      # wei
+    maxPrice:   String      # wei
+  ): [Auction!]!
+
+  """List offers with optional filters."""
+  offers(
+    collection: String
+    tokenID:    String
+    bidder:     String
+    owner:      String
+    status:     String
+    limit:      Int
+  ): [Offer!]!
+
+  """Fetch offer positions summary for a token."""
+  offerPositions(collection: String!, tokenID: String!): OfferSummary!
+
+  """Fetch token metadata."""
+  tokenMeta(collection: String!, tokenID: String!): TokenMeta!
+
+  """Fetch full token metadata including description and attributes."""
+  tokenFullMetadata(collection: String!, tokenID: String!): TokenFullMetadata!
+
+  """Fetch token attributes/traits."""
+  tokenAttributes(collection: String!, tokenID: String!): [Trait!]!
+
+  """Fetch token activity."""
+  tokenActivity(collection: String!, tokenID: String!, limit: Int): [TokenActivity!]!
+
+  """Fetch on-chain activity feed."""
+  activity(
+    limit:      Int
+    address:    String
+    collection: String
+    tokenID:    String
+  ): [Activity!]!
+
+  """Fetch user/creator profile."""
+  profile(address: String!): Profile!
+
+  """Fetch notifications for an authenticated user."""
+  notifications(address: String!, limit: Int): [Notification!]!
+
+  """Fetch wallet NFTs."""
+  walletNFTs(owner: String!): [OwnedNFT!]!
+
+  """Full-text search across NFTs and collections."""
+  search(query: String!, limit: Int): [SearchResult!]!
+
+  """Aggregate market metrics."""
+  metrics: MarketMetrics!
+
+  """Trending collections."""
+  trending(window: String, limit: Int): [TrendingScore!]!
+
+  """Saved searches for a user."""
+  savedSearches(address: String!, page: String, limit: Int): [SavedSearch!]!
+
+  """Trait values for a collection (for filtering)."""
+  traitValues(collection: String!): Map!
+
+  """Collection stats for a collection."""
+  collectionStats(collection: String!): CollectionStats!
+
+  """Count of active listings."""
+  countActiveListings: Int!
+
+  """Count of active auctions."""
+  countActiveAuctions: Int!
+
+  """Count of tracked collections."""
+  countCollections: Int!
+
+  """Total 24h volume in wei."""
+  totalVolume24h: String!
+}

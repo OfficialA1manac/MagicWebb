@@ -670,7 +670,11 @@ var _ imagestore.Store = (*Q)(nil)
 // and silently correct any mime drift (impossible by construction: identical SHA
 // → identical bytes → identical mime, but if the indexer vs. handler mistypes,
 // the first writer wins so we never serve a row with a mismatched header).
-func (q *Q) PutImage(ctx context.Context, sha256hex, mime, sourceURI string, body []byte) error {
+//
+// collection is the NFT contract address that triggered this insert. On INSERT
+// it is stored in the collection column for per-collection quota enforcement;
+// on CONFLICT (dedup) the existing collection value is preserved.
+func (q *Q) PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI string, body []byte) error {
 	tx, err := q.pool.Begin(ctx)
 	if err != nil {
 		return err
@@ -678,15 +682,35 @@ func (q *Q) PutImage(ctx context.Context, sha256hex, mime, sourceURI string, bod
 	defer tx.Rollback(ctx)
 
 	if _, err = tx.Exec(ctx,
-		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body)
-		 VALUES($1,$2,$3,$4,$5)
+		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body, collection)
+		 VALUES($1,$2,$3,$4,$5,$6)
 		 ON CONFLICT(sha256) DO UPDATE
 		   SET refcount     = nft_image_blobs.refcount + 1,
 		       last_seen_at = now()`,
-		sha256hex, mime, len(body), sourceURI, body); err != nil {
+		sha256hex, mime, len(body), sourceURI, body, collection); err != nil {
 		return fmt.Errorf("put image: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// CountBlobsForCollection returns the number of distinct blobs first inserted
+// by this collection. Rows with an empty collection (migration 018 default,
+// legacy rows) are excluded from the count so grandfathered blobs do not
+// consume quota. Used by imagestore.Put() to enforce MaxBlobCountPerCollection.
+func (q *Q) CountBlobsForCollection(ctx context.Context, collection string) (int, error) {
+	var n int
+	err := q.pool.QueryRow(ctx,
+		`SELECT count(*) FROM nft_image_blobs WHERE collection=$1`, collection).Scan(&n)
+	return n, err
+}
+
+// TotalBlobBytes returns the cumulative byte_length across all nft_image_blobs
+// rows. Used by imagestore.Put() to enforce MaxTotalBlobBytes.
+func (q *Q) TotalBlobBytes(ctx context.Context) (int64, error) {
+	var total int64
+	err := q.pool.QueryRow(ctx,
+		`SELECT COALESCE(sum(byte_length), 0) FROM nft_image_blobs`).Scan(&total)
+	return total, err
 }
 
 // GetImage returns the blob row for a hash as an imagestore.Blob. Returns

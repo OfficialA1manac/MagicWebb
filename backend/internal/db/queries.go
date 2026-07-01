@@ -1471,6 +1471,96 @@ func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
 	return &m, err
 }
 
+// StalledAuctionCounts holds per-category counts of auctions needing attention.
+type StalledAuctionCounts struct {
+	ExpiredUnsettled int64 `json:"expiredUnsettled"` // active but ended — keeper hasn't settled
+	InactiveNoBids   int64 `json:"inactiveNoBids"`   // active >30min with zero bids — should be cancelled
+	Unrefunded       int64 `json:"unrefunded"`        // settled/cancelled but losers not yet refunded
+}
+
+// GetStalledAuctionCounts returns counts of stalled / stuck auctions across
+// three categories. Each category is a separate subquery so the result is one
+// row with three columns, avoiding three round-trips.
+func (q *Q) GetStalledAuctionCounts(ctx context.Context) (*StalledAuctionCounts, error) {
+	var s StalledAuctionCounts
+	err := q.pool.QueryRow(ctx, `
+		SELECT
+			(SELECT COUNT(*) FROM auctions WHERE status='active' AND ends_at < now())::bigint,
+			(SELECT COUNT(*) FROM auctions WHERE status='active' AND highest_bidder IS NULL
+			   AND starts_at + interval '30 minutes' < now()
+			   AND ends_at >= now())::bigint,
+			(SELECT COUNT(*) FROM auctions WHERE status IN ('settled','cancelled')
+			   AND NOT losers_refunded
+			   AND (refund_attempt_at IS NULL
+			        OR refund_attempt_at < now() - interval '2 minutes'))::bigint
+	`).Scan(&s.ExpiredUnsettled, &s.InactiveNoBids, &s.Unrefunded)
+	return &s, err
+}
+
+// StalledAuctionRow is one stalled auction returned by ListStalledAuctions.
+type StalledAuctionRow struct {
+	AuctionID       int64     `json:"auction_id"`
+	Collection      string    `json:"collection"`
+	TokenID         string    `json:"token_id"`
+	Seller          string    `json:"seller"`
+	Status          string    `json:"status"`
+	StallReason     string    `json:"stall_reason"` // "expired_unsettled" | "inactive_no_bids" | "unrefunded"
+	EndsAt          time.Time `json:"ends_at"`
+	StartsAt        time.Time `json:"starts_at"`
+	HighestBidWei   string    `json:"highest_bid_wei"`
+	HighestBidder   string    `json:"highest_bidder"`
+	ReservePriceWei string    `json:"reserve_price_wei"`
+	CreateTx        string    `json:"create_tx"`
+}
+
+// ListStalledAuctions returns detailed stalled auction rows for admin
+// inspection. Newest-ended first, limited to `limit` rows.
+func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctionRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 50
+	}
+	rows, err := q.pool.Query(ctx, `
+		SELECT auction_id, collection, token_id::text, seller, status::text,
+		       CASE
+		         WHEN status='active' AND ends_at < now() THEN 'expired_unsettled'
+		         WHEN status='active' AND highest_bidder IS NULL
+		              AND starts_at + interval '30 minutes' < now() THEN 'inactive_no_bids'
+		         WHEN status IN ('settled','cancelled') AND NOT losers_refunded
+		              AND (refund_attempt_at IS NULL
+		                   OR refund_attempt_at < now() - interval '2 minutes') THEN 'unrefunded'
+		         ELSE 'unknown'
+		       END AS stall_reason,
+		       ends_at, starts_at,
+		       COALESCE(highest_bid_wei::text, '0'),
+		       COALESCE(highest_bidder, ''),
+		       reserve_price_wei::text,
+		       COALESCE(create_tx, '')
+		FROM auctions
+		WHERE (status='active' AND ends_at < now())
+		   OR (status='active' AND highest_bidder IS NULL
+		       AND starts_at + interval '30 minutes' < now())
+		   OR (status IN ('settled','cancelled') AND NOT losers_refunded
+		       AND (refund_attempt_at IS NULL
+		            OR refund_attempt_at < now() - interval '2 minutes'))
+		ORDER BY ends_at DESC NULLS LAST
+		LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []StalledAuctionRow
+	for rows.Next() {
+		var r StalledAuctionRow
+		if err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller,
+			&r.Status, &r.StallReason, &r.EndsAt, &r.StartsAt,
+			&r.HighestBidWei, &r.HighestBidder, &r.ReservePriceWei, &r.CreateTx); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ActivityRow is a single entry in the marketplace activity feed.
 type ActivityRow struct {
 	Type       string    `json:"type"`

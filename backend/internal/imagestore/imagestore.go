@@ -42,9 +42,13 @@ const MaxBlobBytes = 8 << 20
 // fill the Postgres table before any other collection can store a single
 // blob. 1,000 is generous for most ERC-721/1155 collections (many have
 // <100 distinct image hashes due to metadata redirection) and fits well
-// within Postgres' BYTEA table limits. Exceeding collections get `quota
-// exceeded` errors on Put; the mediaProxy continues to proxy upstream for
-// blobs beyond the cap.
+// within Postgres' BYTEA table limits.
+//
+// Enforced by CountBlobsForCollection in Put(): new blobs from a collection
+// that has already stored MaxBlobCountPerCollection distinct hashes are
+// silently skipped (Skipped=true). Dedup hits (existing bytes) bypass the
+// check since no new storage is consumed. Existing rows with an empty
+// collection string do not count toward any quota.
 const MaxBlobCountPerCollection = 1_000
 
 // MaxTotalBlobBytes caps the cumulative byte volume of all blobs across
@@ -112,7 +116,11 @@ type Store interface {
 	// existing mime on a refcount-only collision — the bytes are identical
 	// by construction so an upstream mime mismatch is silently corrected
 	// to the canonical value).
-	PutImage(ctx context.Context, sha256hex, mime, sourceURI string, body []byte) error
+	//
+	// collection is the NFT contract address that triggered this insert.
+	// On INSERT it is stored in the collection column; ON CONFLICT (dedup)
+	// the existing collection value is preserved.
+	PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI string, body []byte) error
 
 	// GetImage returns the blob bytes + mime + source URI for a known hash.
 	// Returns (nil, "", "", pgx.ErrNoRows) when the hash is unknown.
@@ -120,6 +128,15 @@ type Store interface {
 
 	// HasImage is a cheap existence check (no body fetch).
 	HasImage(ctx context.Context, sha256hex string) (bool, error)
+
+	// TotalBlobBytes returns the cumulative byte_length across all blob
+	// rows. Used by Put() to enforce MaxTotalBlobBytes.
+	TotalBlobBytes(ctx context.Context) (int64, error)
+
+	// CountBlobsForCollection returns the number of distinct blobs first
+	// inserted by this collection. Used by Put() to enforce
+	// MaxBlobCountPerCollection.
+	CountBlobsForCollection(ctx context.Context, collection string) (int, error)
 }
 
 // ErrBodyTooLarge is returned when body exceeds MaxBlobBytes. We surface it
@@ -133,7 +150,7 @@ var ErrEmptyBody = errors.New("imagestore: empty body")
 // ErrInvalidHash is returned by Stored (and by Get on bad hashes).
 var ErrInvalidHash = errors.New("imagestore: invalid sha256 hash")
 
-// Store is the public ingest response. The returned hex hash is the
+// Stored is the public ingest response. The returned hex hash is the
 // same-origin reference the indexer embeds into nft_metadata.image_uri (or
 // metadata_uri) so the frontend hits /api/v1/img/<hash> instead of the
 // original gateway URL. Inserted is false when the row pre-existed and
@@ -144,6 +161,7 @@ type Stored struct {
 	Hash     string // 64-char lowercase hex
 	Mime     string // canonical MIME (post-sniff)
 	Inserted bool   // false when the row already existed and was ref-bumped
+	Skipped  bool   // true when quota cap exceeded — caller should proxy upstream
 }
 
 // Sniffer is the function signature of media.SniffImage — a runtime seam
@@ -158,12 +176,14 @@ type Sniffer func(body []byte) (mime string, ok bool)
 //     serve.
 //   - sourceURI is recorded verbatim for audit / dedup debugging; not used
 //     at serve time.
+//   - collection is the contract address of the NFT collection, used to
+//     enforce per-collection and total blob quotas.
 //   - Total blob byte volume is capped at MaxTotalBlobBytes. When exceeded,
 //     the blob is skipped (Skipped=true) rather than rejected — the caller
 //     falls back to proxying the upstream URL.
 //   - Per-collection blob count is capped at MaxBlobCountPerCollection.
 //     When exceeded, the blob is skipped rather than rejected.
-func Put(ctx context.Context, s Store, src Sniffer, sourceURI string, body []byte) (Stored, error) {
+func Put(ctx context.Context, s Store, src Sniffer, collection, sourceURI string, body []byte) (Stored, error) {
 	if len(body) == 0 {
 		return Stored{}, ErrEmptyBody
 	}
@@ -181,14 +201,69 @@ func Put(ctx context.Context, s Store, src Sniffer, sourceURI string, body []byt
 	if hash == "" {
 		return Stored{}, ErrEmptyBody
 	}
+
+	// Check whether the blob already exists. If it does, skip quota checks
+	// since we're just bumping a refcount — no new storage consumed.
+	// If the existence check itself errors, fail closed: a DB outage must
+	// not silently bypass quota enforcement.
 	pre, preErr := s.HasImage(ctx, hash)
-	if err := s.PutImage(ctx, hash, mime, sourceURI, body); err != nil {
+	if preErr != nil {
+		return Stored{}, fmt.Errorf("imagestore: has image: %w", preErr)
+	}
+	if pre {
+		// Blob exists — dedup path: bump refcount only, no quota check.
+		if err := s.PutImage(ctx, hash, mime, collection, sourceURI, body); err != nil {
+			return Stored{}, fmt.Errorf("imagestore: put: %w", err)
+		}
+		return Stored{
+			Hash:     hash,
+			Mime:     mime,
+			Inserted: false,
+		}, nil
+	}
+
+	// New blob: enforce per-collection blob count quota before INSERT.
+	// Dedup path above already returned, so this blob is genuinely new.
+	// Rows with empty collection (migration 018 default for legacy rows)
+	// do not count; CountBlobsForCollection excludes them.
+	// Fail closed: a DB error reading the count must not silently bypass
+	// the per-collection cap.
+	if collection != "" {
+		cnt, cerr := s.CountBlobsForCollection(ctx, collection)
+		if cerr != nil {
+			return Stored{}, fmt.Errorf("imagestore: count collection blobs: %w", cerr)
+		}
+		if cnt >= MaxBlobCountPerCollection {
+			return Stored{
+				Hash:    hash,
+				Mime:    mime,
+				Skipped: true,
+			}, nil
+		}
+	}
+
+	// New blob: enforce total byte quota before INSERT.
+	// Fail closed: a DB error reading the total must not silently bypass
+	// the global byte cap.
+	totalBytes, terr := s.TotalBlobBytes(ctx)
+	if terr != nil {
+		return Stored{}, fmt.Errorf("imagestore: total blob bytes: %w", terr)
+	}
+	if totalBytes+int64(len(body)) > MaxTotalBlobBytes {
+		return Stored{
+			Hash:    hash,
+			Mime:    mime,
+			Skipped: true,
+		}, nil
+	}
+
+	if err := s.PutImage(ctx, hash, mime, collection, sourceURI, body); err != nil {
 		return Stored{}, fmt.Errorf("imagestore: put: %w", err)
 	}
 	return Stored{
 		Hash:     hash,
 		Mime:     mime,
-		Inserted: preErr == nil && !pre,
+		Inserted: true,
 	}, nil
 }
 

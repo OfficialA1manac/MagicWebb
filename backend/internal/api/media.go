@@ -216,11 +216,16 @@ func (s *MediaService) handleRetry(c *fiber.Ctx) error {
 			Msg("image-retry: upstream fetch failed")
 		return writeErr(c, fiber.StatusBadGateway, "upstream unavailable")
 	}
-	st, perr := imagestore.Put(c.Context(), s.q, media.SniffImage, imageURI, body)
+	st, perr := imagestore.Put(c.Context(), s.q, media.SniffImage, coll, imageURI, body)
 	if perr != nil {
 		log.Warn().Err(perr).Str("coll", coll).Str("token", tokenID).
 			Msg("image-retry: imagestore put failed")
 		return writeErr(c, fiber.StatusBadGateway, "self-host failed")
+	}
+	if st.Skipped {
+		log.Warn().Str("coll", coll).Str("token", tokenID).
+			Msg("image-retry: quota exceeded, will retry later")
+		return c.JSON(fiber.Map{"status": "quota_exceeded", "image_uri": ""})
 	}
 	localPath := imagestore.PublicPath(st.Hash)
 	if uerr := s.q.UpdateImageURI(c.Context(), coll, tokenID, localPath); uerr != nil {

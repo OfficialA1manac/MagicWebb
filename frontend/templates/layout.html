@@ -293,6 +293,43 @@
       <a href="/metrics"      class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Metrics</a>
       <a href="/profile"      class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Profile</a>
       <a href="/docs"         class="px-3 py-1.5 rounded-lg text-white/80 hover:text-white hover:bg-white/5 transition">Docs</a>
+      <!-- Admin link — only shown when wallet is connected AND the admin
+           endpoint returns 200 (not 403). Fetches stalled auction count
+           from the public metrics endpoint for the live count badge.
+           Non-admins who connect their wallet won't see the link at all;
+           admins see the badge with the total stalled auction count. -->
+      <a href="/admin/stalled"
+         x-show="isAdmin"
+         x-cloak
+         class="px-3 py-1.5 rounded-lg text-rose-200 hover:text-white hover:bg-rose-500/15 transition flex items-center gap-1.5"
+         x-data="{isAdmin: false, stalledCount: 0,
+                 async refreshStalled() {
+                   if (!$store.wallet.connected) return;
+                   try {
+                     // Check admin access + fetch stalled counts in parallel.
+                     var headers = {};
+                     var ws = $store.wallet;
+                     if (ws.authHeaders) {
+                       var auth = ws.authHeaders();
+                       if (auth) for (var k in auth) { if (auth.hasOwnProperty(k)) headers[k] = auth[k]; }
+                     }
+                     var [adminR, metricsR] = await Promise.all([
+                       fetch('/api/v1/admin/auctions/stalled?limit=1', { headers: headers }),
+                       fetch('/api/v1/metrics')
+                     ]);
+                     this.isAdmin = adminR.status === 200;
+                     if (metricsR.ok) {
+                       var d = await metricsR.json();
+                       this.stalledCount = (d.expiredUnsettled||0) + (d.inactiveNoBids||0) + (d.unrefunded||0);
+                     }
+                   } catch (_) {}
+                 }}"
+         x-effect="$store.wallet.connected && refreshStalled()">
+        Admin
+        <span x-show="stalledCount > 0" x-cloak
+              class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full btn-gold text-ink-950 text-[10px] font-extrabold glow-gold"
+              x-text="stalledCount > 99 ? '99+' : stalledCount"></span>
+      </a>
     </div>
 
     <!-- Right: wallet + bell + WC pairing chip + hamburger -->
@@ -360,6 +397,34 @@
           </div>
         </div>
       </template>
+
+      <!-- ── WebSocket debug indicator ──
+           Shows live connection status + subscription count.
+           Click to collapse/expand the subscription summary.
+           Only visible on desktop (hidden below md breakpoint).
+           Connected = green dot; Disconnected = dim red dot. -->
+      <div class="hidden md:flex items-center gap-1.5 px-2 py-1 rounded-lg bg-white/[0.02] border border-white/5 cursor-pointer select-none hover:bg-white/[0.06] transition"
+           :title="'WebSocket: ' + ($store.ws.connected ? 'connected' : 'disconnected') + ' — subscribed to ' + $store.ws.subscriptionSummary"
+           x-data="{ wsExpanded: true }"
+           @click="wsExpanded = !wsExpanded">
+        <span class="relative flex w-2 h-2" x-cloak>
+          <span x-show="$store.ws.connected"
+                class="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-40" style="animation-duration: 2s;"></span>
+          <span :class="$store.ws.connected ? 'bg-emerald-400' : 'bg-rose-700'"
+                class="relative inline-flex w-2 h-2 rounded-full"></span>
+        </span>
+        <span class="text-[10px] font-mono font-bold leading-none"
+              :class="$store.ws.connected ? 'text-emerald-300' : 'text-rose-800'">
+          WS
+        </span>
+        <span x-show="$store.ws.hasSubscriptions && wsExpanded" x-cloak
+              class="text-[9px] px-1 py-0.5 rounded bg-white/5 text-white/50 font-mono leading-none"
+              x-text="$store.ws.subscriptionSummary"></span>
+        <span class="text-[8px] text-white/30 font-mono leading-none transition-transform"
+              :class="wsExpanded ? 'rotate-180' : ''">
+          ▾
+        </span>
+      </div>
 
       <!-- Connected pill: identity + WC badge + disconnect. The explicit
            "Wallet" label + title tooltip makes this unmistakable as
@@ -442,6 +507,37 @@
     <a href="/metrics"   class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Metrics</a>
     <a href="/profile"   class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Profile</a>
     <a href="/docs"      class="block py-2 px-3 rounded-lg text-white/80 hover:text-white hover:bg-white/10 transition">Docs</a>
+    <a href="/admin/stalled"
+       x-show="isAdminM"
+       x-cloak
+       class="block py-2 px-3 rounded-lg text-rose-200 hover:bg-rose-500/15 transition flex items-center gap-2"
+       x-data="{isAdminM: false, stalledCountM: 0,
+               async refreshStalledM() {
+                 if (!$store.wallet.connected) return;
+                 try {
+                   var headers = {};
+                   var ws = $store.wallet;
+                   if (ws.authHeaders) {
+                     var auth = ws.authHeaders();
+                     if (auth) for (var k in auth) { if (auth.hasOwnProperty(k)) headers[k] = auth[k]; }
+                   }
+                   var [adminR, metricsR] = await Promise.all([
+                     fetch('/api/v1/admin/auctions/stalled?limit=1', { headers: headers }),
+                     fetch('/api/v1/metrics')
+                   ]);
+                   this.isAdminM = adminR.status === 200;
+                   if (metricsR.ok) {
+                     var d = await metricsR.json();
+                     this.stalledCountM = (d.expiredUnsettled||0) + (d.inactiveNoBids||0) + (d.unrefunded||0);
+                   }
+                 } catch (_) {}
+               }}"
+       x-effect="$store.wallet.connected && refreshStalledM()">
+      <span>Admin</span>
+      <span x-show="stalledCountM > 0" x-cloak
+            class="inline-flex items-center justify-center min-w-[18px] h-[18px] px-1 rounded-full btn-gold text-ink-950 text-[10px] font-extrabold"
+            x-text="stalledCountM > 99 ? '99+' : stalledCountM"></span>
+    </a>
 
     <!-- Mobile wallet section: always present in the drawer; the inner
          controls are conditional on the same $store.wallet that drives
@@ -520,6 +616,136 @@
   (() => {
     document.body.addEventListener('htmx:sseMessage', () => {
       window.dispatchEvent(new Event('mw-notification'));
+    });
+
+    // ── WebSocket subscription/state event listeners ─────────────────────────
+    // These bridge WebSocket CustomEvents into Alpine's reactive store so
+    // page components can react to state data and subscription changes
+    // without polling the REST API.
+
+    /** Update Alpine store when channels are subscribed. */
+    window.addEventListener('mw-ws-subscribed', function (e) {
+      var channels = (e.detail && e.detail.channels) || [];
+      if (window.Alpine && window.Alpine.store) {
+        var s = window.Alpine.store('ws');
+        if (s) { s.subscribed = channels; }
+      }
+    });
+
+    /** Update Alpine store when channels are unsubscribed. */
+    window.addEventListener('mw-ws-unsubscribed', function (e) {
+      var channels = (e.detail && e.detail.channels) || [];
+      if (window.Alpine && window.Alpine.store) {
+        var s = window.Alpine.store('ws');
+        if (s) {
+          s.subscribed = (s.subscribed || []).filter(function (c) {
+            return channels.indexOf(c) === -1;
+          });
+        }
+      }
+    });
+
+    /** Update Alpine store when state data arrives (get_listing/get_auction/etc). */
+    window.addEventListener('mw-ws-state', function (e) {
+      if (!window.Alpine || !window.Alpine.store) return;
+      var s = window.Alpine.store('ws');
+      if (!s) return;
+      s.lastState = e.detail;
+      s.lastStateAt = Date.now();
+      // Expose the raw state data as a reactive property for Alpine components
+      // to bind with x-text, x-show, etc. The parent page template can
+      // subscribe to '$store.ws.lastState' in Alpine expressions.
+
+      // ── Price-drop detection via WS state ─────────────────────────────
+      // When a get_listing response arrives with a price_wei, compare it
+      // against the last known price for that (collection, token_id). If
+      // the price dropped, fire a toast so the user knows without polling.
+      // Tracks previous prices in window.__wsPrices and a cooldown in
+      // window.__wsToastCooldown to prevent a stack of notifications
+      // during rapid price changes (e.g. Dutch-style auctions, bot war).
+      var detail = e.detail;
+      if (detail && detail.price_wei && detail.collection && detail.token_id) {
+        var key = detail.collection + ':' + detail.token_id;
+        var prev = (window.__wsPrices || {})[key];
+        if (prev && BigInt(detail.price_wei) < BigInt(prev)) {
+          // Cooldown: skip if we already showed a toast for this key in
+          // the last 10 seconds.
+          var cooldowns = window.__wsToastCooldown || (window.__wsToastCooldown = {});
+          var lastToast = cooldowns[key];
+          var now = Date.now();
+          if (!lastToast || now - lastToast > 10000) {
+            cooldowns[key] = now;
+            var diff = BigInt(prev) - BigInt(detail.price_wei);
+            var dropPct = (diff * 100n) / BigInt(prev);
+            var pctDisplay = dropPct < 1n ? '<1' : String(dropPct);
+            var dropFlr = (Number(diff) / 1e18).toFixed(4);
+            setTimeout(function () {
+              if (typeof toast === 'function') {
+                toast('Price dropped ' + pctDisplay + '% (' + dropFlr + ' ' + (window.MW_NATIVE_CURRENCY || 'FLR') + ') on token ' + key, 'info', 6000);
+              }
+            }, 200);
+          }
+        }
+        if (!window.__wsPrices) window.__wsPrices = {};
+        window.__wsPrices[key] = detail.price_wei;
+      }
+    });
+  })();
+</script>
+
+<!-- Alpine WebSocket store initialization.
+     Registers a reactive `$store.ws` with default values so Alpine
+     components can safely reference `$store.ws.connected`,
+     `$store.ws.subscribed`, and `$store.ws.lastState` in templates
+     even before any WebSocket event fires. -->
+<script>
+  document.addEventListener('alpine:init', function () {
+    if (window.Alpine) {
+      window.Alpine.store('ws', {
+        // WebSocket connection state (updated by mw-ws-open/mw-ws-close)
+        connected: false,
+        // Array of active subscription channels, e.g. ["token:0xabc:123"]
+        subscribed: [],
+        // Last state response from get_listing/get_auction/etc
+        lastState: null,
+        // Timestamp of the last state response
+        lastStateAt: 0,
+        // Whether any channels are currently subscribed
+        get hasSubscriptions() { return this.subscribed && this.subscribed.length > 0; },
+        // Short human-readable summary of active subscriptions
+        get subscriptionSummary() {
+          if (!this.subscribed || this.subscribed.length === 0) return 'none';
+          var tokens = this.subscribed.filter(function (c) { return c.indexOf('token:') === 0; });
+          var collections = this.subscribed.filter(function (c) { return c.indexOf('collection:') === 0; });
+          var parts = [];
+          if (tokens.length) parts.push(tokens.length + ' token' + (tokens.length > 1 ? 's' : ''));
+          if (collections.length) parts.push(collections.length + ' collection' + (collections.length > 1 ? 's' : ''));
+          return parts.join(', ') || this.subscribed.length + ' channel' + (this.subscribed.length > 1 ? 's' : '');
+        },
+      });
+    }
+  });
+</script>
+
+<!-- Wire the mw-ws-open/mw-ws-close events into the Alpine store. -->
+<script>
+  (() => {
+    window.addEventListener('mw-ws-open', function () {
+      if (window.Alpine && window.Alpine.store) {
+        var s = window.Alpine.store('ws');
+        if (s) s.connected = true;
+      }
+    });
+    window.addEventListener('mw-ws-close', function () {
+      if (window.Alpine && window.Alpine.store) {
+        var s = window.Alpine.store('ws');
+        if (s) {
+          s.connected = false;
+          // Clear subscriptions on disconnect — they'll be re-established
+          // on reconnect if the page re-subscribes.
+          s.subscribed = [];
+        }
+      }
     });
   })();
 </script>

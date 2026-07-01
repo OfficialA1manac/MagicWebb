@@ -45,6 +45,16 @@ error CannotCancel();
 ///     bidder can never brick the refunds. Bounded gas per call.
 ///
 /// Non-custodial; immutable; no admin, no pause, no upgrade.
+///
+/// @dev Timestamp usage: This contract uses `block.timestamp` for auction timing
+///      (startsAt, endsAt, extension window, stall window). Miners can manipulate
+///      block.timestamp by up to ~15 seconds on Ethereum mainnet (less on Flare),
+///      but all time windows are far larger than the manipulation threshold:
+///      - Auctions last hours to days (up to MAX_AUCTION_DURATION = 7 days)
+///      - Anti-snipe extension window is 3 minutes (EXTENSION_WINDOW)
+///      - Stall recovery window is 7 days (STALL_WINDOW)
+///      A 15-second skew is negligible against these magnitudes and cannot be
+///      exploited to force premature settlement or indefinitely extend an auction.
 contract AuctionHouse is MarketplaceCore {
     /// @notice Cap on minIncrementBps (50%). Prevents seller griefing via absurd increments.
     uint16 public constant MAX_MIN_INCREMENT_BPS = 5_000;

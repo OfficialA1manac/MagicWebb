@@ -17,24 +17,30 @@ import (
 // NOT call t.Parallel() (same non-parallel rule as media.dialResolver).
 type fakeStore struct {
 	rows map[string]struct {
-		body      []byte
-		mime      string
-		sourceURI string
-		refcount  int
+		body       []byte
+		mime       string
+		collection string
+		sourceURI  string
+		refcount   int
 	}
-	failPut error
+	failPut    error
+	totalBytes int64 // injected total for quota tests; -1 = compute from rows
 }
 
 func newFakeStore() *fakeStore {
-	return &fakeStore{rows: map[string]struct {
-		body      []byte
-		mime      string
-		sourceURI string
-		refcount  int
-	}{}}
+	return &fakeStore{
+		rows: map[string]struct {
+			body       []byte
+			mime       string
+			collection string
+			sourceURI  string
+			refcount   int
+	}{},
+		totalBytes: -1, // compute from rows
+	}
 }
 
-func (f *fakeStore) PutImage(_ context.Context, sha, mime, src string, body []byte) error {
+func (f *fakeStore) PutImage(_ context.Context, sha, mime, collection, src string, body []byte) error {
 	if f.failPut != nil {
 		return f.failPut
 	}
@@ -45,11 +51,12 @@ func (f *fakeStore) PutImage(_ context.Context, sha, mime, src string, body []by
 		return nil
 	}
 	f.rows[sha] = struct {
-		body      []byte
-		mime      string
-		sourceURI string
-		refcount  int
-	}{body: append([]byte(nil), body...), mime: mime, sourceURI: src, refcount: 1}
+		body       []byte
+		mime       string
+		collection string
+		sourceURI  string
+		refcount   int
+	}{body: append([]byte(nil), body...), mime: mime, collection: collection, sourceURI: src, refcount: 1}
 	return nil
 }
 
@@ -64,6 +71,27 @@ func (f *fakeStore) GetImage(_ context.Context, sha string) (Blob, error) {
 func (f *fakeStore) HasImage(_ context.Context, sha string) (bool, error) {
 	_, ok := f.rows[sha]
 	return ok, nil
+}
+
+func (f *fakeStore) TotalBlobBytes(_ context.Context) (int64, error) {
+	if f.totalBytes >= 0 {
+		return f.totalBytes, nil
+	}
+	var total int64
+	for _, r := range f.rows {
+		total += int64(len(r.body))
+	}
+	return total, nil
+}
+
+func (f *fakeStore) CountBlobsForCollection(_ context.Context, collection string) (int, error) {
+	var n int
+	for _, r := range f.rows {
+		if r.collection == collection {
+			n++
+		}
+	}
+	return n, nil
 }
 
 // The fake returns pgx.ErrNoRows directly so IsNoRows exercises the same
@@ -169,7 +197,7 @@ func TestPut_DedupesBySha(t *testing.T) {
 	ctx := context.Background()
 	s := newFakeStore()
 
-	first, err := Put(ctx, s, sniffPNG, "https://x/y.png", pngFixture)
+	first, err := Put(ctx, s, sniffPNG, "0xabc", "https://x/y.png", pngFixture)
 	if err != nil {
 		t.Fatalf("first Put: %v", err)
 	}
@@ -181,7 +209,7 @@ func TestPut_DedupesBySha(t *testing.T) {
 	}
 
 	// Identical bytes -> identical hash -> second Put must dedupe.
-	second, err := Put(ctx, s, sniffPNG, "https://different-origin.example/y.png", pngFixture)
+	second, err := Put(ctx, s, sniffPNG, "0xdef", "https://different-origin.example/y.png", pngFixture)
 	if err != nil {
 		t.Fatalf("second Put: %v", err)
 	}
@@ -197,10 +225,10 @@ func TestPut_DedupesBySha(t *testing.T) {
 }
 
 func TestPut_RejectsEmptyBody(t *testing.T) {
-	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "x", nil); !errors.Is(err, ErrEmptyBody) {
+	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "", "x", nil); !errors.Is(err, ErrEmptyBody) {
 		t.Fatalf("want ErrEmptyBody, got %v", err)
 	}
-	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "x", []byte{}); !errors.Is(err, ErrEmptyBody) {
+	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "", "x", []byte{}); !errors.Is(err, ErrEmptyBody) {
 		t.Fatalf("want ErrEmptyBody, got %v", err)
 	}
 }
@@ -212,19 +240,19 @@ func TestPut_RejectsOversizedBody(t *testing.T) {
 	big[1] = 'P'
 	big[2] = 'N'
 	big[3] = 'G'
-	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "x", big); !errors.Is(err, ErrBodyTooLarge) {
+	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "", "x", big); !errors.Is(err, ErrBodyTooLarge) {
 		t.Fatalf("want ErrBodyTooLarge, got %v", err)
 	}
 }
 
 func TestPut_RejectsUnfitBody(t *testing.T) {
-	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "x", []byte("not an image")); err == nil {
+	if _, err := Put(context.Background(), newFakeStore(), sniffPNG, "", "x", []byte("not an image")); err == nil {
 		t.Fatal("sniffer rejection must surface as error")
 	}
 }
 
 func TestPut_NoSnifferIsError(t *testing.T) {
-	if _, err := Put(context.Background(), newFakeStore(), nil, "x", []byte("unused")); err == nil {
+	if _, err := Put(context.Background(), newFakeStore(), nil, "", "x", []byte("unused")); err == nil {
 		t.Fatal("nil sniffer must surface as error so callers can't accidentally store opaque bytes")
 	}
 }
@@ -244,7 +272,7 @@ func TestHas_RejectsMalformedHash(t *testing.T) {
 func TestGet_RoundTripsPutBytes(t *testing.T) {
 	ctx := context.Background()
 	s := newFakeStore()
-	st, err := Put(ctx, s, sniffPNG, "https://x.png", pngFixture)
+	st, err := Put(ctx, s, sniffPNG, "0xabc", "https://x.png", pngFixture)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -275,7 +303,7 @@ func TestPut_DifferentSourcesSameBytesOneRow(t *testing.T) {
 		"https://contract-b.example/2.png",
 		"ipfs://QmABC",
 	} {
-		if _, err := Put(ctx, s, sniffPNG, src, pngFixture); err != nil {
+		if _, err := Put(ctx, s, sniffPNG, "0xabc", src, pngFixture); err != nil {
 			t.Fatalf("Put src=%s: %v", src, err)
 		}
 	}
@@ -291,6 +319,129 @@ func TestPut_DifferentSourcesSameBytesOneRow(t *testing.T) {
 		if r.sourceURI == "" {
 			t.Fatalf("sha=%s source_uri should record the first writer's URL", sha)
 		}
+	}
+}
+
+// ── Quota enforcement tests ────────────────────────────────────────────────
+
+func TestPut_SkipsExceedingPerCollectionBlobCount(t *testing.T) {
+	ctx := context.Background()
+	s := newFakeStore()
+
+	// Pre-populate MaxBlobCountPerCollection blobs for this collection.
+	// Each blob must have unique bytes so they produce distinct hashes.
+	for i := 0; i < MaxBlobCountPerCollection; i++ {
+		body := make([]byte, 12)
+		body[0] = 0x89
+		body[1] = 'P'
+		body[2] = 'N'
+		body[3] = 'G'
+		body[4] = byte(i >> 24)
+		body[5] = byte(i >> 16)
+		body[6] = byte(i >> 8)
+		body[7] = byte(i)
+		st, err := Put(ctx, s, sniffPNG, "0xabc", "src", body)
+		if err != nil {
+			t.Fatalf("pre-populate blob %d: %v", i, err)
+		}
+		if st.Skipped {
+			t.Fatalf("pre-populate blob %d: unexpected skip", i)
+		}
+	}
+
+	// Now the (MaxBlobCountPerCollection+1)th blob from the same collection
+	// must be skipped.
+	body := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 0, 0, 0, 0}
+	st, err := Put(ctx, s, sniffPNG, "0xabc", "overflow", body)
+	if err != nil {
+		t.Fatalf("overflow Put: %v", err)
+	}
+	if !st.Skipped {
+		t.Fatal("expected Skipped=true when per-collection blob count quota exceeded")
+	}
+}
+
+func TestPut_PerCollectionQuota_DoesNotAffectOtherCollections(t *testing.T) {
+	ctx := context.Background()
+	s := newFakeStore()
+
+	// Fill collection A to the max.
+	for i := 0; i < MaxBlobCountPerCollection; i++ {
+		body := make([]byte, 12)
+		body[0] = 0x89
+		body[1] = 'P'
+		body[2] = 'N'
+		body[3] = 'G'
+		body[4] = byte(i >> 24)
+		body[5] = byte(i >> 16)
+		body[6] = byte(i >> 8)
+		body[7] = byte(i)
+		if _, err := Put(ctx, s, sniffPNG, "0xaaa", "src", body); err != nil {
+			t.Fatalf("populate A blob %d: %v", i, err)
+		}
+	}
+
+	// Collection B should still be able to store blobs.
+	body := []byte{0x89, 'P', 'N', 'G', '\r', '\n', 0x1a, '\n', 0, 0, 0, 0, 0, 0, 0, 1}
+	st, err := Put(ctx, s, sniffPNG, "0xbbb", "src", body)
+	if err != nil {
+		t.Fatalf("collection B Put: %v", err)
+	}
+	if st.Skipped {
+		t.Fatal("collection B must not be skipped — its quota is independent of A")
+	}
+	if !st.Inserted {
+		t.Fatal("collection B blob must be Inserted=true")
+	}
+}
+
+func TestPut_PerCollectionQuota_EmptyCollectionNeverQuotaBlocked(t *testing.T) {
+	ctx := context.Background()
+	s := newFakeStore()
+
+	// Empty collection (legacy rows) should never trigger per-collection quota.
+	for i := 0; i < MaxBlobCountPerCollection+10; i++ {
+		body := make([]byte, 12)
+		body[0] = 0x89
+		body[1] = 'P'
+		body[2] = 'N'
+		body[3] = 'G'
+		body[4] = byte(i >> 24)
+		body[5] = byte(i >> 16)
+		body[6] = byte(i >> 8)
+		body[7] = byte(i)
+		st, err := Put(ctx, s, sniffPNG, "", "src", body)
+		if err != nil {
+			t.Fatalf("empty-collection blob %d: %v", i, err)
+		}
+		if st.Skipped {
+			t.Fatalf("empty-collection blob %d: must not be skipped", i)
+		}
+	}
+}
+
+func TestPut_SkipsExceedingTotalBlobBytes(t *testing.T) {
+	ctx := context.Background()
+	// Populating enough real rows to exceed MaxTotalBlobBytes would be
+	// slow/verbose, so we inject totalBytes directly via a custom fake
+	// store to exercise the total-byte-quota path.
+	s := &fakeStore{
+		rows: map[string]struct {
+			body       []byte
+			mime       string
+			collection string
+			sourceURI  string
+			refcount   int
+		}{},
+		totalBytes: MaxTotalBlobBytes, // already at cap
+	}
+
+	st, err := Put(ctx, s, sniffPNG, "0xabc", "overflow", pngFixture)
+	if err != nil {
+		t.Fatalf("overflow Put: %v", err)
+	}
+	if !st.Skipped {
+		t.Fatal("expected Skipped=true when total byte quota exceeded")
 	}
 }
 

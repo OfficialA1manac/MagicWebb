@@ -173,7 +173,7 @@ func TestActivity_ByToken_Success(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID).
+		WithArgs(testCollection, testTokenID, 50).
 		WillReturnRows(pgxmock.NewRows(tokenActivityCols).
 			AddRow("Sold", "5000000000000000000", testSeller, testBuyer, now, "0xtx1"))
 
@@ -200,7 +200,7 @@ func TestActivity_ByToken_Empty(t *testing.T) {
 	defer mock.Close()
 
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID).
+		WithArgs(testCollection, testTokenID, 50).
 		WillReturnRows(pgxmock.NewRows(tokenActivityCols))
 
 	app := newActivityApp(t, mock)
@@ -223,7 +223,7 @@ func TestActivity_ByToken_DBError(t *testing.T) {
 	defer mock.Close()
 
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID).
+		WithArgs(testCollection, testTokenID, 50).
 		WillReturnError(fiber.ErrInternalServerError)
 
 	app := newActivityApp(t, mock)
@@ -244,7 +244,7 @@ func TestActivity_ByTokenAndAddress_Success(t *testing.T) {
 
 	now := time.Now()
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID, testAddr1).
+		WithArgs(testCollection, testTokenID, testAddr1, 50).
 		WillReturnRows(pgxmock.NewRows(tokenActivityCols).
 			AddRow("Sold", "5000000000000000000", testAddr1, testBuyer, now, "0xtx1"))
 
@@ -271,7 +271,7 @@ func TestActivity_ByTokenAndAddress_Empty(t *testing.T) {
 	defer mock.Close()
 
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID, testAddr1).
+		WithArgs(testCollection, testTokenID, testAddr1, 50).
 		WillReturnRows(pgxmock.NewRows(tokenActivityCols))
 
 	app := newActivityApp(t, mock)
@@ -341,7 +341,7 @@ func TestActivity_ByToken_MultiEventTypes(t *testing.T) {
 	now := time.Now()
 	// The UNION query returns multiple event types for one token.
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID).
+		WithArgs(testCollection, testTokenID, 50).
 		WillReturnRows(pgxmock.NewRows(tokenActivityCols).
 			AddRow("Sold", "5000000000000000000", testSeller, testBuyer, now, "0xtx1").
 			AddRow("BidPlaced", "3000000000000000000", testBidder, "", now.Add(-time.Minute), "0xtx2").
@@ -381,7 +381,7 @@ func TestActivity_ByTokenAndAddress_DBError(t *testing.T) {
 	defer mock.Close()
 
 	mock.ExpectQuery(`SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash`).
-		WithArgs(testCollection, testTokenID, testAddr1).
+		WithArgs(testCollection, testTokenID, testAddr1, 50).
 		WillReturnError(fiber.ErrInternalServerError)
 
 	app := newActivityApp(t, mock)

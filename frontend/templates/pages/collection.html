@@ -1,11 +1,46 @@
 {{template "layout.html" .}}
 {{define "content"}}
+<div x-data="{
+    wsChannel: 'collection:{{with .Collection}}{{lower .Address}}{{end}}',
+    wsSubscribed: false,
+    init() {
+      if (!this.wsChannel || this.wsChannel === 'collection:') return;
+      var self = this;
+      var doSub = function () {
+        if (window.MW_WS && window.MW_WS.subscribe) {
+          window.MW_WS.subscribe([self.wsChannel]);
+          self.wsSubscribed = true;
+        }
+      };
+      if (window.MW_WS && window.MW_WS.connected) {
+        doSub();
+      } else {
+        window.addEventListener('mw-ws-open', doSub, { once: true });
+      }
+      window.addEventListener('pagehide', function () {
+        if (window.MW_WS && window.MW_WS.unsubscribe) {
+          window.MW_WS.unsubscribe([self.wsChannel]);
+          self.wsSubscribed = false;
+        }
+      }, { once: true });
+    },
+  }">
 {{with .Collection}}
 <div class="mb-8 flex items-center gap-4">
   <div class="w-16 h-16 rounded-2xl bg-gradient-to-br from-sky-500/30 via-violet-500/30 to-gold-500/30 flex items-center justify-center text-3xl border border-ink-700 shadow-sky-glow">🗂</div>
   <div class="flex-1">
     <h1 class="text-3xl font-extrabold text-white tracking-tight flex items-center gap-2">
       {{if .Name}}{{.Name}}{{else}}{{shortAddr .Address}}{{end}}
+      <!-- Live badge: visible when WebSocket is subscribed to this collection's channel -->
+      <span x-show="wsSubscribed" x-cloak
+            class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider"
+            title="Receiving live updates via WebSocket">
+        <span class="relative flex w-1.5 h-1.5">
+          <span class="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" style="animation-duration: 1.8s;"></span>
+          <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+        </span>
+        Live
+      </span>
       {{if .Verified}}
       <span class="inline-flex items-center gap-1 px-2.5 py-0.5 rounded-full bg-violet-500/15 text-violet-300 text-xs font-extrabold border border-violet-500/30" title="Verified collection">
         <svg class="w-3 h-3" fill="currentColor" viewBox="0 0 20 20"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
@@ -41,5 +76,6 @@
 </div>
 <div class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4">
   {{template "partials/listing_cards.html" .}}
+</div>
 </div>
 {{end}}

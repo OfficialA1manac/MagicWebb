@@ -1,0 +1,61 @@
+schema:
+  - schema.graphql
+
+exec:
+  filename: generated.go
+  package: graphql
+
+model:
+  filename: models_gen.go
+  package: graphql
+
+resolver:
+  filename: resolver.go
+  type: Resolver
+  package: graphql
+
+models:
+  Collection:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Collection
+  CollectionStats:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.CollectionStats
+  Listing:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Listing
+  Auction:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Auction
+  Bid:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Bid
+  EffectiveBid:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.EffectiveBid
+  Offer:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Offer
+  TokenMeta:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.TokenMeta
+  TokenFullMetadata:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.TokenFullMetadata
+  Trait:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Trait
+  Activity:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Activity
+  TokenActivity:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.TokenActivity
+  Profile:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Profile
+  Notification:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.Notification
+  MarketMetrics:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.MarketMetrics
+  TrendingScore:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.TrendingScore
+  SearchResult:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.SearchResult
+  OwnedNFT:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.OwnedNFT
+  SavedSearch:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.SavedSearch
+  OfferSummary:
+    model: github.com/OfficialA1manac/MagicWebb/backend/internal/graphql.OfferSummary
+  Time:
+    model: github.com/99designs/gqlgen/graphql.Time
+  Map:
+    model: github.com/99designs/gqlgen/graphql.Map

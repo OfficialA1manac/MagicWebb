@@ -17,13 +17,18 @@ const (
 	MsgActivity         MessageType = "activity"
 
 	// Client-to-server request types.
-	MsgPing   MessageType = "ping"
-	MsgAction MessageType = "action"
+	MsgPing      MessageType = "ping"
+	MsgAction    MessageType = "action"
+	MsgSubscribe MessageType = "subscribe"
+	MsgUnsubscribe MessageType = "unsubscribe"
 
 	// Server-to-client response types.
-	MsgPong   MessageType = "pong"
-	MsgAck    MessageType = "ack"
-	MsgError  MessageType = "error"
+	MsgPong       MessageType = "pong"
+	MsgAck        MessageType = "ack"
+	MsgError      MessageType = "error"
+	MsgSubscribed   MessageType = "subscribed"
+	MsgUnsubscribed MessageType = "unsubscribed"
+	MsgState      MessageType = "state"
 )
 
 // Message is the JSON envelope for all WebSocket communication.
@@ -50,4 +55,25 @@ type ActionData struct {
 type AckData struct {
 	Status  string `json:"status"` // "ok" | "error"
 	Message string `json:"message,omitempty"`
+}
+
+// SubscribeData is sent by the client to subscribe to event channels.
+// Channels follow the pattern "token:<addr>:<id>", "collection:<addr>", "user:<addr>".
+type SubscribeData struct {
+	Channels []string `json:"channels"`
+}
+
+// UnsubscribeData is sent by the client to unsubscribe from event channels.
+type UnsubscribeData struct {
+	Channels []string `json:"channels"`
+}
+
+// SubscribedData is sent by the server confirming channel subscriptions.
+type SubscribedData struct {
+	Channels []string `json:"channels"`
+}
+
+// UnsubscribedData is sent by the server confirming channel unsubscriptions.
+type UnsubscribedData struct {
+	Channels []string `json:"channels"`
 }

@@ -21,6 +21,7 @@
 
 <!-- Trait filters (collapsible, populated from /collections/:address/traits) -->
 <div x-data="{ open: false, traits: {}, sel: {},
+       wsFlash: false, // briefly true when WS state arrives
        // v34: read active collection from the form input, not from the
        // server-rendered template value (which goes stale on form edits).
        async load() {
@@ -45,7 +46,27 @@
          if (sort && sort.value) p.set('sort', sort.value);
          for (const [k, v] of Object.entries(this.sel)) { if (v) p.set('trait_' + k, v); }
          location.search = p.toString();
-       } }" class="mb-6">    <span class="flex items-center gap-2 text-xs text-white/40">
+       },
+       init() {
+         // Watch $store.ws.lastState for listing state updates.
+         // When listing data arrives via WebSocket (MW_WS.getListing()),
+         // flash a brief indicator so the user knows new data is available
+         // before the next HTMX SSE refresh picks it up.
+         var self = this;
+         try {
+           this.$watch('$store.ws.lastState', function () {
+             self.wsFlash = true;
+             setTimeout(function () { self.wsFlash = false; }, 2000);
+           });
+         } catch (_) { /* $watch not available — no-op */ }
+       }
+     }" class="mb-6">
+    <!-- WebSocket state flash indicator -->
+    <span x-show="wsFlash" x-cloak
+          class="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-emerald-500/10 border border-emerald-400/30 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider ml-2"
+          style="transition: opacity 0.3s;">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-ping" style="animation-duration: 1.5s;"></span>
+      WS ⚡</span>    <span class="flex items-center gap-2 text-xs text-white/40">
       <button @click="load()" class="text-violet-200 hover:text-violet-100 transition font-bold uppercase tracking-wider">⚙ Trait filters</button>
       <template x-if="Object.keys(traits).length > 0">
         <span class="text-white/30" x-text="'(' + Object.keys(traits).length + ' traits)'"></span>

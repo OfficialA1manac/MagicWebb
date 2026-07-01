@@ -41,6 +41,15 @@ type rawMeta struct {
 func (r *Runner) runMetadataWorker(ctx context.Context) {
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
+
+	// Semaphore-bounded parallelism: limit concurrent metadata fetches to
+	// MetadataConcurrency (env METADATA_CONCURRENCY, default 3). A buffered
+	// channel of struct{} serves as the semaphore — each goroutine acquires
+	// a slot before calling fetchOne and releases it in a defer. This
+	// prevents a burst of missing metadata across many tokens from hammering
+	// RPC endpoints and IPFS gateways simultaneously.
+	sem := make(chan struct{}, r.cfg.MetadataConcurrency)
+
 	for {
 		select {
 		case <-ctx.Done():
@@ -52,11 +61,45 @@ func (r *Runner) runMetadataWorker(ctx context.Context) {
 				continue
 			}
 			for _, t := range tokens {
-				if err := r.fetchOne(ctx, t); err != nil {
-					// Warn (not Debug) so a sustained gateway outage surfaces
-					// in default prod-log scraping, not just debug mode.
-					log.Warn().Err(err).Str("coll", t.Collection).Str("token", t.TokenID).
-						Msg("metadata: fetch skipped")
+				t := t // capture loop variable
+				select {
+				case sem <- struct{}{}:
+					// Acquired semaphore slot, launch goroutine.
+				case <-ctx.Done():
+					return
+				}
+				go func() {
+					defer func() { <-sem }()
+					if err := r.fetchOne(ctx, t); err != nil {
+						// Warn (not Debug) so a sustained gateway outage surfaces
+						// in default prod-log scraping, not just debug mode.
+						log.Warn().Err(err).Str("coll", t.Collection).Str("token", t.TokenID).
+							Msg("metadata: fetch skipped")
+					}
+				}()
+			}
+			// Wait for all goroutines in this tick to finish before the next tick.
+			// This prevents goroutine pile-up when the ticker fires before a large
+			// batch completes — each batch drains the semaphore before the loop
+			// drains, so the next tick starts with a clean slate.
+			//
+			// Phase 1: acquire all cap(sem) slots, blocking until in-flight
+			// goroutines finish and release their slots via `<-sem`.
+			// Phase 2: release all acquired slots so the semaphore is empty
+			// for the next tick — without this release, the next tick's first
+			// `sem <- struct{}{}` would deadlock on a full channel.
+			for i := 0; i < cap(sem); i++ {
+				select {
+				case sem <- struct{}{}:
+				case <-ctx.Done():
+					return
+				}
+			}
+			for i := 0; i < cap(sem); i++ {
+				select {
+				case <-sem:
+				case <-ctx.Done():
+					return
 				}
 			}
 		}
@@ -98,11 +141,11 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	// pulls the token out of ListTokensMissingMetadata so we won't retry it
 	// on the next tick regardless).
 	metaURI := resolved
-	if metaSt, merr := imagestore.Put(ctx, r.q, sniffJSON, resolved, body); merr == nil && metaSt.Hash != "" {
+	if metaSt, merr := imagestore.Put(ctx, r.q, sniffJSON, t.Collection, resolved, body); merr == nil && metaSt.Hash != "" && !metaSt.Skipped {
 		metaURI = imagestore.PublicPath(metaSt.Hash)
-	} else if merr != nil {
-		log.Warn().Err(merr).Str("coll", t.Collection).Str("token", t.TokenID).Str("src", resolved).
-			Msg("metadata: self-host meta body rejected; using upstream URI")
+	} else if merr != nil || metaSt.Skipped {
+		log.Warn().Err(merr).Bool("skipped", metaSt.Skipped).Str("coll", t.Collection).Str("token", t.TokenID).Str("src", resolved).
+			Msg("metadata: self-host meta body rejected or quota exceeded; using upstream URI")
 	}
 
 	var m rawMeta
@@ -118,7 +161,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	if img := strings.TrimSpace(imageFromMeta(m)); img != "" {
 		imgResolved := media.ResolveURI(img, t.TokenID)
 		if imgBody, ferr := media.FetchBytes(ctx, imgResolved, t.TokenID); ferr == nil {
-			if imgSt, perr := imagestore.Put(ctx, r.q, media.SniffImage, imgResolved, imgBody); perr == nil && imgSt.Hash != "" {
+			if imgSt, perr := imagestore.Put(ctx, r.q, media.SniffImage, t.Collection, imgResolved, imgBody); perr == nil && imgSt.Hash != "" && !imgSt.Skipped {
 				imageURI = imagestore.PublicPath(imgSt.Hash)
 			}
 		}
@@ -239,9 +282,18 @@ func (r *Runner) retryOneImage(ctx context.Context, t db.ImageRetryToken) (retEr
 	if err != nil {
 		return fmt.Errorf("fetch image: %w", err)
 	}
-	st, err := imagestore.Put(ctx, r.q, media.SniffImage, t.ImageURI, imgBody)
+	st, err := imagestore.Put(ctx, r.q, media.SniffImage, t.Collection, t.ImageURI, imgBody)
 	if err != nil {
 		return fmt.Errorf("imagestore put: %w", err)
+	}
+	if st.Skipped {
+		// Quota exceeded — not a hard failure, but still advance the backoff
+		// schedule so we don't hammer upstream every cycle while quota stays full.
+		if berr := r.q.BumpImageRetry(ctx, t.Collection, t.TokenID, t.RetryCount); berr != nil {
+			log.Warn().Err(berr).Str("coll", t.Collection).Str("token", t.TokenID).
+				Msg("image-retry: failed to bump retry count after quota skip")
+		}
+		return nil
 	}
 	if st.Hash == "" {
 		return fmt.Errorf("imagestore returned empty hash")

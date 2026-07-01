@@ -1,6 +1,7 @@
 package api
 
 import (
+	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
@@ -25,6 +26,7 @@ func (s *AdminService) RegisterRoutes(api fiber.Router, cfg *config.Config) {
 	api.Post("/reports", jwtMiddleware(cfg), s.handleCreateReport)
 	api.Post("/admin/verify", jwtMiddleware(cfg), s.handleAdminVerify)
 	api.Post("/admin/collections/verify", jwtMiddleware(cfg), s.handleAdminVerifyCollection)
+	api.Get("/admin/auctions/stalled", jwtMiddleware(cfg), s.handleStalledAuctions)
 }
 
 type reportRequest struct {
@@ -88,4 +90,38 @@ func (s *AdminService) handleAdminVerifyCollection(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(fiber.Map{"collection": strings.ToLower(req.Address), "verified": req.Verified})
+}
+
+// handleStalledAuctions returns detailed stalled auction rows for admin inspection.
+// Response includes both summary counts and the full row list.
+func (s *AdminService) handleStalledAuctions(c *fiber.Ctx) error {
+	addr := caller(c)
+	if addr == "" || !s.cfg.IsAdmin(addr) {
+		return writeErr(c, fiber.StatusForbidden, "admin only")
+	}
+	limit := 100
+	if ls := c.Query("limit"); ls != "" {
+		if n, err := strconv.Atoi(ls); err == nil && n > 0 {
+			if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+
+	counts, err := s.q.GetStalledAuctionCounts(c.Context())
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	rows, err := s.q.ListStalledAuctions(c.Context(), limit)
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if rows == nil {
+		rows = []db.StalledAuctionRow{}
+	}
+	return c.JSON(fiber.Map{
+		"counts": counts,
+		"rows":   rows,
+	})
 }

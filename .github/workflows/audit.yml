@@ -1,0 +1,140 @@
+name: Audit Checklist
+
+on:
+  workflow_dispatch:  # Manual trigger for full audits
+  schedule:
+    # Weekly audit run: Sunday 04:00 UTC
+    - cron: "0 4 * * 0"
+  push:
+    tags: ["v*"]       # Release tags trigger a full audit
+
+permissions:
+  contents: read
+
+jobs:
+  # ── Full Solidity audit suite ─────────────────────────────────────────
+  contracts-audit:
+    name: Contracts — Full Audit Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1.2.0
+
+      - name: Build (with sizes)
+        working-directory: contracts
+        run: forge build --sizes
+
+      - name: Run all tests (verbose)
+        working-directory: contracts
+        run: forge test -vvv
+
+      - name: Run fuzz tests
+        working-directory: contracts
+        run: |
+          forge test --match-path test/AuditFuzz.t.sol -vvv
+          forge test --match-path test/OfferBookInvariant.t.sol -vvv
+
+      - name: Generate coverage report
+        working-directory: contracts
+        run: forge coverage --report lcov --report-file lcov.info
+
+      - name: Upload coverage to Codecov
+        if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
+        uses: codecov/codecov-action@v5.2.0
+        with:
+          files: contracts/lcov.info
+          flags: contracts
+          fail_ci_if_error: false
+
+  # ── Slither static analysis ───────────────────────────────────────────
+  slither:
+    name: Contracts — Slither Static Analysis
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1.2.0
+
+      - name: Slither static analysis (full)
+        uses: crytic/slither-action@v0.4.0
+        with:
+          target: contracts/
+          slither-config: contracts/slither.config.json
+          fail-on: high
+          slither-args: --print human-summary
+
+  # ── Backend audit suite ───────────────────────────────────────────────
+  backend-audit:
+    name: Backend — Full Audit Suite
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.0
+
+      - uses: actions/setup-go@v5.4.0
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      - name: Build
+        working-directory: backend
+        run: go build ./...
+
+      - name: Vet
+        working-directory: backend
+        run: go vet ./...
+
+      - name: Test (race detector)
+        working-directory: backend
+        run: go test -race -count=1 ./...
+
+      - name: Staticcheck
+        working-directory: backend
+        run: |
+          go install honnef.co/go/tools/cmd/staticcheck@latest
+          staticcheck ./...
+
+  # ── Secret scan (gitleaks) ────────────────────────────────────────────
+  secrets:
+    name: Secret scan (gitleaks)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          fetch-depth: 0
+
+      - name: gitleaks
+        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149
+        env:
+          GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+
+  # ── Audit summary ─────────────────────────────────────────────────────
+  audit-summary:
+    name: Audit Summary
+    needs: [contracts-audit, slither, backend-audit, secrets]
+    runs-on: ubuntu-latest
+    if: always()
+    steps:
+      - name: Compile audit results
+        run: |
+          echo "## 🔍 Full Audit Checklist Results" >> $GITHUB_STEP_SUMMARY
+          echo "" >> $GITHUB_STEP_SUMMARY
+          echo "| Check | Status |" >> $GITHUB_STEP_SUMMARY
+          echo "|-------|--------|" >> $GITHUB_STEP_SUMMARY
+          echo "| Contracts — Build & Sizes | ${{ needs.contracts-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contracts — Unit Tests | ${{ needs.contracts-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contracts — Fuzz Tests | ${{ needs.contracts-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Contracts — Coverage Report | ${{ needs.contracts-audit.result == 'success' && '✅ Generated' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Slither — Static Analysis | ${{ needs.slither.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend — Build | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend — go vet | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend — Race Tests | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend — Staticcheck | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Secrets — Gitleaks | ${{ needs.secrets.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

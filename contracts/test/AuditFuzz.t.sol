@@ -27,7 +27,9 @@ import {
     NotActive,
     NotSettled,
     NotStalled,
-    StallNotOver
+    StallNotOver,
+    BidTooLow,
+    BidOverflow
 } from "../src/AuctionHouse.sol";
 import {
     OfferBook,
@@ -212,6 +214,29 @@ contract AuditFuzzTest is Test {
 
     function _grain(uint256 i) internal pure returns (address) {
         return address(uint160(uint256(keccak256(abi.encodePacked("GRAIN", i)))));
+    }
+
+    /// @dev Create an auction with custom increment parameters.
+    function _createWithIncrement(uint128 reserve, uint16 minIncBps, uint128 minIncFlat)
+        internal returns (uint256 id, uint256 tid)
+    {
+        vm.startPrank(seller);
+        tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        id = ah.create(address(nft), tid, reserve, uint64(block.timestamp + 7 days), minIncBps, minIncFlat);
+        vm.stopPrank();
+    }
+
+    /// @dev Create an auction with custom increment parameters and a named leader bidder.
+    function _setupLeader(uint128 reserve, uint16 minIncBps, uint128 minIncFlat, address leader, uint128 leaderBid)
+        internal returns (uint256 id)
+    {
+        (uint256 id_,) = _createWithIncrement(reserve, minIncBps, minIncFlat);
+        vm.deal(leader, uint256(leaderBid) + 10 ether);
+        _bid(id_, leader, leaderBid);
+        (address l,) = _leader(id_);
+        assertEq(l, leader, "leader must be set");
+        return id_;
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -1109,7 +1134,160 @@ contract AuditFuzzTest is Test {
     }
 
     // ════════════════════════════════════════════════════════════════════════════
-    //  (j)  R-04 / R-01 regression tests (v28 — Round 5):
+    //  (l)  Increment-logic fuzz tests — covers the min-next-bid arithmetic
+    //      in AuctionHouse.bid() for the overtaking-leader path:
+    //
+    //      uint256 incPct  = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
+    //      uint256 inc     = incPct > a.minIncrementFlat ? incPct : a.minIncrementFlat;
+    //      if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
+    //      uint256 minNext256 = uint256(a.leaderTotal) + inc;
+    //      if (minNext256 > type(uint128).max) revert BidOverflow();
+    //      uint128 minNext = uint128(minNext256);
+    //      if (newTotal < minNext) revert BidTooLow();
+    //
+    //  (l.1) MIN_BID_INCREMENT floor: when both BPS and flat are 0, the floor
+    //        of 0.001 ETH is applied. A bid below leaderTotal + floor reverts
+    //        BidTooLow; a bid at the floor takes the lead.
+    //
+    //  (l.2) General minNext calculation: fuzz BPS (0-5000), flat (0-1 ETH),
+    //        and leaderTotal (1-50 ETH). Verify the computed minNext matches
+    //        the contract's actual enforcement: bids at minNext succeed, bids
+    //        at minNext-1 wei revert BidTooLow (when minNext <= uint128.max).
+    //
+    //  (l.3) Near-max BidOverflow guard: when leaderTotal is close to
+    //        uint128.max, a bid that pushes minNext over the cap reverts
+    //        BidOverflow. A small bid that stays under cap succeeds.
+    // ════════════════════════════════════════════════════════════════════════════
+
+    // INVARIANT: When both minIncrementBps=0 and minIncrementFlat=0, the
+    // floor at MIN_BID_INCREMENT (0.001 ETH) is always applied. Bidders
+    // cannot reduce the increment below this economic threshold through
+    // contract configuration alone.
+    function testFuzz_increment_minBidFloor(uint128 leaderTotal) public {
+        leaderTotal = uint128(bound(leaderTotal, 1 ether, 50 ether));
+        uint256 floor = ah.MIN_BID_INCREMENT(); // 0.001 ether
+
+        // Auction with BOTH increment params at 0 — only the floor applies.
+        uint256 id = _setupLeader(leaderTotal / 2, 0, 0, alice, leaderTotal);
+
+        uint256 expectedMinNext = uint256(leaderTotal) + floor;
+
+        // Below-floor bid must revert BidTooLow.
+        vm.deal(bob, 100 ether);
+        vm.prank(bob);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: expectedMinNext - 1}(id);
+        (address l,) = _leader(id);
+        assertEq(l, alice, "alice still leader after failed below-floor bid");
+
+        // At-floor bid takes the lead.
+        vm.prank(bob);
+        ah.bid{value: expectedMinNext}(id);
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, bob, "bob takes lead with floor bid");
+        assertEq(t2, uint128(expectedMinNext), "leaderTotal = leaderTotal + MIN_BID_INCREMENT");
+    }
+
+    // INVARIANT: The increment is always the max of (percentage, flat, MIN_BID_INCREMENT).
+    // Bids below the resulting minNext revert BidTooLow; bids at or above succeed.
+    function testFuzz_increment_minNextCalculation(
+        uint16 minIncBps,
+        uint128 minIncFlat,
+        uint128 leaderTotal
+    ) public {
+        minIncBps = uint16(bound(minIncBps, 0, 5000));
+        minIncFlat = uint128(bound(minIncFlat, 0, 1 ether));
+        leaderTotal = uint128(bound(leaderTotal, 1 ether, 50 ether));
+
+        uint256 incPct = uint256(leaderTotal) * minIncBps / 10_000;
+        uint256 inc = incPct > minIncFlat ? incPct : minIncFlat;
+        uint256 floor = ah.MIN_BID_INCREMENT();
+        if (inc < floor) inc = floor;
+        uint256 minNext256 = uint256(leaderTotal) + inc;
+
+        // Create auction and set up leader BEFORE any overflow branch so `id`
+        // is in scope for every return path.
+        // The reserve is leaderTotal/2 (capped floor at 0.01 ETH) so alice's
+        // leaderTotal bid always clears it.
+        uint256 minReserve = leaderTotal / 2;
+        if (minReserve < 0.01 ether) minReserve = 0.01 ether;
+        uint256 id = _setupLeader(uint128(minReserve), minIncBps, minIncFlat, alice, leaderTotal);
+
+        // If minNext overflows uint128, any bid where newTotal > leaderTotal
+        // triggers BidOverflow in the L-11 guard. Use type(uint128).max as the
+        // bid value — this is always > leaderTotal (leaderTotal <= 50 ether)
+        // and passes the first overflow check (nt == type(uint128).max, not >).
+        if (minNext256 > type(uint128).max) {
+            vm.deal(bob, type(uint128).max);
+            vm.prank(bob);
+            vm.expectRevert(BidOverflow.selector);
+            ah.bid{value: type(uint128).max}(id);
+            return;
+        }
+
+        uint128 minNext = uint128(minNext256);
+
+        // Bid just below minNext reverts BidTooLow (when minNext > leaderTotal).
+        // This always holds since inc >= MIN_BID_INCREMENT > 0, so minNext > leaderTotal.
+        if (minNext > 0 && uint256(minNext) - 1 > leaderTotal) {
+            vm.deal(bob, 100 ether);
+            vm.prank(bob);
+            vm.expectRevert(BidTooLow.selector);
+            ah.bid{value: minNext - 1}(id);
+            (address l,) = _leader(id);
+            assertEq(l, alice, "alice still leader after BidTooLow");
+        }
+
+        // Bid exactly at minNext succeeds.
+        vm.deal(bob, 100 ether);
+        vm.prank(bob);
+        ah.bid{value: minNext}(id);
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, bob, "bob takes lead with exact minNext bid");
+        assertEq(t2, minNext, "leaderTotal equals minNext after winning bid");
+    }
+
+    // INVARIANT: When leaderTotal is near uint128.max, the L-11 guard prevents
+    // any bid from pushing minNext over the cap. Use type(uint128).max as the
+    // bid value for overflow cases since it's the only value guaranteed to be
+    // > leaderTotal while still <= type(uint128).max (for leaderTotal < max).
+    //
+    // NOTE: leaderTotal = type(uint128).max is unreachable for overflow because
+    // no newTotal can exceed it — the `newTotal > a.leaderTotal` branch is never
+    // entered. The upper bound is therefore type(uint128).max - 1.
+    function testFuzz_increment_nearMaxBidOverflow(uint128 leaderTotal) public {
+        leaderTotal = uint128(bound(leaderTotal, type(uint128).max - 1 ether, type(uint128).max - 1));
+
+        // Use 0,0 increments so the floor (MIN_BID_INCREMENT = 0.001 ETH) dominates.
+        uint256 id = _setupLeader(leaderTotal / 2, 0, 0, alice, leaderTotal);
+        uint256 floor = ah.MIN_BID_INCREMENT();
+        uint256 minNext256 = uint256(leaderTotal) + floor;
+
+        // If minNext exceeds uint128.max, use type(uint128).max as the bid.
+        // This is always > leaderTotal (since leaderTotal < type(uint128).max)
+        // and passes the first overflow check (nt == type(uint128).max, not >).
+        if (minNext256 > type(uint128).max) {
+            vm.deal(bob, type(uint128).max);
+            vm.prank(bob);
+            vm.expectRevert(BidOverflow.selector);
+            ah.bid{value: type(uint128).max}(id);
+            (address l, uint128 t) = _leader(id);
+            assertEq(l, alice, "alice still leader after BidOverflow");
+            assertEq(t, leaderTotal, "leaderTotal unchanged after BidOverflow");
+        } else {
+            // minNext is within uint128 range — the bid should succeed.
+            uint128 minNext = uint128(minNext256);
+            vm.deal(bob, type(uint128).max);
+            vm.prank(bob);
+            ah.bid{value: minNext}(id);
+            (address l2, uint128 t2) = _leader(id);
+            assertEq(l2, bob, "bob takes lead with near-max minNext bid");
+            assertEq(t2, minNext, "leaderTotal at near-max boundary");
+        }
+    }
+
+    // ════════════════════════════════════════════════════════════════════════════
+    //  (m)  R-04 / R-01 regression tests (v28 — Round 5):
     //
     //  (j.1) R-04: settleUnstuck MUST NOT refresh a.stalledAt on a re-stall.
     //        Any third party calling settleUnstuck() at day 6 must NOT

@@ -2,6 +2,7 @@
 pragma solidity 0.8.26;
 
 import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {IMarketplaceManager} from "./MarketplaceCore.sol";
 
 error ZeroAddr();
 error NotContract();
@@ -36,7 +37,7 @@ error SameValue();
 ///   - setFeeDistributor    — future token-based fee rebate module.
 ///   - setStakingModule     — future token utility.
 ///   - setGovernanceModule  — future on-chain governance.
-contract MarketplaceManager is AccessControl {
+contract MarketplaceManager is AccessControl, IMarketplaceManager {
     bytes32 public constant OPERATOR_ROLE    = keccak256("OPERATOR_ROLE");
     bytes32 public constant KEEPER_ROLE      = keccak256("KEEPER_ROLE");
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");

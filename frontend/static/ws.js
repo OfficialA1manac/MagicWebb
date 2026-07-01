@@ -53,6 +53,38 @@
       closing = false;
       connect();
     },
+
+    // ── Action helpers ────────────────────────────────────────────────────────
+
+    /** Subscribe to event channels ("token:0xabc:123", "collection:0xabc", "user:0xdef"). */
+    subscribe: function (channels) {
+      this.send({ type: 'subscribe', data: { channels: channels } });
+    },
+
+    /** Unsubscribe from event channels. */
+    unsubscribe: function (channels) {
+      this.send({ type: 'unsubscribe', data: { channels: channels } });
+    },
+
+    /** Request the current state of a listing by collection + token ID. */
+    getListing: function (collection, tokenId) {
+      this.send({ type: 'action', data: { action: 'get_listing', params: { collection: collection, token_id: tokenId } } });
+    },
+
+    /** Request the current state of an auction by ID. */
+    getAuction: function (auctionId) {
+      this.send({ type: 'action', data: { action: 'get_auction', params: { auction_id: auctionId } } });
+    },
+
+    /** Request an offer by ID. */
+    getOffer: function (offerId) {
+      this.send({ type: 'action', data: { action: 'get_offer', params: { offer_id: offerId } } });
+    },
+
+    /** Request token metadata by collection + token ID. */
+    getToken: function (collection, tokenId) {
+      this.send({ type: 'action', data: { action: 'get_token', params: { collection: collection, token_id: tokenId } } });
+    },
   };
 
   // ── Connection lifecycle ───────────────────────────────────────────────────
@@ -101,6 +133,29 @@
 
           case 'ack':
             // Connection established / action acknowledged
+            break;
+
+          case 'subscribed':
+            // Subscription confirmation — dispatch dedicated event so Alpine
+            // components can react (e.g. show subscribed channels indicator).
+            window.dispatchEvent(new CustomEvent('mw-ws-subscribed', {
+              detail: msg.data,
+            }));
+            break;
+
+          case 'unsubscribed':
+            // Unsubscription confirmation.
+            window.dispatchEvent(new CustomEvent('mw-ws-unsubscribed', {
+              detail: msg.data,
+            }));
+            break;
+
+          case 'state':
+            // State data response (get_listing, get_auction, get_offer, get_token).
+            // dispatch with both the raw msg and the resolved state payload.
+            window.dispatchEvent(new CustomEvent('mw-ws-state', {
+              detail: msg.data,
+            }));
             break;
 
           default:

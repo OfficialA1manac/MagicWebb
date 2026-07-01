@@ -22,6 +22,8 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ws"
+
+	graphql "github.com/OfficialA1manac/MagicWebb/backend/internal/graphql"
 )
 
 // Strict-transport / content-security baseline. CSP locks scripts to self +
@@ -205,8 +207,22 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// WebSocket endpoint for bidirectional real-time communication.
 	// Registered at app level (like /events) to avoid rate-limit conflicts.
 	// Supports authenticated (SIWE JWT cookie) and unauthenticated connections.
-	wsHandler := ws.NewHandler(cfg, bcast, func() int64 { return atomic.LoadInt64(serverTimeMs) })
+	// db.Q enables lightweight state queries via WebSocket actions (get_listing,
+	// get_auction, etc.) without REST API round-trips.
+	wsHandler := ws.NewHandler(cfg, bcast, q, func() int64 { return atomic.LoadInt64(serverTimeMs) })
 	app.Get("/ws", wsHandler.HandleWebSocket)
+
+	// GraphQL endpoint for rich data queries.
+	// POST /graphql — execute queries against the GraphQL schema.
+	// GET /graphql — returns documentation page.
+	// GET /graphiql — interactive GraphQL IDE.
+	// Rate-limited at the same tier as /api/v1 to prevent arbitrary-depth
+	// queries from becoming a DB DoS vector.
+	gql := graphql.NewGraphQLServer(q, bcast)
+	gqlLimiter := rateLimitMiddleware(rl)
+	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
+	app.Get("/graphql", gqlLimiter, gql.HandleGET)
+	app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 

@@ -275,13 +275,20 @@ func TestImageRetryNowSelfHostsAndUpdatesAtomically(t *testing.T) {
 
 	// imagestore.Put flow:
 	//   1) HasImage (pre-check) returns pgx.ErrNoRows → (false, nil)
-	//   2) PutImage in a BEGIN/INSERT/COMMIT tx
+	//   2) CountBlobsForCollection returns 0 (well below quota)
+	//   3) TotalBlobBytes returns a small value (well below quota)
+	//   4) PutImage in a BEGIN/INSERT/COMMIT tx
 	mock.ExpectQuery(`SELECT 1 FROM nft_image_blobs WHERE sha256=\$1`).
 		WithArgs(expectedSHA).
 		WillReturnError(pgx.ErrNoRows)
+	mock.ExpectQuery(`SELECT count\(\*\) FROM nft_image_blobs WHERE collection=\$1`).
+		WithArgs("0xc").
+		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(0))
+	mock.ExpectQuery(`SELECT COALESCE\(sum\(byte_length\), 0\) FROM nft_image_blobs`).
+		WillReturnRows(pgxmock.NewRows([]string{"coalesce"}).AddRow(int64(0)))
 	mock.ExpectBegin()
 	mock.ExpectExec(`INSERT INTO nft_image_blobs`).
-		WithArgs(expectedSHA, "image/png", len(imgRetryPNGHeader), "https://ipfs.io/ipfs/QmFakeHash", imgRetryPNGHeader).
+		WithArgs(expectedSHA, "image/png", len(imgRetryPNGHeader), "https://ipfs.io/ipfs/QmFakeHash", imgRetryPNGHeader, "0xc").
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
 	mock.ExpectCommit()
 

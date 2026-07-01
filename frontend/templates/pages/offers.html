@@ -4,12 +4,47 @@
      Live region swaps every 1s OR on offer-updated SSE. Alpine.initTree
      on after-swap re-applies x-show on the new node children so the
      active tab still gates the right offer list. -->
-<div x-data="{tab: 'received'}">
+<div x-data="{
+    tab: 'received',
+    wsChannel: 'user:{{lower .Addr}}',
+    wsSubscribed: false,
+    init() {
+      if (!this.wsChannel || this.wsChannel === 'user:') return;
+      var self = this;
+      var doSub = function () {
+        if (window.MW_WS && window.MW_WS.subscribe) {
+          window.MW_WS.subscribe([self.wsChannel]);
+          self.wsSubscribed = true;
+        }
+      };
+      if (window.MW_WS && window.MW_WS.connected) {
+        doSub();
+      } else {
+        window.addEventListener('mw-ws-open', doSub, { once: true });
+      }
+      window.addEventListener('pagehide', function () {
+        if (window.MW_WS && window.MW_WS.unsubscribe) {
+          window.MW_WS.unsubscribe([self.wsChannel]);
+          self.wsSubscribed = false;
+        }
+      }, { once: true });
+    },
+  }">
   <div class="flex flex-wrap items-center justify-between gap-3 mb-6">
     <div>
       <h1 class="text-3xl font-extrabold tracking-tight text-white flex items-center gap-3">
         <span class="w-11 h-11 rounded-2xl btn-gold flex items-center justify-center text-ink-950 glow-gold">⚐</span>
         Offers
+        <!-- Live badge: visible when WebSocket is subscribed to the user's channel -->
+        <span x-show="wsSubscribed" x-cloak
+              class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-emerald-500/15 border border-emerald-400/30 text-emerald-300 text-[10px] font-extrabold uppercase tracking-wider"
+              title="Receiving live updates via WebSocket">
+          <span class="relative flex w-1.5 h-1.5">
+            <span class="absolute inset-0 rounded-full bg-emerald-400 animate-ping opacity-60" style="animation-duration: 1.8s;"></span>
+            <span class="relative inline-flex w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+          </span>
+          Live
+        </span>
       </h1>
       <p class="text-sm text-white/40 mt-1">Your buy and sell offers, escrow status, and refund windows.</p>
     </div>

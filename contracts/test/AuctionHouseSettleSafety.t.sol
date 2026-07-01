@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, NotActive, NotStalled, StallNotOver} from "../src/AuctionHouse.sol";
+import {AuctionHouse, NotActive, NotStalled, StallNotOver, BidTooLow, AuctionEnded} from "../src/AuctionHouse.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -154,6 +154,76 @@ contract AuctionHouseSettleSafetyTest is Test {
         a = ah.getAuction(id);
         assertTrue(a.settled, "settled after unstuck");
         assertEq(multi.balanceOf(address(bidder), 7), 5, "bidder received ERC1155");
+    }
+
+    /// C-01/C-02: calling settle() on a stalled auction must revert with NotStalled.
+    /// The stall path parks the auction for settleUnstuck() / reclaim(); a direct
+    /// settle() call after stall must be rejected so the caller doesn't bypass
+    /// the STALL_WINDOW waiting period.
+    function test_settleOnStalledAuctionReverts() public {
+        MaliciousBidder bidder = new MaliciousBidder();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        multi.mint(seller, 7, 5);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 2 ether}(id);
+        vm.warp(block.timestamp + 2 days);
+
+        // settle() stalls (ERC-1155 buyer-fault)
+        ah.settle(id);
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertGt(a.stalledAt, 0, "stalled");
+        assertFalse(a.settled, "not settled");
+
+        // Calling settle() again on a stalled auction must revert.
+        vm.expectRevert(NotStalled.selector);
+        ah.settle(id);
+    }
+
+    /// R-04: calling settleUnstuck() on a stalled auction where the buyer
+    /// still hasn't fixed their contract must NOT refresh stalledAt.
+    /// The first-stall timestamp is immutable so the reclaim() 7-day window
+    /// is deterministic — repeated settleUnstuck calls cannot reset it.
+    function test_settleUnstuckBuyerFaultPreservesStalledAt() public {
+        MaliciousBidder bidder = new MaliciousBidder();
+        vm.deal(address(bidder), 100 ether);
+
+        vm.startPrank(seller);
+        multi.mint(seller, 7, 5);
+        multi.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        vm.stopPrank();
+
+        vm.prank(address(bidder));
+        ah.bid{value: 2 ether}(id);
+        vm.warp(block.timestamp + 2 days);
+
+        // First settle → stalls
+        ah.settle(id);
+        uint64 firstStalled = ah.getAuction(id).stalledAt;
+        assertGt(firstStalled, 0, "stalled");
+
+        // Warp forward 1 day — buyer still hasn't fixed
+        vm.warp(block.timestamp + 1 days);
+
+        // settleUnstuck with buyer still blocking → fails again
+        // R-04: stalledAt MUST NOT be refreshed
+        ah.settleUnstuck(id);
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        assertEq(a.stalledAt, firstStalled, "stalledAt unchanged (R-04)");
+        assertFalse(a.settled, "still not settled");
+
+        // Warp past STALL_WINDOW from original stall time
+        vm.warp(uint256(firstStalled) + ah.STALL_WINDOW());
+        uint256 winnerBefore = address(bidder).balance;
+        ah.reclaim(id);
+        assertEq(address(bidder).balance, winnerBefore + 2 ether, "reclaim refunds winner");
+        assertTrue(ah.getAuction(id).settled, "settled after reclaim");
     }
 
     /// feeRecipient cannot receive ETH → settle still completes.

@@ -44,7 +44,7 @@ type Config struct {
 	// Auth
 	SIWEDomain string
 	JWTSecret  string
-	NonceTTL   time.Duration // TTL for SIWE nonces (in-memory store)
+	NonceTTL   time.Duration // TTL for SIWE nonces (in-memory store); env NONCE_TTL
 
 	// Indexer
 	IndexFromBlock  uint64 // start block (override for reindex)
@@ -57,6 +57,9 @@ type Config struct {
 	ScoreWVolume float64
 	ScoreDecay   float64
 
+
+	// Metadata worker
+	MetadataConcurrency int // concurrent metadata fetches per tick; env METADATA_CONCURRENCY
 
 	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
 	KeeperKey string
@@ -122,11 +125,12 @@ func Load() {
 
 		SIWEDomain: envOrDefault("SIWE_DOMAIN", "localhost"),
 		JWTSecret:  required("JWT_SECRET"),
-		NonceTTL:   5 * time.Minute,
+		NonceTTL:   optDuration("NONCE_TTL", 5*time.Minute),
 
-		IndexFromBlock:  optUint64("INDEX_FROM_BLOCK", 0),
-		GetLogsChunk:    optUint64("GETLOGS_CHUNK", 30),
-		GetLogsBlockCap: optUint64("GETLOGS_BLOCK_CAP", 30),
+		IndexFromBlock:       optUint64("INDEX_FROM_BLOCK", 0),
+		GetLogsChunk:         optUint64("GETLOGS_CHUNK", 30),
+		GetLogsBlockCap:      optUint64("GETLOGS_BLOCK_CAP", 30),
+		MetadataConcurrency:  optInt("METADATA_CONCURRENCY", 3),
 
 		ScoreWViews:  optFloat64("SCORE_W_VIEWS", 0.3),
 		ScoreWBids:   optFloat64("SCORE_W_BIDS", 0.5),
@@ -388,4 +392,34 @@ func optFloat64(key string, def float64) float64 {
 		return def
 	}
 	return f
+}
+
+func optDuration(key string, def time.Duration) time.Duration {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	d, err := time.ParseDuration(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARN: %s=%q is not a valid duration (using default %v): %v\n", key, v, def, err)
+		return def
+	}
+	return d
+}
+
+func optInt(key string, def int) int {
+	v := os.Getenv(key)
+	if v == "" {
+		return def
+	}
+	n, err := strconv.Atoi(v)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "WARN: %s=%q is not a valid int (using default %d): %v\n", key, v, def, err)
+		return def
+	}
+	if n < 1 {
+		fmt.Fprintf(os.Stderr, "WARN: %s=%d is < 1, clamping to default %d\n", key, n, def)
+		return def
+	}
+	return n
 }
