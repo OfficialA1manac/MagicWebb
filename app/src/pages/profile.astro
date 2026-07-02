@@ -201,8 +201,28 @@ import WalletConnect from '../components/WalletConnect';
           }
 
           // Build the complete profile page
+          // Merge wallet-held NFTs with listed/auctioned NFTs so users see
+          // their NFTs even when escrowed in the marketplace contract.
+          var combinedNFTs = [];
+          var seenKeys = {};
+          // Helper: add to combinedNFTs, deduped by collection:token_id
+          function mergeItems(arr){
+            if(!arr||!arr.length)return;
+            arr.forEach(function(it){
+              var key = (it.collection||'')+':'+(it.token_id||it.tokenID||'');
+              if(seenKeys[key])return;
+              seenKeys[key]=true;
+              combinedNFTs.push(it);
+            });
+          }
+          // Priority: wallet-held > listed > auctioned (prefer held for latest info)
+          mergeItems(nfts);
+          mergeItems(listings);
+          mergeItems(auctions);
+          var allNFTsCount = combinedNFTs.length;
+
           const tabs = [
-        {id:'nfts',     label:'NFTs ('+nfts.length+')',     color:'#7dd3fc'},
+        {id:'nfts',     label:'My NFTs ('+allNFTsCount+')',     color:'#7dd3fc'},
         {id:'listings', label:'Listings ('+listings.length+')', color:'#fcd34d'},
         {id:'auctions', label:'Auctions ('+auctions.length+')', color:'#a78bfa'},
         {id:'offers',   label:'Offers ('+(offersSent.length+offersRecv.length)+')', color:'#fcd34d'},
@@ -223,7 +243,7 @@ import WalletConnect from '../components/WalletConnect';
                 '</div>'+
                 '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(targetAddr)+'</p>'+
                 (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;">'+esc(bio)+'</p>':'')+
-                '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+nfts.length+' NFT'+(nfts.length!==1?'s':'')+' in wallet</p>'+
+                '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+allNFTsCount+' NFT'+(allNFTsCount!==1?'s':'')+' — '+nfts.length+' in wallet, '+(listings.length+auctions.length)+' on market</p>'+
               '</div>'+
               '<div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">'+
                 (isOwnProfileFor(targetAddr)?'<button id="edit-profile-btn" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(125,211,252,0.25);color:#7dd3fc;font-size:0.8125rem;font-weight:700;transition:all 0.2s;background:rgba(125,211,252,0.1);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:0.375rem;">✎ Edit Profile</button>':'')+
@@ -275,7 +295,7 @@ import WalletConnect from '../components/WalletConnect';
             const tc = document.getElementById('tab-content');
             if(!tc) return;
             switch(id){
-              case 'nfts':     tc.innerHTML = renderNFTGrid(nfts); break;
+              case 'nfts':     tc.innerHTML = renderNFTGrid(combinedNFTs); break;
               case 'listings': tc.innerHTML = renderListingsGrid(listings); break;
               case 'auctions': tc.innerHTML = renderAuctionsList(auctions); break;
               case 'offers':
@@ -447,7 +467,9 @@ import WalletConnect from '../components/WalletConnect';
       }
 
       // Listen for wallet-connect events — re-render profile IN-PLACE without page reload.
-      // No debounce needed since we re-render instead of reloading, avoiding the infinite loop entirely.
+      // Debounce (300ms) to absorb rapid state transitions during wagmi React hydration
+      // that fire multiple mw-wallet-changed events in quick succession.
+      var _wcDebounceTimer = null;
       window.addEventListener('mw-wallet-changed', function _onWalletChange(){
         // Re-read the address from localStorage (may have changed or been cleared)
         const newAddr = (function(){
@@ -455,13 +477,17 @@ import WalletConnect from '../components/WalletConnect';
           if (isEthAddr(p)) return p.toLowerCase();
           try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
         })();
-        if (!newAddr) {
-          // Wallet was disconnected — show connect screen
-          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
-          return;
-        }
-        // Re-fetch and re-render for the new/updated address
-        loadProfileData(newAddr);
+        if (_wcDebounceTimer) clearTimeout(_wcDebounceTimer);
+        _wcDebounceTimer = setTimeout(function(){
+          _wcDebounceTimer = null;
+          if (!newAddr) {
+            // Wallet was disconnected — show connect screen
+            if(root) root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
+            return;
+          }
+          // Re-fetch and re-render for the new/updated address
+          loadProfileData(newAddr);
+        }, 300);
       });
 
       // Initial load
