@@ -1,7 +1,7 @@
 {
   "name": "Titan — The Cosmic Awakening",
   "description": "Titan, once the world's greatest threat and now its most unlikely guardian. His silver hair flows wild as his body pulses with awakened energy — veins glowing crimson through cracked skin, eyes burning with the resolve of a man who walked through hell and came out the other side. The cosmic radiation from his final battle left permanent scars across his form, but also awakened something deeper: the understanding that true strength isn't about defeating enemies — it's about protecting what matters.\n\nThis piece captures the moment of transformation: half-human, half- ascended being, wholly determined. The shattered colosseum looms in the background as Titan stands at the precipice between destruction and redemption.",
-  "image": "/static/svggen/titan.svg",
+  "image": "/api/v1/img/placeholder-titan",
   "attributes": [
     { "trait_type": "Collection", "value": "Animi" },
     { "trait_type": "Series", "value": "Original" },

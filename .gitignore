@@ -29,6 +29,10 @@ desktop.ini
 # Claude / agent
 .claude/settings.local.json
 
+# svggen — standalone SVG art generator (moved to ~/Desktop/svggen/)
+# Was part of repo for testnet seeding; now a separate standalone tool.
+svggen/
+
 # Devtools / one-shot scripts (not part of the app)
 /main.go
 /go.mod

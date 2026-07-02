@@ -12,11 +12,14 @@ OB=0x0C6EdB481BC73B4b817A2E7235B309276D703906
 NFT=0x0E513BfE29E00E160ADE7516AD9363F070a101bF
 
 PK_SELLER=$DEPLOYER_KEY                      # deployer doubles as seller (testnet)
-PK_C=0x1155d467e2746415ca792f62d2170ac3d9bd746cc5370d0d242f1af6b4608bff
-PK_D=0x30c0778ab9ee9a827d71e2aef8a866d896cb3625c35aa735d341d06b0dcc7733
-SELLER=0xdf73Dc01Fc162cDa23e3f8FbD09bF663Cf5cAe0b
-C=0x675c0da0957BEfeb9f874C3347F5305207Fe88EC
-D=0x87C694B3AbC8Df9599C0ACC87AE9Af0C2cD90b63
+# ── WARNING: Do not hardcode private keys in this file. ────────────
+# Set these via environment variables when running the script.
+# These are Coston2 testnet keys — move to env vars for any real use.
+PK_C="${COSTON2_PK_C:?COSTON2_PK_C env required (bidder C private key)}"
+PK_D="${COSTON2_PK_D:?COSTON2_PK_D env required (bidder D private key)}"
+SELLER="${COSTON2_SELLER:-0xdf73Dc01Fc162cDa23e3f8FbD09bF663Cf5cAe0b}"
+C="${COSTON2_BIDDER_C:-0x675c0da0957BEfeb9f874C3347F5305207Fe88EC}"
+D="${COSTON2_BIDDER_D:-0x87C694B3AbC8Df9599C0ACC87AE9Af0C2cD90b63}"
 
 send() { local pk=$1; shift; cast send "$@" --private-key "$pk" --rpc-url "$RPC" >/dev/null; }
 bal()  { cast balance "$1" --rpc-url "$RPC"; }

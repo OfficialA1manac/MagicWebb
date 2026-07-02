@@ -1,7 +1,7 @@
 {
   "name": "Blade — The Magicless Swordsman",
   "description": "Blade, the un-gifted swordsman who climbed the Endless Spire on sheer willpower alone. In a world where magic determines your worth, Blade wields nothing but a blade and an unshakeable promise to reach the top and reunite with his childhood friend. Every scar on his body tells a story of impossibility overcome — of spells shattered by steel, of mages who couldn't comprehend how a boy with zero magical power could stand before them.\n\nThis piece captures Blade mid-strike in the upper floors of the Spire. His sword arcs through the air, leaving trails of light that cut through even the densest magical barriers. The Spire stretches infinitely above him, but his eyes are fixed forward — never up, because the climb isn't about looking at the peak. It's about the next step, the next swing, the next impossible victory.",
-  "image": "/static/svggen/blade.svg",
+  "image": "/api/v1/img/placeholder-blade",
   "attributes": [
     { "trait_type": "Collection", "value": "Animi" },
     { "trait_type": "Series", "value": "Original" },

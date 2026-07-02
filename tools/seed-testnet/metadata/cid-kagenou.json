@@ -1,7 +1,7 @@
 {
   "name": "Umbra — The Eminence in the Dark",
   "description": "Umbra, or as the world knows him — the Shadow Lord, the enigmatic leader of the Obsidian Court who operates from the deepest shadows. Beneath the unassuming exterior of a background wanderer lies the most powerful being in the realm, a master of ancient magic who has achieved the impossible: complete control over void-level mana manipulation.\n\nThis piece captures the moment Umbra reveals his true power. Violet mana swirls around him like a galaxy given form as he raises his hand — the signature pose before uttering those two world-ending words. His dark bodysuit shimmers with latent energy, and behind those calm eyes burns the passion of a man who dedicated his entire existence to becoming the shadow that controls the light, not for power or fame, but because the aesthetic is simply unmatched.",
-  "image": "/static/svggen/umbra.svg",
+  "image": "/api/v1/img/placeholder-umbra",
   "attributes": [
     { "trait_type": "Collection", "value": "Animi" },
     { "trait_type": "Series", "value": "Original" },
