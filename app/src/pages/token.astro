@@ -85,7 +85,7 @@ import WalletConnect from '../components/WalletConnect';
           const img = listing && listing.image_uri
             ? listing.image_uri.startsWith('/api/v1/img/')
               ? listing.image_uri
-              : '/api/v1/media?url='+encodeURIComponent(listing.image_uri)+'&id='+encodeURIComponent(listing.token_id||id)
+              : '/api/v1/media?url='+encodeURIComponent(listing.image_uri)+'&id='+encodeURIComponent(listing.token_id||tid)
             : '';
           const price = listing && listing.price_wei ? weiToFLR(listing.price_wei) : null;
           const seller = listing && listing.seller || '';
