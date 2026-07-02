@@ -147,7 +147,11 @@ import WalletConnect from '../components/WalletConnect';
               const coll=it.collection||''; const tid=it.token_id||it.tokenID||'';
               const nm=it.name||('#'+esc(tid));
               const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
-              const src=it.image_uri?'/api/v1/media?url='+encodeURIComponent(it.image_uri)+'&id='+encodeURIComponent(it.token_id||''):'';
+              const src=it.image_uri
+                ? it.image_uri.startsWith('/api/v1/img/')
+                  ? it.image_uri
+                  : '/api/v1/media?url='+encodeURIComponent(it.image_uri)+'&id='+encodeURIComponent(it.token_id||'')
+                : '';
               const price=it.price_wei?weiToFLR(it.price_wei,4):'';
               return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+

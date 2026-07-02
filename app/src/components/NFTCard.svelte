@@ -32,7 +32,9 @@
 
   let imageSrc = $derived(
     item.image_uri
-      ? `/api/v1/media?url=${encodeURIComponent(item.image_uri)}&id=${encodeURIComponent(item.token_id)}`
+      ? item.image_uri.startsWith('/api/v1/img/')
+        ? item.image_uri
+        : `/api/v1/media?url=${encodeURIComponent(item.image_uri)}&id=${encodeURIComponent(item.token_id)}`
       : ''
   );
 

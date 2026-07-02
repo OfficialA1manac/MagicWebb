@@ -41,6 +41,7 @@ func NewMediaService(q *db.Q, eth chain.Caller, rl *ratelimit.Limiter) *MediaSer
 func (s *MediaService) RegisterRoutes(api fiber.Router) {
 	api.Get("/media", ValidateQuery(QuerySchema{
 		{Name: "url", Required: true, Type: ParamString},
+		{Name: "id", Required: false, Type: ParamString},
 	}), s.handleProxy)
 	api.Post("/img/retry", s.handleRetry)
 }

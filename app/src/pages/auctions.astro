@@ -220,7 +220,11 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
             const endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
             const tLeft = timeLeft(endsAt);
             const ending = endsAt - now < 180;
-            const imgSrc = a.image_uri ? '/api/v1/media?url=' + encodeURIComponent(a.image_uri) + '&id=' + encodeURIComponent(a.token_id || '') : '';
+            const imgSrc = a.image_uri
+              ? a.image_uri.startsWith('/api/v1/img/')
+                ? a.image_uri
+                : '/api/v1/media?url=' + encodeURIComponent(a.image_uri) + '&id=' + encodeURIComponent(a.token_id || '')
+              : '';
             const isActive = a.status === 'active';
             const statusColor = isActive ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.1)';
 

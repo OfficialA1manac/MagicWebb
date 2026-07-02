@@ -82,7 +82,11 @@ import WalletConnect from '../components/WalletConnect';
           await (offerRes && offerRes.ok ? offerRes.json() : Promise.resolve([]));
 
           const name = (listing && listing.name) || (col && col.name ? col.name+' #'+tid : '#'+tid);
-          const img = listing && listing.image_uri ? '/api/v1/media?url='+encodeURIComponent(listing.image_uri)+'&id='+encodeURIComponent(listing.token_id||id) : '';
+          const img = listing && listing.image_uri
+            ? listing.image_uri.startsWith('/api/v1/img/')
+              ? listing.image_uri
+              : '/api/v1/media?url='+encodeURIComponent(listing.image_uri)+'&id='+encodeURIComponent(listing.token_id||id)
+            : '';
           const price = listing && listing.price_wei ? weiToFLR(listing.price_wei) : null;
           const seller = listing && listing.seller || '';
           const standard = (listing && listing.standard) || (col && col.standard) || 'erc721';

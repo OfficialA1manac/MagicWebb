@@ -60,7 +60,11 @@ import WalletConnect from '../components/WalletConnect';
           const ended = endsAt <= now;
           const ending = !ended && (endsAt - now < 180);
           const name = a.name || ('#'+a.token_id);
-          const img = a.image_uri ? '/api/v1/media?url='+encodeURIComponent(a.image_uri)+'&id='+encodeURIComponent(a.token_id||'') : '';
+          const img = a.image_uri
+            ? a.image_uri.startsWith('/api/v1/img/')
+              ? a.image_uri
+              : '/api/v1/media?url='+encodeURIComponent(a.image_uri)+'&id='+encodeURIComponent(a.token_id||'')
+            : '';
           const reserve = weiToFLR(a.reserve_price_wei||'0');
           const highest = a.highest_bid_wei&&a.highest_bid_wei!=='0' ? weiToFLR(a.highest_bid_wei) : null;
           const hasBids = !!highest;
