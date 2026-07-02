@@ -275,13 +275,42 @@ import WalletConnect from '../components/WalletConnect';
             }
           } catch(_) {}
 
-          // SSE live refresh
-          try {
-            const sse = new EventSource('/events');
-            sse.addEventListener('listing-updated', function(){location.reload();});
-            sse.addEventListener('auction-updated', function(){location.reload();});
-            sse.addEventListener('activity', function(){location.reload();});
-          } catch(_) {}
+          // SSE live refresh — re-fetch metrics data in-place instead of full page reload
+          (function(){
+            try {
+              const sse = new EventSource('/events');
+              sse.addEventListener('listing-updated', function(){window.__MW_REFRESH_METRICS__();});
+              sse.addEventListener('auction-updated', function(){window.__MW_REFRESH_METRICS__();});
+              sse.addEventListener('activity', function(){window.__MW_REFRESH_METRICS__();});
+            } catch(_) {}
+          })();
+
+          // Expose refresh function so SSE events can re-fetch without full reload
+          window.__MW_REFRESH_METRICS__ = (async function(){
+            try {
+              const mRes = await fetch('/api/v1/metrics');
+              if(!mRes.ok) return;
+              const m2 = await mRes.json();
+              // Update closure variables so chart functions use fresh data
+              listings = m2.listing_count || m2.totalActiveListings || 0;
+              sales = m2.sales_count || m2.totalSales || 0;
+              auctions = m2.auction_count || m2.totalAuctions || 0;
+              bids = m2.totalBids || 0;
+              offers = m2.totalOffers || 0;
+              volume = m2.grossVolumeWei || m2.volume_all || '0';
+              volFLR = weiToFLR(volume);
+              // Update stat card DOM values
+              const valListings = document.getElementById('val-listings'); if(valListings) valListings.textContent = String(listings);
+              const valSales = document.getElementById('val-sales'); if(valSales) valSales.textContent = String(sales);
+              const valAuc = document.getElementById('val-auctions'); if(valAuc) valAuc.textContent = String(auctions);
+              const valBids = document.getElementById('val-bids'); if(valBids) valBids.textContent = String(bids);
+              const valOffers = document.getElementById('val-offers'); if(valOffers) valOffers.textContent = String(offers);
+              const valVol = document.getElementById('val-volume'); if(valVol) valVol.innerHTML = esc(volFLR)+' <span style="font-size:0.875rem;font-weight:600;opacity:0.4;">C2FLR</span>';
+              // Redraw charts with fresh data
+              drawBarChart();
+              drawDonutChart();
+            } catch(_) {}
+          });
 
         } catch(e) {
           if (loadingEl) loadingEl.style.display = 'none';

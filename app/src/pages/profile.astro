@@ -75,9 +75,15 @@ import WalletConnect from '../components/WalletConnect';
       const root = document.getElementById('profile-root');
       if (!root) return;
 
-      // Listen for wallet-connect events to refresh page on connect/disconnect/switch
-      // Registered OUTSIDE the !addr block so it fires for ALL profile states.
+      // Listen for wallet-connect events to refresh page on connect/disconnect/switch.
+      // Debounced: only reloads once per 5s to prevent infinite loops when wagmi
+      // transitions through intermediate states during AppKit hydration.
       window.addEventListener('mw-wallet-changed', function _onWalletChange(){
+        try {
+          const last = parseInt(sessionStorage.getItem('mw_wallet_reload') || '0', 10);
+          if (Date.now() - last < 5000) return;
+          sessionStorage.setItem('mw_wallet_reload', String(Date.now()));
+        } catch(_) {}
         location.reload();
       });
 
