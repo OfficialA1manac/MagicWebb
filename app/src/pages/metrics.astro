@@ -87,13 +87,13 @@ import WalletConnect from '../components/WalletConnect';
           if (loadingEl) loadingEl.style.display = 'none';
 
           // Stat cards
-          const listings = m.listing_count || m.totalActiveListings || 0;
-          const sales = m.sales_count || m.totalSales || 0;
-          const auctions = m.auction_count || m.totalAuctions || 0;
-          const bids = m.totalBids || 0;
-          const offers = m.totalOffers || 0;
-          const volume = m.grossVolumeWei || m.volume_all || '0';
-          const volFLR = weiToFLR(volume);
+          let listings = m.listing_count || m.totalActiveListings || 0;
+          let sales = m.sales_count || m.totalSales || 0;
+          let auctions = m.auction_count || m.totalAuctions || 0;
+          let bids = m.totalBids || 0;
+          let offers = m.totalOffers || 0;
+          let volume = m.grossVolumeWei || m.volume_all || '0';
+          let volFLR = weiToFLR(volume);
 
           if (metricsGrid) {
             metricsGrid.innerHTML =
