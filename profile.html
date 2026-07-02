@@ -1,46 +1,6 @@
----
-import BaseLayout from '../layouts/BaseLayout.astro';
-import WalletConnect from '../components/WalletConnect';
----
-
-<BaseLayout title="Profile" description="Your MagicWebb profile — NFTs, listings, auctions, and activity" activeNav="/profile">
-  <WalletConnect slot="wallet" client:only="react" />
-
-  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
-    <div id="profile-root">
-      <!-- Loading skeleton -->
-      <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);">
-        <div style="width:4.5rem;height:4.5rem;border-radius:1rem;background:rgba(255,255,255,0.04);flex-shrink:0;"></div>
-        <div style="flex:1;">
-          <div class="skel-line" style="width:30%;height:1.25rem;margin-bottom:0.5rem;"></div>
-          <div class="skel-line" style="width:55%;height:0.75rem;margin-bottom:0.375rem;"></div>
-          <div class="skel-line" style="width:40%;height:0.75rem;"></div>
-        </div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.5rem;">
-        <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;"></div><div class="skel-line" style="width:40%;height:1.5rem;"></div></div>
-        <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;"></div><div class="skel-line" style="width:40%;height:1.5rem;"></div></div>
-        <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;"></div><div class="skel-line" style="width:40%;height:1.5rem;"></div></div>
-        <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;"></div><div class="skel-line" style="width:40%;height:1.5rem;"></div></div>
-      </div>
-      <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;">
-        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
-        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
-        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
-        <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"></div>
-      </div>
-    </div>
-  </section>
-
-  <style>
-    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
-    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
-    @keyframes shimmer-placeholder{0%{opacity:0.4;}50%{opacity:0.8;}100%{opacity:0.4;}}
-    @keyframes count-pop{0%{transform:scale(1);}50%{transform:scale(1.12);}100%{transform:scale(1);}}
-    .count-pop{animation:count-pop 0.4s cubic-bezier(0.34,1.56,0.64,1);}
-  </style>
-
-  <script is:inline>
+<!DOCTYPE html><html lang="en" data-astro-cid-37fxchfa> <head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>Profile — MagicWebb</title><meta name="description" content="Your MagicWebb profile — NFTs, listings, auctions, and activity"><meta name="theme-color" content="#09090b"><meta property="og:title" content="Profile — MagicWebb NFT Marketplace"><meta property="og:description" content="Your MagicWebb profile — NFTs, listings, auctions, and activity"><meta property="og:type" content="website"><link rel="preconnect" href="https://fonts.googleapis.com"><link rel="preconnect" href="https://fonts.gstatic.com" crossorigin><link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet"><link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet"><link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>"><link rel="stylesheet" href="/_astro/auction.B7tLhu_U.css">
+<style>.skel-line[data-astro-cid-wwes6yjo]{background:#ffffff0a;border-radius:.25rem}.shimmer[data-astro-cid-wwes6yjo]{animation:shimmer-placeholder 1.5s ease-in-out infinite}@keyframes shimmer-placeholder{0%{opacity:.4}50%{opacity:.8}to{opacity:.4}}@keyframes count-pop{0%{transform:scale(1)}50%{transform:scale(1.12)}to{transform:scale(1)}}.count-pop[data-astro-cid-wwes6yjo]{animation:count-pop .4s cubic-bezier(.34,1.56,.64,1)}
+</style></head> <body data-astro-cid-37fxchfa> <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;" data-astro-cid-37fxchfa></div> <nav class="topnav" data-astro-cid-37fxchfa> <a href="/" class="nav-brand" data-astro-cid-37fxchfa> <div class="nav-logo-icon" aria-hidden="true" data-astro-cid-37fxchfa>✦</div> <span class="nav-logo-text" data-astro-cid-37fxchfa>Magic<span class="brand-text" data-astro-cid-37fxchfa>Webb</span></span> </a> <div class="nav-links" data-astro-cid-37fxchfa> <a href="/" class data-astro-cid-37fxchfa>Home</a> <a href="/listings" class="nav-listings " data-astro-cid-37fxchfa>Listings</a> <a href="/auctions" class="nav-auctions " data-astro-cid-37fxchfa>Auctions</a> <a href="/offers" class="nav-offers " data-astro-cid-37fxchfa>Offers</a> <a href="/search" class data-astro-cid-37fxchfa>Search</a> <a href="/metrics" class data-astro-cid-37fxchfa>Metrics</a> <a href="/profile" class data-astro-cid-37fxchfa>Profile</a> <a href="/docs" class data-astro-cid-37fxchfa>Docs</a> </div> <div class="nav-right" data-astro-cid-37fxchfa> <div id="notif-bell-container" style="position:relative;" data-astro-cid-37fxchfa> <button id="notif-bell-btn" class="notif-btn" aria-label="Notifications" title="Notifications" data-astro-cid-37fxchfa> <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" data-astro-cid-37fxchfa><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9" data-astro-cid-37fxchfa></path></svg> <span id="notif-badge" class="notif-badge" style="display:none;" data-astro-cid-37fxchfa>0</span> </button> <div id="notif-dropdown" class="notif-dropdown" data-astro-cid-37fxchfa> <div class="notif-header" data-astro-cid-37fxchfa>Notifications</div> <div class="notif-list" id="notif-list" data-astro-cid-37fxchfa><div class="notif-empty" data-astro-cid-37fxchfa>Loading…</div></div> </div> </div> <style>astro-island,astro-slot,astro-static-slot{display:contents}</style><script>(()=>{var e=async t=>{await(await t())()};(self.Astro||(self.Astro={})).only=e;window.dispatchEvent(new Event("astro:only"));})();</script><script>(()=>{var A=Object.defineProperty;var g=(i,o,a)=>o in i?A(i,o,{enumerable:!0,configurable:!0,writable:!0,value:a}):i[o]=a;var d=(i,o,a)=>g(i,typeof o!="symbol"?o+"":o,a);{let i={0:t=>m(t),1:t=>a(t),2:t=>new RegExp(t),3:t=>new Date(t),4:t=>new Map(a(t)),5:t=>new Set(a(t)),6:t=>BigInt(t),7:t=>new URL(t),8:t=>new Uint8Array(t),9:t=>new Uint16Array(t),10:t=>new Uint32Array(t),11:t=>1/0*t},o=t=>{let[l,e]=t;return l in i?i[l](e):void 0},a=t=>t.map(o),m=t=>typeof t!="object"||t===null?t:Object.fromEntries(Object.entries(t).map(([l,e])=>[l,o(e)]));class y extends HTMLElement{constructor(){super(...arguments);d(this,"Component");d(this,"hydrator");d(this,"hydrate",async()=>{var b;if(!this.hydrator||!this.isConnected)return;let e=(b=this.parentElement)==null?void 0:b.closest("astro-island[ssr]");if(e){e.addEventListener("astro:hydrate",this.hydrate,{once:!0});return}let c=this.querySelectorAll("astro-slot"),n={},h=this.querySelectorAll("template[data-astro-template]");for(let r of h){let s=r.closest(this.tagName);s!=null&&s.isSameNode(this)&&(n[r.getAttribute("data-astro-template")||"default"]=r.innerHTML,r.remove())}for(let r of c){let s=r.closest(this.tagName);s!=null&&s.isSameNode(this)&&(n[r.getAttribute("name")||"default"]=r.innerHTML)}let p;try{p=this.hasAttribute("props")?m(JSON.parse(this.getAttribute("props"))):{}}catch(r){let s=this.getAttribute("component-url")||"<unknown>",v=this.getAttribute("component-export");throw v&&(s+=` (export ${v})`),console.error(`[hydrate] Error parsing props for component ${s}`,this.getAttribute("props"),r),r}let u;await this.hydrator(this)(this.Component,p,n,{client:this.getAttribute("client")}),this.removeAttribute("ssr"),this.dispatchEvent(new CustomEvent("astro:hydrate"))});d(this,"unmount",()=>{this.isConnected||this.dispatchEvent(new CustomEvent("astro:unmount"))})}disconnectedCallback(){document.removeEventListener("astro:after-swap",this.unmount),document.addEventListener("astro:after-swap",this.unmount,{once:!0})}connectedCallback(){if(!this.hasAttribute("await-children")||document.readyState==="interactive"||document.readyState==="complete")this.childrenConnectedCallback();else{let e=()=>{document.removeEventListener("DOMContentLoaded",e),c.disconnect(),this.childrenConnectedCallback()},c=new MutationObserver(()=>{var n;((n=this.lastChild)==null?void 0:n.nodeType)===Node.COMMENT_NODE&&this.lastChild.nodeValue==="astro:end"&&(this.lastChild.remove(),e())});c.observe(this,{childList:!0}),document.addEventListener("DOMContentLoaded",e)}}async childrenConnectedCallback(){let e=this.getAttribute("before-hydration-url");e&&await import(e),this.start()}async start(){let e=JSON.parse(this.getAttribute("opts")),c=this.getAttribute("client");if(Astro[c]===void 0){window.addEventListener(`astro:${c}`,()=>this.start(),{once:!0});return}try{await Astro[c](async()=>{let n=this.getAttribute("renderer-url"),[h,{default:p}]=await Promise.all([import(this.getAttribute("component-url")),n?import(n):()=>()=>{}]),u=this.getAttribute("component-export")||"default";if(!u.includes("."))this.Component=h[u];else{this.Component=h;for(let f of u.split("."))this.Component=this.Component[f]}return this.hydrator=p,this.hydrate},e,this)}catch(n){console.error(`[astro-island] Error hydrating ${this.getAttribute("component-url")}`,n)}}attributeChangedCallback(){this.hydrate()}}d(y,"observedAttributes",["props"]),customElements.get("astro-island")||customElements.define("astro-island",y)}})();</script><astro-island uid="qY6nI" component-url="/_astro/WalletConnect.BSLzkwxL.js" component-export="default" renderer-url="/_astro/client.BKj53ZSY.js" props="{&quot;slot&quot;:[0,&quot;wallet&quot;],&quot;data-astro-cid-wwes6yjo&quot;:[0,true]}" ssr client="only" opts="{&quot;name&quot;:&quot;WalletConnect&quot;,&quot;value&quot;:&quot;react&quot;}"></astro-island> <button id="mobile-menu-btn" class="hamburger" aria-label="Menu" aria-expanded="false" data-astro-cid-37fxchfa>☰</button> </div> </nav> <div id="mobile-menu" class="mobile-menu" data-astro-cid-37fxchfa> <a href="/" data-astro-cid-37fxchfa>Home</a><a href="/listings" data-astro-cid-37fxchfa>Listings</a><a href="/auctions" data-astro-cid-37fxchfa>Auctions</a> <a href="/offers" data-astro-cid-37fxchfa>Offers</a><a href="/search" data-astro-cid-37fxchfa>Search</a><a href="/metrics" data-astro-cid-37fxchfa>Metrics</a><a href="/profile" data-astro-cid-37fxchfa>Profile</a><a href="/docs" data-astro-cid-37fxchfa>Docs</a> <div class="mobile-wallet-section" data-astro-cid-37fxchfa> <div class="mobile-section-label" data-astro-cid-37fxchfa>Wallet</div> <div id="mobile-wallet-disconnected" style="display:none;" data-astro-cid-37fxchfa> <button id="mobile-connect-wallet" class="mobile-wallet-btn mobile-connect-btn" data-astro-cid-37fxchfa>⌬ Connect Wallet</button> </div> <div id="mobile-wallet-connected" style="display:none;" data-astro-cid-37fxchfa> <div class="mobile-wallet-info" data-astro-cid-37fxchfa><span class="mobile-wallet-dot" data-astro-cid-37fxchfa></span><span id="mobile-wallet-addr" class="font-mono" style="font-size:0.75rem;" data-astro-cid-37fxchfa></span></div> <button id="mobile-disconnect-wallet" class="mobile-wallet-btn mobile-disconnect-btn" data-astro-cid-37fxchfa>Disconnect Wallet</button> </div> </div> </div> <main style="position:relative;z-index:1;" data-astro-cid-37fxchfa>  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;" data-astro-cid-wwes6yjo> <div id="profile-root" data-astro-cid-wwes6yjo> <!-- Loading skeleton --> <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo> <div style="width:4.5rem;height:4.5rem;border-radius:1rem;background:rgba(255,255,255,0.04);flex-shrink:0;" data-astro-cid-wwes6yjo></div> <div style="flex:1;" data-astro-cid-wwes6yjo> <div class="skel-line" style="width:30%;height:1.25rem;margin-bottom:0.5rem;" data-astro-cid-wwes6yjo></div> <div class="skel-line" style="width:55%;height:0.75rem;margin-bottom:0.375rem;" data-astro-cid-wwes6yjo></div> <div class="skel-line" style="width:40%;height:0.75rem;" data-astro-cid-wwes6yjo></div> </div> </div> <div style="display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:0.75rem;margin-bottom:1.5rem;" data-astro-cid-wwes6yjo> <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;" data-astro-cid-wwes6yjo></div><div class="skel-line" style="width:40%;height:1.5rem;" data-astro-cid-wwes6yjo></div></div> <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;" data-astro-cid-wwes6yjo></div><div class="skel-line" style="width:40%;height:1.5rem;" data-astro-cid-wwes6yjo></div></div> <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;" data-astro-cid-wwes6yjo></div><div class="skel-line" style="width:40%;height:1.5rem;" data-astro-cid-wwes6yjo></div></div> <div class="shimmer" style="padding:1rem;border-radius:0.875rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo><div class="skel-line" style="width:60%;height:0.625rem;margin-bottom:0.5rem;" data-astro-cid-wwes6yjo></div><div class="skel-line" style="width:40%;height:1.5rem;" data-astro-cid-wwes6yjo></div></div> </div> <div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(200px,1fr));gap:1rem;" data-astro-cid-wwes6yjo> <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo></div> <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo></div> <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo></div> <div class="shimmer" style="aspect-ratio:1;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);" data-astro-cid-wwes6yjo></div> </div> </div> </section>  <script>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
       function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
@@ -60,31 +20,45 @@ import WalletConnect from '../components/WalletConnect';
     try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
   })();
 
+      // Connected wallet address (for showing Edit button)
+      const connectedAddr = (function(){
+    try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
+  })();
+
       // JWT for authenticated requests
       function getJWT(){
         try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
       }
 
-      const root = document.getElementById('profile-root');
+      const isOwnProfile = connectedAddr && addr && connectedAddr === addr;
 
-      // Compute isOwnProfile inside loadProfileData to stay fresh on wallet changes
-      function isOwnProfileFor(targetAddr){
-        const curConnected = (function(){
-          try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
-        })();
-        return curConnected && targetAddr && curConnected === targetAddr;
-      }
+      const root = document.getElementById('profile-root');
       if (!root) return;
 
-      // Named function to load and render all profile data for a given address.
-      // Called on initial page load AND on wallet change (without page reload).
-      async function loadProfileData(targetAddr){
-        const encAddr = encodeURIComponent(targetAddr);
-        root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+      // Listen for wallet-connect events to refresh page on connect/disconnect/switch.
+      // Debounced: only reloads once per 5s to prevent infinite loops when wagmi
+      // transitions through intermediate states during AppKit hydration.
+      window.addEventListener('mw-wallet-changed', function _onWalletChange(){
+        try {
+          const last = parseInt(sessionStorage.getItem('mw_wallet_reload') || '0', 10);
+          if (Date.now() - last < 5000) return;
+          sessionStorage.setItem('mw_wallet_reload', String(Date.now()));
+        } catch(_) {}
+        location.reload();
+      });
+
+      if (!addr) {
+        root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
+        return;
+      }
+
+      const encAddr = encodeURIComponent(addr);
+
+      (async function(){
         try {
           const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
-        fetch('/api/v1/wallet/'+encAddr+'/nfts?include_unlisted=true').catch(function(){return null;}),
+        fetch('/api/v1/wallet/'+encAddr+'/nfts').catch(function(){return null;}),
         fetch('/api/v1/listings?seller='+encAddr+'&limit=24').catch(function(){return null;}),
         fetch('/api/v1/auctions?seller='+encAddr+'&limit=20').catch(function(){return null;}),
         fetch('/api/v1/offers?bidder='+encAddr+'&limit=50').catch(function(){return null;}),
@@ -112,7 +86,7 @@ import WalletConnect from '../components/WalletConnect';
           if (!Array.isArray(offersRecv)) offersRecv = [];
           if (!Array.isArray(activity)) activity = [];
 
-          const displayName = (profile && profile.display_name) || shortAddr(targetAddr);
+          const displayName = (profile && profile.display_name) || shortAddr(addr);
           const bio         = (profile && profile.bio) || '';
           const avatar      = (profile && profile.avatar_uri) || '';
           const verified    = profile && profile.verified;
@@ -221,12 +195,12 @@ import WalletConnect from '../components/WalletConnect';
                   '<h1 style="font-size:1.5rem;font-weight:800;color:#fafafa;">'+esc(displayName)+'</h1>'+
                   (verified?'<span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.625rem;font-weight:800;">✓ Verified</span>':'')+
                 '</div>'+
-                '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(targetAddr)+'</p>'+
+                '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(addr)+'</p>'+
                 (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;">'+esc(bio)+'</p>':'')+
                 '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+nfts.length+' NFT'+(nfts.length!==1?'s':'')+' in wallet</p>'+
               '</div>'+
               '<div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">'+
-                (isOwnProfileFor(targetAddr)?'<button id="edit-profile-btn" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(125,211,252,0.25);color:#7dd3fc;font-size:0.8125rem;font-weight:700;transition:all 0.2s;background:rgba(125,211,252,0.1);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:0.375rem;">✎ Edit Profile</button>':'')+
+                (isOwnProfile?'<button id="edit-profile-btn" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(125,211,252,0.25);color:#7dd3fc;font-size:0.8125rem;font-weight:700;transition:all 0.2s;background:rgba(125,211,252,0.1);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:0.375rem;">✎ Edit Profile</button>':'')+
                 '<a href="/offers?addr='+encAddr+'" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>'+
               '</div>'+
             '</div>'+
@@ -305,7 +279,7 @@ import WalletConnect from '../components/WalletConnect';
 
           // ── Edit Profile Modal ─────────────────────────────────────────────
           const editBtn = document.getElementById('edit-profile-btn');
-          if(editBtn && isOwnProfileFor(targetAddr)){
+          if(editBtn && isOwnProfile){
             editBtn.addEventListener('click', function(){
               const overlay = document.createElement('div');
               overlay.id = 'edit-profile-overlay';
@@ -444,32 +418,6 @@ import WalletConnect from '../components/WalletConnect';
         } catch(e) {
           if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><p style="font-size:1rem;font-weight:700;color:#fca5a5;">Could not load profile</p><p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.5rem;">'+esc(e.message||'')+'</p><button onclick="location.reload()" style="margin-top:1rem;padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
         }
-      }
-
-      // Listen for wallet-connect events — re-render profile IN-PLACE without page reload.
-      // No debounce needed since we re-render instead of reloading, avoiding the infinite loop entirely.
-      window.addEventListener('mw-wallet-changed', function _onWalletChange(){
-        // Re-read the address from localStorage (may have changed or been cleared)
-        const newAddr = (function(){
-          const p = window.location.pathname.replace('/profile/','').replace('/profile','');
-          if (isEthAddr(p)) return p.toLowerCase();
-          try { const s = localStorage.getItem('mw_addr') || ''; return isEthAddr(s) ? s.toLowerCase() : ''; } catch(_) { return ''; }
-        })();
-        if (!newAddr) {
-          // Wallet was disconnected — show connect screen
-          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
-          return;
-        }
-        // Re-fetch and re-render for the new/updated address
-        loadProfileData(newAddr);
-      });
-
-      // Initial load
-      if (addr) {
-        loadProfileData(addr);
-      } else {
-        root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
-      }
+      })();
     })();
-  </script>
-</BaseLayout>
+  </script> </main> <footer class="main-footer" data-astro-cid-37fxchfa> <span class="brand-text" style="font-weight:800;" data-astro-cid-37fxchfa>MagicWebb</span> · Non-custodial NFT marketplace on <a href="https://flare.network" data-astro-cid-37fxchfa>Flare Network</a> · <a href="https://github.com/OfficialA1manac/MagicWebb" data-astro-cid-37fxchfa>GitHub</a> · <a href="/docs" data-astro-cid-37fxchfa>Docs</a> </footer> <script type="module" src="/_astro/BaseLayout.astro_astro_type_script_index_0_lang.C8AIg1ng.js"></script> </body> </html>
