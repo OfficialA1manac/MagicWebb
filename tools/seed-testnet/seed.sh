@@ -25,10 +25,11 @@ CHAIN_ID=114
 MARKETPLACE="${MARKETPLACE_ADDR:-0xe5e27Ba24Da24B78e5793c88BA232276F045659f}"
 NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
 
-# ── Metadata base URI (public HTTP base URL for metadata/*.json files)
+# ── Metadata base URI (self-hosted, embedded via go:embed at compile time)
 # Each token's metadata URI will be:  $METADATA_BASE/<filename>.json
-# If empty, the script skips setTokenURI calls and logs a warning.
-METADATA_BASE="${METADATA_BASE:-}"
+# Defaults to the self-hosted /static/nft/metadata/ route served by the Go backend.
+# Override via env var if your deployment domain differs from magicwebb.fly.dev.
+METADATA_BASE="${METADATA_BASE:-https://magicwebb.fly.dev/static/nft/metadata}"
 
 # ── Deployer / seller ──
 : "${PRIVATE_KEY:?PRIVATE_KEY env required (Coston2 wallet with gas)}"
