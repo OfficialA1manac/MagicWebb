@@ -9,7 +9,7 @@ RPC="${RPC:-https://coston2-api.flare.network/ext/C/rpc}"
 MP=0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37
 AH=0x9452518e29DEA185dA392e16be03982c1511753C
 OB=0x0C6EdB481BC73B4b817A2E7235B309276D703906
-NFT=0x0E513BfE29E00E160ADE7516AD9363F070a101bF
+NFT="${NFT_ADDR:-0xe96Afb7b664Ab90d74b778AdFE47D8342495807F}"
 
 PK_SELLER=$DEPLOYER_KEY                      # deployer doubles as seller (testnet)
 # ── WARNING: Do not hardcode private keys in this file. ────────────

@@ -23,7 +23,7 @@ CHAIN_ID=114
 # The previous unaudited mock at 0x0E513BfE29E00E160ADE7516AD9363F070a101bF is
 # deprecated and should no longer be used.
 MARKETPLACE="${MARKETPLACE_ADDR:-0xe5e27Ba24Da24B78e5793c88BA232276F045659f}"
-NFT="${NFT_ADDR:-0x0E513BfE29E00E160ADE7516AD9363F070a101bF}"
+NFT="${NFT_ADDR:-0xe96Afb7b664Ab90d74b778AdFE47D8342495807F}"
 
 # ── Metadata base URI (self-hosted, embedded via go:embed at compile time)
 # Each token's metadata URI will be:  $METADATA_BASE/<filename>.json
