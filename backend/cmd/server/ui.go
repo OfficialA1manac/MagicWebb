@@ -3,6 +3,7 @@ package main
 import (
 	"context"
 	"fmt"
+	"html"
 	"io/fs"
 	"net/http"
 	"os"
@@ -648,7 +649,7 @@ func mountAstro(app *fiber.App) {
 		if path == "/profile" || path == "/profile/" {
 			if idxPath := filepath.Join(distPath, "profile", "index.html"); fileExists(idxPath) {
 				c.Set("Cache-Control", "public, max-age=300")
-				return c.SendFile(idxPath)
+				return sendHTMLWithConfig(c, idxPath)
 			}
 			return c.Next()
 		}
@@ -677,10 +678,11 @@ func mountAstro(app *fiber.App) {
 			// Hashed JS/CSS assets (from Vite) get 1 year — they're immutable.
 			if strings.HasSuffix(fullPath, ".html") {
 				c.Set("Cache-Control", "public, max-age=300")
+				return sendHTMLWithConfig(c, fullPath)
 			} else {
 				c.Set("Cache-Control", "public, max-age=31536000, immutable")
+				return c.SendFile(fullPath)
 			}
-			return c.SendFile(fullPath)
 		}
 
 		// Try directory index.html.
@@ -693,7 +695,7 @@ func mountAstro(app *fiber.App) {
 				return c.Redirect(c.Path()+"/", fiber.StatusFound)
 			}
 			c.Set("Cache-Control", "public, max-age=300")
-			return c.SendFile(indexPath)
+			return sendHTMLWithConfig(c, indexPath)
 		}
 
 		// Catch-all: Astro pages that use client-side URL parsing.
@@ -712,7 +714,7 @@ func mountAstro(app *fiber.App) {
 			if strings.HasPrefix(cleanRel, ca.prefix) && cleanRel != ca.dir {
 				if idxPath := filepath.Join(distPath, ca.dir, "index.html"); fileExists(idxPath) {
 					c.Set("Cache-Control", "public, max-age=300")
-					return c.SendFile(idxPath)
+					return sendHTMLWithConfig(c, idxPath)
 				}
 			}
 		}
@@ -720,6 +722,106 @@ func mountAstro(app *fiber.App) {
 		// No Astro file for this path — pass through to Go HTMX routes.
 		return c.Next()
 	})
+}
+
+// jsStringEscape makes a string safe for embedding inside a JavaScript
+// single-quoted string literal. It escapes backslashes and single quotes
+// — the two characters that could break out of the '...' context and
+// enable script injection. Newlines are also escaped to keep the script
+// on one line.
+func jsStringEscape(s string) string {
+	s = strings.ReplaceAll(s, `\`, `\\`)
+	s = strings.ReplaceAll(s, `'`, `\'`)
+	s = strings.ReplaceAll(s, "\n", `\n`)
+	s = strings.ReplaceAll(s, "\r", ``)
+	// Escape < so that </script> in a config value cannot terminate
+	// the script block early (HTML5 parser ends <script> on </script).
+	s = strings.ReplaceAll(s, `<`, `\x3C`)
+	return s
+}
+
+// astroConfigScript is the <script> block injected into every Astro HTML
+// response so the frontend's window.MW_* globals reflect the running
+// server's chain config (RPC URL, chain ID, network name, native currency
+// symbol, block explorer URL). Without this, Astro pages fall back to
+// the hardcoded Coston2 defaults in BaseLayout.astro and the wallet UI
+// shows the wrong chain / currency on mainnet deployments.
+//
+// The script overwrites the defaults set in BaseLayout.astro <head> ONLY
+// if the server's config differs — the `||` fallback chain in the
+// BaseLayout script runs first (SSR), then this block runs and replaces
+// the values with the authoritative server config.
+//
+// All string values are jsStringEscape'd to prevent XSS via config values
+// containing quotes or backslashes (defence-in-depth even though config
+// is operator-controlled).
+var astroConfigScript = fmt.Sprintf(`<script>
+window.MW_CHAIN_ID='%d';
+window.MW_RPC_URL='%s';
+window.MW_NETWORK_NAME='%s';
+window.MW_NATIVE_CURRENCY='%s';
+window.MW_EXPLORER='%s';
+window.MW_WC_PROJECT_ID='%s';
+window.MW_MARKETPLACE='%s';
+window.MW_AUCTION='%s';
+window.MW_OFFERBOOK='%s';
+</script>`,
+	config.C.ChainID,
+	jsStringEscape(config.C.RPCURL),
+	jsStringEscape(config.C.NetworkName),
+	jsStringEscape(config.C.NativeCurrency),
+	jsStringEscape(config.C.ExplorerURL),
+	jsStringEscape(config.C.WCProjectID),
+	jsStringEscape(config.C.MarketplaceAddr),
+	jsStringEscape(config.C.AuctionAddr),
+	jsStringEscape(config.C.OfferBookAddr),
+)
+
+// sendHTMLWithConfig serves an Astro-built HTML file with the server's
+// chain config injected as a <script> block immediately before </head>.
+// This is the Astro equivalent of the Go-template injection that
+// render() does for HTMX pages — both paths ensure window.MW_* globals
+// reflect the running server's chain (Coston2, Flare mainnet, Songbird)
+// without rebuilding the Astro frontend.
+//
+// It also replaces <span class="mw-cur">C2FLR</span> placeholders with
+// the actual native currency symbol server-side, eliminating the flash
+// of the default "C2FLR" text that would otherwise appear before the
+// client-side JS updater runs.
+func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
+	body, err := os.ReadFile(htmlPath)
+	if err != nil {
+		return c.Status(fiber.StatusInternalServerError).SendString("failed to read page")
+	}
+	// Use 'content' instead of 'html' to avoid shadowing the html package.
+	content := string(body)
+	// Inject the config script just before </head>. The Astro-built
+	// HTML always has a </head> tag (BaseLayout.astro guarantees it).
+	// Using string replacement is safe because: (1) the script is
+	// static per-process (computed once at init from config.C), and
+	// (2) </head> appears exactly once in a well-formed HTML document.
+	idx := strings.Index(content, "</head>")
+	if idx < 0 {
+		// No </head> — fall back to prepending (shouldn't happen with
+		// BaseLayout.astro, but be safe).
+		content = astroConfigScript + content
+	} else {
+		content = content[:idx] + astroConfigScript + content[idx:]
+	}
+	// Server-side replacement of .mw-cur span content so the correct
+	// currency symbol renders immediately (no FOUC). The Astro pages
+	// emit <span class="mw-cur">C2FLR</span> as a default placeholder;
+	// we swap it for the actual currency from server config.
+	curPlaceholder := `<span class="mw-cur">C2FLR</span>`
+	curReplacement := `<span class="mw-cur">` + html.EscapeString(config.C.NativeCurrency) + `</span>`
+	content = strings.ReplaceAll(content, curPlaceholder, curReplacement)
+	// Also update .mw-net-name spans (used in the homepage testnet badge)
+	// so the correct network name shows without waiting for JS.
+	netPlaceholder := `<span class="mw-net-name">Flare Coston2</span>`
+	netReplacement := `<span class="mw-net-name">` + html.EscapeString(config.C.NetworkName) + `</span>`
+	content = strings.ReplaceAll(content, netPlaceholder, netReplacement)
+	c.Set("Content-Type", "text/html; charset=utf-8")
+	return c.SendString(content)
 }
 
 // envOrDefault reads an env var, returning the default if empty or unset.

@@ -20,6 +20,14 @@ interface Window {
   /** Reown / WalletConnect project ID. */
   MW_WC_PROJECT_ID?: string;
 
+  // ── Smart contract addresses (injected by the Go backend) ────────────────
+  /** Marketplace contract address. */
+  MW_MARKETPLACE?: string;
+  /** AuctionHouse contract address. */
+  MW_AUCTION?: string;
+  /** OfferBook contract address. */
+  MW_OFFERBOOK?: string;
+
   // ── AppKit external trigger API ──────────────────────────────────────────
   // Set by WalletConnect component so the mobile menu / page chrome can open
   // the AppKit modal or disconnect without importing the component.

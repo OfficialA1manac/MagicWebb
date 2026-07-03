@@ -159,8 +159,10 @@ func TestSetAuctionStatus(t *testing.T) {
 	}
 }
 
-// The bid update must be atomic: insert the bid and bump the auction high bid in one
-// transaction, committing only if both succeed.
+// The bid update must be atomic: insert the bid and recompute the auction's
+// leader from the effective_bids view in one transaction, committing only if
+// both succeed. The new SQL uses a subquery from effective_bids (cumulative
+// model) instead of blindly storing the individual bid amount.
 func TestInsertBidAndUpdateAuctionIsAtomic(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
@@ -171,8 +173,10 @@ func TestInsertBidAndUpdateAuctionIsAtomic(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO bids`).
 		WithArgs(int64(9), "0xbob", "1000", "0xtx", placed).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	mock.ExpectExec(`UPDATE auctions SET highest_bid_wei`).
-		WithArgs("1000", "0xbob", int64(9)).
+	// The UPDATE now takes only the auction_id as a parameter ($1) — the
+	// leader is derived from the effective_bids subquery inside the SQL.
+	mock.ExpectExec(`UPDATE auctions SET highest_bid_wei = sub.effective_wei`).
+		WithArgs(int64(9)).
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectCommit()
 
@@ -195,8 +199,8 @@ func TestInsertBidAndUpdateAuctionRollsBackOnUpdateFailure(t *testing.T) {
 	mock.ExpectExec(`INSERT INTO bids`).
 		WithArgs(int64(9), "0xbob", "1000", "0xtx", placed).
 		WillReturnResult(pgxmock.NewResult("INSERT", 1))
-	mock.ExpectExec(`UPDATE auctions SET highest_bid_wei`).
-		WithArgs("1000", "0xbob", int64(9)).
+	mock.ExpectExec(`UPDATE auctions SET highest_bid_wei = sub.effective_wei`).
+		WithArgs(int64(9)).
 		WillReturnError(context.DeadlineExceeded)
 	mock.ExpectRollback()
 

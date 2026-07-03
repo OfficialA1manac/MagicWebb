@@ -22,7 +22,9 @@ function getTargetChain() {
   const name = window.MW_NETWORK_NAME || 'Flare Coston2';
   const currency = window.MW_NATIVE_CURRENCY || 'C2FLR';
   const explorer = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
-  const currencyName = name === 'Flare' ? 'Flare' : 'Coston2 Flare';
+  // Derive the currency name from the network name — works for any chain
+  // (Coston2, Flare mainnet, Songbird) without hardcoded mappings.
+  const currencyName = name;
   return {
     id: chainId,
     name,

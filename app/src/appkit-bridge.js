@@ -31,7 +31,7 @@ if (!projectId) {
   return;
 }
 
-const chainId = Number(window.MW_NETWORK_ID || 114);
+const chainId = Number(window.MW_CHAIN_ID || 114);
 const rpcUrl  = window.MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
 const explorer = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
 const networkName = window.MW_NETWORK_NAME || 'Flare Coston2';

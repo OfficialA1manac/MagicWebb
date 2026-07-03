@@ -54,6 +54,7 @@ import WalletConnect from '../components/WalletConnect';
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
       function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(4);}catch(_){return'0.0000';}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
 
       let addr = new URLSearchParams(window.location.search).get('addr') || '';
       if (!addr) {
@@ -108,7 +109,7 @@ import WalletConnect from '../components/WalletConnect';
                   '<p style="font-size:0.875rem;font-weight:600;color:#fafafa;">'+esc(shortAddr(o.collection))+' #'+esc(o.token_id)+'</p>'+
                   '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);margin-top:0.25rem;">'+esc(shortAddr(o.bidder))+' · '+esc(o.status||'pending')+'</p>'+
                 '</div>'+
-                '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
+                '<span style="font-size:1rem;font-weight:900;color:#fcd34d;flex-shrink:0;margin-left:1rem;">'+weiToFLR(o.amount_wei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">'+cur()+'</span></span>'+
               '</a>';
             }).join('')+'</div>';
           }

@@ -173,16 +173,42 @@ func Load() {
 	C.OfferBookAddr = strings.ToLower(C.OfferBookAddr)
 	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
 
-	// Chain metadata validation — only Coston2 (chain 114) is supported.
-	// Any unrecognised chain ID is a fatal error: silently using Coston2
-	// defaults on a misconfigured deploy would produce incorrect labels
-	// and broken wallet pairing. Operators deploying to a different testnet
-	// must set NETWORK_NAME, NATIVE_CURRENCY, EXPLORER_URL explicitly.
+	// Chain metadata validation — supports Coston2 (114), Flare mainnet (14),
+	// and Songbird (19). Any unrecognised chain ID is a fatal error: silently
+	// using wrong defaults on a misconfigured deploy would produce incorrect
+	// labels and broken wallet pairing. Operators can override NETWORK_NAME,
+	// NATIVE_CURRENCY, EXPLORER_URL via .env for any chain.
+	//
+	// Per-chain defaults: only set when the operator has NOT explicitly set
+	// the env var (os.Getenv returns ""). envOrDefault would have already
+	// set the Coston2 defaults above; we only overwrite for non-Coston2.
 	switch C.ChainID {
+	case 14:
+		// Flare mainnet
+		if os.Getenv("NETWORK_NAME") == "" {
+			C.NetworkName = "Flare"
+		}
+		if os.Getenv("NATIVE_CURRENCY") == "" {
+			C.NativeCurrency = "FLR"
+		}
+		if os.Getenv("EXPLORER_URL") == "" {
+			C.ExplorerURL = "https://flare-explorer.flare.network"
+		}
+	case 19:
+		// Songbird mainnet — canary network, same stack as Flare.
+		if os.Getenv("NETWORK_NAME") == "" {
+			C.NetworkName = "Songbird"
+		}
+		if os.Getenv("NATIVE_CURRENCY") == "" {
+			C.NativeCurrency = "SGB"
+		}
+		if os.Getenv("EXPLORER_URL") == "" {
+			C.ExplorerURL = "https://songbird-explorer.flare.network"
+		}
 	case 114:
-		// Coston2 — defaults are correct; no action.
+		// Coston2 — envOrDefault defaults are correct; no action.
 	default:
-		fmt.Fprintf(os.Stderr, "FATAL: unsupported CHAIN_ID=%d; this deployment targets Coston2 (chain 114) only.\n", C.ChainID)
+		fmt.Fprintf(os.Stderr, "FATAL: unsupported CHAIN_ID=%d; supported chains: 14 (Flare), 19 (Songbird), 114 (Coston2).\n", C.ChainID)
 		os.Exit(1)
 	}
 

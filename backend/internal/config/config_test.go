@@ -314,30 +314,29 @@ func TestOptFloat64EmptyUsesDefault(t *testing.T) {
 // ── Chain ID validation (Coston2-only, chain 114) ────────────────────────
 
 func TestChainIDValidation(t *testing.T) {
-	// Chain 114 (Coston2) must be accepted; any other chain must be rejected.
-	// This mirrors the switch in Load() that calls os.Exit(1) for non-114 chains.
-	// Cannot test os.Exit directly, so we duplicate the switch logic inline
-	// (same pattern as TestProdSIWEDomainGuard).
+	// Chains 14 (Flare), 19 (Songbird), and 114 (Coston2) must be accepted;
+	// any other chain must be rejected.
 
 	chainPasses := func(id uint64) bool {
 		switch id {
-		case 114:
+		case 14, 19, 114:
 			return true
 		default:
 			return false
 		}
 	}
 
-	// Coston2 passes.
-	if !chainPasses(114) {
-		t.Fatal("chain 114 (Coston2) must be accepted")
+	// All three supported chains pass.
+	for _, id := range []uint64{14, 19, 114} {
+		if !chainPasses(id) {
+			t.Fatalf("chain %d must be accepted", id)
+		}
 	}
 
 	// Every other chain ID must be rejected.
 	rejected := []uint64{
 		0,           // unset
 		1,           // Ethereum mainnet
-		14,          // Flare mainnet
 		56,          // BNB Smart Chain
 		137,         // Polygon
 		42161,       // Arbitrum One
@@ -346,7 +345,7 @@ func TestChainIDValidation(t *testing.T) {
 	}
 	for _, id := range rejected {
 		if chainPasses(id) {
-			t.Fatalf("chain %d must be rejected (only Coston2/114 is supported)", id)
+			t.Fatalf("chain %d must be rejected (only 14/19/114 supported)", id)
 		}
 	}
 }	// ── Chain ID validation via os/exec subprocess (exercises Load() directly) ───
@@ -391,15 +390,21 @@ func TestLoadChainID_Subprocess(t *testing.T) {
 		"GO_TEST_SUBPROCESS_LOAD_CHAIN=1",
 	}
 
-	// Chain 114 (Coston2) must pass: Load() returns normally, subprocess exits 0.
-	t.Run("chain_114_passes", func(t *testing.T) {
-		cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
-		cmd.Env = append(append([]string{}, minimalEnv...), "CHAIN_ID=114")
-		out, err := cmd.CombinedOutput()
-		if err != nil {
-			t.Fatalf("chain 114 should pass Load(), got err=%v\noutput:\n%s", err, out)
-		}
-	})
+	// Chains 14 (Flare), 19 (Songbird), 114 (Coston2) must pass: Load() returns normally, subprocess exits 0.
+	for _, tc := range []struct{ id uint64; name string }{
+		{14, "flare_mainnet"},
+		{19, "songbird"},
+		{114, "coston2"},
+	} {
+		t.Run("chain_"+tc.name+"_passes", func(t *testing.T) {
+			cmd := exec.Command(os.Args[0], "-test.run=TestLoadChainID_Subprocess")
+			cmd.Env = append(append([]string{}, minimalEnv...), fmt.Sprintf("CHAIN_ID=%d", tc.id))
+			out, err := cmd.CombinedOutput()
+			if err != nil {
+				t.Fatalf("chain %d should pass Load(), got err=%v\noutput:\n%s", tc.id, err, out)
+			}
+		})
+	}
 
 	// All other chains must fail: Load() hits the default switch case → os.Exit(1).
 	failing := []struct {
@@ -408,7 +413,6 @@ func TestLoadChainID_Subprocess(t *testing.T) {
 	}{
 		{0, "unset"},
 		{1, "ethereum_mainnet"},
-		{14, "flare_mainnet"},
 		{56, "bsc"},
 		{137, "polygon"},
 		{42161, "arbitrum"},

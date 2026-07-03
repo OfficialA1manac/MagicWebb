@@ -34,6 +34,7 @@ import WalletConnect from '../components/WalletConnect';
       function timeAgo(t){const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
       function fmtTimeLeft(endsAt,now){const s=Math.max(0,endsAt-now);if(s<=0)return'Ended';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';const d=Math.floor(s/86400);return d+'d '+Math.floor((s%86400)/3600)+'h';}
       function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
+      function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
 
       const aid = window.location.pathname.replace('/auction/','').replace('/auction','');
       const root = document.getElementById('auction-detail');
@@ -127,13 +128,13 @@ import WalletConnect from '../components/WalletConnect';
                     '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;">'+
                       '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(hasBids?'Top bid':'Reserve')+'</span>'+
                     '</div>'+
-                    '<p style="font-size:2rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1;">'+esc(hasBids?highest:reserve)+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></p>'+
+                    '<p style="font-size:2rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1;">'+esc(hasBids?highest:reserve)+' <span style="font-size:1rem;opacity:0.6;">'+cur()+'</span></p>'+
                     (hasBids?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(leader))+'</p>':'')+
                   '</div>'+
                   // Bid/Create button
                   (!ended
                     ? '<div style="padding:1.25rem;border-radius:1rem;background:rgba(15,15,19,0.7);border:1px solid rgba(167,139,250,0.2);margin-bottom:1rem;backdrop-filter:blur(8px);">'+
-                        '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Bid floor: '+esc(floorFLR)+' C2FLR</p>'+
+                        '<p style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;margin-bottom:0.5rem;">Bid floor: '+esc(floorFLR)+' '+cur()+'</p>'+
                         '<div style="display:flex;gap:0.5rem;">'+
                           '<input id="bid-input" type="number" step="0.000001" min="0" placeholder="Enter bid amount" style="flex:1;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(9,9,11,0.5);border:1px solid rgba(255,255,255,0.1);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;">'+
                           '<button onclick="document.getElementById(\'bid-input\').focus();window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="padding:0.75rem 1.5rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Bid</button>'+
@@ -162,7 +163,7 @@ import WalletConnect from '../components/WalletConnect';
                             '<p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(b.placed_at)+'</p>'+
                           '</div>'+
                         '</div>'+
-                        '<span style="font-size:0.9375rem;font-weight:900;color:'+(isLeader?'#fde68a':'#fafafa')+';">'+weiToFLR(b.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span>'+
+                        '<span style="font-size:0.9375rem;font-weight:900;color:'+(isLeader?'#fde68a':'#fafafa')+';">'+weiToFLR(b.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">'+cur()+'</span></span>'+
                       '</div>';
                     }).join('')+'</div>')+'</div>'+
               '</div>'+
@@ -206,10 +207,10 @@ import WalletConnect from '../components/WalletConnect';
                 if(el){el.textContent='Ends '+new Date(au.ends_at).toLocaleDateString('en-US',{month:'short',day:'numeric',hour:'2-digit',minute:'2-digit'});}
                 // Full re-render of price display
                 const pEl=document.getElementById('price-display');
-                if(pEl){pEl.innerHTML='<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;"><span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(pHas?'Top bid':'Reserve')+'</span></div><p style="font-size:2rem;font-weight:900;color:'+(pHas?'#fde68a':'#fafafa')+';line-height:1;">'+esc(pHas?weiToFLR(au.highest_bid_wei):weiToFLR(au.reserve_price_wei||'0'))+' <span style="font-size:1rem;opacity:0.6;">C2FLR</span></p>'+(pHas?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(au.highest_bidder||''))+'</p>':'');}
+                if(pEl){pEl.innerHTML='<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.5rem;"><span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(pHas?'Top bid':'Reserve')+'</span></div><p style="font-size:2rem;font-weight:900;color:'+(pHas?'#fde68a':'#fafafa')+';line-height:1;">'+esc(pHas?weiToFLR(au.highest_bid_wei):weiToFLR(au.reserve_price_wei||'0'))+' <span style="font-size:1rem;opacity:0.6;">'+cur()+'</span></p>'+(pHas?'<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">by '+esc(shortAddr(au.highest_bidder||''))+'</p>':'');}
                 // Full re-render of bid list (uses pHas from fresh data, not closure)
                 const bl=document.getElementById('bid-list');
-                if(bl&&Array.isArray(bList)){const bSub=bList.slice(0,20);if(!bSub.length){bl.innerHTML='<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>';}else{bl.innerHTML='<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bSub.map(function(bd,i){const isL=i===0&&pHas;return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isL?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isL?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(bd.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(bd.placed_at)+'</p></div></div><span style="font-size:0.9375rem;font-weight:900;color:'+(isL?'#fde68a':'#fafafa')+';">'+weiToFLR(bd.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">C2FLR</span></span></div>';}).join('')+'</div>';}}
+                if(bl&&Array.isArray(bList)){const bSub=bList.slice(0,20);if(!bSub.length){bl.innerHTML='<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No bids yet</div>';}else{bl.innerHTML='<div style="display:flex;flex-direction:column;gap:0.5rem;">'+bSub.map(function(bd,i){const isL=i===0&&pHas;return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:'+(isL?'rgba(167,139,250,0.1)':'rgba(15,15,19,0.5)')+';border:1px solid '+(isL?'rgba(167,139,250,0.25)':'rgba(255,255,255,0.05)')+';"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="font-size:0.8125rem;font-weight:700;color:rgba(255,255,255,0.25);">#'+(i+1)+'</span><div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;font-family:JetBrains Mono,monospace;">'+esc(shortAddr(bd.bidder))+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.25);">'+timeAgo(bd.placed_at)+'</p></div></div><span style="font-size:0.9375rem;font-weight:900;color:'+(isL?'#fde68a':'#fafafa')+';">'+weiToFLR(bd.amount_wei)+' <span style="font-size:0.625rem;opacity:0.5;">'+cur()+'</span></span></div>';}).join('')+'</div>';}}
               }).catch(function(){});
               setTimeout(function(){sseReloading=false;},3000);
             });

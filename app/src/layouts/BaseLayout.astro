@@ -28,6 +28,17 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
     <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
 
+    <script is:inline>
+      window.MW_CHAIN_ID = window.MW_CHAIN_ID || '114';
+      window.MW_RPC_URL = window.MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
+      window.MW_NETWORK_NAME = window.MW_NETWORK_NAME || 'Flare Coston2';
+      window.MW_NATIVE_CURRENCY = window.MW_NATIVE_CURRENCY || 'C2FLR';
+      window.MW_EXPLORER = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
+      window.MW_MARKETPLACE = window.MW_MARKETPLACE || '';
+      window.MW_AUCTION = window.MW_AUCTION || '';
+      window.MW_OFFERBOOK = window.MW_OFFERBOOK || '';
+      window.MW_WC_PROJECT_ID = window.MW_WC_PROJECT_ID || '';
+    </script>
     <style>
       :root {
         --ink-950: #09090b; --ink-900: #0f0f13; --ink-800: #1a1a24;
@@ -241,6 +252,23 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
           // slow, the 2s fallback ensures the drawer isn't stuck on "Connect".
           if (a && a.length > 10) check();
         }, 2000);
+      })();
+
+      // ── Dynamic currency + network name labels ──
+      // Replaces every .mw-cur span with the server-injected native currency
+      // symbol (window.MW_NATIVE_CURRENCY) and every .mw-net-name span with
+      // the network name (window.MW_NETWORK_NAME). The Go backend injects
+      // these globals into Astro HTML responses via sendHTMLWithConfig() in
+      // ui.go; the defaults above (Coston2) are the fallback for dev mode.
+      (function(){if(typeof window==='undefined')return;
+        var cur=window.MW_NATIVE_CURRENCY||'C2FLR';
+        var net=window.MW_NETWORK_NAME||'Flare Coston2';
+        function updateLabels(){
+          document.querySelectorAll('.mw-cur').forEach(function(el){el.textContent=cur;});
+          document.querySelectorAll('.mw-net-name').forEach(function(el){el.textContent=net;});
+        }
+        if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',updateLabels);}
+        else{updateLabels();}
       })();
     </script>
   </body>

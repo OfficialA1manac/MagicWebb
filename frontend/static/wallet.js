@@ -630,7 +630,7 @@ window.addEventListener('alpine:init', () => {
           // mark connected, otherwise every ethers-provider call would
           // target the wrong chain and instant-revert at the contract.
           if (!silent) {
-            toast(`Connected wallet is on chain #${Number(network.chainId)} — expected Coston2 (114). Switch networks in your wallet, then Re-pair via QR.`, 'error', 8000);
+            toast(`Connected wallet is on chain #${Number(network.chainId)} — expected ${NETWORK_NAME} (${CHAIN_ID}). Switch networks in your wallet, then Re-pair via QR.`, 'error', 8000);
           }
           // Wrong-chain cleanup: tear down the WC session and close the
           // overlay so the user can re-pair cleanly without a stale

@@ -9,6 +9,9 @@
 **/.env.local
 **/secrets.*
 
+# Root-level rendered HTML build artifacts (do NOT touch frontend/templates/)
+/*.html
+
 # Foundry
 contracts/out/
 contracts/cache/
@@ -99,3 +102,6 @@ frontend/static/svggen/
 # NUL device files (Windows artifact)
 nul
 app/nul
+
+# temp_gen — temporary generation output directory
+temp_gen/

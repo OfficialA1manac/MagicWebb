@@ -467,13 +467,6 @@ func (q *Q) ExtendAuction(ctx context.Context, auctionID int64, endsAt time.Time
 	return err
 }
 
-func (q *Q) UpdateAuctionBid(ctx context.Context, r AuctionRow) error {
-	_, err := q.pool.Exec(ctx,
-		`UPDATE auctions SET highest_bid_wei=$1, highest_bidder=$2 WHERE auction_id=$3`,
-		r.HighestBidWei, r.HighestBidder, r.AuctionID)
-	return err
-}
-
 func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error) {
 	var r AuctionRow
 	err := q.pool.QueryRow(ctx,
@@ -1333,7 +1326,8 @@ func (q *Q) DeactivateAndSale(ctx context.Context,
 	return tx.Commit(ctx)
 }
 
-// InsertBidAndUpdateAuction atomically records a bid and updates the auction's highest bid.
+// InsertBidAndUpdateAuction atomically records a bid and recomputes the auction's
+// leader from the effective_bids view (cumulative-bid model) in one transaction.
 // Replaces the non-transactional InsertBid + UpdateAuctionBid pair in the indexer.
 func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {
 	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
@@ -1347,9 +1341,21 @@ func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidd
 		_ = tx.Rollback(ctx)
 		return fmt.Errorf("insert bid: %w", err)
 	}
+	// Recompute the leader from the effective_bids view so highest_bid_wei
+	// reflects the bidder's CUMULATIVE total (not the individual bid amount)
+	// and highest_bidder points to the actual leader (not just the last
+	// bidder to place a bid). The contract's leader is the address with the
+	// highest cumulative escrow; the effective_bids view computes
+	// SUM(amount_wei) per bidder, so ORDER BY effective_wei DESC LIMIT 1
+	// yields the on-chain leader. If the subquery returns no rows (no bids
+	// at all), the UPDATE is a no-op — the auction keeps its default
+	// highest_bid_wei='0' and highest_bidder=''.
 	if _, err := tx.Exec(ctx,
-		`UPDATE auctions SET highest_bid_wei=$1, highest_bidder=$2 WHERE auction_id=$3`,
-		amtWei, bidder, auctionID); err != nil {
+		`UPDATE auctions SET highest_bid_wei = sub.effective_wei, highest_bidder = sub.bidder
+		 FROM (SELECT bidder, effective_wei FROM effective_bids WHERE auction_id = $1
+		       ORDER BY effective_wei DESC LIMIT 1) sub
+		 WHERE auctions.auction_id = $1`,
+		auctionID); err != nil {
 		_ = tx.Rollback(ctx)
 		return fmt.Errorf("update auction bid: %w", err)
 	}

@@ -30,6 +30,10 @@
 
   let imageError = $state(false);
 
+  // Dynamic currency symbol from server-injected window.MW_NATIVE_CURRENCY.
+  // Falls back to C2FLR for dev mode (Astro dev server without Go backend).
+  let currency = $state(typeof window !== 'undefined' ? (window.MW_NATIVE_CURRENCY || 'C2FLR') : 'C2FLR');
+
   let imageSrc = $derived(
     item.image_uri
       ? item.image_uri.startsWith('/api/v1/img/') || item.image_uri.startsWith('data:')
@@ -101,7 +105,7 @@
     <!-- Top-right: price -->
     <div class="price-badge">
       <span class="price-value">{priceFormatted()}</span>
-      <span class="price-symbol">C2FLR</span>
+      <span class="price-symbol">{currency}</span>
     </div>
 
     <!-- Bottom-right: amount for ERC1155 -->

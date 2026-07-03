@@ -64,12 +64,12 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
 
       <!-- Price range -->
       <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:120px;">
-        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Min Reserve (C2FLR)</label>
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Min Reserve (<span class="mw-cur">C2FLR</span>)</label>
         <input id="filter-min-price" type="number" min="0" step="0.01" placeholder="0" value={minPriceParam ? (Number(minPriceParam) / 1e18).toFixed(4) : ''}
                style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
       </div>
       <div style="display:flex;flex-direction:column;gap:0.25rem;min-width:120px;">
-        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Max Reserve (C2FLR)</label>
+        <label style="font-size:0.5625rem;font-weight:700;color:rgba(255,255,255,0.35);text-transform:uppercase;letter-spacing:0.05em;">Max Reserve (<span class="mw-cur">C2FLR</span>)</label>
         <input id="filter-max-price" type="number" min="0" step="0.01" placeholder="Any" value={maxPriceParam ? (Number(maxPriceParam) / 1e18).toFixed(4) : ''}
                style="width:100%;padding:0.5rem 0.75rem;border-radius:0.5rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.8125rem;font-family:inherit;outline:none;box-sizing:border-box;transition:border-color 0.2s;">
       </div>
@@ -147,6 +147,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
         catch(_) { return null; }
       }
       function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
+      function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
 
       const grid = document.getElementById('auctions-grid');
       const badge = document.getElementById('auction-count-badge');
@@ -236,7 +237,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
                   '<div style="display:flex;align-items:center;justify-content:space-between;">' +
                     '<div>' +
                       '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.4);text-transform:uppercase;font-weight:700;">'+(hasBids&&isActive?'Top bid':isActive?'Reserve':'Price')+'</span>' +
-                      '<div style="font-size:0.9375rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1.2;">'+esc(highest)+' <span style="font-size:0.625rem;opacity:0.7;">C2FLR</span></div>' +
+                      '<div style="font-size:0.9375rem;font-weight:900;color:'+(hasBids?'#fde68a':'#fafafa')+';line-height:1.2;">'+esc(highest)+' <span style="font-size:0.625rem;opacity:0.7;">'+cur()+'</span></div>' +
                     '</div>' +
                     '<div style="text-align:right;">' +
                       '<span style="font-size:0.5625rem;color:rgba(255,255,255,0.35);text-transform:uppercase;font-weight:700;">'+(isActive?'Ends in':'')+'</span>' +
