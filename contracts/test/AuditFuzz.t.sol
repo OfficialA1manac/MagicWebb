@@ -180,6 +180,9 @@ contract AuditFuzzTest is Test {
         vm.deal(seller, 100 ether);
     }
 
+    // ── Fixed listing durations for Marketplace tests ───────────────────────
+    uint64 constant _LIST_24HR = 24 hours;
+
     // ─── helpers ──────────────────────────────────────────────────────────────
 
     function _auctionEndsIn(uint64 dt) internal returns (uint256 id, uint256 tid) {
@@ -214,6 +217,11 @@ contract AuditFuzzTest is Test {
 
     function _grain(uint256 i) internal pure returns (address) {
         return address(uint160(uint256(keccak256(abi.encodePacked("GRAIN", i)))));
+    }
+
+    /// @dev Enable offers on a collection (test contract owns MockERC721 token 0).
+    function _enableOffers(address coll) internal {
+        ob.setOfferEligible(coll, true);
     }
 
     /// @dev Create an auction with custom increment parameters.
@@ -363,6 +371,7 @@ contract AuditFuzzTest is Test {
         vm.deal(address(bidder), 10 ether);
 
         uint64 exp = uint64(block.timestamp) + 1 days;
+        _enableOffers(address(nft));
         // Unblock for makeOffer (receive() not called during escrow, but be safe).
         bidder.setBlocked(false);
         vm.prank(address(bidder));
@@ -479,6 +488,7 @@ contract AuditFuzzTest is Test {
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
 
+        _enableOffers(address(nft));
         uint64 longExp = uint64(block.timestamp + 7 days);
         vm.prank(alice);
         ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, longExp);
@@ -501,6 +511,7 @@ contract AuditFuzzTest is Test {
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
 
+        _enableOffers(address(nft));
         uint64 longExp = uint64(block.timestamp + 14 days);
         vm.prank(alice);
         ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, longExp);
@@ -862,6 +873,7 @@ contract AuditFuzzTest is Test {
         bidder.setBlocked(false);
         vm.deal(address(bidder), 10 ether);
 
+        _enableOffers(address(nft));
         uint64 exp = uint64(block.timestamp + 1 days);
         vm.prank(address(bidder));
         ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
@@ -887,6 +899,7 @@ contract AuditFuzzTest is Test {
         bidder.setBlocked(false); // for makeOffer receive()
         vm.deal(address(bidder), 10 ether);
 
+        _enableOffers(address(nft));
         uint64 exp = uint64(block.timestamp + 1 days);
         vm.prank(address(bidder));
         ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
@@ -951,9 +964,9 @@ contract AuditFuzzTest is Test {
         vm.stopPrank();
 
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](3);
-        items[0] = Marketplace.BatchItem(address(coll), t1, 0.1 ether,  uint64(block.timestamp + 7 days));
-        items[1] = Marketplace.BatchItem(address(coll), t2, 0.15 ether, uint64(block.timestamp + 7 days));
-        items[2] = Marketplace.BatchItem(address(coll), t3, 0.2 ether,  uint64(block.timestamp + 7 days));
+        items[0] = Marketplace.BatchItem(address(coll), t1, 0.1 ether,  uint64(block.timestamp + _LIST_24HR));
+        items[1] = Marketplace.BatchItem(address(coll), t2, 0.15 ether, uint64(block.timestamp + _LIST_24HR));
+        items[2] = Marketplace.BatchItem(address(coll), t3, 0.2 ether,  uint64(block.timestamp + _LIST_24HR));
 
         vm.prank(seller);
         mp.batchList(items);
@@ -995,8 +1008,8 @@ contract AuditFuzzTest is Test {
         uint256 t2 = coll.mint(seller);
         uint256 t99 = coll.mint(seller);
         coll.setApprovalForAll(address(mp), true);
-        mp.list(address(coll), t1, 0.1 ether, uint64(block.timestamp + 7 days));
-        mp.list(address(coll), t2, 0.15 ether, uint64(block.timestamp + 7 days));
+        mp.list(address(coll), t1, 0.1 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(coll), t2, 0.15 ether, uint64(block.timestamp + _LIST_24HR));
         vm.stopPrank();
 
         // ReentrantBuyer receives token 99 and approves the marketplace.
@@ -1009,7 +1022,7 @@ contract AuditFuzzTest is Test {
 
         // Reentry batch: list token 99 at 0.99 ETH.
         Marketplace.BatchItem[] memory reentry = new Marketplace.BatchItem[](1);
-        reentry[0] = Marketplace.BatchItem(address(coll), t99, 0.99 ether, uint64(block.timestamp + 7 days));
+        reentry[0] = Marketplace.BatchItem(address(coll), t99, 0.99 ether, uint64(block.timestamp + _LIST_24HR));
         buyer.setReentryItems(reentry);
         buyer.arm();
 
@@ -1160,12 +1173,12 @@ contract AuditFuzzTest is Test {
     // ════════════════════════════════════════════════════════════════════════════
 
     // INVARIANT: When both minIncrementBps=0 and minIncrementFlat=0, the
-    // floor at MIN_BID_INCREMENT (0.001 ETH) is always applied. Bidders
+    // floor at MIN_BID_INCREMENT (1 ether) is always applied. Bidders
     // cannot reduce the increment below this economic threshold through
     // contract configuration alone.
     function testFuzz_increment_minBidFloor(uint128 leaderTotal) public {
         leaderTotal = uint128(bound(leaderTotal, 1 ether, 50 ether));
-        uint256 floor = ah.MIN_BID_INCREMENT(); // 0.001 ether
+        uint256 floor = ah.MIN_BID_INCREMENT(); // 1 ether
 
         // Auction with BOTH increment params at 0 — only the floor applies.
         uint256 id = _setupLeader(leaderTotal / 2, 0, 0, alice, leaderTotal);
@@ -1264,8 +1277,6 @@ contract AuditFuzzTest is Test {
         uint256 minNext256 = uint256(leaderTotal) + floor;
 
         // If minNext exceeds uint128.max, use type(uint128).max as the bid.
-        // This is always > leaderTotal (since leaderTotal < type(uint128).max)
-        // and passes the first overflow check (nt == type(uint128).max, not >).
         if (minNext256 > type(uint128).max) {
             vm.deal(bob, type(uint128).max);
             vm.prank(bob);
@@ -1406,6 +1417,7 @@ contract AuditFuzzTest is Test {
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
 
+        _enableOffers(address(nft));
         uint64 exp = uint64(block.timestamp + 1 days);
         vm.prank(address(bidder));
         ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);

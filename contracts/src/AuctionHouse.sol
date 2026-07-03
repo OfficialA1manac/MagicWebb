@@ -76,13 +76,14 @@ contract AuctionHouse is MarketplaceCore {
     ///         startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION = the
     ///         absolute latest possible endsAt, regardless of extension count.
     uint64 public constant MAX_TOTAL_EXTENSION = 24 hours;
-    /// @notice Minimum absolute increment when both `minIncrementBps` and
-    ///         `minIncrementFlat` are zero (or both below this floor). Prevents
-    ///         collusive 1-wei bid exchanges that perpetually satisfy the
-    ///         `newLead=true` anti-snipe gate and stall the auction forever
-    ///         (audit-#5). At 0.001 ETH per flip, two coordinated wallets
-    ///         cannot afford to keep the timer extending.
-    uint128 public constant MIN_BID_INCREMENT  = 0.001 ether;
+    /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
+    ///         the current leader. The user's new cumulative bid must exceed the
+    ///         leader's total by at least this amount. The percentage-based
+    ///         `minIncrementBps` and `minIncrementFlat` parameters are still
+    ///         accepted at creation for backward-compatibility but the bid() logic
+    ///         uses only this flat value — guaranteeing a +1 C2FLR/FLR/SGB floor
+    ///         across all chains.
+    uint128 public constant MIN_BID_INCREMENT  = 1 ether;
 
     struct Auction {
         address       seller;

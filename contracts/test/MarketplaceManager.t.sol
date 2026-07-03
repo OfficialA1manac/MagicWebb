@@ -41,6 +41,11 @@ contract MarketplaceManagerTest is Test {
 
         vm.deal(alice, 100 ether);
         vm.deal(bob,   100 ether);
+
+        // Enable offers on the mock NFT collection so makeOffer tests pass.
+        // The admin has DEFAULT_ADMIN_ROLE via the MarketplaceManager.
+        vm.prank(admin);
+        ob.setOfferEligible(address(nft), true);
     }
 
     // ── Roles ────────────────────────────────────────────────────────────────

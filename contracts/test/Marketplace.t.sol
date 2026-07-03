@@ -22,6 +22,15 @@ contract MarketplaceTest is Test {
         vm.deal(buyer, 10 ether);
     }
 
+    // ── Fixed listing durations ───────────────────────────────────────────────
+    
+    uint64 constant _DURATION_3MIN  = 3 minutes;
+    uint64 constant _DURATION_15MIN = 15 minutes;
+    uint64 constant _DURATION_30MIN = 30 minutes;
+    uint64 constant _DURATION_1HR   = 1 hours;
+    uint64 constant _DURATION_4HR   = 4 hours;
+    uint64 constant _DURATION_24HR  = 24 hours;
+
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// @dev 1.5% platform fee, deducted from the seller's proceeds.
@@ -53,7 +62,7 @@ contract MarketplaceTest is Test {
     // ── ERC-721 basic flow ──────────────────────────────────────────────────────
 
     function test_listAndBuy() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
 
         vm.prank(buyer);
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
@@ -66,14 +75,14 @@ contract MarketplaceTest is Test {
     }
 
     function test_buyWrongSellerReverts() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(buyer);
         vm.expectRevert(); // no listing under `other`
         mp.buy{value: _total(1 ether)}(address(nft), id, other);
     }
 
     function test_cancel() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(seller);
         mp.cancel(address(nft), id);
         vm.prank(buyer);
@@ -82,14 +91,14 @@ contract MarketplaceTest is Test {
     }
 
     function test_cancelByNonSellerReverts() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(other);
         vm.expectRevert();
         mp.cancel(address(nft), id);
     }
 
     function test_wrongPriceReverts() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(buyer);
         vm.expectRevert(); // value must equal the price exactly
         mp.buy{value: 1 ether + 1}(address(nft), id, seller);
@@ -100,13 +109,13 @@ contract MarketplaceTest is Test {
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.list(address(nft), id, 0.009 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 0.009 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
     }
 
     function test_expiredReverts() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
-        vm.warp(block.timestamp + 2 days);
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_1HR));
+        vm.warp(block.timestamp + 2 hours);
         vm.prank(buyer);
         vm.expectRevert();
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
@@ -122,7 +131,7 @@ contract MarketplaceTest is Test {
     }
 
     function test_completedSaleIsFinal() public {
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(buyer);
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
 
@@ -140,7 +149,7 @@ contract MarketplaceTest is Test {
     // ── ERC-1155 ────────────────────────────────────────────────────────────────
 
     function test_list1155AndBuy() public {
-        _list1155(1, 5, 2 ether, uint64(block.timestamp + 1 days));
+        _list1155(1, 5, 2 ether, uint64(block.timestamp + _DURATION_24HR));
 
         vm.prank(buyer);
         mp.buy{value: _total(2 ether)}(address(multi), 1, seller);
@@ -156,7 +165,7 @@ contract MarketplaceTest is Test {
         multi.mint(seller, 2, 10);
         multi.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.list1155(address(multi), 2, 0, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list1155(address(multi), 2, 0, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
     }
 
@@ -165,7 +174,7 @@ contract MarketplaceTest is Test {
         multi.mint(seller, 3, 2);
         multi.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.list1155(address(multi), 3, 5, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list1155(address(multi), 3, 5, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
     }
 
@@ -173,12 +182,12 @@ contract MarketplaceTest is Test {
         vm.startPrank(seller);
         multi.mint(seller, 4, 5);
         vm.expectRevert();
-        mp.list1155(address(multi), 4, 5, 1 ether, uint64(block.timestamp + 1 days));
+        mp.list1155(address(multi), 4, 5, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
     }
 
     function test_buy1155Expired() public {
-        _list1155(5, 2, 1 ether, uint64(block.timestamp + 1 hours));
+        _list1155(5, 2, 1 ether, uint64(block.timestamp + _DURATION_1HR));
         vm.warp(block.timestamp + 2 hours);
         vm.prank(buyer);
         vm.expectRevert();
@@ -188,11 +197,11 @@ contract MarketplaceTest is Test {
     /// @dev Per-holder stacked ERC-1155 listings: a second holder lists the SAME id
     ///      under their own key. Both listings coexist (no exclusivity).
     function test_secondHolderListsSeparately() public {
-        _list1155(20, 5, 1 ether, uint64(block.timestamp + 1 days));
+        _list1155(20, 5, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.startPrank(other);
         multi.mint(other, 20, 10);
         multi.setApprovalForAll(address(mp), true);
-        mp.list1155(address(multi), 20, 10, 2 ether, uint64(block.timestamp + 1 days));
+        mp.list1155(address(multi), 20, 10, 2 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
 
         (address s1,,,uint128 p1,) = mp.listings(address(multi), 20, seller);
@@ -202,16 +211,16 @@ contract MarketplaceTest is Test {
     }
 
     function test_originalSellerCanRelist() public {
-        _list1155(21, 5, 1 ether, uint64(block.timestamp + 1 days));
+        _list1155(21, 5, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(seller);
-        mp.list1155(address(multi), 21, 5, 2 ether, uint64(block.timestamp + 1 days));
+        mp.list1155(address(multi), 21, 5, 2 ether, uint64(block.timestamp + _DURATION_24HR));
         (address s,,,uint128 p,) = mp.listings(address(multi), 21, seller);
         assertEq(s, seller);
         assertEq(p, 2 ether);
     }
 
     function test_cancel1155() public {
-        _list1155(6, 3, 1 ether, uint64(block.timestamp + 1 days));
+        _list1155(6, 3, 1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(seller);
         mp.cancel(address(multi), 6);
         vm.prank(buyer);
@@ -219,14 +228,14 @@ contract MarketplaceTest is Test {
         mp.buy{value: _total(1 ether)}(address(multi), 6, seller);
     }
 
-    // ── Expiry boundary (max 90 days) ───────────────────────────────────────────
+    // ── Expiry boundary (max 24 hours) ───────────────────────────────────────────
 
     function test_listExpiryBeyondMaxReverts() public {
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert();
-        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 91 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 25 hours));
         vm.stopPrank();
     }
 
@@ -234,7 +243,7 @@ contract MarketplaceTest is Test {
         vm.startPrank(seller);
         uint256 id = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 90 days));
+        mp.list(address(nft), id, 1 ether, uint64(block.timestamp + 24 hours));
         vm.stopPrank();
         (address s,,,,) = mp.listings(address(nft), id, seller);
         assertEq(s, seller);
@@ -260,7 +269,7 @@ contract MarketplaceTest is Test {
         vm.startPrank(freshSeller);
         uint256 tid = nft.mint(freshSeller);
         nft.setApprovalForAll(address(freshMp), true);
-        freshMp.list(address(nft), tid, price, uint64(block.timestamp + 1 days));
+        freshMp.list(address(nft), tid, price, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
 
         uint256 creatorBefore = creator.balance;
@@ -283,7 +292,7 @@ contract MarketplaceTest is Test {
         vm.deal(buyer2, 2 ether);
 
         // First sale: seller → buyer
-        uint256 id = _list(1 ether, uint64(block.timestamp + 1 days));
+        uint256 id = _list(1 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.prank(buyer);
         mp.buy{value: _total(1 ether)}(address(nft), id, seller);
         assertEq(nft.ownerOf(id), buyer);
@@ -291,7 +300,7 @@ contract MarketplaceTest is Test {
         // buyer re-lists the token (free)
         vm.startPrank(buyer);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), id, 1.5 ether, uint64(block.timestamp + 1 days));
+        mp.list(address(nft), id, 1.5 ether, uint64(block.timestamp + _DURATION_24HR));
         vm.stopPrank();
 
         // buyer2 buys from buyer
@@ -309,7 +318,7 @@ contract BatchListTest is MarketplaceTest {
         uint256 t1 = nft.mint(seller);
         uint256 t2 = nft.mint(seller);
         uint256 t3 = nft.mint(seller);
-        uint64 exp = uint64(block.timestamp + 7 days);
+        uint64 exp = uint64(block.timestamp + _DURATION_24HR);
 
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](3);
         items[0] = Marketplace.BatchItem({coll: address(nft), id: t1, price: 1 ether, expiresAt: exp});
@@ -340,7 +349,7 @@ contract BatchListTest is MarketplaceTest {
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](51);
         for (uint256 i; i < 51; i++) {
             uint256 tid = nft.mint(seller);
-            items[i] = Marketplace.BatchItem({coll: address(nft), id: tid, price: 1 ether, expiresAt: uint64(block.timestamp + 7 days)});
+            items[i] = Marketplace.BatchItem({coll: address(nft), id: tid, price: 1 ether, expiresAt: uint64(block.timestamp + _DURATION_24HR)});
         }
         vm.expectRevert(BatchTooLarge.selector);
         mp.batchList(items);

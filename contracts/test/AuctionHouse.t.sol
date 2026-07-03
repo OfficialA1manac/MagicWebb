@@ -99,11 +99,11 @@ contract AuctionHouseTest is Test {
         assertEq(alice.balance, 99 ether, "alice not refunded on outbid");
         (address l, uint128 t) = _leader(id);
         assertEq(l, bob); assertEq(t, 2 ether);
-        // alice tops up cumulatively: 1 + 1.2 = 2.2 > 2 + 5% → reclaims lead
-        _bid(id, alice, 1.2 ether);
+        // alice tops up cumulatively: 1 + 2 = 3 > 2 + 1 (MIN_BID_INCREMENT) → reclaims lead
+        _bid(id, alice, 2 ether);
         (address l2, uint128 t2) = _leader(id);
-        assertEq(l2, alice); assertEq(t2, 2.2 ether);
-        assertEq(ah.cumulative(id, alice), 2.2 ether);
+        assertEq(l2, alice); assertEq(t2, 3 ether);
+        assertEq(ah.cumulative(id, alice), 3 ether);
     }
 
     function test_outbidEmitsNotification() public {
@@ -417,7 +417,8 @@ contract AuctionHouseTest is Test {
         (,,,,,,uint64 newEnd,,,,,,,) = ah.auctions(id);
         assertEq(newEnd, end, "timer NOT extended for sub-threshold bid");
         // Now bob overtakes with a qualifying bid → timer extends
-        _bid(id, bob, 2 ether);                    // cumulative 2.5 > 2.1 min next
+        // bob cumulative = 0.5 + 2.5 = 3.0 > 2.0 + 1.0 (MIN_BID_INCREMENT) = 3.0 → overtakes at minNext
+        _bid(id, bob, 2.5 ether);
         (,,,,,,newEnd,,,,,,,) = ah.auctions(id);
         assertGt(newEnd, end, "timer extended on newLead");
     }
@@ -438,11 +439,9 @@ contract AuctionHouseTest is Test {
         assertEq(ah.cumulative(id, alice), 1.5 ether);
     }
 
-    // ── MIN_BID_INCREMENT floor for 0/0 increment config ──────────────────────
-
-    /// @dev audit-#5: When both minIncrementBps and minIncrementFlat are 0,
-    ///      the bid() path falls through to MIN_BID_INCREMENT (0.001 ether)
-    ///      to prevent 1-wei collusive loop that extends the timer forever.
+    // ── MIN_BID_INCREMENT floor for 0/0 increment config ──────────────────────        /// @dev audit-#5: When both minIncrementBps and minIncrementFlat are 0,
+        ///      the bid() path falls through to MIN_BID_INCREMENT (1 ether)
+        ///      to prevent 1-wei collusive loop that extends the timer forever.
     function test_minBidIncrementFloorPreventsOneWeiLoop() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
@@ -454,7 +453,7 @@ contract AuctionHouseTest is Test {
         // Bob tries to overtake with just 1 wei above — must be rejected.
         vm.prank(bob);
         vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: 1 ether + 1 wei}(id);        // 1 wei above leader, but MIN_BID_INCREMENT=0.001E
+        ah.bid{value: 1 ether + 1 wei}(id);        // 1 wei above leader, but MIN_BID_INCREMENT=1E
 
         // Bob bids enough to clear MIN_BID_INCREMENT.
         uint128 qualifying = 1 ether + ah.MIN_BID_INCREMENT();

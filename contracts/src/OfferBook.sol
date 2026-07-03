@@ -22,11 +22,18 @@ error OfferActive();
 /// @dev Maximum offer lifetime from the latest top-up.
 uint64 constant MAX_OFFER_DURATION = 14 days;
 
+/// @notice Sent when a collection's offer eligibility is toggled.
+event OfferEligibilitySet(address indexed coll, bool indexed eligible);
+
+error OffersNotEligible();
+
 /// @title OfferBook
 /// @notice On-chain NFT offers with stacked positions; the seller pays the fee on acceptance.
 ///
 /// Fee model (seller-pays, Option-4 stacked positions):
-///   - Anyone may offer on any NFT — no eligibility gate. Making an offer is FREE.
+///   - Making an offer is FREE, but only on collections marked as offer-eligible.
+///     The collection owner (or admin via the MarketplaceManager) sets the flag.
+///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
 ///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
 ///     offerer pays no fee.
 ///   - Multiple offers from the same bidder on the same NFT COMPOUND into one position;
@@ -48,6 +55,11 @@ contract OfferBook is MarketplaceCore {
 
     /// @notice positions[coll][tokenId][bidder] → Position.
     mapping(address => mapping(uint256 => mapping(address => Position))) public positions;
+
+    /// @notice offerEligible[coll] → true if the collection accepts offers.
+    ///         The collection owner (msg.sender in makeOffer context) or an
+    ///         authorized admin toggles this. Offers revert when false.
+    mapping(address => bool) public offerEligible;
 
     // ── Storage note ───────────────────────────────────────────────────────
     // `pendingReturns` is declared ONCE in MarketplaceCore. OfferBook inherits
@@ -83,23 +95,62 @@ contract OfferBook is MarketplaceCore {
         MarketplaceCore(recipient, manager_)
     {}
 
+    /// @notice Toggle whether a collection accepts offers. Callable by the
+    ///         collection's owner (ERC721 ownerOf(token 0)) or the
+    ///         MarketplaceManager admin (DEFAULT_ADMIN_ROLE = bytes32(0)).
+    ///         Non-ERC721 collections fall through to the admin-only path.
+    /// @param coll     Collection address.
+    /// @param eligible True to allow offers on this collection.
+    function setOfferEligible(address coll, bool eligible) external nonReentrant {
+        // Check if the caller is the ERC721 token-0 owner.
+        bool authorized = false;
+        (bool ok, bytes memory data) = coll.staticcall(
+            abi.encodeWithSelector(IERC721.ownerOf.selector, 0)
+        );
+        if (ok && data.length == 32) {
+            address tokenOwner = abi.decode(data, (address));
+            if (msg.sender == tokenOwner) {
+                authorized = true;
+            }
+        }
+        // If not the collection owner, check if caller has DEFAULT_ADMIN_ROLE
+        // via the MarketplaceManager. OpenZeppelin AccessControl defines
+        // DEFAULT_ADMIN_ROLE as bytes32(0), NOT keccak256("DEFAULT_ADMIN_ROLE").
+        if (!authorized && manager != address(0)) {
+            (bool adminOk, bytes memory adminData) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
+            );
+            if (adminOk && adminData.length == 32 && abi.decode(adminData, (bool))) {
+                authorized = true;
+            }
+        }
+        if (!authorized) revert NotOwner();
+
+        offerEligible[coll] = eligible;
+        emit OfferEligibilitySet(coll, eligible);
+    }
+
     // ── Make offer (free; full principal escrowed) ─────────────────────────────
 
     /// @notice Offer on an ERC-721 token. Send exactly `principal` as msg.value. FREE.
+    ///         The target collection must be offer-eligible (setOfferEligible).
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
     /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
     function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant entryGate {
+        if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
     }
 
     /// @notice Offer on ERC-1155 units. Send exactly `principal` as msg.value. FREE.
+    ///         The target collection must be offer-eligible (setOfferEligible).
     /// @param units  Number of ERC-1155 units desired (latest top-up wins).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
         external payable nonReentrant entryGate
     {
         if (units == 0) revert InvalidAmount();
+        if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, expiresAt);
     }
 

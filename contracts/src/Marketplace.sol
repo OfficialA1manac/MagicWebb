@@ -13,9 +13,16 @@ error NotApproved();
 error InvalidExpiry();
 error InvalidAmount();
 error BatchTooLarge();
+error InvalidDuration();
 
-/// @dev Max listing duration. Prevents listings expiring decades in the future.
-uint64 constant MAX_LISTING_DURATION = 90 days;
+/// @dev Fixed listing durations: 3 min, 15 min, 30 min, 1 hr, 4 hr, 24 hr.
+///      Sellers must pick one of these exact values for expiresAt - block.timestamp.
+uint64 constant LISTING_DURATION_3MIN   = 3 minutes;
+uint64 constant LISTING_DURATION_15MIN  = 15 minutes;
+uint64 constant LISTING_DURATION_30MIN  = 30 minutes;
+uint64 constant LISTING_DURATION_1HR    = 1 hours;
+uint64 constant LISTING_DURATION_4HR    = 4 hours;
+uint64 constant LISTING_DURATION_24HR   = 24 hours;
 
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
@@ -140,7 +147,14 @@ contract Marketplace is MarketplaceCore {
     ) internal {
         if (price < MIN_PRICE) revert BelowMinPrice();
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
-        if (expiresAt > block.timestamp + MAX_LISTING_DURATION) revert InvalidExpiry();
+        // Validate that the listing duration is one of the fixed durations.
+        // expiresAt is uint64, block.timestamp is uint256 — cast both to uint256 for math.
+        uint256 duration = uint256(expiresAt) - block.timestamp;
+        if (duration != LISTING_DURATION_3MIN && duration != LISTING_DURATION_15MIN
+            && duration != LISTING_DURATION_30MIN && duration != LISTING_DURATION_1HR
+            && duration != LISTING_DURATION_4HR && duration != LISTING_DURATION_24HR) {
+            revert InvalidDuration();
+        }
 
         if (standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(id) != msg.sender) revert NotOwner();

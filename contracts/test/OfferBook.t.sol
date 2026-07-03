@@ -7,10 +7,28 @@ import {BelowMinPrice} from "../src/MarketplaceCore.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
+/// @dev Minimal manager that grants DEFAULT_ADMIN_ROLE to the deployer.
+///      Used by OfferBookTest so setOfferEligible works for ERC1155 collections
+///      (which don't have ownerOf(0) for the ERC721 authorization path).
+contract MiniManager {
+    bytes32 private constant DEFAULT_ADMIN_ROLE = bytes32(0);
+    mapping(bytes32 => mapping(address => bool)) private _roles;
+
+    constructor() {
+        _roles[DEFAULT_ADMIN_ROLE][msg.sender] = true;
+    }
+
+    function entriesAllowed() external pure returns (bool) { return true; }
+    function hasRole(bytes32 role, address who) external view returns (bool) {
+        return _roles[role][who];
+    }
+}
+
 contract OfferBookTest is Test {
     OfferBook   ob;
     MockERC721  nft;
     MockERC1155 multi;
+    MiniManager mgr;
 
     address feeRecipient = address(0x1111000000000000000000000000000000111100);
     address seller       = address(0xBEEF);
@@ -18,8 +36,9 @@ contract OfferBookTest is Test {
     address bidder2      = address(0xB0B);
 
     function setUp() public {
-        ob    = new OfferBook(feeRecipient, address(0));
-        nft   = new MockERC721();
+        mgr  = new MiniManager();
+        ob   = new OfferBook(feeRecipient, address(mgr));
+        nft  = new MockERC721();
         multi = new MockERC1155();
 
         vm.deal(bidder,  100 ether);
@@ -38,7 +57,14 @@ contract OfferBookTest is Test {
     }
 
     function _exp() internal view returns (uint64) {
-        return uint64(block.timestamp + 3 days);
+        return uint64(block.timestamp + 24 hours);
+    }
+
+    /// @dev Set the collection as offer-eligible (required by the offerEligible gate).
+    ///      For ERC721 collections, the test contract owns token 0 and can toggle.
+    ///      For ERC1155 collections (no ownerOf), the MiniManager's admin path is used.
+    function _enableOffers(address coll) internal {
+        ob.setOfferEligible(coll, true);
     }
 
     function _mintAndApprove(address to) internal returns (uint256 tid) {
@@ -55,6 +81,7 @@ contract OfferBookTest is Test {
     // ── Make offer (free; full principal escrowed) ─────────────────────────────
 
     function test_makeOfferStoresPrincipalNoFee() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
 
         uint256 vaultBefore = feeRecipient.balance;
@@ -66,7 +93,8 @@ contract OfferBookTest is Test {
     }
 
     function test_makeOfferAnyoneCanOffer() public {
-        // No eligibility gate: a non-owner token can still receive offers.
+        _enableOffers(address(nft));
+        // Any buyer can offer on an eligible collection.
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -74,6 +102,7 @@ contract OfferBookTest is Test {
     }
 
     function test_makeOfferCompoundsPosition() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
 
         vm.startPrank(bidder);
@@ -86,6 +115,7 @@ contract OfferBookTest is Test {
     }
 
     function test_makeOfferWrongValueReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         vm.expectRevert(WrongValue.selector);
@@ -93,6 +123,7 @@ contract OfferBookTest is Test {
     }
 
     function test_makeOfferBelowMinPriceReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         vm.expectRevert(BelowMinPrice.selector);
@@ -100,6 +131,7 @@ contract OfferBookTest is Test {
     }
 
     function test_makeOfferBadExpiryReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         vm.expectRevert(InvalidExpiry.selector);
@@ -115,6 +147,7 @@ contract OfferBookTest is Test {
     // ── Accept (seller pays 1.5%; seller nets 98.5% of principal) ──────────────
 
     function test_acceptOfferPaysSellerNet() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -133,6 +166,7 @@ contract OfferBookTest is Test {
     }
 
     function test_acceptOfferNotOwnerReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -143,6 +177,7 @@ contract OfferBookTest is Test {
     }
 
     function test_acceptOfferNoOfferReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(seller);
         vm.expectRevert(NoOffer.selector);
@@ -152,6 +187,7 @@ contract OfferBookTest is Test {
     // ── Reject / expiry (full principal refunded — offers are free) ────────────
 
     function test_rejectOfferRefundsFullPrincipal() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         uint256 balBefore = bidder.balance;
         vm.prank(bidder);
@@ -166,6 +202,7 @@ contract OfferBookTest is Test {
     }
 
     function test_rejectOfferNotOwnerReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -176,6 +213,7 @@ contract OfferBookTest is Test {
     }
 
     function test_refundExpiredOfferAfterExpiry() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         uint256 balBefore = bidder.balance;
         uint64  exp = _exp();
@@ -192,6 +230,7 @@ contract OfferBookTest is Test {
     }
 
     function test_refundExpiredOfferBeforeExpiryReverts() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
@@ -201,6 +240,7 @@ contract OfferBookTest is Test {
     }
 
     function test_multipleOffersSellerAcceptsOneRefundsOther() public {
+        _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
 
         vm.prank(bidder);
@@ -224,6 +264,7 @@ contract OfferBookTest is Test {
     // ── ERC-1155 ────────────────────────────────────────────────────────────────
 
     function test_makeOffer1155AndAccept() public {
+        _enableOffers(address(multi));
         vm.startPrank(seller);
         multi.mint(seller, 42, 10);
         multi.setApprovalForAll(address(ob), true);
@@ -250,6 +291,7 @@ contract OfferBookTest is Test {
     ///      holds at least the offer's `units` (mirroring acceptOffer). A 1-unit
     ///      holder cannot reject a 5-unit offer; a sufficient holder can.
     function test_rejectOffer1155RequiresSufficientUnits() public {
+        _enableOffers(address(multi));
         vm.startPrank(seller);
         multi.mint(seller, 77, 10);
         multi.setApprovalForAll(address(ob), true);
@@ -291,6 +333,7 @@ contract OfferBookTest is Test {
     // ── Fuzz ────────────────────────────────────────────────────────────────────
 
     function testFuzz_feeChargedAtAcceptNotMake(uint128 principal) public {
+        _enableOffers(address(nft));
         principal = uint128(bound(principal, 0.01 ether, 100 ether));
 
         uint256 tid = _mintAndApprove(seller);
