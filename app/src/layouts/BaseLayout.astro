@@ -222,7 +222,25 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
           const mc=document.getElementById('mobile-connect-wallet');if(mc)mc.addEventListener('click',function(){document.getElementById('mobile-menu').classList.remove('open');if(typeof window.__MW_APPKIT_OPEN__==='function'){window.__MW_APPKIT_OPEN__();}else if(typeof window.MW_CONNECT_WALLET==='function'){window.MW_CONNECT_WALLET();}});
           const md=document.getElementById('mobile-disconnect-wallet');if(md)md.addEventListener('click',function(){if(typeof window.__MW_APPKIT_DISCONNECT__==='function'){window.__MW_APPKIT_DISCONNECT__();}else{try{localStorage.removeItem('mw_addr');localStorage.removeItem('mw_kind');localStorage.removeItem('mw_jwt');}catch(_){}location.reload();}});
         });
-        const iv=setInterval(check,3000);window.addEventListener('beforeunload',function(){clearInterval(iv);});
+        // Drive mobile wallet display via events instead of polling every 3s.
+        // The setInterval(check,3000) legacy poller was a recurring timer that
+        // read localStorage on every tick — it couldn't keep pace with wagmi
+        // React hydration (AppKit reconnects after the inline script ran) so
+        // the mobile drawer showed "Connect Wallet" until the next 3s window.
+        // Now we listen for the same mw-wallet-changed event that the profile
+        // page uses, plus a one-time deferred check at t+2s to catch the case
+        // where no event fires (missing AppKit, air-gapped page, etc.).
+        window.addEventListener('mw-wallet-changed', function(){check();});
+        // One-time deferred check: fires once at page-boot time after AppKit
+        // has had time to hydrate. Clears itself so there's no recurring timer.
+        setTimeout(function _bootCheck(){
+          try { var a = localStorage.getItem('mw_addr'); } catch(_) { a = ''; }
+          // Only update if React hasn't already signaled a change via the event.
+          // If AppKit dispatched mw-wallet-changed, the listener above already
+          // ran check(), so _bootCheck is a no-op — but if AppKit is absent or
+          // slow, the 2s fallback ensures the drawer isn't stuck on "Connect".
+          if (a && a.length > 10) check();
+        }, 2000);
       })();
     </script>
   </body>

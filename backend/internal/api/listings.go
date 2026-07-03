@@ -5,6 +5,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -82,6 +83,13 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 	}
 	if rows == nil {
 		rows = []db.ListingRow{}
+	}
+	if len(rows) == 0 {
+		log.Debug().
+			Str("collection", f.Collection).
+			Str("seller", f.Seller).
+			Str("sort", f.Sort).
+			Msg("listings: query returned zero results — no active listings match the filter criteria")
 	}
 	return c.JSON(rows)
 }

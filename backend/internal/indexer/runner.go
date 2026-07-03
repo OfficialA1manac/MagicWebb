@@ -161,6 +161,83 @@ func (r *Runner) Run(ctx context.Context) {
 // whose own head slightly lags the one that answered BlockNumber.
 const headLag = 2
 
+// ReindexCollection forces the indexer to re-scan Transfer events for a single
+// collection from fromBlock to the current chain head. Useful after adding a
+// new collection to TRACKED_COLLECTIONS — past holdings become visible without
+// waiting for new Transfer events. Returns the number of blocks scanned.
+func (r *Runner) ReindexCollection(ctx context.Context, collectionAddr string, fromBlock uint64) (int, error) {
+	addr := common.HexToAddress(collectionAddr)
+	head, err := r.eth.BlockNumber(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("reindex: block number: %w", err)
+	}
+	target := head - headLag
+	if target <= fromBlock {
+		return 0, fmt.Errorf("reindex: target block %d <= fromBlock %d", target, fromBlock)
+	}
+
+	log.Info().
+		Str("collection", collectionAddr).
+		Uint64("from", fromBlock).
+		Uint64("to", target).
+		Msg("reindex: starting collection backfill")
+
+	chunk := r.cfg.GetLogsChunk
+	if chunk == 0 {
+		chunk = 30
+	}
+
+	var scanned, processed int
+	for start := fromBlock; start <= target; start += chunk {
+		end := start + chunk - 1
+		if end > target {
+			end = target
+		}
+
+		logs, err := r.eth.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(start)),
+			ToBlock:   big.NewInt(int64(end)),
+			Addresses: []common.Address{addr},
+			Topics:    transferTopics(),
+		})
+		if err != nil {
+			return scanned, fmt.Errorf("reindex: filter logs [%d..%d]: %w", start, end, err)
+		}
+
+		for _, l := range logs {
+			// Fetch block timestamp on demand.
+			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
+			hcancel()
+			if herr != nil {
+				log.Warn().Err(herr).Uint64("block", l.BlockNumber).
+					Msg("reindex: header lookup failed, skipping log")
+				continue
+			}
+			if err := r.h.dispatch(ctx, l, h.Time); err != nil {
+				log.Warn().Err(err).Str("tx", l.TxHash.Hex()).
+					Msg("reindex: dispatch failed")
+			} else {
+				processed++
+			}
+		}
+
+		scanned += int(end - start + 1)
+
+		if err := ctx.Err(); err != nil {
+			return scanned, err
+		}
+	}
+
+	log.Info().
+		Str("collection", collectionAddr).
+		Int("blocks_scanned", scanned).
+		Int("logs_processed", processed).
+		Msg("reindex: collection backfill complete")
+
+	return scanned, nil
+}
+
 func (r *Runner) runWatcher(ctx context.Context) {
 	chainID := int(r.cfg.ChainID)
 	contracts := []common.Address{

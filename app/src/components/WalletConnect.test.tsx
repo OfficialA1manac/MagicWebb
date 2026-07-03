@@ -1,6 +1,6 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { render, screen, fireEvent } from '@testing-library/react';
+import { render, screen, fireEvent, act } from '@testing-library/react';
 
 // ── Shared mock instance references ─────────────────────────────────────────
 // Stored at module level so they persist across tests and can be asserted on
@@ -83,6 +83,9 @@ describe('WalletConnect', () => {
     // The useEffect fires initAppKit().then(() => setReady(true)) asynchronously,
     // so "Loading…" is visible on the synchronous first render.
     expect(screen.getByText('Loading…')).toBeInTheDocument();
+    // Flush the pending initAppKit() Promise resolution to avoid the
+    // "not wrapped in act(...)" warning from React.
+    await act(async () => {});
   });
 
   it('renders connect button when not connected', async () => {

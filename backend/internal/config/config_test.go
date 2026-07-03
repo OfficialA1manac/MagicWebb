@@ -495,6 +495,119 @@ func TestContractAddressValidation(t *testing.T) {
 	}
 }
 
+// ── v35: TRACKED_COLLECTIONS startup warnings ─────────────────────────────
+
+func TestTrackedCollections_InvalidAddressWarn(t *testing.T) {
+	// Load() prints a WARN to stderr for each invalid address in
+	// TRACKED_COLLECTIONS. Because Load() uses os.Stderr directly (not
+	// through a logger we can inject), we run it in a subprocess and
+	// capture stderr via cmd.CombinedOutput().
+
+	if os.Getenv("GO_TEST_SUBPROCESS_TRACKED_WARN") == "1" {
+		// ── Subprocess: set a bad address, call Load(), let it print ──
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("CHAIN_ID", "114")
+		os.Setenv("MARKETPLACE_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("AUCTION_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("OFFERBOOK_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		os.Setenv("TRACKED_COLLECTIONS", "0xbad,0x"+strings.Repeat("a", 40))
+		Load()
+		os.Exit(0)
+	}
+
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_TRACKED_WARN=1",
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestTrackedCollections_InvalidAddressWarn")
+	cmd.Env = append(minimalEnv, "CHAIN_ID=114")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subprocess should exit 0, got err=%v\noutput:\n%s", err, out)
+	}
+	// The bad address "0xbad" should trigger a WARN.
+	if !strings.Contains(string(out), "TRACKED_COLLECTIONS contains invalid address") {
+		t.Fatalf("expected WARN about invalid address in TRACKED_COLLECTIONS, got:\n%s", out)
+	}
+	if !strings.Contains(string(out), "0xbad") {
+		t.Fatalf("expected WARN to mention the bad address '0xbad', got:\n%s", out)
+	}
+}
+
+func TestTrackedCollections_EmptyProductionWarn(t *testing.T) {
+	// Load() prints a WARN when ENV=production and TRACKED_COLLECTIONS
+	// is empty. Run in a subprocess to capture stderr.
+
+	if os.Getenv("GO_TEST_SUBPROCESS_TRACKED_PROD") == "1" {
+		// ── Subprocess ──
+		os.Setenv("ENV", "production")
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("CHAIN_ID", "114")
+		os.Setenv("MARKETPLACE_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("AUCTION_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("OFFERBOOK_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		os.Setenv("SIWE_DOMAIN", "magicwebb.fly.dev") // avoid localhost FATAL
+		// TRACKED_COLLECTIONS is unset → empty
+		Load()
+		os.Exit(0)
+	}
+
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_TRACKED_PROD=1",
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestTrackedCollections_EmptyProductionWarn")
+	cmd.Env = append(minimalEnv, "CHAIN_ID=114")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subprocess should exit 0, got err=%v\noutput:\n%s", err, out)
+	}
+	if !strings.Contains(string(out), "TRACKED_COLLECTIONS is empty in production") {
+		t.Fatalf("expected WARN about empty TRACKED_COLLECTIONS in production, got:\n%s", out)
+	}
+}
+
+func TestTrackedCollections_DevNoWarn(t *testing.T) {
+	// In development (non-production), an empty TRACKED_COLLECTIONS should
+	// NOT trigger the production WARN.
+
+	if os.Getenv("GO_TEST_SUBPROCESS_TRACKED_DEV") == "1" {
+		// ── Subprocess ──
+		os.Setenv("ENV", "development")
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("CHAIN_ID", "114")
+		os.Setenv("MARKETPLACE_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("AUCTION_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("OFFERBOOK_ADDR", "0x0000000000000000000000000000000000000000")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		// TRACKED_COLLECTIONS is unset → empty, ENV=development → no WARN
+		Load()
+		os.Exit(0)
+	}
+
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_TRACKED_DEV=1",
+	}
+
+	cmd := exec.Command(os.Args[0], "-test.run=TestTrackedCollections_DevNoWarn")
+	cmd.Env = append(minimalEnv, "CHAIN_ID=114")
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("subprocess should exit 0, got err=%v\noutput:\n%s", err, out)
+	}
+	if strings.Contains(string(out), "TRACKED_COLLECTIONS is empty") {
+		t.Fatalf("development env should NOT trigger production WARN, got:\n%s", out)
+	}
+}
+
 // ── v35: ADMIN_ALLOWLIST entry validation (via isValidEthAddr) ────────────
 
 func TestAdminAllowlistValidation(t *testing.T) {

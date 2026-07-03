@@ -46,6 +46,7 @@ import WalletConnect from '../components/WalletConnect';
       function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){if(!t)return'';const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
 
       function isEthAddr(s){
         if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
@@ -66,6 +67,16 @@ import WalletConnect from '../components/WalletConnect';
       }
 
       const root = document.getElementById('profile-root');
+      if (!root) return;
+
+      // Track last rendered address to skip no-op re-renders. Declared
+      // BEFORE loadProfileData so the catch block (which resets it on
+      // failure) and the mw-wallet-changed guard both reference it cleanly.
+      var _lastRenderedAddr = addr;
+      // Debounce timer for wallet-changed events (prevent rapid re-renders)
+      var _wcDebounceTimer = null;
+      // In-flight guard: prevent overlapping loadProfileData calls
+      var _loading = false;
 
       // Compute isOwnProfile inside loadProfileData to stay fresh on wallet changes
       function isOwnProfileFor(targetAddr){
@@ -74,11 +85,14 @@ import WalletConnect from '../components/WalletConnect';
         })();
         return curConnected && targetAddr && curConnected === targetAddr;
       }
-      if (!root) return;
 
       // Named function to load and render all profile data for a given address.
       // Called on initial page load AND on wallet change (without page reload).
       async function loadProfileData(targetAddr){
+        // Prevent overlapping calls: if a load is already in-flight (e.g.
+        // rapid wallet toggles beating the debounce), skip the duplicate.
+        if (_loading) return;
+        _loading = true;
         const encAddr = encodeURIComponent(targetAddr);
         root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
         try {
@@ -139,11 +153,7 @@ import WalletConnect from '../components/WalletConnect';
               const coll=it.collection||''; const tid=it.token_id||it.tokenID||'';
               const nm=it.name||('#'+esc(tid));
               const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
-              const src=it.image_uri
-                ? it.image_uri.startsWith('/api/v1/img/')
-                  ? it.image_uri
-                  : '/api/v1/media?url='+encodeURIComponent(it.image_uri)+'&id='+encodeURIComponent(it.token_id||'')
-                : '';
+              const src=resolveImageUri(it.image_uri,it.token_id);
               const price=it.price_wei?weiToFLR(it.price_wei,4):'';
               return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
@@ -199,6 +209,14 @@ import WalletConnect from '../components/WalletConnect';
                 '</div></div>';
             }).join('')+'</div>';
           }
+
+          // If wallet returned empty but there are listings/auctions for this
+          // address, show a note so the user understands why "My NFTs" is 0 —
+          // the wallet may hold NFTs that aren't in tracked collections, or
+          // the indexer hasn't processed recent transfers yet.
+          var emptyWalletNotice = (!nfts || !nfts.length) && (listings.length + auctions.length > 0)
+            ? '<div style="margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(125,211,252,0.08);border:1px solid rgba(125,211,252,0.15);"><p style="font-size:0.75rem;color:rgba(255,255,255,0.45);">💡 Your wallet has active listings/auctions but the indexer hasn&rsquo;t recorded any NFTs for this address yet. If you recently transferred NFTs to this wallet, they will appear after the next indexer sweep (≈2&hairsp;–&hairsp;5&thinsp;min).</p></div>'
+            : '';
 
           // Build the complete profile page
           // Merge wallet-held NFTs with listed/auctioned NFTs so users see
@@ -284,6 +302,10 @@ import WalletConnect from '../components/WalletConnect';
                 '<div><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);text-transform:uppercase;font-weight:700;">Gross Volume</p><p style="font-size:1.25rem;font-weight:800;color:#fafafa;">'+weiToFLR(mVolWei,2)+' <span style="font-size:0.5625rem;opacity:0.5;">C2FLR</span></p></div>'+
               '</div>'+
             '</div>'+
+
+            // Empty wallet notice (if applicable — shown when user has
+            // listings/auctions but zero NFTs recorded in nft_ownership)
+            emptyWalletNotice +
 
             // Tab bar
             '<div id="tab-bar" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">'+
@@ -437,9 +459,12 @@ import WalletConnect from '../components/WalletConnect';
                   if(res.ok){
                     statusEl.style.display = 'block';
                     statusEl.innerHTML = '<p style="color:#7dd3fc;font-size:0.75rem;font-weight:600;">✓ Profile saved!</p>';
+                    // Re-render in-place instead of location.reload() — avoids
+                    // a full page reload which would re-trigger the React
+                    // hydration wallet-connect race we just fixed.
                     setTimeout(function(){
                       closeModal();
-                      location.reload();
+                      loadProfileData(targetAddr);
                     }, 800);
                   } else {
                     let errData;
@@ -462,14 +487,22 @@ import WalletConnect from '../components/WalletConnect';
           }
 
         } catch(e) {
-          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><p style="font-size:1rem;font-weight:700;color:#fca5a5;">Could not load profile</p><p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.5rem;">'+esc(e.message||'')+'</p><button onclick="location.reload()" style="margin-top:1rem;padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
+          // Reset last-rendered guard so the user isn't stuck — future wallet
+          // events can retry loading even when the address hasn't changed
+          // (e.g. after a transient API failure). _loading is reset in the
+          // finally block below (don't duplicate it here).
+          _lastRenderedAddr = null;
+          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><p style="font-size:1rem;font-weight:700;color:#fca5a5;">Could not load profile</p><p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.5rem;">'+esc(e.message||'')+'</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
+        } finally {
+          _loading = false;
         }
       }
 
       // Listen for wallet-connect events — re-render profile IN-PLACE without page reload.
-      // Debounce (300ms) to absorb rapid state transitions during wagmi React hydration
-      // that fire multiple mw-wallet-changed events in quick succession.
-      var _wcDebounceTimer = null;
+      // Debounce (500ms) to absorb rapid state transitions during wagmi React hydration
+      // that fire multiple mw-wallet-changed events in quick succession. Also guard against
+      // re-renders when the address hasn't actually changed (e.g. AppKit fires the event
+      // during reconnect with the same address that was already stored).
       window.addEventListener('mw-wallet-changed', function _onWalletChange(){
         // Re-read the address from localStorage (may have changed or been cleared)
         const newAddr = (function(){
@@ -480,6 +513,11 @@ import WalletConnect from '../components/WalletConnect';
         if (_wcDebounceTimer) clearTimeout(_wcDebounceTimer);
         _wcDebounceTimer = setTimeout(function(){
           _wcDebounceTimer = null;
+          // Skip re-render if address hasn't changed — prevents unnecessary
+          // re-fetches and visual flicker when wagmi reconnects with the
+          // same wallet during page hydration.
+          if (newAddr === _lastRenderedAddr) return;
+          _lastRenderedAddr = newAddr;
           if (!newAddr) {
             // Wallet was disconnected — show connect screen
             if(root) root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
@@ -487,7 +525,7 @@ import WalletConnect from '../components/WalletConnect';
           }
           // Re-fetch and re-render for the new/updated address
           loadProfileData(newAddr);
-        }, 300);
+        }, 500);
       });
 
       // Initial load

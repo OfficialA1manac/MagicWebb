@@ -30,6 +30,7 @@ import WalletConnect from '../components/WalletConnect';
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
       const input = document.getElementById('search-input');
       const btn = document.getElementById('search-btn');
       const results = document.getElementById('search-results');
@@ -57,11 +58,7 @@ import WalletConnect from '../components/WalletConnect';
                 const href = r.kind==='nft' ? '/token/'+encC+'/'+encT : '/collection/'+encC;
                 const label = r.kind==='nft' ? 'NFT' : 'Collection';
                 const name = r.name||shortAddr(r.collection);
-                const img = r.image_uri
-                  ? r.image_uri.startsWith('/api/v1/img/')
-                    ? r.image_uri
-                    : '/api/v1/media?url='+encodeURIComponent(r.image_uri)+'&id='+encodeURIComponent(r.token_id||'')
-                  : '';
+                const img = resolveImageUri(r.image_uri, r.token_id);
                 return '<a href="'+href+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
                   '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                     (img?'<img src="'+esc(img)+'" alt="" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';">':'')+

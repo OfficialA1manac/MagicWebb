@@ -78,22 +78,34 @@ function WalletButton() {
   const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
 
   const wasConnectedRef = useRef(false);
+  const prevAddressRef = useRef<string | null>(null);
   useEffect(() => {
     if (isConnected && address) {
       wasConnectedRef.current = true;
-      try {
-        localStorage.setItem('mw_addr', address.toLowerCase());
-        localStorage.setItem('mw_kind', 'walletconnect');
-      } catch (_) {}
-      // Sync React state so stored-address is shown immediately after reconnect
-      setStoredAddr(address.toLowerCase());
-      setHasStoredWallet(true);
-      // Notify the page so saved-search buttons appear
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
+      const addrLower = address.toLowerCase();
+      // Only write to localStorage and fire event when the address
+      // has *actually* changed. Without this guard, wagmi's hydration
+      // (initializing→reconnecting→connected) fires mw-wallet-changed
+      // on every page load, even when the wallet didn't change — which
+      // causes the profile page to re-render needlessly and can trigger
+      // a visible disconnect/reconnect flicker.
+      if (prevAddressRef.current !== addrLower) {
+        prevAddressRef.current = addrLower;
+        try {
+          localStorage.setItem('mw_addr', addrLower);
+          localStorage.setItem('mw_kind', 'walletconnect');
+        } catch (_) {}
+        // Sync React state so stored-address is shown immediately after reconnect
+        setStoredAddr(addrLower);
+        setHasStoredWallet(true);
+        // Notify the page so saved-search buttons appear
+        if (typeof window !== 'undefined') {
+          window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
+        }
       }
     } else if (wasConnectedRef.current && !isConnected) {
       wasConnectedRef.current = false;
+      prevAddressRef.current = null;
       try {
         localStorage.removeItem('mw_addr');
         localStorage.removeItem('mw_kind');

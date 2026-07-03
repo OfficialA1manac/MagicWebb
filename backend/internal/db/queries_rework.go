@@ -23,6 +23,27 @@ func lcStandard(s string) string {
 
 // ── Collection auto-indexing ───────────────────────────────────────────────
 
+// ListDistinctCollectionsFromTokens returns every unique collection address that
+// appears in nft_tokens. Used at startup to seed tracked_collections for
+// collections that were ever listed, auctioned, or transferred — even if their
+// tracked_collections row was lost or the collection was never explicitly tracked.
+func (q *Q) ListDistinctCollectionsFromTokens(ctx context.Context) ([]string, error) {
+	rows, err := q.pool.Query(ctx, `SELECT DISTINCT collection FROM nft_tokens`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
 // EnsureCollection registers a collection (and its tracked_collections row) the
 // first time it is seen via any marketplace event. Idempotent.
 func (q *Q) EnsureCollection(ctx context.Context, addr, standard string, block uint64) error {
@@ -40,6 +61,27 @@ func (q *Q) EnsureCollection(ctx context.Context, addr, standard string, block u
 		 ON CONFLICT(address) DO NOTHING`,
 		addr, std, block)
 	return err
+}
+
+// SeedTrackedCollections ensures every address in `addrs` has a row in
+// tracked_collections by calling EnsureCollection for each one. Standard
+// defaults to 'erc721' when unknown. Errors are logged but not fatal — a
+// single unreachable collection won't block the rest of the seed.
+// Returns the count of newly-seeded addresses.
+func (q *Q) SeedTrackedCollections(ctx context.Context, addrs []string) int {
+	var seeded int
+	for _, addr := range addrs {
+		addr = strings.ToLower(strings.TrimSpace(addr))
+		if len(addr) != 42 || addr[:2] != "0x" {
+			continue
+		}
+		if err := q.EnsureCollection(ctx, addr, "erc721", 0); err != nil {
+			// Logged by the caller; a single failure doesn't block the rest.
+			continue
+		}
+		seeded++
+	}
+	return seeded
 }
 
 // ListTrackedCollections returns every collection the indexer watches for transfers.

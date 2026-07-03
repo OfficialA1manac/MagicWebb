@@ -40,6 +40,7 @@ import WalletConnect from '../components/WalletConnect';
       function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt(10)**BigInt(18);const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
+      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
 
       // Validate hex address (0x + 40 hex)
       function isEthAddr(s){
@@ -83,9 +84,7 @@ import WalletConnect from '../components/WalletConnect';
 
           const name = (listing && listing.name) || (col && col.name ? col.name+' #'+tid : '#'+tid);
           const img = listing && listing.image_uri
-            ? listing.image_uri.startsWith('/api/v1/img/')
-              ? listing.image_uri
-              : '/api/v1/media?url='+encodeURIComponent(listing.image_uri)+'&id='+encodeURIComponent(listing.token_id||tid)
+            ? resolveImageUri(listing.image_uri, listing.token_id || tid)
             : '';
           const price = listing && listing.price_wei ? weiToFLR(listing.price_wei) : null;
           const seller = listing && listing.seller || '';

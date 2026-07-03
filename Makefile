@@ -108,6 +108,22 @@ zigmedia-bench: ## benchmark Zig vs Go SHA-256
 
 # ── Quality ───────────────────────────────────────────────────────────────────
 
+setup-hooks: ## install Git hooks via core.hooksPath → .githooks/
+	@git config core.hooksPath .githooks
+	@chmod +x .githooks/pre-commit 2>/dev/null || true
+	@echo "  Git hooks installed — .githooks/pre-commit runs on every commit."
+.PHONY: setup-hooks
+
+check-test-files: ## fail if .test.* files exist in app/src/pages/ (Astro picks them up as routes)
+	@bad=$$(find app/src/pages -maxdepth 1 -name '*.test.*' 2>/dev/null); \
+	if [ -n "$$bad" ]; then \
+		echo "ERROR: .test.* files found in app/src/pages/ — Astro will try to render them as routes:"; \
+		echo "$$bad" | sed 's/^/  /'; \
+		echo "Move them to app/src/__tests__/ and update the import path."; \
+		exit 1; \
+	fi
+	@echo "  OK — no .test.* files in app/src/pages/"
+
 test: ## run Go test suite with the race detector
 	cd backend && go test ./... -race -count=1 -timeout 120s
 

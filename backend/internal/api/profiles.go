@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -33,6 +34,11 @@ func (s *ProfilesService) handleGet(c *fiber.Ctx) error {
 	p, err := s.q.GetProfile(c.Context(), addr)
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if p.DisplayName == "" && p.Bio == "" {
+		log.Debug().
+			Str("address", addr).
+			Msg("profiles: empty profile returned — display_name and bio are blank. The address may have never set up a profile or the profiles row is missing.")
 	}
 	return c.JSON(p)
 }

@@ -1,11 +1,15 @@
 package api
 
 import (
+	"bytes"
 	"net/http"
+	"strings"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/pashagolub/pgxmock/v4"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -69,6 +73,41 @@ func TestWalletNFTs_Empty(t *testing.T) {
 	decodeJSON(t, resp, &nfts)
 	if nfts == nil || len(nfts) != 0 {
 		t.Fatalf("expected empty slice, got %+v", nfts)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestWalletNFTs_EmptyDebugLog(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	mock.ExpectQuery(`SELECT n.collection, n.token_id::text, n.units::text`).
+		WithArgs(testOwner).
+		WillReturnRows(pgxmock.NewRows(walletNFTCols))
+
+	// Capture zerolog global logger output
+	var buf bytes.Buffer
+	oldLogger := log.Logger
+	log.Logger = zerolog.New(&buf).Level(zerolog.DebugLevel)
+	defer func() { log.Logger = oldLogger }()
+
+	app := newWalletApp(t, mock)
+	resp := doGet(t, app, "/api/v1/wallet/"+testOwner+"/nfts")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d, want 200", resp.StatusCode)
+	}
+
+	output := buf.String()
+	if !strings.Contains(output, "wallet-nfts") {
+		t.Fatalf("expected debug log to contain 'wallet-nfts', got: %s", output)
+	}
+	if !strings.Contains(output, testOwner) {
+		t.Fatalf("expected debug log to contain owner address %s, got: %s", testOwner, output)
+	}
+	if !strings.Contains(output, "tracked_collections") {
+		t.Fatalf("expected debug log to mention tracked_collections, got: %s", output)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

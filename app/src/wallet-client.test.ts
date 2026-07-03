@@ -294,16 +294,23 @@ describe('$store.wallet', () => {
 // ═══════════════════════════════════════════════════════════════════════════════
 
 describe('$store.modals', () => {
+  let warnSpy: ReturnType<typeof vi.spyOn>;
+
   beforeEach(() => {
     setServerGlobals();
     createMockAlpine();
     loadWalletJs();
     dispatchAlpineInit();
+    // Suppress the expected "action modal auto-open blocked" console.warn
+    // from wallet.js modals.open() — the test below that calls open({kind:'buy'})
+    // without userInitiated intentionally triggers this production guard.
+    warnSpy = vi.spyOn(console, 'warn').mockImplementation(() => {});
   });
 
   afterEach(() => {
     clearServerGlobals();
     delete (window as any).Alpine;
+    warnSpy.mockRestore();
   });
 
   it('is registered with open/dismiss functions after alpine:init', () => {
@@ -406,20 +413,64 @@ describe('MW_CONNECT_WALLET bridge', () => {
     await (window as any).MW_CONNECT_WALLET();
 
     expect(mockWalletStore.connect).toHaveBeenCalledWith({ silent: false });
-  });  it('returns a Promise when Alpine is not defined', () => {
-      loadWalletJs(); // Alpine is not set up before load in this case
+  });
+
+  it('toasts and returns a resolved Promise when wallet store is not yet registered', () => {
+    createMockAlpine();
+    loadWalletJs();
+    // Simulate wallet store not yet registered (no alpine:init dispatched).
+    // Set mockWalletStore to null so Alpine.store('wallet') returns falsy,
+    // hitting the `if (!w)` path in MW_CONNECT_WALLET which surfaces a
+    // toast and returns Promise.resolve() (consistent with the happy path).
+    mockWalletStore = null as any;
 
     const container = document.createElement('div');
     container.id = 'toasts';
     document.body.appendChild(container);
 
-      // The bridge falls through to a Promise.resolve chain that checks Alpine
-      // again on the next microtask. So it won't throw.
-      // TODO: assert the toast is actually appended once wallet.js toast
-      // mechanism is mockable, e.g.:
-      // await result; expect(container.children.length).toBeGreaterThan(0);
-      const result = (window as any).MW_CONNECT_WALLET();
-      expect(result).toBeInstanceOf(Promise);
+    const result = (window as any).MW_CONNECT_WALLET();
+
+    // The if (!w) path now returns Promise.resolve() instead of undefined.
+    expect(result).toBeInstanceOf(Promise);
+    // Toast should be appended with the error message.
+    expect(container.children.length).toBe(1);
+    expect(container.children[0].textContent).toContain('Wallet store not yet registered');
+
+    document.getElementById('toasts')?.remove();
+  });
+
+  it('handles a synchronous crash in Alpine.store() by surfacing a toast', () => {
+    createMockAlpine();
+    loadWalletJs();
+    // Make Alpine.store() throw on its NEXT call — this hits the outer
+    // `catch (e)` handler in MW_CONNECT_WALLET which surfaces a
+    // "Connect failed" toast and returns undefined. Using mockImplementationOnce
+    // limits the throw to one call so subsequent code doesn't trip on it.
+    const alpine = (window as any).Alpine;
+    alpine.store.mockImplementationOnce(() => { throw new Error('Simulated crash'); });
+
+    // Suppress the expected console.error from the catch handler.
+    const errSpy = vi.spyOn(console, 'error').mockImplementation(() => {});
+
+    const container = document.createElement('div');
+    container.id = 'toasts';
+    document.body.appendChild(container);
+
+    const result = (window as any).MW_CONNECT_WALLET();
+
+    // The outer catch now returns Promise.resolve() for consistency.
+    expect(result).toBeInstanceOf(Promise);
+    // The catch handler called console.error with the crash message.
+    expect(errSpy).toHaveBeenCalledWith(
+      '[mw] MW_CONNECT_WALLET crashed:',
+      expect.objectContaining({ message: 'Simulated crash' }),
+    );
+    // Toast should be appended with "Connect failed" prefix.
+    expect(container.children.length).toBe(1);
+    expect(container.children[0].textContent).toContain('Connect failed: Simulated crash');
+
+    errSpy.mockRestore();
+    alpine.store.mockRestore();
     document.getElementById('toasts')?.remove();
   });
 });
@@ -517,5 +568,137 @@ describe('Event bus handlers', () => {
     window.dispatchEvent(new Event('mw-notification'));
 
     expect(mockWalletStore.refreshUnread).toHaveBeenCalled();
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 6: Alpine Guards — Event Listener Safety
+// ═══════════════════════════════════════════════════════════════════════════════
+// wallet.js registers event listeners at the bottom of the IIFE, outside the
+// alpine:init handler. These listeners reference Alpine directly. The v35
+// Alpine guards prevent "Cannot read properties of undefined (reading 'store')"
+// when Alpine hasn't loaded yet (wallet.js parses before alpine.js via defer).
+//
+// Each nested describe loads wallet.js once (no duplicate listeners) so
+// alpine:init handler errors don't leak between the two scenarios.
+
+describe('Alpine guards (event listener safety)', () => {
+  beforeEach(() => {
+    setServerGlobals();
+    // Clear localStorage to prevent leaked mw_addr from previous suites
+    // from triggering the alpine:init auto-reconnect code path, which
+    // would call mockWalletStore.connect() before we've set it up.
+    localStorage.clear();
+  });
+  afterEach(() => {
+    clearServerGlobals();
+    delete (window as any).Alpine;
+    delete (window as any).MW_CONNECT_WALLET;
+    delete (window as any).MW_HIDE_ALL;
+    delete (window as any).MW_WC_OPEN_OVERLAY;
+  });
+
+  // NOTE: "available" must run BEFORE "undefined". After "undefined" loads
+  // wallet.js with Alpine=undefined (creating listeners that capture
+  // Alpine=undefined), any subsequent dispatchAlpineInit() would fire the
+  // unguarded alpine:init handler from that closure and produce 16 unhandled
+  // TypeErrors. Running "available" first avoids stale undefined-closure
+  // listeners during the alpine:init phase.
+  describe('when Alpine is available (guards let events through)', () => {
+    beforeEach(() => {
+      createMockAlpine();
+      loadWalletJs();
+      dispatchAlpineInit();
+    });
+
+    it('buy event calls wallet.buy()', () => {
+      mockWalletStore.buy = vi.fn().mockResolvedValue({ ok: true });
+
+      document.dispatchEvent(new CustomEvent('buy', {
+        detail: {
+          collection: '0xabc',
+          tokenId: '123',
+          seller: '0xdef',
+          price: '1000000000000000000',
+        },
+      }));
+
+      expect(mockWalletStore.buy).toHaveBeenCalledWith(
+        '0xabc', '123', '0xdef', '1000000000000000000',
+      );
+    });
+
+    it('cancel-listing event calls wallet.cancel()', () => {
+      mockWalletStore.cancel = vi.fn().mockResolvedValue({ ok: true });
+
+      document.dispatchEvent(new CustomEvent('cancel-listing', {
+        detail: { collection: '0xabc', tokenId: '123' },
+      }));
+
+      expect(mockWalletStore.cancel).toHaveBeenCalledWith('0xabc', '123');
+    });
+
+    it('settle-auction event calls wallet.settle()', () => {
+      mockWalletStore.settle = vi.fn().mockResolvedValue({ ok: true });
+
+      document.dispatchEvent(new CustomEvent('settle-auction', {
+        detail: { auctionId: 42 },
+      }));
+
+      expect(mockWalletStore.settle).toHaveBeenCalledWith(42);
+    });
+
+    it('mw-notification event calls wallet.refreshUnread()', () => {
+      mockWalletStore.jwt = 'test-jwt';
+      mockWalletStore.refreshUnread = vi.fn().mockResolvedValue(undefined);
+
+      window.dispatchEvent(new Event('mw-notification'));
+
+      expect(mockWalletStore.refreshUnread).toHaveBeenCalled();
+    });
+  });
+
+  describe('when Alpine is undefined (guards prevent TypeError)', () => {
+    beforeEach(() => {
+      // Intentionally do NOT call createMockAlpine() — Alpine is undefined.
+      // loadWalletJs() passes `window.Alpine` (undefined) as the IIFE parameter,
+      // so the event listeners capture Alpine=undefined in their closure.
+      loadWalletJs();
+    });
+
+    it('does not throw when buy event fires', () => {
+      expect(() => {
+        document.dispatchEvent(new CustomEvent('buy', {
+          detail: {
+            collection: '0xabc',
+            tokenId: '123',
+            seller: '0xdef',
+            price: '1000000000000000000',
+          },
+        }));
+      }).not.toThrow();
+    });
+
+    it('does not throw when cancel-listing event fires', () => {
+      expect(() => {
+        document.dispatchEvent(new CustomEvent('cancel-listing', {
+          detail: { collection: '0xabc', tokenId: '123' },
+        }));
+      }).not.toThrow();
+    });
+
+    it('does not throw when settle-auction event fires', () => {
+      expect(() => {
+        document.dispatchEvent(new CustomEvent('settle-auction', {
+          detail: { auctionId: 42 },
+        }));
+      }).not.toThrow();
+    });
+
+    it('does not throw when mw-notification event fires', () => {
+      expect(() => {
+        window.dispatchEvent(new Event('mw-notification'));
+      }).not.toThrow();
+    });
   });
 });

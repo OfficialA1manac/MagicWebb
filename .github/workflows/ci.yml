@@ -89,6 +89,37 @@ jobs:
           slither-config: contracts/slither.config.json
           fail-on: high
 
+  frontend-lint:
+    name: Frontend (Astro check + vitest + guards)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.0
+      - name: No .test.* files in pages/
+        run: |
+          bad=$(find app/src/pages -maxdepth 1 -name '*.test.*' 2>/dev/null)
+          if [ -n "$bad" ]; then
+            echo "ERROR: .test.* files found in app/src/pages/ — Astro would render them as routes:"
+            echo "$bad" | sed 's/^/  /'
+            echo "Move them to app/src/__tests__/ instead."
+            exit 1
+          fi
+          echo "OK — no .test.* files in app/src/pages/"
+      - uses: actions/setup-node@v4.3.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci
+      - name: Astro check (typecheck)
+        working-directory: app
+        run: npx astro check
+      - name: Vitest (unit tests)
+        working-directory: app
+        run: npx vitest run
+
   secrets:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest

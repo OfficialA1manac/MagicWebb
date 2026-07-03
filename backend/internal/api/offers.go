@@ -6,6 +6,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -51,6 +52,14 @@ func (s *OffersService) handleList(c *fiber.Ctx) error {
 	}
 	if rows == nil {
 		rows = []db.OfferRow{}
+	}
+	if len(rows) == 0 {
+		log.Debug().
+			Str("collection", f.Collection).
+			Str("bidder", f.Bidder).
+			Str("owner", f.Owner).
+			Str("status", f.Status).
+			Msg("offers: query returned zero results — no offers match the filter criteria")
 	}
 	return c.JSON(rows)
 }

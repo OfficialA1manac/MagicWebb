@@ -27,6 +27,11 @@ func (s *NotificationsService) RegisterRoutes(api fiber.Router, cfg *config.Conf
 	api.Post("/notifications/read", jwtMiddleware(cfg), s.handleMarkRead)
 }
 
+// Caller returns the SIWE-authenticated address from the JWT middleware, if any.
+func Caller(c *fiber.Ctx) string {
+	return caller(c)
+}
+
 // caller returns the SIWE-authenticated address from the JWT middleware, if any.
 func caller(c *fiber.Ctx) string {
 	if a, ok := c.Locals(string(auth.CallerKey)).(string); ok {

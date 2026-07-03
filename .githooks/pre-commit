@@ -1,0 +1,17 @@
+#!/bin/bash
+# ── MagicWebb pre-commit hook ──────────────────────────────────────────────
+# Catches .test.* files in app/src/pages/ before they reach the repo.
+# Astro scans pages/ for all files when generating static routes — if a
+# test file lands there, it causes "window is not defined" at build time.
+# This hook is the earliest-possible guard: it runs BEFORE git commit,
+# giving instant feedback instead of waiting for CI.
+#
+# Install:  make setup-hooks
+# Remove:   git config --unset core.hooksPath
+# ─────────────────────────────────────────────────────────────────────────────
+
+set -euo pipefail
+
+echo "▸ pre-commit: checking for .test.* files in app/src/pages/..."
+make check-test-files
+echo "✓ pre-commit: OK"

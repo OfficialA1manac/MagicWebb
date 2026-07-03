@@ -4,6 +4,7 @@ import (
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -34,6 +35,11 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 	}
 	if nfts == nil {
 		nfts = []db.OwnedNFT{}
+	}
+	if len(nfts) == 0 {
+		log.Debug().
+			Str("owner", addr).
+			Msg("wallet-nfts: query returned zero results for owner — no nft_ownership rows found. Check that the NFT contract is in tracked_collections and the indexer has processed relevant Transfer events.")
 	}
 	return c.JSON(nfts)
 }

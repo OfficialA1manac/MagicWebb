@@ -14,11 +14,13 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ws"
@@ -270,6 +272,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 // switch (old cookie was set, new one issued). The middleware tries every
 // match and accepts the first one that verifies; tokens for other wallets
 // are simply ignored.
+// JwtMiddleware authenticates requests via Bearer token or session cookie.
+func JwtMiddleware(cfg *config.Config) fiber.Handler {
+	return jwtMiddleware(cfg)
+}
+
 func jwtMiddleware(cfg *config.Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		verify := func(token string) string {
@@ -612,4 +619,68 @@ func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
 		})
 		return nil
 	}
+}
+
+// ── Reindex Collection ──────────────────────────────────────────────────────
+
+type reindexCollectionReq struct {
+	Collection string `json:"collection"`
+	FromBlock  uint64 `json:"from_block"`
+}
+
+// handleReindexCollection forces a re-scan of Transfer events for a specific
+// collection from a given block. This makes past holdings visible after a
+// collection is added to TRACKED_COLLECTIONS.
+func handleReindexCollection(runner *indexer.Runner, cfg *config.Config) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		addr := Caller(c)
+		if addr == "" || !cfg.IsAdmin(addr) {
+			return writeErr(c, fiber.StatusForbidden, "admin only")
+		}
+
+		var req reindexCollectionReq
+		if err := bodyDecode(c, &req); err != nil {
+			return writeErr(c, fiber.StatusBadRequest, "invalid request body")
+		}
+
+		req.Collection = strings.TrimSpace(req.Collection)
+		if req.Collection == "" || len(req.Collection) != 42 || !strings.HasPrefix(req.Collection, "0x") {
+			return writeErr(c, fiber.StatusBadRequest, "invalid collection address")
+		}
+
+		if req.FromBlock == 0 {
+			req.FromBlock = 1 // default: scan from block 1 (genesis is empty)
+		}
+
+		log.Info().
+			Str("admin", addr).
+			Str("collection", req.Collection).
+			Uint64("from_block", req.FromBlock).
+			Msg("admin: reindex-collection requested")
+
+		// Run the reindex synchronously so the caller gets the result.
+		// For large collections this can take seconds to minutes;
+		// the admin caller should set a generous HTTP timeout.
+		scanned, err := runner.ReindexCollection(c.Context(), strings.ToLower(req.Collection), req.FromBlock)
+		if err != nil {
+			log.Error().Err(err).
+				Str("collection", req.Collection).
+				Int("scanned", scanned).
+				Msg("admin: reindex-collection failed")
+			return writeErr(c, fiber.StatusInternalServerError, err.Error())
+		}
+
+		return c.JSON(fiber.Map{
+			"collection":     strings.ToLower(req.Collection),
+			"blocks_scanned": scanned,
+			"status":         "complete",
+		})
+	}
+}
+
+// MountReindexRoute registers the admin reindex-collection endpoint.
+// Call AFTER the indexer Runner is created so the handler can access it.
+func MountReindexRoute(app *fiber.App, runner *indexer.Runner, cfg *config.Config) {
+	app.Post("/api/v1/admin/indexer/reindex-collection", JwtMiddleware(cfg),
+		handleReindexCollection(runner, cfg))
 }

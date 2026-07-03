@@ -1752,7 +1752,7 @@ window.MW_CONNECT_WALLET = () => {
     const w = Alpine_.store('wallet');
     if (!w) {
       try { toast('Wallet store not yet registered — refresh and try again.', 'error'); } catch (_) {}
-      return;
+      return Promise.resolve();
     }
     return Promise.resolve(w.connect({ silent: false })).catch((e) => {
       try { console.error('[mw] connect rejected:', e); } catch (_) {}
@@ -1761,6 +1761,7 @@ window.MW_CONNECT_WALLET = () => {
   } catch (e) {
     try { console.error('[mw] MW_CONNECT_WALLET crashed:', e); } catch (_) {}
     try { toast('Connect failed: ' + (e?.message || e), 'error'); } catch (_) {}
+    return Promise.resolve();
   }
 };
 
@@ -1789,21 +1790,29 @@ function toast(msg, type = 'info') {
 // previous `window.addEventListener` silently never fired from inside the
 // listing card's nested DOM, so the click fell through to the wrapping
 // <a href="/token/..."> navigation. `document` is reliably on the bubble path.
+// v35: Alpine guards — these event listeners register immediately when wallet.js
+// parses (before alpine.js has loaded via `defer`). If Alpine isn't available
+// when the event fires (misconfigured deployment, test environment), the guards
+// prevent "Cannot read properties of undefined (reading 'store')" TypeError.
 document.addEventListener('buy', e => {
+  if (typeof Alpine === 'undefined' || typeof Alpine.store !== 'function') return;
   const { collection, tokenId, seller, price } = e.detail || {};
   if (collection && tokenId && seller && price) {
     Alpine.store('wallet').buy(collection, tokenId, seller, price);
   }
 });
 document.addEventListener('cancel-listing', e => {
+  if (typeof Alpine === 'undefined' || typeof Alpine.store !== 'function') return;
   const { collection, tokenId } = e.detail || {};
   Alpine.store('wallet').cancel(collection, tokenId);
 });
 document.addEventListener('settle-auction', e => {
+  if (typeof Alpine === 'undefined' || typeof Alpine.store !== 'function') return;
   Alpine.store('wallet').settle(e.detail.auctionId);
 });
 
 window.addEventListener('mw-notification', () => {
+  if (typeof Alpine === 'undefined' || typeof Alpine.store !== 'function') return;
   const w = Alpine.store('wallet');
   if (w?.jwt) w.refreshUnread();
 });

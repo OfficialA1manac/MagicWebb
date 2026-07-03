@@ -33,6 +33,7 @@ import WalletConnect from '../components/WalletConnect';
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
       function fmtTimeLeft(endsAt,now){const s=Math.max(0,endsAt-now);if(s<=0)return'Ended';if(s<60)return s+'s';if(s<3600)return Math.floor(s/60)+'m';if(s<86400)return Math.floor(s/3600)+'h '+Math.floor((s%3600)/60)+'m';const d=Math.floor(s/86400);return d+'d '+Math.floor((s%86400)/3600)+'h';}
+      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
 
       const aid = window.location.pathname.replace('/auction/','').replace('/auction','');
       const root = document.getElementById('auction-detail');
@@ -60,11 +61,7 @@ import WalletConnect from '../components/WalletConnect';
           const ended = endsAt <= now;
           const ending = !ended && (endsAt - now < 180);
           const name = a.name || ('#'+a.token_id);
-          const img = a.image_uri
-            ? a.image_uri.startsWith('/api/v1/img/')
-              ? a.image_uri
-              : '/api/v1/media?url='+encodeURIComponent(a.image_uri)+'&id='+encodeURIComponent(a.token_id||'')
-            : '';
+          const img = resolveImageUri(a.image_uri, a.token_id);
           const reserve = weiToFLR(a.reserve_price_wei||'0');
           const highest = a.highest_bid_wei&&a.highest_bid_wei!=='0' ? weiToFLR(a.highest_bid_wei) : null;
           const hasBids = !!highest;

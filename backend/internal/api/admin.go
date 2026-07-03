@@ -27,6 +27,7 @@ func (s *AdminService) RegisterRoutes(api fiber.Router, cfg *config.Config) {
 	api.Post("/admin/verify", jwtMiddleware(cfg), s.handleAdminVerify)
 	api.Post("/admin/collections/verify", jwtMiddleware(cfg), s.handleAdminVerifyCollection)
 	api.Get("/admin/auctions/stalled", jwtMiddleware(cfg), s.handleStalledAuctions)
+	api.Get("/admin/debug/tracked-collections", jwtMiddleware(cfg), s.handleTrackedCollections)
 }
 
 type reportRequest struct {
@@ -90,6 +91,26 @@ func (s *AdminService) handleAdminVerifyCollection(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
 	return c.JSON(fiber.Map{"collection": strings.ToLower(req.Address), "verified": req.Verified})
+}
+
+// handleTrackedCollections returns the current tracked_collections table contents
+// for operators diagnosing "why is WalletNFTs returning zero results". Admin-only.
+func (s *AdminService) handleTrackedCollections(c *fiber.Ctx) error {
+	addr := caller(c)
+	if addr == "" || !s.cfg.IsAdmin(addr) {
+		return writeErr(c, fiber.StatusForbidden, "admin only")
+	}
+	addrs, err := s.q.ListTrackedCollections(c.Context())
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if addrs == nil {
+		addrs = []string{}
+	}
+	return c.JSON(fiber.Map{
+		"tracked_collections": addrs,
+		"count":               len(addrs),
+	})
 }
 
 // handleStalledAuctions returns detailed stalled auction rows for admin inspection.

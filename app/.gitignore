@@ -3,3 +3,6 @@ dist/
 .env
 .env.local
 *.log
+
+# Prevent test files from being picked up by Astro's static route generator
+src/pages/*.test.*

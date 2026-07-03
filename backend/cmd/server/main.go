@@ -75,6 +75,16 @@ func main() {
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
 
+	// Seed tracked_collections at startup so the indexer watches Transfer events
+	// for every NFT contract the operator explicitly configured (TRACKED_COLLECTIONS
+	// comma-separated env var) AND every collection that already has rows in
+	// nft_tokens (previously listed/auctioned collections whose tracking row may
+	// have been lost). Without this, collections that have never been listed or
+	// auctioned on MagicWebb are invisible to the indexer — their Transfer events
+	// are never processed, nft_ownership stays empty, and WalletNFTs returns zero
+	// results even when the wallet legitimately holds NFTs.
+	seedTracked(ctx, q)
+
 	// Start indexer in background. Keepers gate on a Postgres advisory lock
 	// (dedicated connection — not through the shared pool) so only one instance
 	// broadcasts settle/refund txs; the returned lockCtx stops them the moment
@@ -116,6 +126,11 @@ func main() {
 
 	// Mount all REST + SSE routes
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs)
+
+	// Admin-only endpoint: force re-scan of Transfer events for a specific
+	// collection (mounted after runner creation so the handler can call
+	// runner.ReindexCollection).
+	api.MountReindexRoute(app, runner, &config.C)
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))
@@ -339,6 +354,49 @@ func isValidEthAddr(s string) bool {
 		}
 	}
 	return true
+}
+
+// seedTracked ensures every collection the indexer needs to watch has a row in
+// tracked_collections. It merges three sources at startup:
+//   1. Explicit TRACKED_COLLECTIONS env var (operator-configured NFT contracts)
+//   2. Every unique collection that already appears in nft_tokens (covers
+//      collections that were ever listed, auctioned, or had a Transfer event
+//      indexed at some point — even if their tracked_collections row was later
+//      lost or never explicitly seeded)
+// A missing tracked_collections row means the indexer's processTransfers() skips
+// that contract entirely, so nft_ownership stays empty and WalletNFTs returns
+// zero results even when the wallet holds tokens. This seed runs once per
+// process lifetime at startup; EnsureCollection is idempotent (ON CONFLICT DO
+// NOTHING) so repeated seeds on restart are cheap.
+func seedTracked(ctx context.Context, q *db.Q) {
+	addrs := config.C.TrackedCollections // env TRACKED_COLLECTIONS
+
+	// 1. Existing nft_tokens collections (auto-discovered).
+	if existing, err := q.ListDistinctCollectionsFromTokens(ctx); err == nil {
+		addrs = append(addrs, existing...)
+	} else {
+		log.Warn().Err(err).Msg("startup: ListDistinctCollectionsFromTokens failed, skipping auto-seed")
+	}
+
+	// 2. Dedup.
+	seen := make(map[string]bool, len(addrs))
+	uniq := make([]string, 0, len(addrs))
+	for _, a := range addrs {
+		a = strings.ToLower(strings.TrimSpace(a))
+		if a == "" || seen[a] {
+			continue
+		}
+		seen[a] = true
+		uniq = append(uniq, a)
+	}
+
+	if len(uniq) == 0 {
+		return
+	}
+
+	seeded := q.SeedTrackedCollections(ctx, uniq)
+	log.Info().Int("attempted", len(uniq)).Int("seeded", seeded).
+		Msg("startup: seeded tracked_collections")
 }
 
 // siweDomainMatches extracts the domain from an EIP-4361 SIWE message

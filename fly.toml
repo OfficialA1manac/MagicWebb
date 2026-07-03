@@ -21,6 +21,10 @@ primary_region = "iad"
   AUCTION_ADDR = "0x7e42261e29bfc1Dcd25C36e7F50bc5B315F7b1E4"
   OFFERBOOK_ADDR = "0xB96fbaBDb3136EfC7748f67480e45B0511Ca6108"
   NFT_ADDR = "0xe96Afb7b664Ab90d74b778AdFE47D8342495807F"
+  # NFT contracts the indexer must watch for Transfer events. Add any
+  # collection that has never been listed/auctioned on the marketplace
+  # so WalletNFTs returns held NFTs from that collection.
+  TRACKED_COLLECTIONS = "0xe96Afb7b664Ab90d74b778AdFE47D8342495807F"
   INDEX_FROM_BLOCK = "31630816"
   SIWE_DOMAIN = "magicwebb.fly.dev"
   FRONTEND_URL = "https://magicwebb.fly.dev"

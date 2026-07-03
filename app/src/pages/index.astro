@@ -166,6 +166,7 @@ import WalletConnect from '../components/WalletConnect';
       function esc(s) { return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;'); }
       function weiToFLR(w,d){d=d||2;try{return(Number(BigInt(w||'0'))/1e18).toFixed(d);}catch(_){return'0.00';}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
+      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
 
       try {
         // Fetch metrics for counters
@@ -205,11 +206,7 @@ import WalletConnect from '../components/WalletConnect';
                 const name = item.name || ('#' + (item.token_id||item.tokenID||''));
                 const tokenId = item.token_id || item.tokenID || '';
                 const coll = item.collection || '';
-                const imgSrc = item.image_uri
-                  ? item.image_uri.startsWith('/api/v1/img/')
-                    ? item.image_uri
-                    : '/api/v1/media?url=' + encodeURIComponent(item.image_uri) + '&id=' + encodeURIComponent(item.token_id || '')
-                  : '';
+                const imgSrc = resolveImageUri(item.image_uri, item.token_id);
                 const verified = item.collection_verified || item.collectionVerified;
                 return '<a href="/token/' + esc(coll) + '/' + esc(tokenId) + '" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.08);border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
                   '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +

@@ -4,6 +4,7 @@ import (
 	"strconv"
 
 	"github.com/gofiber/fiber/v2"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -59,6 +60,13 @@ func (s *AuctionsService) handleList(c *fiber.Ctx) error {
 	}
 	if rows == nil {
 		rows = []db.AuctionRow{}
+	}
+	if len(rows) == 0 {
+		log.Debug().
+			Str("collection", f.Collection).
+			Str("seller", f.Seller).
+			Str("status", f.Status).
+			Msg("auctions: query returned zero results — no auctions match the filter criteria")
 	}
 	return c.JSON(rows)
 }

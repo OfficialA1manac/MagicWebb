@@ -51,6 +51,17 @@ type Config struct {
 	GetLogsChunk    uint64 // getLogs chunk size (Flare public RPC: 30)
 	GetLogsBlockCap uint64 // 0 = unlimited (private RPC)
 
+	// TrackedCollections are NFT contract addresses (ERC-721/ERC-1155) the
+	// indexer must watch for Transfer events. Without a tracked_collections
+	// row, the indexer's processTransfers never sees Transfer logs from that
+	// contract, so nft_ownership stays empty and WalletNFTs returns zero
+	// results — even when the wallet legitimately holds NFTs. The indexer
+	// auto-seeds tracked_collections when a listing or auction is created
+	// for a token from that collection; TRACKED_COLLECTIONS lets operators
+	// add contracts that have never been listed/auctioned on the marketplace.
+	// Comma-separated, case-insensitive. Seed at startup via EnsureCollection.
+	TrackedCollections []string
+
 	// Score weights (trending formula)
 	ScoreWViews  float64
 	ScoreWBids   float64
@@ -131,6 +142,7 @@ func Load() {
 		GetLogsChunk:         optUint64("GETLOGS_CHUNK", 30),
 		GetLogsBlockCap:      optUint64("GETLOGS_BLOCK_CAP", 30),
 		MetadataConcurrency:  optInt("METADATA_CONCURRENCY", 3),
+		TrackedCollections:   parseAddrList(envOrDefault("TRACKED_COLLECTIONS", "")),
 
 		ScoreWViews:  optFloat64("SCORE_W_VIEWS", 0.3),
 		ScoreWBids:   optFloat64("SCORE_W_BIDS", 0.5),
@@ -229,6 +241,27 @@ func Load() {
 			fmt.Fprintf(os.Stderr, "FATAL: ADMIN_ALLOWLIST contains invalid address: %q\n", addr)
 			os.Exit(1)
 		}
+	}
+
+	// v35: TRACKED_COLLECTIONS entry validation. Invalid entries are a WARN
+	// (not fatal) because a typo in one collection doesn't break the rest.
+	// The indexer skips malformed addresses at seed time via SeedTrackedCollections,
+	// so the operator sees zero results for that collection with no clue WHY —
+	// the startup warning closes that gap.
+	for _, addr := range C.TrackedCollections {
+		if !isValidEthAddr(addr) {
+			fmt.Fprintf(os.Stderr, "WARN: TRACKED_COLLECTIONS contains invalid address (skipped): %q\n", addr)
+		}
+	}
+
+	// v35: empty TRACKED_COLLECTIONS in production means the indexer only
+	// watches collections auto-discovered from nft_tokens (i.e. collections
+	// that were ever listed or auctioned). Legitimate NFT holders whose
+	// collections have never been traded on MagicWebb will see zero results
+	// in WalletNFTs until someone creates a listing — the operator should
+	// explicitly add every deployed NFT contract to TRACKED_COLLECTIONS.
+	if C.Env == "production" && len(C.TrackedCollections) == 0 {
+		fmt.Fprintln(os.Stderr, "WARN: TRACKED_COLLECTIONS is empty in production; the indexer will only watch collections auto-discovered from nft_tokens. Add your NFT contracts to TRACKED_COLLECTIONS.")
 	}
 
 	// v35: production guard — empty ADMIN_ALLOWLIST in production is a
