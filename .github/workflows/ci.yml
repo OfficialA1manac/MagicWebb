@@ -53,6 +53,11 @@ jobs:
       - name: Vet
         working-directory: backend
         run: go vet ./...
+      - name: Vulncheck (Go dependency CVEs)
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
       - name: Test
         working-directory: backend
         run: go test ./...

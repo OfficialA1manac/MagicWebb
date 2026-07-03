@@ -91,6 +91,12 @@ jobs:
         working-directory: backend
         run: go vet ./...
 
+      - name: Vulncheck (Go dependency CVEs)
+        working-directory: backend
+        run: |
+          go install golang.org/x/vuln/cmd/govulncheck@latest
+          govulncheck ./...
+
       - name: Test (race detector)
         working-directory: backend
         run: go test -race -count=1 ./...
@@ -135,6 +141,7 @@ jobs:
           echo "| Slither — Static Analysis | ${{ needs.slither.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Backend — Build | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Backend — go vet | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
+          echo "| Backend — Vulncheck (Go dep CVEs) | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Backend — Race Tests | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Backend — Staticcheck | ${{ needs.backend-audit.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY
           echo "| Secrets — Gitleaks | ${{ needs.secrets.result == 'success' && '✅ Pass' || '❌ Fail' }} |" >> $GITHUB_STEP_SUMMARY

@@ -139,6 +139,9 @@ check-fly-sync: ## verify magicwebb.fly.dev X-MW-Build-SHA matches origin/main
 	@./tools/check-fly-sync.sh
 .PHONY: check-fly-sync
 
+vulncheck: ## run govulncheck over the backend
+	cd backend && govulncheck ./...
+
 lint: ## run golangci-lint over the backend
 	cd backend && golangci-lint run ./...
 
