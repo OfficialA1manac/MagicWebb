@@ -21,6 +21,11 @@ primary_region = "iad"
   AUCTION_ADDR = "0x7e42261e29bfc1Dcd25C36e7F50bc5B315F7b1E4"
   OFFERBOOK_ADDR = "0xB96fbaBDb3136EfC7748f67480e45B0511Ca6108"
   NFT_ADDR = "0xe96Afb7b664Ab90d74b778AdFE47D8342495807F"
+  # Optional read-replica pool for query offloading. When set to a Neon
+  # read-only branch endpoint (e.g. postgresql://user:pass@ep-<branch>-reader.us-east-2.aws.neon.tech/magicwebb?sslmode=require),
+  # read-heavy API queries are routed through the replica while writes
+  # always hit the primary. Unset = all reads use the primary.
+  # READ_POOL_URL =
   # NFT contracts the indexer must watch for Transfer events. Add any
   # collection that has never been listed/auctioned on the marketplace
   # so WalletNFTs returns held NFTs from that collection.
