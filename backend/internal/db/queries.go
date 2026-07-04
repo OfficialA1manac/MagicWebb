@@ -102,6 +102,21 @@ func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, 
 	return &c, err
 }
 
+// GetCollectionByAddress returns a collection's name and address by contract address.
+// Used by the search handler to resolve 0x-prefixed address queries. Lightweight
+// lookup returning only the fields needed for search results.
+func (q *Q) GetCollectionByAddress(ctx context.Context, address string) (*CollectionRow, error) {
+	var c CollectionRow
+	err := q.reader().QueryRow(ctx,
+		`SELECT address, name, '' AS symbol, ''::text AS standard, 0 AS deploy_block, false AS verified
+		 FROM collections WHERE address=$1`, address).
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("collection not found: %s", address)
+	}
+	return &c, err
+}
+
 func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, error) {
 	if limit == 0 || limit > 200 {
 		limit = 50
