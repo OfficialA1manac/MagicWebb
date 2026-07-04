@@ -57,6 +57,21 @@ type Runner struct {
 	keeperGate KeeperGate
 	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
 	serverTimeMs *int64
+	// headLagBlocks is the difference between the chain head and the last
+	// indexed block, updated atomically every watcher tick. Exported via
+	// HeadLagBlocks() for SLO monitoring and health check integration.
+	// A value > 15 indicates the indexer is falling behind (≈ 30 seconds
+	// at 2s block time on Flare/Coston2).
+	headLagBlocks int64
+}
+
+// HeadLagBlocks returns the current head lag in blocks (chain head minus last
+// indexed block), updated atomically every watcher tick. Used by the /healthz
+// endpoint to detect when the indexer is falling behind the chain head —
+// values > 15 indicate the indexer is >30 seconds behind at Flare/Coston2's
+// ~2s block time.
+func (r *Runner) HeadLagBlocks() uint64 {
+	return uint64(atomic.LoadInt64(&r.headLagBlocks))
 }
 
 // New creates a Runner with all dependencies injected.
@@ -343,6 +358,10 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
 					atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
 				}
+				// Store head lag metric on idle ticks too.
+				if head > lastBlock {
+					atomic.StoreInt64(&r.headLagBlocks, int64(head-lastBlock))
+				}
 				continue
 			}
 			if !backfilled {
@@ -395,6 +414,9 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				backfilled = true
 				log.Info().Msg("watcher: backfill complete")
 			}
+			// Store head lag metric (head minus last indexed block).
+			// On Flare/Coston2 (~2s block time), 15 blocks ≈ 30 seconds.
+			atomic.StoreInt64(&r.headLagBlocks, int64(head-lastBlock))
 		}
 	}
 }

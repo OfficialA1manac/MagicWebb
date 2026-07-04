@@ -132,6 +132,54 @@ func main() {
 	// runner.ReindexCollection).
 	api.MountReindexRoute(app, runner, &config.C)
 
+	// Expose head lag as a Prometheus-compatible text gauge at /api/v1/indexer/slo.
+	// Format: `# HELP head_lag_blocks ...` then `head_lag_blocks <value>`.
+	// This can be scraped directly by Prometheus or consumed by any monitoring
+	// system that reads text/plain metrics. The value is the difference between
+	// the chain head block number and the last indexed block, updated every
+	// ~2s watcher tick. During normal operation with headLag=2, the value is 2.
+	// Values > 15 indicate the indexer is >30 seconds behind at 2s block time.
+	app.Get("/api/v1/indexer/slo", func(c *fiber.Ctx) error {
+		lag := runner.HeadLagBlocks()
+		c.Set("Content-Type", "text/plain; charset=utf-8")
+		return c.SendString(fmt.Sprintf(
+			"# HELP head_lag_blocks Chain head minus last indexed block\n"+
+			"# TYPE head_lag_blocks gauge\n"+
+			"head_lag_blocks %d\n", lag))
+	})
+
+	// Override /healthz to also report indexer head lag SLO.
+	// The api.Mount registers a /healthz handler that checks DB + RPC health.
+	// We re-register here (Fiber's LIFO route resolution) to wrap in the
+	// indexer lag check — if head lag exceeds 15 blocks (~30 seconds at
+	// Flare's 2s block time), the endpoint returns 503 with a clear reason.
+	// The head lag is read from the runner's HeadLagBlocks() atomic, which
+	// is updated every watcher tick (every 2 seconds). On startup before the
+	// watcher's first tick, HeadLagBlocks() returns 0 — the health check
+	// passes because the indexer hasn't fallen behind yet.
+	app.Get("/healthz", func(c *fiber.Ctx) error {
+		// DB health check (inherited from api.Mount).
+		pingCtx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancel()
+		if err := q.Ping(pingCtx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")
+		}
+		// RPC health check.
+		rpcCtx, cancelRPC := context.WithTimeout(c.Context(), 3*time.Second)
+		defer cancelRPC()
+		if _, err := eth.BlockNumber(rpcCtx); err != nil {
+			return c.Status(fiber.StatusServiceUnavailable).SendString("rpc unhealthy")
+		}
+		// Indexer lag SLO: warn when more than 15 blocks behind the head.
+		// On Flare/Coston2 (~2s block time), 15 blocks ≈ 30 seconds of lag.
+		if lag := runner.HeadLagBlocks(); lag > 15 {
+			return c.Status(fiber.StatusServiceUnavailable).
+				SendString(fmt.Sprintf("indexer lag: %d blocks behind head", lag))
+		}
+		c.Set("X-MW-Build-SHA", api.MWServerBuildSHA)
+		return c.SendStatus(fiber.StatusOK)
+	})
+
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))
 	app.Post("/auth/verify", verifyHandler(ns, rl))
