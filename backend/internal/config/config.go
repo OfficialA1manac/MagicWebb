@@ -91,6 +91,19 @@ type Config struct {
 	// Set to 0 to disable the balance check.
 	KeeperMinBalanceWei string
 
+	// Fee sweep (Zodiac Allowance Module on Gnosis Safe)
+	// SafeAddr is the Gnosis Safe multisig used as feeRecipient. When set and
+	// KeeperKey is also set, a background sweeper periodically checks the
+	// Safe's native balance and pulls fees to PersonalWalletAddr via the
+	// Zodiac Allowance Module.
+	SafeAddr           string
+	PersonalWalletAddr string
+	// FeeSweepMinWei is the minimum Safe balance (in wei) that triggers a sweep.
+	// Sweeping on every tick wastes gas on dust; sweep only when balance clears
+	// a meaningful multiple of current gas cost. Default: 0.1 native token (1e17 wei).
+	// Set to "0" to sweep every tick (not recommended).
+	FeeSweepMinWei string
+
 	// Admin token for IndexerService.Reindex (leave empty to disable)
 	ServiceToken string
 
@@ -158,6 +171,10 @@ func Load() {
 
 		KeeperKey: envOrDefault("KEEPER_KEY", ""),
 
+		SafeAddr:           envOrDefault("SAFE_ADDR", ""),
+		PersonalWalletAddr: envOrDefault("PERSONAL_WALLET_ADDR", ""),
+		FeeSweepMinWei:     envOrDefault("FEE_SWEEP_MIN_WEI", "100000000000000000"), // 0.1 native token
+
 		// v29: ceiling on keeper gas pricing. 0 = unbounded (NOT recommended).
 		MaxFeeCapGwei: optFloat64("KEEPER_MAX_FEE_CAP_GWEI", 100),
 		MaxTipCapGwei: optFloat64("KEEPER_MAX_TIP_CAP_GWEI", 5),
@@ -180,6 +197,8 @@ func Load() {
 	C.NFTAddr = strings.ToLower(C.NFTAddr)
 	C.MarketplaceManagerAddr = strings.ToLower(C.MarketplaceManagerAddr)
 	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
+	C.SafeAddr = strings.ToLower(C.SafeAddr)
+	C.PersonalWalletAddr = strings.ToLower(C.PersonalWalletAddr)
 
 	// Chain metadata validation — supports Coston2 (114), Flare mainnet (14),
 	// and Songbird (19). Any unrecognised chain ID is a fatal error: silently

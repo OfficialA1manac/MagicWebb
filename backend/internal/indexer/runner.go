@@ -167,7 +167,11 @@ func (r *Runner) Run(ctx context.Context) {
 					kwg.Add(2)
 					go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
 					go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
-					kwg.Wait()
+					// Fee sweep (Zodiac Allowance Module) — only when SAFE_ADDR is configured.
+					if r.cfg.SafeAddr != "" && r.cfg.PersonalWalletAddr != "" {
+						kwg.Add(1)
+						go func() { defer kwg.Done(); r.runFeeSweeper(kctx) }()
+					}
 					release()
 					if r.keeperGate == nil {
 						return // no gate: keepers only stop on shutdown
