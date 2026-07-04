@@ -41,7 +41,7 @@ contract MarketplaceCoreTest is Test {
     }
 
     function test_minPriceConstant() public view {
-        assertEq(mp.MIN_PRICE(), 0.01 ether);
+        assertEq(mp.MIN_PRICE(), 1 ether);
     }
 
     // ── Fee routing (seller pays 1.5% on the sale, listing is free) ────────────

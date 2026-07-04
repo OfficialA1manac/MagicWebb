@@ -70,7 +70,9 @@ contract OfferHandler is Test {
         (uint128 p,, uint64 exp,) = ob.positions(address(nft), tid, b);
         if (p == 0) return;
         vm.warp(uint256(exp) + 1 + (warp % 1000));
-        ob.refundExpiredOffer(address(nft), tid, b);
+        // Seller rejects the expired offer (refundExpiredOffer removed in v10).
+        vm.prank(owner);
+        ob.rejectOffer(address(nft), tid, b);
         ghostEscrowed -= p;
     }
 }

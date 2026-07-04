@@ -51,6 +51,8 @@ contract Marketplace is MarketplaceCore {
     /// @notice listings[collection][tokenId][seller] → Listing.
     mapping(address => mapping(uint256 => mapping(address => Listing))) public listings;
 
+    // (hasActiveListing mapping removed: the no-duplicate-price check uses listings[] directly)
+
     event Listed(
         address indexed coll,
         uint256 indexed id,
@@ -146,6 +148,12 @@ contract Marketplace is MarketplaceCore {
         uint64  expiresAt
     ) internal {
         if (price < MIN_PRICE) revert BelowMinPrice();
+        // Prevent the same NFT from being listed at a different price by the same seller.
+        // If an existing listing is active at a different price, revert.
+        Listing memory existing = listings[coll][id][msg.sender];
+        if (existing.seller != address(0) && block.timestamp <= existing.expiresAt && existing.price != price) {
+            revert NotOwner(); // seller must cancel first to relist at a different price
+        }
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
         // Validate that the listing duration is one of the fixed durations.
         // expiresAt is uint64, block.timestamp is uint256 — cast both to uint256 for math.
@@ -188,6 +196,21 @@ contract Marketplace is MarketplaceCore {
         if (l.seller != msg.sender) revert NotOwner(); // seller == address(0) → not listed
         delete listings[coll][id][msg.sender];
         emit Cancelled(coll, id, msg.sender);
+    }
+
+    // ── Expire ────────────────────────────────────────────────────────────────
+
+    /// @notice Clean up an expired listing that had no buyer. Permissionless — anyone
+    ///         can call this to remove stale listings from storage. Emits Cancelled event.
+    /// @dev The listing must be expired (block.timestamp > expiresAt). No price check,
+    ///      no seller authorization — the listing is dead and can be safely deleted.
+    ///      The seller must relist the NFT to offer it for sale again.
+    function cleanExpired(address coll, uint256 id, address seller_) external nonReentrant {
+        Listing memory l = listings[coll][id][seller_];
+        if (l.seller == address(0)) revert NotListed();
+        if (block.timestamp <= l.expiresAt) revert NotOwner(); // only seller can cancel active listings
+        delete listings[coll][id][seller_];
+        emit Cancelled(coll, id, seller_);
     }
 
     // ── Buy (seller pays 1.5% on the sale) ────────────────────────────────────

@@ -24,6 +24,7 @@ contract MarketplaceTest is Test {
 
     // ── Fixed listing durations ───────────────────────────────────────────────
     
+    // ── Durations
     uint64 constant _DURATION_3MIN  = 3 minutes;
     uint64 constant _DURATION_15MIN = 15 minutes;
     uint64 constant _DURATION_30MIN = 30 minutes;
@@ -210,8 +211,11 @@ contract MarketplaceTest is Test {
         assertEq(s2, other);  assertEq(p2, 2 ether);
     }
 
-    function test_originalSellerCanRelist() public {
+    function test_originalSellerCanRelistAfterCancel() public {
         _list1155(21, 5, 1 ether, uint64(block.timestamp + _DURATION_24HR));
+        // Seller must cancel first to relist at a different price (no duplicate listings).
+        vm.prank(seller);
+        mp.cancel(address(multi), 21);
         vm.prank(seller);
         mp.list1155(address(multi), 21, 5, 2 ether, uint64(block.timestamp + _DURATION_24HR));
         (address s,,,uint128 p,) = mp.listings(address(multi), 21, seller);
@@ -258,7 +262,7 @@ contract MarketplaceTest is Test {
     // ── Fuzz ────────────────────────────────────────────────────────────────────
 
     function testFuzz_sellerPaysFee(uint128 price) public {
-        price = uint128(bound(price, 0.01 ether, 100 ether));
+        price = uint128(bound(price, 1 ether, 100 ether));
 
         Marketplace freshMp = new Marketplace(creator, address(0));
 

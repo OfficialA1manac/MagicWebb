@@ -19,8 +19,11 @@ error OfferActive();
 /// from the same storage slot. Single selector = simpler frontend/indexer
 /// code, fewer "if/else" branches per error-matching path.
 
-/// @dev Maximum offer lifetime from the latest top-up.
-uint64 constant MAX_OFFER_DURATION = 14 days;
+/// @dev Maximum offer lifetime from the latest top-up. Set to 24 hours per the
+///      product requirement: offers automatically expire 24 hours after the last
+///      top-up. Only the seller can reject/refund an expired offer — there is no
+///      permissionless refundExpiredOffer function.
+uint64 constant MAX_OFFER_DURATION = 24 hours;
 
 /// @notice Sent when a collection's offer eligibility is toggled.
 event OfferEligibilitySet(address indexed coll, bool indexed eligible);
@@ -240,18 +243,6 @@ contract OfferBook is MarketplaceCore {
     // contract cannot receive ETH can withdraw later via the inherited
     // `withdrawRefund()` on their core (Marketplace / AuctionHouse / this).
     // No code duplication, no shadowed storage, no divergent error selectors.
-
-    /// @notice Reclaim an expired position's principal. Permissionless (keeper or bidder).
-    ///         Full principal refunded — no fee was charged at offer time.
-    function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
-        Position memory p = positions[coll][tokenId][bidder];
-        if (p.principal == 0) revert NoOffer();
-        if (block.timestamp <= p.expiresAt) revert OfferActive();
-
-        delete positions[coll][tokenId][bidder];
-        _pay(bidder, p.principal); // inherited pull-fallback + PushFailed event
-        emit OfferRefunded(coll, tokenId, bidder, p.principal);
-    }
 
     /// @notice Owner rejects a bidder's offer, refunding the FULL principal.
     ///         Best-effort push with pull-fallback — a bidder contract without

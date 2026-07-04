@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, WithdrawFailed, BelowMinPrice} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, TransferFailed, WithdrawFailed, BelowMinPrice} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -18,8 +18,7 @@ error BadIncrement();
 error NotSettled();
 error NothingToWithdraw();
 error BatchTooLarge();
-error NotStalled();
-error StallNotOver();
+
 error CannotCancel();
 
 /// @title AuctionHouse
@@ -62,20 +61,13 @@ contract AuctionHouse is MarketplaceCore {
     uint64 public constant EXTENSION_WINDOW     = 3 minutes;
     /// @notice Maximum auction duration from creation.
     uint64 public constant MAX_AUCTION_DURATION = 7 days;
-    /// @notice Window after which a stalled auction (settle() failed delivery
-    ///         because the seller revoked approval) can be reclaimed — refunds
-    ///         the winner in full and cancels the auction. Prevents a seller
-    ///         from monopolising the winner's escrow indefinitely.
-    uint64 public constant STALL_WINDOW        = 7 days;
-    /// @notice Absolute cap on total anti-snipe extensions. On Flare mainnet
-    ///         FLR trades at sub-cent values, making 0.001 ETH/FLR per flip
-    ///         economically negligible for griefers who could alternate
-    ///         minimum-increment bids and keep extending the auction
-    ///         indefinitely. Capping total extensions to 24h bounds
-    ///         worst-case griefing without redeploy-time tuning per network.
+
+    /// @notice Absolute cap on total anti-snipe extensions. Set to 30 minutes
+    ///         per the product requirement: the auction can only be extended
+    ///         up to 30 minutes past its original end time via anti-snipe bids.
     ///         startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION = the
     ///         absolute latest possible endsAt, regardless of extension count.
-    uint64 public constant MAX_TOTAL_EXTENSION = 24 hours;
+    uint64 public constant MAX_TOTAL_EXTENSION = 30 minutes;
     /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
     ///         the current leader. The user's new cumulative bid must exceed the
     ///         leader's total by at least this amount. The percentage-based
@@ -90,6 +82,7 @@ contract AuctionHouse is MarketplaceCore {
         uint64        startsAt;
         uint16        minIncrementBps;
         bool          settled;
+        bool          active;          // seller activates after creation; bids only when true
         TokenStandard standard;
         address       collection;
         uint64        endsAt;
@@ -99,9 +92,6 @@ contract AuctionHouse is MarketplaceCore {
         address       leader;            // current highest-cumulative bidder
         uint128       leaderTotal;       // leader's cumulative escrow
         uint128       minIncrementFlat;  // absolute min increment in wei (may be 0)
-        uint64        stalledAt;         // timestamp when settle() detected a delivery
-                                         // failure and parked the auction. 0 = active.
-                                         // Allows settleUnstuck() / reclaim() recovery.
     }
 
     uint256 public nextAuctionId;
@@ -110,9 +100,9 @@ contract AuctionHouse is MarketplaceCore {
     /// @notice Position-stable getter for the Auction struct. Off-chain and
     /// off-test code MUST use this instead of the auto-generated `auctions(id)`
     /// getter, which returns a positional tuple — silent misreads on struct
-    /// reflow if a new field is ever added before `stalledAt`. Test harnesses
+    /// reflow if a new field is ever added before `leader`. Test harnesses
     /// also gain audit-fix stability: invariants can assert on a named field
-    /// (`.endsAt`, `.settled`, `.stalledAt`, `.leader`, `.leaderTotal`)
+    /// (`.endsAt`, `.settled`, `.active`, `.leader`, `.leaderTotal`)
     /// rather than counting commas in a destructuring tuple.
     function getAuction(uint256 id) external view returns (Auction memory) {
         return auctions[id];
@@ -175,10 +165,23 @@ contract AuctionHouse is MarketplaceCore {
     event LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount);
     event AuctionCancelled(uint256 indexed id);
     event RefundPushed(address indexed bidder, uint256 amount);
-    event AuctionStalled(uint256 indexed id, address indexed winner, address indexed seller);
-    event AuctionReclaimed(uint256 indexed id, address indexed winner, uint256 refundAmount);
+    event AuctionActivated(uint256 indexed id);
 
     constructor(address recipient, address manager_) MarketplaceCore(recipient, manager_) {}
+
+    // ── Activate Auction ──────────────────────────────────────────────────────
+
+    /// @notice Activate an auction, allowing bids. Only the seller can call this.
+    ///         Once activated, the auction cannot be deactivated.
+    /// @param id The auction to activate.
+    function activateAuction(uint256 id) external nonReentrant {
+        Auction storage a = auctions[id];
+        if (a.seller != msg.sender) revert NotSeller();
+        if (a.settled) revert NotActive();
+        if (a.active) revert AuctionLive();
+        a.active = true;
+        emit AuctionActivated(id);
+    }
 
     // ── Create (free) ───────────────────────────────────────────────────────────
 
@@ -244,6 +247,9 @@ contract AuctionHouse is MarketplaceCore {
         a.amount          = amount;
         a.minIncrementFlat = minIncFlat;
 
+        // Auction starts INACTIVE — seller must call activateAuction() before bids are accepted.
+        a.active = false;
+
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
     }
 
@@ -251,10 +257,12 @@ contract AuctionHouse is MarketplaceCore {
 
     /// @notice Add `msg.value` to your cumulative bid on auction `id`. No refund on
     ///         being outbid — top up again to reclaim the lead. Your effective bid is
-    ///         the sum of all your bids.
+    ///         the sum of all your bids. The seller must have activated the auction
+    ///         via activateAuction() before bidding is allowed.
     function bid(uint256 id) external payable nonReentrant entryGate {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
+        if (!a.active) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
         if (msg.value == 0) revert InvalidAmount();
 
@@ -349,14 +357,14 @@ contract AuctionHouse is MarketplaceCore {
     /// @notice Finalize a finished auction. Callable by anyone after `endsAt`.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable via
-    ///         refundLosers). If the NFT can't be delivered, refunds the winner and
-    ///         cancels. Losers are refunded separately via refundLosers.
+    ///         refundLosers). If the NFT can't be delivered, the entire tx reverts —
+    ///         no stall state. The keeper bot retries on the next block.
+    ///         Losers are refunded separately via refundLosers.
     // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
-        if (a.stalledAt != 0) revert NotStalled(); // parked after delivery failure — use settleUnstuck() or reclaim()
 
         address winner = a.leader;
         if (winner == address(0)) {
@@ -373,193 +381,28 @@ contract AuctionHouse is MarketplaceCore {
         uint128       winBid  = a.leaderTotal;
         uint128       fee     = uint128(_feeOf(winBid));
 
-        // Consume the winner's escrow up front so refundLosers never repays them
-        // (whichever path the settle takes).
+        // Consume the winner's escrow up front so refundLosers never repays them.
         cumulative[id][winner] = 0;
 
-        bool moved = false;
-        // C-01 fix: use transferFrom for ERC721 to bypass onERC721Received
-        // hook — the winning bidder VOLUNTARILY bid and must accept delivery.
-        // safeTransferFrom lets a malicious contract bidder revert the receiver
-        // hook, force a stall, wait 7 days, and reclaim a full refund (free
-        // cancellation exploit). transferFrom moves the token without calling
-        // the receiver hook, eliminating this attack vector entirely.
-        // For ERC1155 there is no plain transferFrom in the standard, so we
-        // must keep safeTransferFrom; the stall path below handles the case
-        // where the buyer's onERC1155Received reverts.
+        // Transfer the NFT. On failure, revert entirely — no stall state.
+        // The keeper bot retries settlement in the next block once the issue
+        // (e.g. seller revoked approval, NFT moved) is resolved.
         if (std == TokenStandard.ERC721) {
-            try IERC721(coll).transferFrom(sel, winner, tid) { moved = true; } catch {}
+            IERC721(coll).transferFrom(sel, winner, tid);
         } else {
-            // L-12 CEI fix: set settled=true before the external
-            // safeTransferFrom call so onERC1155Received observes the
-            // auction as settled. If safeTransferFrom fails, revert
-            // settled back to false for the stall path.
             a.settled = true;
-            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { moved = true; } catch {
+            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") {}
+            catch {
+                // Restore settled and revert so keeper can retry.
                 a.settled = false;
+                cumulative[id][winner] = winBid;
+                revert TransferFailed();
             }
-        }
-
-        if (!moved) {
-            // Delivery failed. Determine who is at fault.
-            bool sellerStillOwns = false;
-            if (std == TokenStandard.ERC721) {
-                try IERC721(coll).ownerOf(tid) returns (address o) {
-                    sellerStillOwns = (o == sel);
-                } catch { sellerStillOwns = false; }
-            } else {
-                try IERC1155(coll).balanceOf(sel, tid) returns (uint256 bal) {
-                    sellerStillOwns = (bal >= amt);
-                } catch { sellerStillOwns = false; }
-            }
-            if (!sellerStillOwns) {
-                // NFT is gone — will never be deliverable. Refund winner, cancel.
-                // L-12a: for ERC-1155, restore settled flag if we set it
-                // optimistically above.
-                if (std == TokenStandard.ERC1155) a.settled = false;
-                _refundWinnerAndCancel(a, id, winner, winBid);
-                return;
-            }
-            // C-02 fix: check if the seller still has approval. If the seller
-            // revoked approval, the delivery failure is the SELLER's fault —
-            // refund the winner immediately instead of stalling. The previous
-            // behavior gave the seller a free 7-day option: stall, watch the
-            // market, and decide whether to re-approve (forcing the sale) or
-            // do nothing (cancelling after STALL_WINDOW). By refunding
-            // immediately on seller-fault, the seller loses the auction
-            // outcome and the winner's escrow is freed.
-            bool sellerApproved = _checkSellerApproval(std, coll, sel, tid);
-            if (!sellerApproved) {
-                // Seller's fault: revoked approval. Refund winner, cancel.
-                if (std == TokenStandard.ERC1155) a.settled = false;
-                _refundWinnerAndCancel(a, id, winner, winBid);
-                return;
-            }
-            // Seller approved but transfer STILL failed. For ERC721 with
-            // transferFrom, this should never happen (only if the collection
-            // itself is broken). For ERC1155, this means the buyer's
-            // onERC1155Received reverted — the BUYER is at fault.
-            // Park the auction for retry via settleUnstuck(). After
-            // STALL_WINDOW, reclaim() becomes available as a safety valve
-            // so the winner's funds are never permanently locked — the
-            // 7-day delay is the economic cost of the buyer's refusal.
-            // L-12b: for ERC-1155, restore settled flag (we set it
-            // optimistically in the safeTransferFrom try-block above).
-            if (std == TokenStandard.ERC1155) a.settled = false;
-            a.stalledAt = uint64(block.timestamp);
-            emit AuctionStalled(id, winner, sel);
-            return;
         }
 
         a.settled = true;
 
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
-        // gas: 50_000 caps EIP-150 63/64 forwarding — a hostile seller contract
-        // cannot OOG-grief settlement and trap the winner's escrow forever.
-        // `emit PushFailed` on fallback so off-chain indexers can detect a
-        // stuck feeRecipient / non-receiving seller and surface the credit;
-        // without this signal, pendingReturns would silently accumulate with
-        // no on-chain observability, leaving operators to poll storage.
-        if (fee > 0) {
-            (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
-            if (!okFee) {
-                pendingReturns[feeRecipient] += fee;
-                emit PushFailed(feeRecipient, fee);
-            }
-        }
-        uint128 proceeds;
-        unchecked { proceeds = winBid - fee; } // fee = 1.5% of winBid, always < winBid
-        (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
-        if (!okSel) {
-            pendingReturns[sel] += proceeds;
-            emit PushFailed(sel, proceeds);
-        }
-
-        emit AuctionSettled(id, winner, sel, winBid, fee);
-    }
-
-    /// @notice Re-attempt delivery for a stalled auction (settle() bailed into
-    ///         STALLED because the seller revoked approval between endsAt and
-    ///         the original settle call). On success, completes the settlement
-    ///         normally. On another delivery failure, refreshes `stalledAt`
-    ///         (frontend re-poll) and the caller can wait out STALL_WINDOW for
-    ///         reclaim().
-    // slither-disable-next-line reentrancy-eth
-    function settleUnstuck(uint256 id) external nonReentrant {
-        Auction storage a = auctions[id];
-        if (a.seller == address(0) || a.settled) revert NotActive();
-        if (a.stalledAt == 0) revert NotStalled();
-
-        address       winner = a.leader;
-        TokenStandard std    = a.standard;
-        address       coll   = a.collection;
-        address       sel    = a.seller;
-        uint128       winBid = a.leaderTotal;
-        uint128       fee    = uint128(_feeOf(winBid));
-
-        // C-01 fix: use transferFrom for ERC721 (same rationale as settle).
-        bool moved = false;
-        if (std == TokenStandard.ERC721) {
-            try IERC721(coll).transferFrom(sel, winner, a.tokenId) { moved = true; } catch {}
-        } else {
-            // Mirror settle()'s pre-transfer state update so onERC1155Received
-            // observes the auction as settled/finalized. Store the original
-            // stalledAt and restore it on failure (R-04: NEVER refresh stalledAt).
-            uint64 origStalled = a.stalledAt;
-            a.settled   = true;
-            a.stalledAt = 0;
-            try IERC1155(coll).safeTransferFrom(sel, winner, a.tokenId, a.amount, "") { moved = true; } catch {
-                a.settled   = false;
-                a.stalledAt = origStalled;
-            }
-        }
-        if (!moved) {
-            bool sellerStillOwns = false;
-            if (std == TokenStandard.ERC721) {
-                try IERC721(coll).ownerOf(a.tokenId) returns (address o) {
-                    sellerStillOwns = (o == sel);
-                } catch { sellerStillOwns = false; }
-            } else {
-                try IERC1155(coll).balanceOf(sel, a.tokenId) returns (uint256 bal) {
-                    sellerStillOwns = (bal >= a.amount);
-                } catch { sellerStillOwns = false; }
-            }
-            if (!sellerStillOwns) {
-                _refundWinnerAndCancel(a, id, winner, winBid);
-                return;
-            }
-            // C-02 fix: seller-fault detection (same as settle).
-            bool sellerApproved = _checkSellerApproval(std, coll, sel, a.tokenId);
-            if (!sellerApproved) {
-                _refundWinnerAndCancel(a, id, winner, winBid);
-                return;
-            }
-            // R-04 (Round 5): Buyer's fault. Emit AuctionStalled for
-            // observability, but DO NOT refresh `a.stalledAt`.
-            //
-            // The previous implementation set `stalledAt = block.timestamp`
-            // on every failed delivery attempt, which let any third party
-            // reset the 7-day reclaim window by calling settleUnstuck()
-            // repeatedly close to STALL_WINDOW. The winner's reclaim()
-            // safety valve (which refunds the escrow once 7d have elapsed)
-            // would then NEVER open, and the bidder's funds were trapped
-            // indefinitely — denial-of-service via perpetual timer reset.
-            //
-            // The fix: the first-stall timestamp is immutable. Every
-            // subsequent settleUnstuck call that hits the same buyer-fault
-            // branch emits AuctionStalled (so off-chain observers see the
-            // retry attempt and can alert on a sustained buyer-fault signal)
-            // but does NOT modify stalledAt. reclaim() opens at
-            // `firstStalledAt + STALL_WINDOW` regardless of how many
-            // failed-retry events the auction accumulates.
-            emit AuctionStalled(id, winner, sel);
-            return;
-        }
-
-        a.settled   = true;
-        a.stalledAt = 0;
-
-        // Same PushFailed pattern as in settle() — see comment there.
         if (fee > 0) {
             (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
             if (!okFee) {
@@ -578,41 +421,7 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionSettled(id, winner, sel, winBid, fee);
     }
 
-    /// @notice Safety valve: refund the winner and cancel a stalled auction
-    ///         after STALL_WINDOW (7 days) has elapsed. Callable by anyone.
-    ///
-    ///         After the C-01/C-02 fixes, stalls only occur for buyer-fault
-    ///         (ERC1155 receiver hook reverted while seller was ready).
-    ///         The primary resolution path is settleUnstuck() (buyer fixes
-    ///         their contract, anyone retries). reclaim() exists as a
-    ///         backstop so the winner's funds are never permanently locked
-    ///         if the buyer never cooperates — the 7-day delay is the
-    ///         economic cost of the buyer's refusal to accept delivery.
-    // slither-disable-next-line reentrancy-eth
-    function reclaim(uint256 id) external nonReentrant {
-        Auction storage a = auctions[id];
-        if (a.seller == address(0) || a.settled) revert NotActive();
-        if (a.stalledAt == 0) revert NotStalled();
-        if (block.timestamp < a.stalledAt + STALL_WINDOW) revert StallNotOver();
 
-        address winner = a.leader;
-        uint128 winBid = a.leaderTotal;
-
-        a.settled   = true;
-        a.stalledAt = 0;
-
-        if (winBid > 0) {
-            // gas: 50_000 caps EIP-150 63/64 forwarding to protect reclaim.
-            (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
-            if (!ok) {
-                pendingReturns[winner] += winBid;
-                emit PushFailed(winner, winBid);
-            }
-            emit RefundPushed(winner, winBid);
-        }
-        emit AuctionReclaimed(id, winner, winBid);
-        emit AuctionCancelled(id);
-    }
 
     /// @notice Refund a batch of non-winning bidders their full escrow. Callable
     ///         by anyone once the auction is settled. Idempotent (zeroed escrow
@@ -630,7 +439,7 @@ contract AuctionHouse is MarketplaceCore {
         // to 7+ days while the auction is stalled — only the winner's escrow
         // was consumed at stall time, but losers cannot pull their escrow
         // because refundLosers required settled == true.
-        if (!a.settled && a.stalledAt == 0) revert NotSettled();
+        if (!a.settled) revert NotSettled();
         if (batch.length == 0 || batch.length > 200) revert BatchTooLarge();
 
         for (uint256 i; i < batch.length; ++i) {
@@ -677,70 +486,29 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionCancelled(id);
     }
 
-    // ── Internal helpers ────────────────────────────────────────────────────────
 
-    /// @dev Shared logic: refund the winner in full and cancel the auction.
-    ///      Used by settle() and settleUnstuck() when delivery can never succeed
-    ///      (seller no longer owns, or seller revoked approval — seller-fault).
-    ///      `PushFailed` event is emitted on push-failure so off-chain
-    ///      indexers observe the credit and the operator can surface it;
-    ///      `RefundPushed` fires on every attempt to record intent.
-    ///      NOTE: `sel` (seller) is deliberately NOT a parameter — the helper
-    ///      only needs the winner (escrow owner) and amount; the seller is
-    ///      already encoded in `a.seller` and the auction event stream.
-    /// @param a     Mutable auction storage; flipped to settled=true, stalledAt=0.
-    /// @param id    Auction id (for event indexing).
-    /// @param winner Escrow owner receiving the refund. Must equal `a.leader`.
-    /// @param winBid Escrow amount to refund to the winner.
-    function _refundWinnerAndCancel(
-        Auction storage a,
-        uint256 id,
-        address winner,
-        uint128 winBid
-    ) internal {
-        a.settled   = true;
-        a.stalledAt = 0;
-        if (winBid > 0) {
-            (bool ok,) = winner.call{gas: 50_000, value: winBid}("");
-            if (!ok) {
-                pendingReturns[winner] += winBid;
-                emit PushFailed(winner, winBid);
-            }
-            emit RefundPushed(winner, winBid);
-        }
-        emit AuctionReclaimed(id, winner, winBid);
-        emit AuctionCancelled(id);
-    }
 
-    /// @dev Check whether the seller has approved this contract to transfer
-    ///      the NFT. Used to distinguish seller-fault (revoked approval) from
-    ///      buyer-fault (receiver hook reverted) when safeTransferFrom fails.
-    ///      Each external call is wrapped in try/catch so a malicious or
-    ///      non-conforming collection cannot break settlement resolution.
-    /// @param std  Token standard (ERC721 vs ERC1155) — picks the right probe.
-    /// @param coll Collection address being queried.
-    /// @param sel  Seller address whose approvals are being checked.
-    /// @param tid  Token id (ERC721 only — irrelevant for ERC1155 which uses
-    ///             isApprovedForAll only).
-    /// @return True iff this contract is approved to move the seller's NFT.
-    function _checkSellerApproval(
-        TokenStandard std,
-        address coll,
-        address sel,
-        uint256 tid
-    ) internal view returns (bool) {
-        if (std == TokenStandard.ERC721) {
-            try IERC721(coll).isApprovedForAll(sel, address(this)) returns (bool ok) {
-                if (ok) return true;
-            } catch {}
-            try IERC721(coll).getApproved(tid) returns (address approved) {
-                return approved == address(this);
-            } catch { return false; }
-        } else {
-            try IERC1155(coll).isApprovedForAll(sel, address(this)) returns (bool ok) {
-                return ok;
-            } catch { return false; }
+    // ── Early loser withdrawal ─────────────────────────────────────────────────
+
+    /// @notice Withdraw your full escrow from an auction before settlement, if you
+    ///         are currently not the leader. Losers can pull their funds early
+    ///         instead of waiting for refundLosers after settlement.
+    /// @param id The auction to withdraw from.
+    function withdrawLoserFunds(uint256 id) external nonReentrant {
+        Auction storage a = auctions[id];
+        if (a.seller == address(0) || a.settled) revert NotActive();
+        if (a.leader == msg.sender) revert AuctionLive(); // leader cannot withdraw early
+
+        uint128 amt = cumulative[id][msg.sender];
+        if (amt == 0) revert NothingToWithdraw();
+
+        cumulative[id][msg.sender] = 0;
+        (bool ok,) = msg.sender.call{gas: 50_000, value: amt}("");
+        if (!ok) {
+            pendingReturns[msg.sender] += amt;
+            emit PushFailed(msg.sender, amt);
         }
+        emit LoserRefunded(id, msg.sender, amt);
     }
 
     // ── Views (keeper enumeration) ────────────────────────────────────────────────

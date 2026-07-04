@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, NotStalled, StallNotOver, InvalidAmount, CannotCancel, BidOverflow} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel, BidOverflow} from "../src/AuctionHouse.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -57,6 +57,9 @@ contract AuctionHouseTest is Test {
         nft.setApprovalForAll(address(ah), true);
         id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
         vm.stopPrank();
+        // Auctions start inactive — seller must activate before bids.
+        vm.prank(seller);
+        ah.activateAuction(id);
     }
 
     function _bid(uint256 id, address who, uint128 amt) internal {
@@ -65,7 +68,10 @@ contract AuctionHouseTest is Test {
     }
 
     function _leader(uint256 id) internal view returns (address l, uint128 t) {
-        (,,,,,,,,,, l, t,,) = ah.auctions(id);
+        // Positions: seller=0, startsAt=1, minIncrementBps=2, settled=3, active=4,
+        // standard=5, collection=6, endsAt=7, tokenId=8, reserve=9, amount=10,
+        // leader=11, leaderTotal=12, minIncrementFlat=13
+        (,,,,,,,,,,, l, t,) = ah.auctions(id);
     }
 
     // ── Cumulative bidding ──────────────────────────────────────────────────────
@@ -188,9 +194,12 @@ contract AuctionHouseTest is Test {
         uint64 end = uint64(block.timestamp + 1 hours);
         uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
         vm.stopPrank();
+        vm.prank(seller);
+        ah.activateAuction(id);
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
-        (,,,,,,uint64 newEnd,,,,,,,) = ah.auctions(id);
+        // endsAt at position 7, struct has 14 fields total
+        (,,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
         assertEq(newEnd, uint64(block.timestamp) + ah.EXTENSION_WINDOW());
     }
 
@@ -219,6 +228,8 @@ contract AuctionHouseTest is Test {
         vm.warp(block.timestamp + 8 days);
         vm.prank(carol);                          // not keeper, not party
         ah.settle(id);
+        // settled at position 3
+        // settled at position 3, struct has 14 fields total
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
     }
@@ -235,6 +246,7 @@ contract AuctionHouseTest is Test {
         _bid(id, alice, 0.5 ether);               // below reserve → no leader
         vm.warp(block.timestamp + 8 days);
         ah.settle(id);
+        // settled at position 3, struct has 14 fields total
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
         assertEq(ah.cumulative(id, alice), 0.5 ether, "refundable, not consumed");
@@ -353,6 +365,8 @@ contract AuctionHouseTest is Test {
         multi.setApprovalForAll(address(ah), true);
         uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
         vm.stopPrank();
+        vm.prank(seller);
+        ah.activateAuction(id);
         _bid(id, alice, 2 ether);
         vm.warp(block.timestamp + 8 days);
         uint256 sellerBefore = seller.balance;
@@ -371,6 +385,8 @@ contract AuctionHouseTest is Test {
         nft.setApprovalForAll(address(ah), true);
         uint256 id = ah.create(address(nft), tid, amt, uint64(block.timestamp + 7 days), 0, 0);
         vm.stopPrank();
+        vm.prank(seller);
+        ah.activateAuction(id);
         _bid(id, alice, amt);
         vm.warp(block.timestamp + 8 days);
         uint256 sb = seller.balance; uint256 vb = feeRecipient.balance;
@@ -411,15 +427,18 @@ contract AuctionHouseTest is Test {
         uint64 end = uint64(block.timestamp + 1 hours);
         uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
         vm.stopPrank();
+        vm.prank(seller);
+        ah.activateAuction(id);
         _bid(id, alice, 2 ether);                  // alice leads at 2 ETH
         vm.warp(end - 1 minutes);                  // inside extension window
         _bid(id, bob, 0.5 ether);                  // below leader, no lead change
-        (,,,,,,uint64 newEnd,,,,,,,) = ah.auctions(id);
+        // endsAt at position 7, struct has 14 fields total
+        (,,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
         assertEq(newEnd, end, "timer NOT extended for sub-threshold bid");
         // Now bob overtakes with a qualifying bid → timer extends
         // bob cumulative = 0.5 + 2.5 = 3.0 > 2.0 + 1.0 (MIN_BID_INCREMENT) = 3.0 → overtakes at minNext
         _bid(id, bob, 2.5 ether);
-        (,,,,,,newEnd,,,,,,,) = ah.auctions(id);
+        (,,,,,,,newEnd,,,,,,) = ah.auctions(id);
         assertGt(newEnd, end, "timer extended on newLead");
     }
 
@@ -449,6 +468,8 @@ contract AuctionHouseTest is Test {
         // minIncBps=0, minIncFlat=0 → floor is MIN_BID_INCREMENT
         uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 0, 0);
         vm.stopPrank();
+        vm.prank(seller);
+        ah.activateAuction(id);
         _bid(id, alice, 1 ether);                  // alice leads
         // Bob tries to overtake with just 1 wei above — must be rejected.
         vm.prank(bob);
@@ -463,72 +484,5 @@ contract AuctionHouseTest is Test {
         assertEq(l, bob, "bob leads after meeting min increment floor");
     }
 
-    // ── settleUnstuck when not stalled ────────────────────────────────────────
 
-    function test_settleUnstuckNotStalledReverts() public {
-        (uint256 id,) = _create();
-        _bid(id, alice, 2 ether);
-        vm.warp(block.timestamp + 8 days);
-        ah.settle(id);                              // settled, not stalled
-        vm.expectRevert(NotActive.selector);        // settled → NotActive
-        ah.settleUnstuck(id);
-    }
-
-    function test_settleUnstuckActiveAuctionReverts() public {
-        (uint256 id,) = _create();
-        _bid(id, alice, 2 ether);
-        vm.expectRevert(NotStalled.selector);
-        ah.settleUnstuck(id);                      // active, not stalled
-    }
-
-    // ── reclaim after STALL_WINDOW ────────────────────────────────────────────
-
-    /// @dev Full reclaim path: stall → wait STALL_WINDOW → reclaim refunds winner
-    ///      and cancels the auction. Uses ERC-1155 buyer-fault stall scenario.
-    function test_reclaimAfterStallWindow() public {
-        MaliciousBidderForTest bidder = new MaliciousBidderForTest();
-        vm.deal(address(bidder), 100 ether);
-
-        vm.startPrank(seller);
-        MockERC1155 multi2 = new MockERC1155();
-        multi2.mint(seller, 7, 5);
-        multi2.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create1155(address(multi2), 7, 5, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
-        vm.stopPrank();
-
-        vm.prank(address(bidder));
-        ah.bid{value: 2 ether}(id);
-        vm.warp(block.timestamp + 2 days);
-
-        // settle() stalls (ERC-1155 buyer-fault)
-        ah.settle(id);
-        AuctionHouse.Auction memory a = ah.getAuction(id);
-        assertGt(a.stalledAt, 0, "stalled");
-        assertFalse(a.settled, "not settled");
-
-        // reclaim before stall window → reverts
-        vm.expectRevert(StallNotOver.selector);
-        ah.reclaim(id);
-
-        // Warp past stall window
-        vm.warp(block.timestamp + ah.STALL_WINDOW());
-        uint256 winnerBefore = address(bidder).balance;
-        ah.reclaim(id);
-
-        a = ah.getAuction(id);
-        assertTrue(a.settled, "settled after reclaim");
-        assertEq(a.stalledAt, 0, "stalledAt cleared");
-        assertEq(address(bidder).balance, winnerBefore + 2 ether, "winner refunded");
-    }
-
-    // ── reclaim not stalled ───────────────────────────────────────────────────
-
-    function test_reclaimNotStalledReverts() public {
-        (uint256 id,) = _create();
-        // _create() sets a seller, so the auction exists and is active.
-        // reclaim() first checks seller==0 || settled (passes), then checks
-        // stalledAt==0 → reverts with NotStalled().
-        vm.expectRevert(NotStalled.selector);
-        ah.reclaim(id);
-    }
 }

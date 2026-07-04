@@ -212,32 +212,7 @@ contract OfferBookTest is Test {
         ob.rejectOffer(address(nft), tid, bidder);
     }
 
-    function test_refundExpiredOfferAfterExpiry() public {
-        _enableOffers(address(nft));
-        uint256 tid = _mintAndApprove(seller);
-        uint256 balBefore = bidder.balance;
-        uint64  exp = _exp();
-        vm.prank(bidder);
-        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, exp);
 
-        vm.warp(uint256(exp) + 1);
-        // Permissionless — anyone (here bidder2) can trigger the refund to the bidder.
-        vm.prank(bidder2);
-        ob.refundExpiredOffer(address(nft), tid, bidder);
-
-        assertEq(bidder.balance, balBefore);
-        assertEq(_principalOf(address(nft), tid, bidder), 0);
-    }
-
-    function test_refundExpiredOfferBeforeExpiryReverts() public {
-        _enableOffers(address(nft));
-        uint256 tid = _mintAndApprove(seller);
-        vm.prank(bidder);
-        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
-
-        vm.expectRevert(OfferActive.selector);
-        ob.refundExpiredOffer(address(nft), tid, bidder);
-    }
 
     function test_multipleOffersSellerAcceptsOneRefundsOther() public {
         _enableOffers(address(nft));
@@ -334,7 +309,7 @@ contract OfferBookTest is Test {
 
     function testFuzz_feeChargedAtAcceptNotMake(uint128 principal) public {
         _enableOffers(address(nft));
-        principal = uint128(bound(principal, 0.01 ether, 100 ether));
+        principal = uint128(bound(principal, 1 ether, 100 ether));
 
         uint256 tid = _mintAndApprove(seller);
         vm.deal(bidder, _total(uint256(principal)) + 1 ether);

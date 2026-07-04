@@ -31,7 +31,7 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     uint16 public constant PLATFORM_FEE_BPS = 150;
 
     /// @notice Minimum accepted commitment everywhere (list price, auction reserve, offer amount).
-    uint256 public constant MIN_PRICE = 0.01 ether;
+    uint256 public constant MIN_PRICE = 1 ether;
 
     /// @notice Wallet that receives all platform fees. Immutable post-deploy.
     address public immutable feeRecipient;

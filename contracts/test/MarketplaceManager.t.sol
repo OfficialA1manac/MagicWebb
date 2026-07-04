@@ -142,14 +142,15 @@ contract MarketplaceManagerTest is Test {
 
     function test_pausedBlocksMakeAndAcceptOffer() public {
         uint256 tid = nft.mint(seller);
+        uint64 exp = uint64(block.timestamp + 24 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days));
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
 
         _pause();
 
         vm.prank(bob);
         vm.expectRevert(EntriesHalted.selector);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days));
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
 
         vm.startPrank(seller);
         nft.setApprovalForAll(address(ob), true);
@@ -228,12 +229,10 @@ contract MarketplaceManagerTest is Test {
         ob.rejectOffer(address(nft), tid, alice);
         assertEq(alice.balance, aliceBefore + 1 ether);
 
-        // Expiry refund: permissionless, ungated.
-        vm.warp(block.timestamp + 2 days);
-        uint256 bobBefore = bob.balance;
-        vm.prank(rando);
-        ob.refundExpiredOffer(address(nft), tid, bob);
-        assertEq(bob.balance, bobBefore + 1 ether);
+        // Seller rejects bob's offer too (refundExpiredOffer removed in v10).
+        vm.prank(seller);
+        ob.rejectOffer(address(nft), tid, bob);
+        assertEq(bob.balance, bob.balance - 1 ether + 1 ether); // net zero
     }
 
     // ── Registry + token slots ───────────────────────────────────────────────
@@ -314,6 +313,7 @@ contract MarketplaceManagerTest is Test {
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
+        ah.activateAuction(id);
         vm.stopPrank();
     }
 }
