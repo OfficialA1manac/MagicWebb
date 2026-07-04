@@ -1240,6 +1240,62 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	return out, rows.Err()
 }
 
+// ── Expired Listing Sweeper ──────────────────────────────────────────────────
+
+// ExpiredListingRow is one listing that has passed its expiry time and should
+// be deactivated with a notification sent to the seller.
+type ExpiredListingRow struct {
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id"`
+	Seller     string `json:"seller"`
+	Name       string `json:"name"`
+	ExpiresAt  time.Time `json:"expires_at"`
+}
+
+// ListExpiredListings returns active, non-orphaned listings whose expires_at
+// has passed. Limited to `limit` rows per tick, oldest-expiry first, so the
+// sweeper processes expired listings in chronological order and a backlog
+// of thousands doesn't overwhelm the notification system.
+func (q *Q) ListExpiredListings(ctx context.Context, limit int) ([]ExpiredListingRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT l.collection, l.token_id::text, l.seller,
+		        COALESCE(m.name, t.name, ''), l.expires_at
+		 FROM listings l
+		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
+		 WHERE l.active=true AND NOT l.orphaned AND l.expires_at < now()
+		 ORDER BY l.expires_at ASC
+		 LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExpiredListingRow
+	for rows.Next() {
+		var r ExpiredListingRow
+		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.Name, &r.ExpiresAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeactivateExpiredListing marks a listing as inactive (not orphaned) because
+// it has expired without being sold. The seller must re-list if they want to
+// sell the NFT again. Only deactivates if the listing is still active and not
+// already deactivated.
+func (q *Q) DeactivateExpiredListing(ctx context.Context, collection, tokenID, seller string) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE listings SET active=false
+		 WHERE collection=$1 AND token_id=$2 AND seller=$3 AND active=true AND NOT orphaned`,
+		collection, tokenID, seller)
+	return err
+}
+
 // ── Pending withdrawals ("withdraw required" tracking) ────────────────────
 
 // SeedPendingWithdrawal records an address whose refund MAY have fallen back

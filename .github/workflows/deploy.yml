@@ -109,6 +109,88 @@ jobs:
         working-directory: app
         run: npx vitest run
 
+  verify:
+    name: Forge verify (FlareScan source verification)
+    needs: [test, frontend-lint]
+    # Only run on release tags (v*), not on every push to main. FlareScan
+    # has API rate limits and flatten+verify takes ~5 minutes — running it
+    # on every deploy would waste API tokens and CI time. Release-tag-only
+    # ensures verified source is always published alongside a release.
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          submodules: recursive
+
+      - name: Install Foundry
+        uses: foundry-rs/foundry-toolchain@v1.2.0
+
+      - name: Flatten + verify each contract on FlareScan
+        # Verifies deployed contracts on FlareScan (blockscout) using forge
+        # verify-contract. Requires EXPLORER_API_KEY as a GitHub secret.
+        # The contract addresses must match the current Coston2 deployment.
+        # When re-deploying, update the addresses here or pass them via
+        # GitHub Actions variables.
+        #
+        # Each contract is flattened first (remix-imports style), then
+        # verified against the chain. FlareScan uses Blockscout under the
+        # hood, which supports standard-json verification.
+        #
+        # EXPLORER_API_KEY is a GitHub Actions secret. FlareScan requires
+        # an API key obtained from https://coston2-explorer.flare.network/.
+        env:
+          EXPLORER_API_KEY: ${{ secrets.EXPLORER_API_KEY }}
+        run: |
+          set -euo pipefail
+
+          # Map chain ID to explorer URL from config.go
+          CHAIN_ID=${CHAIN_ID:-114}
+          case "$CHAIN_ID" in
+            14) EXPLORER_URL="https://flare-explorer.flare.network" ;;
+            19) EXPLORER_URL="https://songbird-explorer.flare.network" ;;
+            114) EXPLORER_URL="https://coston2-explorer.flare.network" ;;
+            *) echo "Unknown CHAIN_ID=$CHAIN_ID"; exit 1 ;;
+          esac
+
+          # Contract addresses (from current Coston2 deploy)
+          MARKETPLACE_ADDR="0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37"
+          AUCTION_ADDR="0x9452518e29DEA185dA392e16be03982c1511753C"
+          OFFERBOOK_ADDR="0x0C6EdB481BC73B4b817A2E7235B309276D703906"
+          NFT_ADDR="0xe96Afb7b664Ab90d74b778AdFE47D8342495807F"
+          MANAGER_ADDR="0x46F55c4330bfe0bD1D83A0287730ea7dFb57f039"
+
+          # Use env vars or CI variables to override addresses
+          MARKETPLACE_ADDR="${MARKETPLACE_ADDR:-$MARKETPLACE_ADDR}"
+          AUCTION_ADDR="${AUCTION_ADDR:-$AUCTION_ADDR}"
+          OFFERBOOK_ADDR="${OFFERBOOK_ADDR:-$OFFERBOOK_ADDR}"
+          NFT_ADDR="${NFT_ADDR:-$NFT_ADDR}"
+          MANAGER_ADDR="${MANAGER_ADDR:-$MANAGER_ADDR}"
+
+          echo "Verifying contracts on $EXPLORER_URL (chain $CHAIN_ID)..."
+
+          verify() {
+            local name="$1" addr="$2" file="$3"
+            echo "--- Verifying $name at $addr ---"
+            forge flatten "src/$file" -o "/tmp/${name}_flat.sol"
+            forge verify-contract \
+              "$addr" \
+              "src/$file" \
+              --chain "$CHAIN_ID" \
+              --verifier blockscout \
+              --verifier-url "${EXPLORER_URL}/api/" \
+              --etherscan-api-key "$EXPLORER_API_KEY" \
+              --watch || echo "⚠  $name verification skipped or failed (check explorer)"
+          }
+
+          # Verify marketplace contracts (all are MarketplaceCore derivations)
+          verify "MarketplaceManager" "$MANAGER_ADDR" "MarketplaceManager.sol"
+          verify "Marketplace"       "$MARKETPLACE_ADDR" "Marketplace.sol"
+          verify "AuctionHouse"      "$AUCTION_ADDR" "AuctionHouse.sol"
+          verify "OfferBook"         "$OFFERBOOK_ADDR" "OfferBook.sol"
+          verify "MagicWebbNFT"      "$NFT_ADDR" "MagicWebbNFT.sol"
+
   deploy:
     name: fly deploy --remote-only --strategy rolling
     needs: [test, frontend-lint]

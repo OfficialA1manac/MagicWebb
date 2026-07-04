@@ -106,6 +106,9 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runOfferExpirySweeper(ctx) }()
 
+	wg.Add(1)
+	go func() { defer wg.Done(); r.runListingExpirySweeper(ctx) }()
+
 	// Offer Keeper goroutine REMOVED: the contract no longer has a
 	// permissionless refundExpiredOffer function. The user explicitly
 	// required "Users cannot refund offers. Only sellers can reject offers" —
@@ -620,6 +623,56 @@ func (r *Runner) computeAllScores(ctx context.Context) {
 			}
 			if err := r.q.UpsertTrendingScore(ctx, ts); err != nil {
 				log.Warn().Err(err).Str("coll", s.Collection).Msg("score worker: upsert")
+			}
+		}
+	}
+}
+
+// ── Listing Expiry Sweeper ─────────────────────────────────────────────────
+
+// runListingExpirySweeper checks for expired listings every 5 minutes and
+// sends notifications to sellers whose listings have expired without being
+// sold. The seller must re-list the NFT if they still want to sell — the
+// listing is deactivated automatically per the requirement: "when nfts expire
+// the seller is notified and if nobody has purchased the nft then it is
+// removed from listing and the seller must relist the nft on the marketplace."
+func (r *Runner) runListingExpirySweeper(ctx context.Context) {
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			expired, err := r.q.ListExpiredListings(ctx, 50)
+			if err != nil {
+				log.Error().Err(err).Msg("listing sweeper: list expired failed")
+				continue
+			}
+			for _, l := range expired {
+				// Deactivate the listing first so it's no longer visible to buyers.
+				if err := r.q.DeactivateExpiredListing(ctx, l.Collection, l.TokenID, l.Seller); err != nil {
+					log.Warn().Err(err).
+						Str("collection", l.Collection).Str("token", l.TokenID).
+						Msg("listing sweeper: deactivate failed")
+					continue
+				}
+				// Notify the seller that their listing expired.
+				title := l.Name
+				if title == "" {
+					title = fmt.Sprintf("%s #%s", l.Collection[:10], l.TokenID)
+				}
+				r.h.notify(ctx, l.Seller, "listing_expired",
+					"Your listing expired — "+title+" was not purchased",
+					"Re-list it on the marketplace",
+					"/token/"+l.Collection+"/"+l.TokenID+"?action=list")
+				log.Info().
+					Str("collection", l.Collection).Str("token", l.TokenID).
+					Str("seller", l.Seller).
+					Msg("listing sweeper: expired listing deactivated, seller notified")
+			}
+			if len(expired) > 0 {
+				log.Info().Int("expired", len(expired)).Msg("listing sweeper: tick complete")
 			}
 		}
 	}
