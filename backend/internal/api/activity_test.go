@@ -8,6 +8,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/pashagolub/pgxmock/v4"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
@@ -30,7 +31,7 @@ var activityCols = []string{"type", "collection", "token_id", "amount_wei", "at"
 func newActivityApp(t *testing.T, mock pgxmock.PgxPoolIface) *fiber.App {
 	t.Helper()
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	svc := NewMetricsService(db.New(mock))
+	svc := NewMetricsService(db.New(mock), cache.New(0))
 	app.Get("/api/v1/activity", ValidateQuery(QuerySchema{
 		{Name: "limit", Type: ParamInt},
 		{Name: "address", Type: ParamAddress},

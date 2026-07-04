@@ -17,6 +17,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -228,11 +229,17 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
+	// ── In-memory caches for read-heavy endpoints ───────────────────────
+	// 30s TTL for trending (scores recomputed periodically, stale is fine)
+	trendingCache := cache.New(30 * time.Second)
+	// 10s TTL for activity (more real-time, but DB query is the expensive part)
+	activityCache := cache.New(10 * time.Second)
+
 	// Domain-specific route registrations.
 	NewListingsService(q, eth).RegisterRoutes(api)
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
-	NewCollectionsService(q).RegisterRoutes(api)
+	NewCollectionsService(q, trendingCache).RegisterRoutes(api)
 	ms := NewMediaService(q, eth, rl)
 	ms.RegisterRoutes(api)
 	NewWalletService(q).RegisterRoutes(api)
@@ -241,7 +248,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(api)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
-	NewMetricsService(q).RegisterRoutes(api)
+	NewMetricsService(q, activityCache).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
 	// Image-by-hash route: registered at app level (NOT under the rate-limited

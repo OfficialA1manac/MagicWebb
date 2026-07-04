@@ -1,22 +1,25 @@
 package api
 
 import (
+	"fmt"
 	"strconv"
 	"strings"
 
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
 // CollectionsService handles collection-related API operations.
 type CollectionsService struct {
-	q *db.Q
+	q     *db.Q
+	cache *cache.Cache
 }
 
 // NewCollectionsService creates a CollectionsService.
-func NewCollectionsService(q *db.Q) *CollectionsService {
-	return &CollectionsService{q: q}
+func NewCollectionsService(q *db.Q, c *cache.Cache) *CollectionsService {
+	return &CollectionsService{q: q, cache: c}
 }
 
 // RegisterRoutes registers all collection-related routes under the given router group.
@@ -105,6 +108,13 @@ func (s *CollectionsService) handleTrending(c *fiber.Ctx) error {
 			limit = n
 		}
 	}
+
+	// Cache hit → return immediately, no DB query.
+	ckey := fmt.Sprintf("tr:%s:%d", window, limit)
+	if cached, ok := s.cache.Get(ckey); ok {
+		return c.JSON(cached)
+	}
+
 	rows, err := s.q.GetTrendingCollections(c.Context(), window, limit)
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
@@ -112,6 +122,9 @@ func (s *CollectionsService) handleTrending(c *fiber.Ctx) error {
 	if rows == nil {
 		rows = []db.TrendingScore{}
 	}
+
+	// Cache the successful response for subsequent callers.
+	s.cache.Set(ckey, rows)
 	return c.JSON(rows)
 }
 

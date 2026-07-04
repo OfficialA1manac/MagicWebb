@@ -3,6 +3,7 @@ package api
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -10,6 +11,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -24,12 +26,13 @@ const mantissaBound = 1 << 53
 
 // MetricsService handles marketplace metrics, recent activity, and SSE counters.
 type MetricsService struct {
-	q *db.Q
+	q     *db.Q
+	cache *cache.Cache
 }
 
 // NewMetricsService creates a MetricsService.
-func NewMetricsService(q *db.Q) *MetricsService {
-	return &MetricsService{q: q}
+func NewMetricsService(q *db.Q, c *cache.Cache) *MetricsService {
+	return &MetricsService{q: q, cache: c}
 }
 
 // RegisterRoutes registers metrics and activity routes under the given router group.
@@ -60,6 +63,23 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 	address := strings.ToLower(c.Query("address"))
 	collection := strings.ToLower(c.Query("collection"))
 	tokenID := c.Query("token_id")
+
+	// ── Cache check: global and address-scoped queries only ────────────
+	// Token-specific queries (collection+tokenID) are personal / rare and
+	// not cached. Global activity (no params) and address activity are the
+	// hot paths hit by every homepage / profile page load.
+	if address != "" && collection == "" && tokenID == "" {
+		ckey := fmt.Sprintf("act:%s:%d", address, limit)
+		if cached, ok := s.cache.Get(ckey); ok {
+			return c.JSON(cached)
+		}
+	}
+	if address == "" && collection == "" && tokenID == "" {
+		ckey := fmt.Sprintf("act:g:%d", limit)
+		if cached, ok := s.cache.Get(ckey); ok {
+			return c.JSON(cached)
+		}
+	}
 
 	var rows []db.ActivityRow
 	var err error
@@ -113,6 +133,18 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 	if rows == nil {
 		rows = []db.ActivityRow{}
 	}
+
+	// Store successful responses in the cache so subsequent callers skip
+	// the DB round-trip. Only cache global and address-scoped queries
+	// (the hot paths); token-specific activity is rare and personal.
+	if tokenRows == nil {
+		if address != "" {
+			s.cache.Set(fmt.Sprintf("act:%s:%d", address, limit), rows)
+		} else if collection == "" && tokenID == "" {
+			s.cache.Set(fmt.Sprintf("act:g:%d", limit), rows)
+		}
+	}
+
 	return c.JSON(rows)
 }
 

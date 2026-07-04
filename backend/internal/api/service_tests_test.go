@@ -14,6 +14,7 @@ import (
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
@@ -778,7 +779,7 @@ func TestCollectionsService_HandleList_Success(t *testing.T) {
 			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(100)).
 			AddRow("0xcol2", "Collection Two", "COL2", "erc1155", uint64(200)))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections", svc.handleList)
 	})
@@ -810,7 +811,7 @@ func TestCollectionsService_HandleList_LimitClamping(t *testing.T) {
 		WithArgs(200).
 		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block"}))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections", svc.handleList)
 	})
@@ -832,7 +833,7 @@ func TestCollectionsService_HandleList_DBError(t *testing.T) {
 		WithArgs(50).
 		WillReturnError(fiber.ErrInternalServerError)
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections", svc.handleList)
 	})
@@ -871,7 +872,7 @@ func TestCollectionsService_HandleGet_Success(t *testing.T) {
 		WithArgs("0xcol1").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(15))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections/:address", svc.handleGet)
 	})
@@ -908,7 +909,7 @@ func TestCollectionsService_HandleGet_NotFound(t *testing.T) {
 		WithArgs("0xnonexistent").
 		WillReturnError(pgx.ErrNoRows)
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections/:address", svc.handleGet)
 	})
@@ -947,7 +948,7 @@ func TestCollectionsService_HandleGet_StatsFallback(t *testing.T) {
 		WithArgs("0xcol1").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(0))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections/:address", svc.handleGet)
 	})
@@ -981,7 +982,7 @@ func TestCollectionsService_HandleTraits_Success(t *testing.T) {
 			AddRow("Background", "Blue", 5).
 			AddRow("Fur", "Gold", 3))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections/:address/traits", svc.handleTraits)
 	})
@@ -1011,7 +1012,7 @@ func TestCollectionsService_HandleTraits_Empty(t *testing.T) {
 		WithArgs("0xcol1").
 		WillReturnRows(pgxmock.NewRows([]string{"trait_type", "value", "count"}))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections/:address/traits", svc.handleTraits)
 	})
@@ -1040,7 +1041,7 @@ func TestCollectionsService_HandleTrending_Success(t *testing.T) {
 			AddRow("0xcol1", "24h", 95.5, int64(1000), int64(5), "50000000000000000000").
 			AddRow("0xcol2", "24h", 80.0, int64(500), int64(2), "20000000000000000000"))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/trending", svc.handleTrending)
 	})
@@ -1067,7 +1068,7 @@ func TestCollectionsService_HandleTrending_Empty(t *testing.T) {
 		WithArgs("24h", 20).
 		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei"}))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/trending", svc.handleTrending)
 	})
@@ -1095,7 +1096,7 @@ func TestCollectionsService_HandleTrending_CustomWindow(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei"}).
 			AddRow("0xcol1", "7d", 95.5, int64(1000), int64(5), "50000000000000000000"))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/trending", svc.handleTrending)
 	})
@@ -1123,7 +1124,7 @@ func TestCollectionsService_HandleList_LimitCustom(t *testing.T) {
 		WithArgs(10).
 		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block"}))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections", svc.handleList)
 	})
@@ -1146,7 +1147,7 @@ func TestCollectionsService_HandleList_SuccessWithNilGuard(t *testing.T) {
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block"}))
 
-	svc := NewCollectionsService(db.New(mock))
+	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/collections", svc.handleList)
 	})
