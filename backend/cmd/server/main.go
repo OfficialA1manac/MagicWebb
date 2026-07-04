@@ -74,7 +74,10 @@ func main() {
 	if readPool != nil {
 		defer readPool.Close()
 	}
-	q := db.New(pool).WithReadReplica(readPool)
+	q := db.New(pool)
+	if readPool != nil {
+		q = q.WithReadReplica(readPool)
+	}
 
 	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY.
 	// Degrades to local-only delivery if the listen conn is unavailable.
