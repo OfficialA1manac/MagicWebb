@@ -30,10 +30,12 @@ type Config struct {
 	ExplorerURL    string // block-explorer base URL (e.g. https://coston2-explorer.flare.network)
 
 	// Contract addresses
-	MarketplaceAddr string
-	AuctionAddr     string
-	OfferBookAddr   string
-	RoyaltyAddr     string
+	MarketplaceAddr           string
+	AuctionAddr               string
+	OfferBookAddr             string
+	NFTAddr                   string
+	MarketplaceManagerAddr    string
+	RoyaltyAddr               string
 
 	// Database
 	PostgresURL  string // primary (read-write) connection
@@ -126,10 +128,12 @@ func Load() {
 		NativeCurrency: envOrDefault("NATIVE_CURRENCY", "C2FLR"),
 		ExplorerURL:    envOrDefault("EXPLORER_URL", "https://coston2-explorer.flare.network"),
 
-		MarketplaceAddr: required("MARKETPLACE_ADDR"),
-		AuctionAddr:     required("AUCTION_ADDR"),
-		OfferBookAddr:   required("OFFERBOOK_ADDR"),
-		RoyaltyAddr:     envOrDefault("ROYALTY_ADDR", ""),
+		MarketplaceAddr:           required("MARKETPLACE_ADDR"),
+		AuctionAddr:               required("AUCTION_ADDR"),
+		OfferBookAddr:             required("OFFERBOOK_ADDR"),
+		NFTAddr:                   envOrDefault("NFT_ADDR", ""),
+		MarketplaceManagerAddr:    envOrDefault("MARKETPLACE_MANAGER_ADDR", ""),
+		RoyaltyAddr:               envOrDefault("ROYALTY_ADDR", ""),
 
 		PostgresURL: required("POSTGRES_URL"),
 		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
@@ -173,6 +177,8 @@ func Load() {
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)
 	C.AuctionAddr = strings.ToLower(C.AuctionAddr)
 	C.OfferBookAddr = strings.ToLower(C.OfferBookAddr)
+	C.NFTAddr = strings.ToLower(C.NFTAddr)
+	C.MarketplaceManagerAddr = strings.ToLower(C.MarketplaceManagerAddr)
 	C.RoyaltyAddr = strings.ToLower(C.RoyaltyAddr)
 
 	// Chain metadata validation — supports Coston2 (114), Flare mainnet (14),

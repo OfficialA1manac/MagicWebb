@@ -18,6 +18,7 @@ import (
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/gofiber/fiber/v2"
+	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
 
@@ -53,6 +54,13 @@ func main() {
 		log.Fatal().Err(err).Msg("db connect failed")
 	}
 	defer pool.Close()
+
+	// Verify deployment config matches env vars. Prevents the indexer from
+	// mixing events from old and new contract instances after a redeploy.
+	// Creates the initial row on first deploy; refuses to start on mismatch.
+	if err := verifyDeploymentConfig(ctx, pool); err != nil {
+		log.Fatal().Err(err).Msg("deployment config mismatch — contract addresses changed since last deploy; truncate on-chain data first")
+	}
 
 	// Optional read-replica pool for query offloading. When READ_POOL_URL is
 	// set (e.g. a Neon read-only branch endpoint), read-heavy API queries
@@ -182,6 +190,61 @@ func main() {
 	case <-time.After(15 * time.Second):
 		log.Warn().Msg("indexer drain timed out")
 	}
+}
+
+// ── Deployment Config Check ──────────────────────────────────────────────────
+
+// verifyDeploymentConfig reads the latest deployment_config row and compares it
+// to the running env config. On first deploy (no rows), it inserts the current
+// config. On mismatch, it returns an error so main() can fatal-exit.
+func verifyDeploymentConfig(ctx context.Context, pool db.PgxPool) error {
+	var chainID int64
+	var marketplaceAddr, auctionAddr, offerbookAddr, nftAddr, managerAddr string
+	err := pool.QueryRow(ctx,
+		`SELECT chain_id, marketplace_addr, auction_addr, offerbook_addr, nft_addr, marketplace_manager_addr
+		   FROM deployment_config ORDER BY id DESC LIMIT 1`,
+	).Scan(&chainID, &marketplaceAddr, &auctionAddr, &offerbookAddr, &nftAddr, &managerAddr)
+
+	if err == pgx.ErrNoRows {
+		// First deploy — insert the current config and proceed.
+		_, err := pool.Exec(ctx,
+			`INSERT INTO deployment_config(chain_id, marketplace_addr, auction_addr, offerbook_addr, nft_addr, marketplace_manager_addr)
+			 VALUES($1,$2,$3,$4,$5,$6)`,
+			config.C.ChainID, config.C.MarketplaceAddr, config.C.AuctionAddr,
+			config.C.OfferBookAddr, config.C.NFTAddr, config.C.MarketplaceManagerAddr)
+		if err != nil {
+			return fmt.Errorf("insert initial deployment config: %w", err)
+		}
+		log.Info().Msg("deployment config: initial row created")
+		return nil
+	}
+	if err != nil {
+		return fmt.Errorf("read deployment config: %w", err)
+	}
+
+	// Compare each field. Collect all mismatches before returning.
+	var diffs []string
+	if chainID != int64(config.C.ChainID) {
+		diffs = append(diffs, fmt.Sprintf("chain_id: stored=%d env=%d", chainID, config.C.ChainID))
+	}
+	if marketplaceAddr != config.C.MarketplaceAddr {
+		diffs = append(diffs, fmt.Sprintf("marketplace_addr: stored=%s env=%s", marketplaceAddr, config.C.MarketplaceAddr))
+	}
+	if auctionAddr != config.C.AuctionAddr {
+		diffs = append(diffs, fmt.Sprintf("auction_addr: stored=%s env=%s", auctionAddr, config.C.AuctionAddr))
+	}
+	if offerbookAddr != config.C.OfferBookAddr {
+		diffs = append(diffs, fmt.Sprintf("offerbook_addr: stored=%s env=%s", offerbookAddr, config.C.OfferBookAddr))
+	}
+	if nftAddr != config.C.NFTAddr {
+		diffs = append(diffs, fmt.Sprintf("nft_addr: stored=%s env=%s", nftAddr, config.C.NFTAddr))
+	}
+	if len(diffs) > 0 {
+		return fmt.Errorf("deployment mismatch:\n  %s", strings.Join(diffs, "\n  "))
+	}
+
+	log.Info().Msg("deployment config: matches env — proceeding")
+	return nil
 }
 
 // ── SIWE auth ────────────────────────────────────────────────────────────────

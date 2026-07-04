@@ -109,6 +109,22 @@ jobs:
         working-directory: app
         run: npx vitest run
 
+      - name: NFT metadata count guard
+        # Counts the NFT metadata JSON files and asserts the expected number.
+        # When new NFTs are minted, this count must be updated to match
+        # totalSupply(). A mismatch means either orphaned metadata (deleted
+        # mint, stale file) or a minted token with no metadata (broken image).
+        # Expected: 4 (cid-kagenou, garou, itachi-uchiha, will-serfort)
+        run: |
+          count=$(ls -1 frontend/static/nft/metadata/*.json 2>/dev/null | wc -l)
+          expected=4
+          if [ "$count" -ne "$expected" ]; then
+            echo "ERROR: frontend/static/nft/metadata/ has $count files, expected $expected"
+            echo "Update expected count in deploy.yml when minting new NFTs"
+            exit 1
+          fi
+          echo "OK — $count metadata files match expected count ($expected)"
+
   verify:
     name: Forge verify (FlareScan source verification)
     needs: [test, frontend-lint]
