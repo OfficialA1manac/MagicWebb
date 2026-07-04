@@ -91,6 +91,15 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runOfferExpirySweeper(ctx) }()
 
+	// Offer Keeper goroutine REMOVED: the contract no longer has a
+	// permissionless refundExpiredOffer function. The user explicitly
+	// required "Users cannot refund offers. Only sellers can reject offers" —
+	// there is no keeper path for auto-refunding expired offers because only
+	// the seller (contract owner via rejectOffer) can refund. The DB-side
+	// offer-expiry sweeper (runOfferExpirySweeper) still marks expired
+	// offers in the database so the UI can accurately reflect offer status;
+	// the on-chain refund is now seller-only via rejectOffer.
+
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
 
@@ -137,9 +146,8 @@ func (r *Runner) Run(ctx context.Context) {
 						}
 					}
 					var kwg sync.WaitGroup
-					kwg.Add(3)
+					kwg.Add(2)
 					go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
-					go func() { defer kwg.Done(); r.runOfferKeeper(kctx) }()
 					go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
 					kwg.Wait()
 					release()
@@ -155,6 +163,15 @@ func (r *Runner) Run(ctx context.Context) {
 }
 
 // ── Chain Watcher ─────────────────────────────────────────────────────────
+
+// reorgSafetyBlocks is the confirmation depth before the indexer considers a
+// block final. The indexer stays this many blocks behind the reported head so
+// that a chain reorganisation (reorg) of up to this depth does not produce
+// orphaned events in the DB. Flare mainnet and Songbird have ~2s block times
+// and near-zero reorg risk past 2 blocks; Coston2 (testnet) can reorg deeper.
+// 12 blocks ≈ 24 seconds of finalisation on Coston2 — conservative for all
+// three target chains.
+const reorgSafetyBlocks = 12
 
 // headLag keeps the indexer this many blocks behind the reported head: cheap
 // reorg tolerance, and tolerance for a mid-iteration failover to an endpoint
@@ -259,6 +276,17 @@ func (r *Runner) runWatcher(ctx context.Context) {
 	// a fully successful range — a failed/partial range is retried next tick,
 	// so RPC failures can delay events but never permanently drop them.
 	lastBlock := fromBlock
+	// lastBlockHash tracks the block hash of lastBlock for reorg detection.
+	// On each new range, we fetch the header of lastBlock+1 and check that its
+	// parentHash matches the stored hash. If it doesn't match, a reorg has
+	// occurred and we rewind lastBlock by reorgSafetyBlocks to re-index the
+	// affected range.
+	var lastBlockHash common.Hash
+	if lastBlock > 0 {
+		if h, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock))); err == nil {
+			lastBlockHash = h.Hash()
+		}
+	}
 	backfilled := false
 
 	ticker := time.NewTicker(2 * time.Second)
@@ -273,15 +301,77 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				log.Warn().Err(err).Msg("watcher: block poll failed")
 				continue
 			}
-			if head <= headLag {
+			if head <= reorgSafetyBlocks {
 				continue
 			}
 			target := head - headLag
 			if target <= lastBlock {
+				// Even when the head hasn't advanced, check for reorgs at the
+				// current tip. Flare/Coston2 rarely reorg past 1 block, but a
+				// deep reorg on testnet can orphan blocks the indexer already
+				// processed. We verify chain continuity by checking the parent
+				// hash of target against lastBlockHash every tick (cheap: one
+				// HeaderByNumber call per tick when idle).
+				if lastBlock > 0 && lastBlockHash != (common.Hash{}) {
+					targetHeader, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target)))
+					if err == nil && targetHeader.ParentHash != lastBlockHash {
+						// Reorg detected: the block the indexer thinks is the
+						// last indexed block no longer sits on the canonical chain.
+						// Rewind by reorgSafetyBlocks to re-index the affected range.
+						log.Warn().
+							Str("expected_parent", lastBlockHash.Hex()).
+							Str("actual_parent", targetHeader.ParentHash.Hex()).
+							Uint64("head", head).
+							Uint64("rewind_to", lastBlock-reorgSafetyBlocks).
+							Msg("watcher: reorg detected — rewinding indexer")
+						if lastBlock > reorgSafetyBlocks {
+							lastBlock -= reorgSafetyBlocks
+						} else {
+							lastBlock = 0
+						}
+						// Reset hash so continuity is re-established on the next tick.
+						lastBlockHash = common.Hash{}
+						// Persist the rewind so the indexer resumes from the
+						// rewound position on restart.
+						if err := r.q.SetIndexedBlock(ctx, chainID, lastBlock); err != nil {
+							log.Error().Err(err).Uint64("block", lastBlock).
+								Msg("watcher: persist rewind cursor failed")
+						}
+					}
+				}
+				// Update serverTimeMs from the latest header even when idle.
+				if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
+					atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
+				}
 				continue
 			}
 			if !backfilled {
-				log.Info().Uint64("from", lastBlock).Uint64("to", target).Msg("watcher: backfill start")
+				log.Info().Uint64("from", lastBlock+1).Uint64("to", target).Msg("watcher: backfill start")
+			}
+			// Verify chain continuity before processing the new range.
+			// Fetch the header of the first new block (lastBlock+1) and check
+			// its parentHash against the lastBlockHash we cached.
+			if lastBlock > 0 && lastBlockHash != (common.Hash{}) {
+				firstNew, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock+1)))
+				if err == nil && firstNew.ParentHash != lastBlockHash {
+					log.Warn().
+						Str("expected_parent", lastBlockHash.Hex()).
+						Str("actual_parent", firstNew.ParentHash.Hex()).
+						Uint64("head", head).
+						Uint64("last_block", lastBlock).
+						Msg("watcher: chain continuity break — reorg detected before new range; rewinding")
+					if lastBlock > reorgSafetyBlocks {
+						lastBlock -= reorgSafetyBlocks
+					} else {
+						lastBlock = 0
+					}
+					lastBlockHash = common.Hash{}
+					if err := r.q.SetIndexedBlock(ctx, chainID, lastBlock); err != nil {
+						log.Error().Err(err).Uint64("block", lastBlock).
+							Msg("watcher: persist rewind cursor failed")
+					}
+					continue // skip this range; retry on next tick after rewind
+				}
 			}
 			// backfill chunks every range, so cold start, outage catch-up and
 			// the steady 1-2 block tick all share one code path.
@@ -290,13 +380,20 @@ func (r *Runner) runWatcher(ctx context.Context) {
 					Msg("watcher: range failed, will retry")
 				continue // lastBlock unchanged: the same range is retried next tick
 			}
+			// Cache the last block's hash for continuity checking on the next tick.
+			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
+				lastBlockHash = header.Hash()
+				atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
+			} else {
+				// If we can't get the header, reset the hash so the next tick
+				// re-establishes continuity conservatively (still processes the
+				// range that was already backfilled).
+				lastBlockHash = common.Hash{}
+			}
 			lastBlock = target
 			if !backfilled {
 				backfilled = true
 				log.Info().Msg("watcher: backfill complete")
-			}
-			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
-				atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
 			}
 		}
 	}
@@ -658,64 +755,6 @@ func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, fr
 	data := append([]byte(nil), settleSelector...)
 	data = append(data, idBytes...)
 	return r.sendRaw(ctx, key, from, to, signer, chainID, data, 150_000)
-}
-
-// ── Offer Keeper (on-chain refund of expired positions) ────────────────────
-
-var refundOfferSelector = crypto.Keccak256([]byte("refundExpiredOffer(address,uint256,address)"))[:4]
-
-func (r *Runner) runOfferKeeper(ctx context.Context) {
-	keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
-	key, err := crypto.HexToECDSA(keeperKeyHex)
-	if err != nil {
-		log.Error().Err(err).Msg("offer keeper: invalid KEEPER_KEY")
-		return
-	}
-	keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
-	offerAddr := common.HexToAddress(r.cfg.OfferBookAddr)
-	chainIDBig := big.NewInt(int64(r.cfg.ChainID))
-	signer := types.NewLondonSigner(chainIDBig)
-
-	log.Info().Str("keeper", keeperAddr.Hex()).Msg("offer keeper: started")
-	ticker := time.NewTicker(60 * time.Second)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-			offers, err := r.q.GetRefundableExpiredOffers(ctx)
-			if err != nil {
-				log.Error().Err(err).Msg("offer keeper: list expired")
-				continue
-			}
-			for _, o := range offers {
-				data := append([]byte(nil), refundOfferSelector...)
-				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Collection).Bytes(), 32)...)
-				tid, _ := new(big.Int).SetString(o.TokenID, 10)
-				if tid == nil {
-					tid = big.NewInt(0)
-				}
-				idBytes := make([]byte, 32)
-				tid.FillBytes(idBytes)
-				data = append(data, idBytes...)
-				data = append(data, common.LeftPadBytes(common.HexToAddress(o.Bidder).Bytes(), 32)...)
-
-				txHash, err := r.sendRaw(ctx, key, keeperAddr, offerAddr, signer, chainIDBig, data, 120_000)
-				if err != nil {
-					log.Error().Err(err).Str("bidder", o.Bidder).Msg("offer keeper: refund tx failed")
-					continue
-				}
-				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
-					log.Error().Err(err).Str("bidder", o.Bidder).Str("tx", txHash.Hex()).
-						Msg("offer keeper: refund tx receipt not confirmed; will retry on next tick")
-					continue
-				}
-				log.Info().Str("coll", o.Collection).Str("token", o.TokenID).Str("bidder", o.Bidder).
-					Str("tx", txHash.Hex()).Msg("offer keeper: refund confirmed")
-			}
-		}
-	}
 }
 
 // sendRaw signs and broadcasts an arbitrary calldata tx from the keeper,

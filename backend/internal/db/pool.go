@@ -19,6 +19,42 @@ import (
 //go:embed migrations/*.sql
 var migrations embed.FS
 
+// ConnectReadReplica opens a read-only pgxpool for query offloading. Uses
+// the same Neon-friendly configuration as Connect(): low connection count,
+// aggressive idle timeout, regular health checks. Returns nil when dsn is
+// empty (no replica configured) — callers must handle nil pools gracefully
+// by falling back to the primary pool for reads.
+func ConnectReadReplica(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	if dsn == "" {
+		return nil, nil // no replica configured
+	}
+	cfg, err := pgxpool.ParseConfig(dsn)
+	if err != nil {
+		return nil, fmt.Errorf("db: parse read replica config: %w", err)
+	}
+	// Read replicas typically serve many concurrent queries, so we allow
+	// more connections than the primary (but still capped for Neon's free tier).
+	cfg.MaxConns = 20
+	cfg.MinConns = 0
+	cfg.MaxConnIdleTime = 4 * time.Minute
+	cfg.MaxConnLifetime = 30 * time.Minute
+	cfg.HealthCheckPeriod = 30 * time.Second
+
+	pool, err := pgxpool.NewWithConfig(ctx, cfg)
+	if err != nil {
+		return nil, fmt.Errorf("db: connect read replica: %w", err)
+	}
+	if err := pool.Ping(ctx); err != nil {
+		pool.Close()
+		return nil, fmt.Errorf("db: ping read replica: %w", err)
+	}
+	log.Info().
+		Str("host", cfg.ConnConfig.Host).
+		Int32("max_conns", cfg.MaxConns).
+		Msg("read replica connected")
+	return pool, nil
+}
+
 // Connect opens a pgxpool tuned for serverless Postgres (Neon) compatibility.
 // Neon terminates idle connections after ~5 minutes, so the pool must:
 //   - cap total connections (Neon free tier: 10)

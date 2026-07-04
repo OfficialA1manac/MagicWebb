@@ -9,6 +9,7 @@ import (
 	"os"
 	"path/filepath"
 	"strings"
+	"sync"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -789,12 +790,18 @@ window.MW_OFFERBOOK='%s';
 // of the default "C2FLR" text that would otherwise appear before the
 // client-side JS updater runs.
 func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
+	// Check the cache first — processed HTML is immutable per path.
+	if cached, ok := htmlCache.Load(htmlPath); ok {
+		c.Set("Content-Type", "text/html; charset=utf-8")
+		return c.SendString(cached.(string))
+	}
+
 	body, err := os.ReadFile(htmlPath)
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to read page")
 	}
-	// Use 'content' instead of 'html' to avoid shadowing the html package.
 	content := string(body)
+
 	// Inject the config script just before </head>. The Astro-built
 	// HTML always has a </head> tag (BaseLayout.astro guarantees it).
 	// Using string replacement is safe because: (1) the script is
@@ -802,27 +809,38 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 	// (2) </head> appears exactly once in a well-formed HTML document.
 	idx := strings.Index(content, "</head>")
 	if idx < 0 {
-		// No </head> — fall back to prepending (shouldn't happen with
-		// BaseLayout.astro, but be safe).
 		content = astroConfigScript + content
 	} else {
 		content = content[:idx] + astroConfigScript + content[idx:]
 	}
+
 	// Server-side replacement of .mw-cur span content so the correct
-	// currency symbol renders immediately (no FOUC). The Astro pages
-	// emit <span class="mw-cur">C2FLR</span> as a default placeholder;
-	// we swap it for the actual currency from server config.
+	// currency symbol renders immediately (no FOUC).
 	curPlaceholder := `<span class="mw-cur">C2FLR</span>`
 	curReplacement := `<span class="mw-cur">` + html.EscapeString(config.C.NativeCurrency) + `</span>`
 	content = strings.ReplaceAll(content, curPlaceholder, curReplacement)
-	// Also update .mw-net-name spans (used in the homepage testnet badge)
-	// so the correct network name shows without waiting for JS.
+	// Also update .mw-net-name spans (used in the homepage testnet badge).
 	netPlaceholder := `<span class="mw-net-name">Flare Coston2</span>`
 	netReplacement := `<span class="mw-net-name">` + html.EscapeString(config.C.NetworkName) + `</span>`
 	content = strings.ReplaceAll(content, netPlaceholder, netReplacement)
+
+	// Store in cache before serving — the injected config is static
+	// per-process, so this computation happens exactly once per HTML file.
+	htmlCache.Store(htmlPath, content)
+
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(content)
 }
+
+// htmlCache caches Astro HTML file content with server config injected.
+// The astroConfigScript and currency/network replacements are static per
+// process (they only depend on config.C, which is immutable after Load()).
+// Without caching, every uncached request re-reads the file from disk and
+// re-runs strings.Index + 2× strings.ReplaceAll — avoidable disk I/O and
+// string-alloc churn on the hot path. The cache is a sync.Map keyed by
+// absolute path; entries are populated on first access and never invalidated
+// (the process must restart to pick up new Astro builds).
+var htmlCache sync.Map
 
 // envOrDefault reads an env var, returning the default if empty or unset.
 func envOrDefault(key, def string) string {

@@ -36,7 +36,8 @@ type Config struct {
 	RoyaltyAddr     string
 
 	// Database
-	PostgresURL string
+	PostgresURL  string // primary (read-write) connection
+	ReadPoolURL  string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
 
 	// Servers
 	HTTPAddr string
@@ -131,6 +132,7 @@ func Load() {
 		RoyaltyAddr:     envOrDefault("ROYALTY_ADDR", ""),
 
 		PostgresURL: required("POSTGRES_URL"),
+		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
 
 		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
 

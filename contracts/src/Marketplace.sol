@@ -51,7 +51,6 @@ contract Marketplace is MarketplaceCore {
     /// @notice listings[collection][tokenId][seller] → Listing.
     mapping(address => mapping(uint256 => mapping(address => Listing))) public listings;
 
-    // (hasActiveListing mapping removed: the no-duplicate-price check uses listings[] directly)
 
     event Listed(
         address indexed coll,

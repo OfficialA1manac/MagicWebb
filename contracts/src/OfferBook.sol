@@ -99,26 +99,54 @@ contract OfferBook is MarketplaceCore {
     {}
 
     /// @notice Toggle whether a collection accepts offers. Callable by the
-    ///         collection's owner (ERC721 ownerOf(token 0)) or the
-    ///         MarketplaceManager admin (DEFAULT_ADMIN_ROLE = bytes32(0)).
-    ///         Non-ERC721 collections fall through to the admin-only path.
+    ///         collection's contract owner (via ERC-173/Ownable owner() selector
+    ///         0x8da5cb5b) or the MarketplaceManager admin (DEFAULT_ADMIN_ROLE).
+    ///         Uses ERC-173's standardized owner() rather than IERC721.ownerOf(0)
+    ///         because owning token 0 is NOT the same as owning the contract —
+    ///         any secondary-market buyer of token 0 could otherwise toggle offers
+    ///         for the entire collection.
+    ///
+    ///         Graceful fallback: if ERC-173 owner() is not available (the
+    ///         collection doesn't implement it), falls back to IERC721.ownerOf(0)
+    ///         for backwards compatibility with mocks and non-Ownable contracts.
+    ///         Non-ERC721 / non-Ownable collections fall through to the
+    ///         admin-only path via MarketplaceManager.
     /// @param coll     Collection address.
     /// @param eligible True to allow offers on this collection.
     function setOfferEligible(address coll, bool eligible) external nonReentrant {
-        // Check if the caller is the ERC721 token-0 owner.
+        // Check if the caller is the collection's ERC-173/Ownable owner.
+        // The owner() selector is 0x8da5cb5b, standardized by ERC-173.
         bool authorized = false;
         (bool ok, bytes memory data) = coll.staticcall(
-            abi.encodeWithSelector(IERC721.ownerOf.selector, 0)
+            abi.encodeWithSignature("owner()")
         );
         if (ok && data.length == 32) {
-            address tokenOwner = abi.decode(data, (address));
-            if (msg.sender == tokenOwner) {
+            address contractOwner = abi.decode(data, (address));
+            if (msg.sender == contractOwner) {
                 authorized = true;
             }
         }
-        // If not the collection owner, check if caller has DEFAULT_ADMIN_ROLE
-        // via the MarketplaceManager. OpenZeppelin AccessControl defines
-        // DEFAULT_ADMIN_ROLE as bytes32(0), NOT keccak256("DEFAULT_ADMIN_ROLE").
+        // Graceful fallback: if ERC-173 is not available (the staticcall
+        // reverted or returned unexpected data), try IERC721.ownerOf(0).
+        // This handles collections that only implement ERC-721 without
+        // ERC-173/Ownable. The `ownerOf(0)` path is less secure (token 0
+        // ownership conflates with contract admin) but is a reasonable
+        // fallback for non-Ownable contracts.
+        if (!authorized) {
+            (bool ok721, bytes memory data721) = coll.staticcall(
+                abi.encodeWithSelector(IERC721.ownerOf.selector, uint256(0))
+            );
+            if (ok721 && data721.length == 32) {
+                address tokenZeroOwner = abi.decode(data721, (address));
+                if (msg.sender == tokenZeroOwner) {
+                    authorized = true;
+                }
+            }
+        }
+        // If neither ERC-173 nor ERC-721 ownerOf(0) worked, check if the
+        // caller has DEFAULT_ADMIN_ROLE via the MarketplaceManager.
+        // OpenZeppelin AccessControl defines DEFAULT_ADMIN_ROLE as
+        // bytes32(0), NOT keccak256("DEFAULT_ADMIN_ROLE").
         if (!authorized && manager != address(0)) {
             (bool adminOk, bytes memory adminData) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
