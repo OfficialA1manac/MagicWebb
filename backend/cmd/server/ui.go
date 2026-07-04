@@ -790,10 +790,17 @@ window.MW_OFFERBOOK='%s';
 // of the default "C2FLR" text that would otherwise appear before the
 // client-side JS updater runs.
 func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
-	// Check the cache first — processed HTML is immutable per path.
+	// Check the cache — but validate that the file hasn't changed on disk
+	// since it was cached. This handles Astro rebuilds during a rolling
+	// deploy without requiring a process restart.
 	if cached, ok := htmlCache.Load(htmlPath); ok {
-		c.Set("Content-Type", "text/html; charset=utf-8")
-		return c.SendString(cached.(string))
+		entry := cached.(htmlCacheEntry)
+		if fi, err := os.Stat(htmlPath); err == nil && fi.ModTime().Equal(entry.modtime) {
+			// File modtime matches cache timestamp — serve cached content.
+			c.Set("Content-Type", "text/html; charset=utf-8")
+			return c.SendString(entry.content)
+		}
+		// File has been updated (or Stat failed) — fall through to recompute.
 	}
 
 	body, err := os.ReadFile(htmlPath)
@@ -801,6 +808,14 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 		return c.Status(fiber.StatusInternalServerError).SendString("failed to read page")
 	}
 	content := string(body)
+
+	// Grab the modtime AFTER reading the file (so the cache timestamp
+	// is never older than the contents we cached). The stat is cheap
+	// and runs only on cache miss.
+	var modtime time.Time
+	if fi, err := os.Stat(htmlPath); err == nil {
+		modtime = fi.ModTime()
+	}
 
 	// Inject the config script just before </head>. The Astro-built
 	// HTML always has a </head> tag (BaseLayout.astro guarantees it).
@@ -824,9 +839,9 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 	netReplacement := `<span class="mw-net-name">` + html.EscapeString(config.C.NetworkName) + `</span>`
 	content = strings.ReplaceAll(content, netPlaceholder, netReplacement)
 
-	// Store in cache before serving — the injected config is static
-	// per-process, so this computation happens exactly once per HTML file.
-	htmlCache.Store(htmlPath, content)
+	// Store in cache before serving. The modtime snapshot ensures the
+	// next request can detect if the file was touched by a deploy roll.
+	htmlCache.Store(htmlPath, htmlCacheEntry{content: content, modtime: modtime})
 
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(content)
@@ -838,9 +853,20 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 // Without caching, every uncached request re-reads the file from disk and
 // re-runs strings.Index + 2× strings.ReplaceAll — avoidable disk I/O and
 // string-alloc churn on the hot path. The cache is a sync.Map keyed by
-// absolute path; entries are populated on first access and never invalidated
-// (the process must restart to pick up new Astro builds).
+// absolute path; entries store the processed content alongside the file's
+// modification time at the time of caching. On lookup, the modtime is
+// re-checked via os.Stat: if the file has changed (e.g. an Astro rebuild
+// during a rolling deploy), the entry is invalidated and recomputed.
 var htmlCache sync.Map
+
+// htmlCacheEntry holds a cached HTML page together with the file modtime
+// at the moment it was cached. On lookup, the caller must verify that
+// the file's current modtime still matches entry.modtime — if not, the
+// cache is stale and must be recomputed.
+type htmlCacheEntry struct {
+	content  string
+	modtime  time.Time
+}
 
 // envOrDefault reads an env var, returning the default if empty or unset.
 func envOrDefault(key, def string) string {
