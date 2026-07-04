@@ -53,7 +53,20 @@ func main() {
 		log.Fatal().Err(err).Msg("db connect failed")
 	}
 	defer pool.Close()
-	q := db.New(pool)
+
+	// Optional read-replica pool for query offloading. When READ_POOL_URL is
+	// set (e.g. a Neon read-only branch endpoint), read-heavy API queries
+	// (listings, auctions, activity, search) are routed through the replica
+	// pool while writes always use the primary. Nil is safe — reader() falls
+	// back to the primary pool when no replica is configured.
+	readPool, err := db.ConnectReadReplica(ctx, config.C.ReadPoolURL)
+	if err != nil {
+		log.Fatal().Err(err).Msg("read replica connect failed")
+	}
+	if readPool != nil {
+		defer readPool.Close()
+	}
+	q := db.New(pool).WithReadReplica(readPool)
 
 	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY.
 	// Degrades to local-only delivery if the listen conn is unavailable.

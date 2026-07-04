@@ -10,20 +10,47 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Q wraps a connection pool and exposes typed query methods.
-type Q struct{ pool PgxPool }
+// Q wraps one or two connection pools and exposes typed query methods.
+// When a read replica pool is configured, read-only queries (SELECT) are
+// routed through readPool while writes (INSERT/UPDATE/DELETE/BEGIN) go
+// through pool. If readPool is nil, all queries use the primary pool.
+type Q struct {
+	pool     PgxPool // primary (read-write) pool
+	readPool PgxPool // optional read-only replica pool
+}
 
 // New builds a Q over any PgxPool (a *pgxpool.Pool in production, a mock in tests).
-func New(pool PgxPool) *Q { return &Q{pool} }
+func New(pool PgxPool) *Q { return &Q{pool: pool} }
 
-// Ping verifies the DB connection is alive.
+// WithReadReplica attaches an optional read-only pool. When set, read queries
+// are offloaded to the replica. Returns self for chaining.
+func (q *Q) WithReadReplica(readPool PgxPool) *Q {
+	q.readPool = readPool
+	return q
+}
+
+// reader returns the pool to use for read-only queries (SELECT). Prefers the
+// read replica when configured; falls back to the primary pool so a missing
+// replica is transparent to callers.
+func (q *Q) reader() PgxPool {
+	if q.readPool != nil {
+		return q.readPool
+	}
+	return q.pool
+}
+
+// writer always returns the primary (read-write) pool so writes and
+// transactions never accidentally hit the replica.
+func (q *Q) writer() PgxPool { return q.pool }
+
+// Ping verifies the primary DB connection is alive.
 func (q *Q) Ping(ctx context.Context) error { return q.pool.Ping(ctx) }
 
 // ── Indexer state ─────────────────────────────────────────────────────────
 
 func (q *Q) GetIndexedBlock(ctx context.Context, chainID int) (uint64, error) {
 	var block uint64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT indexed_block FROM indexer_state WHERE chain_id = $1`, chainID).
 		Scan(&block)
 	if err == pgx.ErrNoRows {
@@ -33,7 +60,7 @@ func (q *Q) GetIndexedBlock(ctx context.Context, chainID int) (uint64, error) {
 }
 
 func (q *Q) SetIndexedBlock(ctx context.Context, chainID int, block uint64) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO indexer_state(chain_id, indexed_block, updated_at)
 		 VALUES($1,$2,now())
 		 ON CONFLICT (chain_id) DO UPDATE
@@ -54,7 +81,7 @@ type CollectionRow struct {
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO collections(address, name, symbol, standard, deploy_block)
 		 VALUES($1,$2,$3,$4,$5)
 		 ON CONFLICT(address) DO UPDATE
@@ -65,7 +92,7 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 
 func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT address, name, symbol, standard::text, deploy_block, verified
 		 FROM collections WHERE address=$1`, address).
 		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
@@ -79,7 +106,7 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 	if limit == 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT address, name, symbol, standard::text, deploy_block
 		 FROM collections WHERE tracked=true ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
@@ -99,7 +126,7 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 
 func (q *Q) GetFloorPrice(ctx context.Context, collection string) (*big.Int, error) {
 	var priceStr string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(MIN(price_wei)::text,'0') FROM listings
 		 WHERE collection=$1 AND active=true AND expires_at > now()`, collection).
 		Scan(&priceStr)
@@ -111,7 +138,7 @@ func (q *Q) GetFloorPrice(ctx context.Context, collection string) (*big.Int, err
 
 func (q *Q) Get24hVolume(ctx context.Context, collection string) (*big.Int, error) {
 	var volStr string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
 		 WHERE collection=$1 AND occurred_at > now()-interval '24 hours'`, collection).
 		Scan(&volStr)
@@ -123,7 +150,7 @@ func (q *Q) Get24hVolume(ctx context.Context, collection string) (*big.Int, erro
 
 func (q *Q) GetListedCount(ctx context.Context, collection string) (int, error) {
 	var count int
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COUNT(*) FROM listings WHERE collection=$1 AND active=true AND expires_at > now()`,
 		collection).Scan(&count)
 	return count, err
@@ -136,7 +163,7 @@ func (q *Q) GetListedCount(ctx context.Context, collection string) (int, error) 
 // let the handler decide whether to fail-soft or fail-hard.
 func (q *Q) CountActiveListings(ctx context.Context) (int64, error) {
 	var n int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COUNT(*) FROM listings WHERE active=true AND NOT orphaned AND expires_at > now()`,
 	).Scan(&n)
 	return n, err
@@ -146,7 +173,7 @@ func (q *Q) CountActiveListings(ctx context.Context) (int64, error) {
 // cancelled. Drives the home-page counter.
 func (q *Q) CountActiveAuctions(ctx context.Context) (int64, error) {
 	var n int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COUNT(*) FROM auctions WHERE status='active' AND ends_at > now()`,
 	).Scan(&n)
 	return n, err
@@ -156,7 +183,7 @@ func (q *Q) CountActiveAuctions(ctx context.Context) (int64, error) {
 // filter excludes one-off contract rows that never completed ingest.
 func (q *Q) CountCollections(ctx context.Context) (int64, error) {
 	var n int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COUNT(*) FROM collections WHERE tracked=true`,
 	).Scan(&n)
 	return n, err
@@ -168,7 +195,7 @@ func (q *Q) CountCollections(ctx context.Context) (int64, error) {
 // result so the page still renders "0.00 FLR" rather than an empty string.
 func (q *Q) TotalVolume24hWei(ctx context.Context) (string, error) {
 	var v string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
 		 WHERE occurred_at > now()-interval '24 hours'`,
 	).Scan(&v)
@@ -273,7 +300,7 @@ type ListingRow struct {
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO listings(collection, token_id, seller, price_wei, amount, standard, expires_at, listed_at, tx_hash, active, orphaned)
 		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,true,false)
 		 ON CONFLICT(collection, token_id, seller) DO UPDATE
@@ -286,7 +313,7 @@ func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
 
 // DeactivateListing closes one seller's listing for a token (multi-listing key).
 func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID, seller string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2 AND seller=$3`,
 		collection, tokenID, seller)
 	return err
@@ -294,7 +321,7 @@ func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID, seller s
 
 func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*ListingRow, error) {
 	var r ListingRow
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
@@ -365,7 +392,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		orderBy = "CAST(l.price_wei AS numeric) DESC"
 	}
 
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
@@ -437,7 +464,7 @@ func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
 }
 
 func (q *Q) UpsertAuction(ctx context.Context, r AuctionRow) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO auctions(auction_id, collection, token_id, seller, standard,
 		    reserve_price_wei, highest_bid_wei, highest_bidder, min_increment_bps,
 		    starts_at, ends_at, status, create_tx)
@@ -454,7 +481,7 @@ func (q *Q) UpsertAuction(ctx context.Context, r AuctionRow) error {
 }
 
 func (q *Q) SetAuctionStatus(ctx context.Context, auctionID int64, status string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE auctions SET status=$1 WHERE auction_id=$2`, status, auctionID)
 	return err
 }
@@ -462,14 +489,14 @@ func (q *Q) SetAuctionStatus(ctx context.Context, auctionID int64, status string
 // ExtendAuction pushes out an active auction's end time after an on-chain anti-snipe
 // extension (the AuctionExtended event). No-op on non-active auctions.
 func (q *Q) ExtendAuction(ctx context.Context, auctionID int64, endsAt time.Time) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE auctions SET ends_at=$1 WHERE auction_id=$2 AND status='active'`, endsAt, auctionID)
 	return err
 }
 
 func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error) {
 	var r AuctionRow
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+` WHERE a.auction_id=$1`, auctionID).
 		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
@@ -516,7 +543,7 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 		args = append(args, f.MaxPriceWei)
 		where += fmt.Sprintf(" AND CAST(a.reserve_price_wei AS NUMERIC) <= CAST($%d AS NUMERIC)", len(args))
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+` `+where+` ORDER BY a.ends_at ASC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
@@ -538,7 +565,7 @@ func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, er
 }
 
 func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+
 			` WHERE a.status='active' AND a.ends_at < now()
 		 ORDER BY a.ends_at ASC LIMIT 100`)
@@ -558,7 +585,7 @@ func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) 
 }
 
 func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+
 			` WHERE a.status='active'
 		   AND a.highest_bidder IS NULL
@@ -594,7 +621,7 @@ type RefundableAuction struct {
 // refunds, throttled so a just-attempted auction is skipped for 2 minutes
 // (refundLosers is idempotent on-chain, so re-sends are safe but wasteful).
 func (q *Q) GetSettledUnrefundedAuctions(ctx context.Context) ([]RefundableAuction, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT auction_id, status::text, COALESCE(highest_bidder,'')
 		   FROM auctions
 		  WHERE status IN ('settled', 'cancelled') AND NOT losers_refunded
@@ -618,7 +645,7 @@ func (q *Q) GetSettledUnrefundedAuctions(ctx context.Context) ([]RefundableAucti
 // MarkLosersRefunded flags an auction as fully refunded so the sweeper stops
 // re-sending refundLosers for it.
 func (q *Q) MarkLosersRefunded(ctx context.Context, auctionID int64) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE auctions SET losers_refunded = TRUE WHERE auction_id=$1`, auctionID)
 	return err
 }
@@ -626,7 +653,7 @@ func (q *Q) MarkLosersRefunded(ctx context.Context, auctionID int64) error {
 // SetRefundAttempt records that the sweeper just broadcast refundLosers for an
 // auction, throttling the next attempt.
 func (q *Q) SetRefundAttempt(ctx context.Context, auctionID int64) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE auctions SET refund_attempt_at = now() WHERE auction_id=$1`, auctionID)
 	return err
 }
@@ -634,7 +661,7 @@ func (q *Q) SetRefundAttempt(ctx context.Context, auctionID int64) error {
 // ── Bids ──────────────────────────────────────────────────────────────────
 
 func (q *Q) InsertBid(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO bids(auction_id, bidder, amount_wei, tx_hash, placed_at)
 		 VALUES($1,$2,$3,$4,$5)
 		 ON CONFLICT(tx_hash) DO NOTHING`,
@@ -652,7 +679,7 @@ type BidRow struct {
 
 // GetBidsForAuction returns all bids for an auction ordered newest-first.
 func (q *Q) GetBidsForAuction(ctx context.Context, auctionID int64) ([]BidRow, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT bidder, amount_wei::text, tx_hash, placed_at
 		   FROM bids
 		  WHERE auction_id = $1
@@ -691,7 +718,7 @@ type EffectiveBidRow struct {
 // OOM-ed rendering pages. Clamping at 200 covers the realistic active-bidder
 // spectrum and keeps JSON / template payloads bounded.
 func (q *Q) GetEffectiveBids(ctx context.Context, auctionID int64) ([]EffectiveBidRow, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT bidder, effective_wei::text, bid_count, last_bid_at
 		   FROM effective_bids
 		  WHERE auction_id = $1
@@ -719,7 +746,7 @@ func (q *Q) InsertSale(ctx context.Context,
 	collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash string,
 	blockNumber uint64, occurredAt time.Time,
 ) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO sales(collection, token_id, seller, buyer, price_wei, fee_wei, royalty_wei, tx_hash, block_number, occurred_at)
 		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10)
 		 ON CONFLICT(tx_hash) DO NOTHING`,
@@ -729,7 +756,7 @@ func (q *Q) InsertSale(ctx context.Context,
 
 func (q *Q) GetCollectionVolume(ctx context.Context, collection string, since time.Time) (*big.Int, error) {
 	var volStr string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(SUM(price_wei)::text,'0') FROM sales
 		 WHERE collection=$1 AND occurred_at >= $2`, collection, since).Scan(&volStr)
 	if err != nil {
@@ -740,7 +767,7 @@ func (q *Q) GetCollectionVolume(ctx context.Context, collection string, since ti
 
 func (q *Q) GetCollectionBidCount(ctx context.Context, collection string, since time.Time) (int64, error) {
 	var count int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COUNT(*) FROM bids b
 		 JOIN auctions a ON a.auction_id=b.auction_id
 		 WHERE a.collection=$1 AND b.placed_at >= $2`, collection, since).Scan(&count)
@@ -749,7 +776,7 @@ func (q *Q) GetCollectionBidCount(ctx context.Context, collection string, since 
 
 func (q *Q) GetCollectionViews(ctx context.Context, collection string) (int64, error) {
 	var views int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(SUM(views),0) FROM nft_tokens WHERE collection=$1`, collection).Scan(&views)
 	return views, err
 }
@@ -766,7 +793,7 @@ type CollectionStatsRow struct {
 // grouped query, replacing the per-collection N+1 the score worker used to
 // issue (3 queries × collections × windows per minute).
 func (q *Q) GetCollectionStatsSince(ctx context.Context, since time.Time, limit int) ([]CollectionStatsRow, error) {
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT c.address,
 		       COALESCE(v.views, 0),
 		       COALESCE(b.bids, 0),
@@ -809,7 +836,7 @@ type TrendingScore struct {
 }
 
 func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO trending_scores(collection, "window", score, views, bids, volume_wei, computed_at)
 		 VALUES($1,$2,$3,$4,$5,$6,now())
 		 ON CONFLICT(collection, "window") DO UPDATE
@@ -820,7 +847,7 @@ func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
 }
 
 func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int) ([]TrendingScore, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT collection, "window", score, views, bids, volume_wei::text
 		 FROM trending_scores WHERE "window"=$1
 		 ORDER BY score DESC LIMIT $2`, window, limit)
@@ -845,7 +872,7 @@ func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int
 // ── NFT token owner & metadata ────────────────────────────────────────────
 
 func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO nft_tokens(collection, token_id, owner)
 		 VALUES($1,$2,$3)
 		 ON CONFLICT(collection, token_id) DO UPDATE SET owner=EXCLUDED.owner`,
@@ -854,13 +881,13 @@ func (q *Q) SetTokenOwner(ctx context.Context, collection, tokenID, owner string
 }
 
 func (q *Q) GetTokenMeta(ctx context.Context, collection, tokenID string) (name, imageURI string, err error) {
-	err = q.pool.QueryRow(ctx,
+	err = q.reader().QueryRow(ctx,
 		`SELECT COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM nft_tokens t
 		 LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 		 WHERE t.collection=$1 AND t.token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
 	if err == pgx.ErrNoRows {
-		err = q.pool.QueryRow(ctx,
+		err = q.reader().QueryRow(ctx,
 			`SELECT COALESCE(name,''), COALESCE(image_uri,'') FROM nft_metadata
 			 WHERE collection=$1 AND token_id=$2`, collection, tokenID).Scan(&name, &imageURI)
 		if err == pgx.ErrNoRows {
@@ -871,7 +898,7 @@ func (q *Q) GetTokenMeta(ctx context.Context, collection, tokenID string) (name,
 }
 
 func (q *Q) IncrementTokenViews(ctx context.Context, collection, tokenID string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE nft_tokens SET views=views+1 WHERE collection=$1 AND token_id=$2`,
 		collection, tokenID)
 	return err
@@ -895,7 +922,7 @@ func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string, li
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash
 		  FROM sales WHERE collection=$1 AND token_id=$2
 		UNION ALL
@@ -934,7 +961,7 @@ func (q *Q) GetTokenActivityByAddress(ctx context.Context, collection, tokenID, 
 	if limit <= 0 || limit > 100 {
 		limit = 30
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT 'Sold' AS type, price_wei::text, seller, buyer, occurred_at AS ts, tx_hash
 		  FROM sales WHERE collection=$1 AND token_id=$2 AND (seller=$3 OR buyer=$3)
 		UNION ALL
@@ -967,7 +994,7 @@ func (q *Q) GetTokenActivityByAddress(ctx context.Context, collection, tokenID, 
 // GetTokenFullMetadata returns the on-chain metadata for a single token
 // with ALL fields (not just name+image). Drives the token detail page.
 func (q *Q) GetTokenFullMetadata(ctx context.Context, collection, tokenID string) (name, description, imageURI, animationURI, metadataURI string, fetchedAt time.Time, err error) {
-	err = q.pool.QueryRow(ctx,
+	err = q.reader().QueryRow(ctx,
 		`SELECT COALESCE(m.name, t.name, ''),
 		        COALESCE(m.description, ''),
 		        COALESCE(m.image_uri, t.image_uri, ''),
@@ -980,7 +1007,7 @@ func (q *Q) GetTokenFullMetadata(ctx context.Context, collection, tokenID string
 		Scan(&name, &description, &imageURI, &animationURI, &metadataURI, &fetchedAt)
 	if err == pgx.ErrNoRows {
 		// Try nft_metadata-only fallback (token may not be in nft_tokens yet)
-		err = q.pool.QueryRow(ctx,
+		err = q.reader().QueryRow(ctx,
 			`SELECT COALESCE(name,''), COALESCE(description,''), COALESCE(image_uri,''),
 			        COALESCE(animation_uri,''), COALESCE(metadata_uri,''), COALESCE(fetched_at,now())
 			 FROM nft_metadata WHERE collection=$1 AND token_id=$2`,
@@ -996,7 +1023,7 @@ func (q *Q) GetTokenFullMetadata(ctx context.Context, collection, tokenID string
 // Attributes grid on /token/:addr/:id. Order matches storage (by trait_type
 // then value) so the layout is stable across reloads.
 func (q *Q) GetTokenAttributes(ctx context.Context, collection, tokenID string) ([]Trait, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT trait_type, value FROM nft_attributes
 		 WHERE collection=$1 AND token_id=$2
 		 ORDER BY trait_type ASC, value ASC`,
@@ -1044,7 +1071,7 @@ type OffersFilter struct {
 
 func (q *Q) GetOffer(ctx context.Context, offerID string) (*OfferRow, error) {
 	var r OfferRow
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
 		        fee_wei::text, units, standard::text, expires_at, status::text,
 		        COALESCE(make_tx,''), created_at
@@ -1086,7 +1113,7 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 			WHERE n.collection=o.collection AND n.token_id=o.token_id AND n.owner=$%d AND n.units > 0
 		)`, len(args))
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text,
 		        o.principal_wei::text, o.fee_wei::text, o.units, o.standard::text,
 		        o.expires_at, o.status::text, COALESCE(o.make_tx,''), o.created_at
@@ -1109,7 +1136,7 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 }
 
 func (q *Q) ExpireOffers(ctx context.Context) (int64, error) {
-	tag, err := q.pool.Exec(ctx,
+	tag, err := q.writer().Exec(ctx,
 		`UPDATE offers SET status='expired' WHERE expires_at < now() AND status='pending'`)
 	if err != nil {
 		return 0, err
@@ -1118,7 +1145,7 @@ func (q *Q) ExpireOffers(ctx context.Context) (int64, error) {
 }
 
 func (q *Q) CancelOffer(ctx context.Context, offerID, bidder string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE offers SET status='cancelled'
 		 WHERE offer_id=$1 AND bidder=$2 AND status='pending'`,
 		offerID, bidder)
@@ -1128,7 +1155,7 @@ func (q *Q) CancelOffer(ctx context.Context, offerID, bidder string) error {
 // ── Users ─────────────────────────────────────────────────────────────────
 
 func (q *Q) UpsertUser(ctx context.Context, address string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO users(address, last_seen_at)
 		 VALUES($1, now())
 		 ON CONFLICT(address) DO UPDATE SET last_seen_at=now()`,
@@ -1139,7 +1166,7 @@ func (q *Q) UpsertUser(ctx context.Context, address string) error {
 // ── Event counting (for IndexerService.GetStatus) ─────────────────────────
 
 func (q *Q) GetEventCounts(ctx context.Context) (total, last1h uint64, err error) {
-	err = q.pool.QueryRow(ctx,
+	err = q.reader().QueryRow(ctx,
 		`SELECT
 		    (SELECT COUNT(*) FROM sales) +
 		    (SELECT COUNT(*) FROM bids) +
@@ -1170,7 +1197,7 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	if limit <= 0 || limit > 50 {
 		limit = 20
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		(
 			SELECT 'nft'::text,
 			       t.collection::text,
@@ -1219,7 +1246,7 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 // to pull-withdrawal (LoserRefunded/RefundPushed fire on both push outcomes).
 // The withdrawal sweeper verifies against on-chain pendingReturns afterwards.
 func (q *Q) SeedPendingWithdrawal(ctx context.Context, address string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO pending_withdrawals(address, verified, updated_at)
 		 VALUES($1, false, now())
 		 ON CONFLICT(address) DO UPDATE SET updated_at = now()`,
@@ -1236,7 +1263,7 @@ type PendingWithdrawalRow struct {
 
 // ListPendingWithdrawals returns all candidate/verified rows for the sweeper.
 func (q *Q) ListPendingWithdrawals(ctx context.Context, limit int) ([]PendingWithdrawalRow, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT address, amount_wei::text, verified FROM pending_withdrawals
 		  ORDER BY updated_at ASC LIMIT $1`, limit)
 	if err != nil {
@@ -1259,7 +1286,7 @@ func (q *Q) ListPendingWithdrawals(ctx context.Context, limit int) ([]PendingWit
 // so the caller can notify the user exactly once.
 func (q *Q) MarkPendingWithdrawalVerified(ctx context.Context, address, amountWei string) (bool, error) {
 	var wasVerified bool
-	err := q.pool.QueryRow(ctx,
+	err := q.writer().QueryRow(ctx,
 		`UPDATE pending_withdrawals AS pw
 		    SET amount_wei = $2, verified = true, updated_at = now()
 		  FROM (SELECT verified FROM pending_withdrawals WHERE address = $1) prev
@@ -1272,7 +1299,7 @@ func (q *Q) MarkPendingWithdrawalVerified(ctx context.Context, address, amountWe
 // DeletePendingWithdrawal removes a row once on-chain pendingReturns is zero
 // (the push landed after all, or the user withdrew).
 func (q *Q) DeletePendingWithdrawal(ctx context.Context, address string) error {
-	_, err := q.pool.Exec(ctx, `DELETE FROM pending_withdrawals WHERE address = $1`, address)
+	_, err := q.writer().Exec(ctx, `DELETE FROM pending_withdrawals WHERE address = $1`, address)
 	return err
 }
 
@@ -1280,7 +1307,7 @@ func (q *Q) DeletePendingWithdrawal(ctx context.Context, address string) error {
 // when nothing verified is owed. Drives the profile-page withdraw banner.
 func (q *Q) GetVerifiedPendingWithdrawal(ctx context.Context, address string) (string, error) {
 	var amt string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT amount_wei::text FROM pending_withdrawals
 		  WHERE address = $1 AND verified = true`, address).Scan(&amt)
 	if err == pgx.ErrNoRows {
@@ -1291,7 +1318,7 @@ func (q *Q) GetVerifiedPendingWithdrawal(ctx context.Context, address string) (s
 
 // SetCollectionVerified flips the curation badge on a collection.
 func (q *Q) SetCollectionVerified(ctx context.Context, address string, verified bool) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE collections SET verified = $2 WHERE address = $1`, address, verified)
 	return err
 }
@@ -1304,7 +1331,7 @@ func (q *Q) DeactivateAndSale(ctx context.Context,
 	collection, tokenID, seller, buyer, priceWei, feeWei, royaltyWei, txHash string,
 	blockNumber uint64, occurredAt time.Time,
 ) error {
-	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := q.writer().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -1330,7 +1357,7 @@ func (q *Q) DeactivateAndSale(ctx context.Context,
 // leader from the effective_bids view (cumulative-bid model) in one transaction.
 // Replaces the non-transactional InsertBid + UpdateAuctionBid pair in the indexer.
 func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidder, amtWei, txHash string, placedAt time.Time) error {
-	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := q.writer().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -1373,7 +1400,7 @@ func (q *Q) InsertBidAndUpdateAuction(ctx context.Context, auctionID int64, bidd
 // branch DELETEs all ownership rows for (coll,token) then INSERTs one row for
 // the lister, mirroring the contract's single-owner invariant.
 func (q *Q) UpsertListingAndOwnership(ctx context.Context, r ListingRow) error {
-	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := q.writer().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -1429,7 +1456,7 @@ func (q *Q) AcceptOfferAndRecordSale(ctx context.Context,
 	priceWei, feeWei, royaltyWei, txHash string,
 	blockNumber uint64, occurredAt time.Time,
 ) error {
-	tx, err := q.pool.BeginTx(ctx, pgx.TxOptions{})
+	tx, err := q.writer().BeginTx(ctx, pgx.TxOptions{})
 	if err != nil {
 		return err
 	}
@@ -1464,7 +1491,7 @@ type MarketMetrics struct {
 
 func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
 	var m MarketMetrics
-	err := q.pool.QueryRow(ctx, `
+	err := q.reader().QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*)          FROM listings WHERE active = true)::bigint,
 			(SELECT COUNT(*)          FROM sales)::bigint,
@@ -1489,7 +1516,7 @@ type StalledAuctionCounts struct {
 // row with three columns, avoiding three round-trips.
 func (q *Q) GetStalledAuctionCounts(ctx context.Context) (*StalledAuctionCounts, error) {
 	var s StalledAuctionCounts
-	err := q.pool.QueryRow(ctx, `
+	err := q.reader().QueryRow(ctx, `
 		SELECT
 			(SELECT COUNT(*) FROM auctions WHERE status='active' AND ends_at < now())::bigint,
 			(SELECT COUNT(*) FROM auctions WHERE status='active' AND highest_bidder IS NULL
@@ -1525,7 +1552,7 @@ func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctio
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT auction_id, collection, token_id::text, seller, status::text,
 		       CASE
 		         WHEN status='active' AND ends_at < now() THEN 'expired_unsettled'
@@ -1590,7 +1617,7 @@ func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
 			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
 			   FROM listings ORDER BY listed_at DESC LIMIT $1)
@@ -1632,7 +1659,7 @@ func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx, `
+	rows, err := q.reader().Query(ctx, `
 		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
 			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
 			   FROM listings WHERE lower(seller) = lower($1)

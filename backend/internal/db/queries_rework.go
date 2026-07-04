@@ -28,7 +28,7 @@ func lcStandard(s string) string {
 // collections that were ever listed, auctioned, or transferred — even if their
 // tracked_collections row was lost or the collection was never explicitly tracked.
 func (q *Q) ListDistinctCollectionsFromTokens(ctx context.Context) ([]string, error) {
-	rows, err := q.pool.Query(ctx, `SELECT DISTINCT collection FROM nft_tokens`)
+	rows, err := q.reader().Query(ctx, `SELECT DISTINCT collection FROM nft_tokens`)
 	if err != nil {
 		return nil, err
 	}
@@ -48,14 +48,14 @@ func (q *Q) ListDistinctCollectionsFromTokens(ctx context.Context) ([]string, er
 // first time it is seen via any marketplace event. Idempotent.
 func (q *Q) EnsureCollection(ctx context.Context, addr, standard string, block uint64) error {
 	std := lcStandard(standard)
-	if _, err := q.pool.Exec(ctx,
+	if _, err := q.writer().Exec(ctx,
 		`INSERT INTO collections(address, standard, deploy_block, tracked)
 		 VALUES($1,$2,$3,true)
 		 ON CONFLICT(address) DO NOTHING`,
 		addr, std, block); err != nil {
 		return err
 	}
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO tracked_collections(address, standard, first_seen_block, last_indexed_block)
 		 VALUES($1,$2,$3,$3)
 		 ON CONFLICT(address) DO NOTHING`,
@@ -86,7 +86,7 @@ func (q *Q) SeedTrackedCollections(ctx context.Context, addrs []string) int {
 
 // ListTrackedCollections returns every collection the indexer watches for transfers.
 func (q *Q) ListTrackedCollections(ctx context.Context) ([]string, error) {
-	rows, err := q.pool.Query(ctx, `SELECT address FROM tracked_collections`)
+	rows, err := q.reader().Query(ctx, `SELECT address FROM tracked_collections`)
 	if err != nil {
 		return nil, err
 	}
@@ -106,7 +106,7 @@ func (q *Q) ListTrackedCollections(ctx context.Context) ([]string, error) {
 
 func (q *Q) GetTokenOwner(ctx context.Context, collection, tokenID string) (string, error) {
 	var owner string
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT owner FROM nft_ownership
 		 WHERE collection=$1 AND token_id=$2 AND units > 0
 		 ORDER BY units DESC LIMIT 1`, collection, tokenID).Scan(&owner)
@@ -119,7 +119,7 @@ func (q *Q) GetTokenOwner(ctx context.Context, collection, tokenID string) (stri
 // ApplyTransfer721 sets the single owner of an ERC-721 token and orphans any
 // active listing whose seller is no longer the holder.
 func (q *Q) ApplyTransfer721(ctx context.Context, collection, tokenID, to string) error {
-	tx, err := q.pool.Begin(ctx)
+	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -154,7 +154,7 @@ func (q *Q) ApplyTransfer721(ctx context.Context, collection, tokenID, to string
 // ApplyTransfer1155 moves `units` of a token between holders and orphans the
 // sender's listing once their balance reaches zero.
 func (q *Q) ApplyTransfer1155(ctx context.Context, collection, tokenID, from, to, units string) error {
-	tx, err := q.pool.Begin(ctx)
+	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -196,7 +196,7 @@ func (q *Q) ApplyTransfer1155(ctx context.Context, collection, tokenID, from, to
 // UpsertOfferPosition records a bidder's compounded position. The contract emits
 // the cumulative principal, so we overwrite rather than add.
 func (q *Q) UpsertOfferPosition(ctx context.Context, r OfferRow) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO offers(collection, token_id, bidder, principal_wei, fee_wei, units, standard, expires_at, status, make_tx)
 		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,'pending',$9)
 		 ON CONFLICT(collection, token_id, bidder) WHERE status='pending'
@@ -209,7 +209,7 @@ func (q *Q) UpsertOfferPosition(ctx context.Context, r OfferRow) error {
 }
 
 func (q *Q) SetOfferStatus(ctx context.Context, collection, tokenID, bidder, status string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE offers SET status=$4
 		 WHERE collection=$1 AND token_id=$2 AND bidder=$3 AND status='pending'`,
 		collection, tokenID, bidder, status)
@@ -228,7 +228,7 @@ func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID str
 	if limit <= 0 || limit > 500 {
 		limit = 200
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
 		        fee_wei::text, units, standard::text, expires_at, status::text,
 		        COALESCE(make_tx,''), created_at
@@ -264,7 +264,7 @@ type OwnedNFT struct {
 }
 
 func (q *Q) WalletNFTs(ctx context.Context, owner string) ([]OwnedNFT, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT n.collection, n.token_id::text, n.units::text, n.standard::text,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM nft_ownership n
@@ -299,7 +299,7 @@ type Preflight struct {
 // preflight and the metadata worker can find the token before Transfer logs arrive.
 func (q *Q) EnsureListingSellerOwnership(ctx context.Context, collection, tokenID, seller, standard string, amount int64) error {
 	if standard == "erc1155" {
-		_, err := q.pool.Exec(ctx,
+		_, err := q.writer().Exec(ctx,
 			`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
 			 VALUES($1,$2,$3,$4,'erc1155')
 			 ON CONFLICT(collection, token_id, owner)
@@ -307,12 +307,12 @@ func (q *Q) EnsureListingSellerOwnership(ctx context.Context, collection, tokenI
 			collection, tokenID, seller, amount)
 		return err
 	}
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`DELETE FROM nft_ownership WHERE collection=$1 AND token_id=$2`, collection, tokenID)
 	if err != nil {
 		return err
 	}
-	_, err = q.pool.Exec(ctx,
+	_, err = q.writer().Exec(ctx,
 		`INSERT INTO nft_ownership(collection, token_id, owner, units, standard)
 		 VALUES($1,$2,$3,1,'erc721')`, collection, tokenID, seller)
 	return err
@@ -320,7 +320,7 @@ func (q *Q) EnsureListingSellerOwnership(ctx context.Context, collection, tokenI
 
 // OrphanListing marks a seller's listing inactive when they no longer hold the NFT.
 func (q *Q) OrphanListing(ctx context.Context, collection, tokenID, seller string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE listings SET orphaned=true, active=false
 		 WHERE lower(collection)=lower($1) AND token_id=$2 AND lower(seller)=lower($3)
 		   AND active=true AND NOT orphaned`,
@@ -336,7 +336,7 @@ func (q *Q) OrphanListing(ctx context.Context, collection, tokenID, seller strin
 // the full amount.
 func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller string) (*Preflight, error) {
 	p := &Preflight{Seller: seller}
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT (l.active AND NOT l.orphaned AND l.expires_at > now()), l.orphaned, l.price_wei::text,
 		        EXISTS(SELECT 1 FROM nft_ownership n
 		               WHERE n.collection=l.collection AND n.token_id=l.token_id
@@ -361,7 +361,7 @@ func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) (
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.standard::text, l.amount
 		 FROM listings l
 		 WHERE l.active=true AND NOT l.orphaned AND l.expires_at > now()
@@ -404,7 +404,7 @@ type NotificationRow struct {
 }
 
 func (q *Q) InsertNotification(ctx context.Context, addr, kind, title, body, link string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO notifications(user_addr, kind, title, body, link)
 		 VALUES($1,$2,$3,$4,NULLIF($5,''))`,
 		strings.ToLower(addr), kind, title, body, link)
@@ -415,7 +415,7 @@ func (q *Q) ListNotifications(ctx context.Context, addr string, limit int) ([]No
 	if limit == 0 || limit > 100 {
 		limit = 50
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT id, kind::text, title, body, COALESCE(link,''), read, created_at
 		 FROM notifications WHERE user_addr=$1
 		 ORDER BY created_at DESC LIMIT $2`, strings.ToLower(addr), limit)
@@ -436,14 +436,14 @@ func (q *Q) ListNotifications(ctx context.Context, addr string, limit int) ([]No
 
 func (q *Q) UnreadCount(ctx context.Context, addr string) (int, error) {
 	var n int
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT count(*) FROM notifications WHERE user_addr=$1 AND read=false`,
 		strings.ToLower(addr)).Scan(&n)
 	return n, err
 }
 
 func (q *Q) MarkNotificationsRead(ctx context.Context, addr string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE notifications SET read=true WHERE user_addr=$1 AND read=false`,
 		strings.ToLower(addr))
 	return err
@@ -464,7 +464,7 @@ type ProfileRow struct {
 
 func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
 	p := &ProfileRow{Address: strings.ToLower(addr)}
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT display_name, bio, COALESCE(avatar_uri,''), COALESCE(banner_uri,''),
 		        COALESCE(twitter,''), COALESCE(website,''), verified
 		 FROM profiles WHERE address=$1`, strings.ToLower(addr)).
@@ -477,7 +477,7 @@ func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
 
 // UpsertProfile writes user-editable fields only; `verified` is admin-controlled.
 func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO profiles(address, display_name, bio, avatar_uri, banner_uri, twitter, website, updated_at)
 		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''), now())
 		 ON CONFLICT(address) DO UPDATE
@@ -489,7 +489,7 @@ func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
 }
 
 func (q *Q) SetVerified(ctx context.Context, addr string, verified bool) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO profiles(address, verified, updated_at) VALUES($1,$2, now())
 		 ON CONFLICT(address) DO UPDATE SET verified=EXCLUDED.verified, updated_at=now()`,
 		strings.ToLower(addr), verified)
@@ -499,7 +499,7 @@ func (q *Q) SetVerified(ctx context.Context, addr string, verified bool) error {
 // ── Reports ────────────────────────────────────────────────────────────────
 
 func (q *Q) InsertReport(ctx context.Context, reporter, targetType, targetID, reason, detail string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO reports(reporter, target_type, target_id, reason, detail)
 		 VALUES($1,$2,$3,$4,$5)`,
 		strings.ToLower(reporter), targetType, targetID, reason, detail)
@@ -523,7 +523,7 @@ func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]Missing
 	// Re-querying them every 30s produced a tight eth_call loop on tokens
 	// whose JSON genuinely has no `image` field. Once a metadata row exists
 	// at all, the drop is over.
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT src.collection, src.token_id::text, src.standard::text
 		 FROM (
 		   SELECT n.collection, n.token_id, n.standard
@@ -557,7 +557,7 @@ func (q *Q) ListTokensMissingMetadata(ctx context.Context, limit int) ([]Missing
 type Trait struct{ Type, Value string }
 
 func (q *Q) UpsertMetadata(ctx context.Context, collection, tokenID, name, desc, image, animation, uri string, traits []Trait) error {
-	tx, err := q.pool.Begin(ctx)
+	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -610,7 +610,7 @@ func (q *Q) UpsertMetadata(ctx context.Context, collection, tokenID, name, desc,
 // sentinel vs. a later successful fetch), we don't wipe its populated
 // fields. The indexer simply records the attempt.
 func (q *Q) MarkMissing(ctx context.Context, collection, tokenID string) error {
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`INSERT INTO nft_metadata(collection, token_id, name, description, image_uri, animation_uri, metadata_uri, fetched_at)
 		 VALUES($1, $2, NULL, NULL, NULL, NULL, NULL, now())
 		 ON CONFLICT(collection, token_id) DO NOTHING`,
@@ -645,7 +645,7 @@ func (q *Q) ListTokensWithUpstreamImages(ctx context.Context, limit int) ([]Imag
 	} else if limit > 100 {
 		limit = 100
 	}
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT collection, token_id::text, image_uri, image_retry_count
 		 FROM nft_metadata
 		 WHERE image_uri IS NOT NULL
@@ -691,7 +691,7 @@ var _ imagestore.Store = (*Q)(nil)
 // it is stored in the collection column for per-collection quota enforcement;
 // on CONFLICT (dedup) the existing collection value is preserved.
 func (q *Q) PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI string, body []byte) error {
-	tx, err := q.pool.Begin(ctx)
+	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -715,7 +715,7 @@ func (q *Q) PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI
 // consume quota. Used by imagestore.Put() to enforce MaxBlobCountPerCollection.
 func (q *Q) CountBlobsForCollection(ctx context.Context, collection string) (int, error) {
 	var n int
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT count(*) FROM nft_image_blobs WHERE collection=$1`, collection).Scan(&n)
 	return n, err
 }
@@ -724,7 +724,7 @@ func (q *Q) CountBlobsForCollection(ctx context.Context, collection string) (int
 // rows. Used by imagestore.Put() to enforce MaxTotalBlobBytes.
 func (q *Q) TotalBlobBytes(ctx context.Context) (int64, error) {
 	var total int64
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT COALESCE(sum(byte_length), 0) FROM nft_image_blobs`).Scan(&total)
 	return total, err
 }
@@ -735,7 +735,7 @@ func (q *Q) TotalBlobBytes(ctx context.Context) (int64, error) {
 // owns the Blob shape; db just fills it).
 func (q *Q) GetImage(ctx context.Context, sha256hex string) (imagestore.Blob, error) {
 	var b imagestore.Blob
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT body, mime, source_uri FROM nft_image_blobs WHERE sha256=$1`, sha256hex).
 		Scan(&b.Body, &b.Mime, &b.SourceURI)
 	return b, err
@@ -745,7 +745,7 @@ func (q *Q) GetImage(ctx context.Context, sha256hex string) (imagestore.Blob, er
 // first vs. upstream fetch without pulling the bytea row just to throw it away.
 func (q *Q) HasImage(ctx context.Context, sha256hex string) (bool, error) {
 	var n int
-	err := q.pool.QueryRow(ctx,
+	err := q.reader().QueryRow(ctx,
 		`SELECT 1 FROM nft_image_blobs WHERE sha256=$1`, sha256hex).Scan(&n)
 	if err == pgx.ErrNoRows {
 		return false, nil
@@ -757,7 +757,7 @@ func (q *Q) HasImage(ctx context.Context, sha256hex string) (bool, error) {
 // with a self-hosted blob path and resets retry tracking. Used by the
 // slow-path image retry worker after a successful imagestore.Put.
 func (q *Q) UpdateImageURI(ctx context.Context, collection, tokenID, imageURI string) error {
-	tx, err := q.pool.Begin(ctx)
+	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
 	}
@@ -789,7 +789,7 @@ func (q *Q) BumpImageRetry(ctx context.Context, collection, tokenID string, coun
 	// 16h, capped at 24h. power(2.0, exp)::int yields the intended geometric
 	// series; GREATEST clamps count-1 to ≥ 0 so the very first bump doesn't
 	// schedule the next retry in the past.
-	_, err := q.pool.Exec(ctx,
+	_, err := q.writer().Exec(ctx,
 		`UPDATE nft_metadata
 		 SET image_retry_count = $3,
 		     next_image_retry_at = now() + LEAST(power(2.0, GREATEST($3 - 1, 0))::int, 24) * interval '1 hour'
@@ -818,13 +818,13 @@ func (q *Q) ListSavedSearches(ctx context.Context, addr string, limit int, page 
 	var rows pgx.Rows
 	var err error
 	if page != "" {
-		rows, err = q.pool.Query(ctx,
+		rows, err = q.reader().Query(ctx,
 			`SELECT id, user_addr, name, page, params, created_at
 			 FROM saved_searches WHERE user_addr=$1 AND page=$2
 			 ORDER BY created_at DESC LIMIT $3`,
 			strings.ToLower(addr), page, limit)
 	} else {
-		rows, err = q.pool.Query(ctx,
+		rows, err = q.reader().Query(ctx,
 			`SELECT id, user_addr, name, page, params, created_at
 			 FROM saved_searches WHERE user_addr=$1
 			 ORDER BY created_at DESC LIMIT $2`,
@@ -848,7 +848,7 @@ func (q *Q) ListSavedSearches(ctx context.Context, addr string, limit int, page 
 // InsertSavedSearch creates a new saved search. Returns the inserted ID.
 func (q *Q) InsertSavedSearch(ctx context.Context, addr, name, page, params string) (int64, error) {
 	var id int64
-	err := q.pool.QueryRow(ctx,
+	err := q.writer().QueryRow(ctx,
 		`INSERT INTO saved_searches(user_addr, name, page, params)
 		 VALUES($1,$2,$3,$4) RETURNING id`,
 		strings.ToLower(addr), name, page, params).Scan(&id)
@@ -858,7 +858,7 @@ func (q *Q) InsertSavedSearch(ctx context.Context, addr, name, page, params stri
 // DeleteSavedSearch removes a saved search. Only the owning user may delete.
 // Returns true when a row was actually deleted.
 func (q *Q) DeleteSavedSearch(ctx context.Context, id int64, addr string) (bool, error) {
-	tag, err := q.pool.Exec(ctx,
+	tag, err := q.writer().Exec(ctx,
 		`DELETE FROM saved_searches WHERE id=$1 AND user_addr=$2`, id, strings.ToLower(addr))
 	if err != nil {
 		return false, err
@@ -870,7 +870,7 @@ func (q *Q) DeleteSavedSearch(ctx context.Context, id int64, addr string) (bool,
 
 // ListTraitValues returns distinct trait values for a collection, powering filters.
 func (q *Q) ListTraitValues(ctx context.Context, collection string) (map[string][]string, error) {
-	rows, err := q.pool.Query(ctx,
+	rows, err := q.reader().Query(ctx,
 		`SELECT trait_type, value, count(*) FROM nft_attributes
 		 WHERE collection=$1 GROUP BY trait_type, value ORDER BY trait_type, value`, collection)
 	if err != nil {
