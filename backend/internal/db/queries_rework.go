@@ -252,32 +252,6 @@ func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID str
 	return out, rows.Err()
 }
 
-// GetRefundableExpiredOffers returns positions past expiry still marked pending,
-// for the keeper to refund on-chain.
-func (q *Q) GetRefundableExpiredOffers(ctx context.Context) ([]OfferRow, error) {
-	rows, err := q.pool.Query(ctx,
-		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
-		        fee_wei::text, units, standard::text, expires_at, status::text,
-		        COALESCE(make_tx,''), created_at
-		 FROM offers
-		 WHERE status='pending' AND expires_at < now()
-		 LIMIT 100`)
-	if err != nil {
-		return nil, err
-	}
-	defer rows.Close()
-	var out []OfferRow
-	for rows.Next() {
-		var r OfferRow
-		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
-			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
-			return nil, err
-		}
-		out = append(out, r)
-	}
-	return out, rows.Err()
-}
-
 // ── Wallet NFTs (for the picker) + preflight ───────────────────────────────
 
 type OwnedNFT struct {

@@ -80,9 +80,9 @@ contract AuctionHouse is MarketplaceCore {
     struct Auction {
         address       seller;
         uint64        startsAt;
-        uint16        minIncrementBps;
+        uint16        minIncrementBps;   // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
         bool          settled;
-        bool          active;          // seller activates after creation; bids only when true
+        bool          active;            // seller activates after creation; bids only when true
         TokenStandard standard;
         address       collection;
         uint64        endsAt;
@@ -91,7 +91,7 @@ contract AuctionHouse is MarketplaceCore {
         uint128       amount;            // token amount (1 for ERC-721)
         address       leader;            // current highest-cumulative bidder
         uint128       leaderTotal;       // leader's cumulative escrow
-        uint128       minIncrementFlat;  // absolute min increment in wei (may be 0)
+        uint128       minIncrementFlat;  // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
     }
 
     uint256 public nextAuctionId;
@@ -186,6 +186,10 @@ contract AuctionHouse is MarketplaceCore {
     // ── Create (free) ───────────────────────────────────────────────────────────
 
     /// @notice Create an ERC-721 auction. Starts immediately.
+    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
+    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
+    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
     function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant entryGate returns (uint256 id)
     {
@@ -193,6 +197,8 @@ contract AuctionHouse is MarketplaceCore {
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
+    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
     function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant entryGate returns (uint256 id)
     {
