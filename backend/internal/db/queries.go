@@ -1167,6 +1167,39 @@ func (q *Q) CancelOffer(ctx context.Context, offerID, bidder string) error {
 	return err
 }
 
+// ListExpiredPendingOffers returns offers whose status is 'expired' (marked by
+// the offer expiry sweeper) and have not yet been refunded on-chain. The keeper
+// sweeper uses this to batch call refundExpiredOffer() on the OfferBook contract.
+// Refunded offers are handled by the OfferRefunded event, which updates status to
+// 'cancelled' in the DB.
+type ExpiredOfferRow struct {
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id"`
+	Bidder     string `json:"bidder"`
+}
+
+func (q *Q) ListExpiredPendingOffers(ctx context.Context, limit int) ([]ExpiredOfferRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT collection, token_id::text, bidder FROM offers
+		 WHERE status='expired' LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExpiredOfferRow
+	for rows.Next() {
+		var r ExpiredOfferRow
+		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Bidder); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 // ── Users ─────────────────────────────────────────────────────────────────
 
 func (q *Q) UpsertUser(ctx context.Context, address string) error {

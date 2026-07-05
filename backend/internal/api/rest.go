@@ -78,7 +78,9 @@ const (
 	"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://*.reown.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
-		"form-action 'self'"
+		"form-action 'self'; " +
+		"object-src 'none'; " +
+		"upgrade-insecure-requests"
 	hstsHeader        = "max-age=63072000; includeSubDomains; preload"
 	permissionsPolicy = "geolocation=(), microphone=(), camera=(), payment=(self \"https://magicwebb.xyz\"), usb=()"
 	referrerPolicy    = "strict-origin-when-cross-origin"

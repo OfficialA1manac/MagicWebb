@@ -18,6 +18,7 @@ error BadIncrement();
 error NotSettled();
 error NothingToWithdraw();
 error BatchTooLarge();
+error NotKeeper();
 
 error CannotCancel();
 
@@ -358,19 +359,37 @@ contract AuctionHouse is MarketplaceCore {
         emit BidPlaced(id, msg.sender, msg.value, newTotal);
     }
 
-    // ── Settle (permissionless, after endsAt) ─────────────────────────────────────
+    // ── Settle (keeper-only after endsAt) ───────────────────────────────────────
 
-    /// @notice Finalize a finished auction. Callable by anyone after `endsAt`.
+    /// @notice Finalize a finished auction. Callable only by addresses with
+    ///         KEEPER_ROLE (via the MarketplaceManager) after `endsAt`.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable via
     ///         refundLosers). If the NFT can't be delivered, the entire tx reverts —
     ///         no stall state. The keeper bot retries on the next block.
     ///         Losers are refunded separately via refundLosers.
+    ///
+    ///         Restricting settle() to the keeper prevents users from front-running
+    ///         settlement windows and ensures consistent, automated settlement.
+    ///         If no MarketplaceManager is deployed (manager == address(0)),
+    ///         settlement is permissionless as a fallback — funds are never trapped.
     // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
+
+        // Only the keeper can settle when a MarketplaceManager is deployed.
+        // When no manager is configured (address(0)), settlement stays
+        // permissionless as a safety fallback so funds are never trapped.
+        if (manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
+            );
+            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
+                revert NotKeeper();
+            }
+        }
 
         address winner = a.leader;
         if (winner == address(0)) {

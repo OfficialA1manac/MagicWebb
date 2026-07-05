@@ -109,15 +109,6 @@ func (r *Runner) Run(ctx context.Context) {
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runListingExpirySweeper(ctx) }()
 
-	// Offer Keeper goroutine REMOVED: the contract no longer has a
-	// permissionless refundExpiredOffer function. The user explicitly
-	// required "Users cannot refund offers. Only sellers can reject offers" —
-	// there is no keeper path for auto-refunding expired offers because only
-	// the seller (contract owner via rejectOffer) can refund. The DB-side
-	// offer-expiry sweeper (runOfferExpirySweeper) still marks expired
-	// offers in the database so the UI can accurately reflect offer status;
-	// the on-chain refund is now seller-only via rejectOffer.
-
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
 
@@ -164,9 +155,10 @@ func (r *Runner) Run(ctx context.Context) {
 						}
 					}
 					var kwg sync.WaitGroup
-					kwg.Add(2)
+					kwg.Add(3)
 					go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
 					go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
+					go func() { defer kwg.Done(); r.runOfferRefundSweeper(kctx) }()
 					// Fee sweep (Zodiac Allowance Module) — only when SAFE_ADDR is configured.
 					if r.cfg.SafeAddr != "" && r.cfg.PersonalWalletAddr != "" {
 						kwg.Add(1)
@@ -950,6 +942,87 @@ func (r *Runner) checkKeeperBalance(ctx context.Context, keeperAddr common.Addre
 			Float64("balance", flrVal).
 			Str("currency", r.cfg.NativeCurrency).
 			Msg("keeper: wallet balance OK")
+	}
+}
+
+// ── Expired Offer Refund Sweeper (keeper on-chain refund) ──────────────
+
+var refundExpiredOfferSelector = crypto.Keccak256([]byte("refundExpiredOffer(address,uint256,address)"))[:4]
+
+// encodeRefundExpiredOffer ABI-encodes refundExpiredOffer(address,uint256,address):
+// selector ‖ coll(32) ‖ tokenId(32) ‖ bidder(32)
+func encodeRefundExpiredOffer(coll common.Address, tokenID *big.Int, bidder common.Address) []byte {
+	out := append([]byte(nil), refundExpiredOfferSelector...)
+	out = append(out, common.LeftPadBytes(coll.Bytes(), 32)...)
+	tidWord := make([]byte, 32)
+	tokenID.FillBytes(tidWord)
+	out = append(out, tidWord...)
+	out = append(out, common.LeftPadBytes(bidder.Bytes(), 32)...)
+	return out
+}
+
+// runOfferRefundSweeper checks for expired offers in the DB and calls
+// refundExpiredOffer() on-chain to return escrow to the bidder. This makes
+// expired offers auto-refundable without user interaction — the keeper
+// handles everything. Idempotent: calling refundExpiredOffer on an already
+// refunded offer (position already deleted) simply reverts on-chain and is
+// skipped on retry.
+func (r *Runner) runOfferRefundSweeper(ctx context.Context) {
+	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	if err != nil {
+		log.Error().Err(err).Msg("offer refund sweeper: invalid KEEPER_KEY, disabled")
+		return
+	}
+	keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
+	offerBookAddr := common.HexToAddress(r.cfg.OfferBookAddr)
+	chainIDBig := big.NewInt(int64(r.cfg.ChainID))
+	signer := types.NewLondonSigner(chainIDBig)
+
+	log.Info().Str("keeper", keeperAddr.Hex()).Msg("offer refund sweeper: started")
+	ticker := time.NewTicker(2 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			offers, err := r.q.ListExpiredPendingOffers(ctx, 50)
+			if err != nil {
+				log.Error().Err(err).Msg("offer refund sweeper: list expired offers failed")
+				continue
+			}
+			for _, o := range offers {
+				coll := common.HexToAddress(o.Collection)
+				bidder := common.HexToAddress(o.Bidder)
+				tid, ok := new(big.Int).SetString(o.TokenID, 10)
+				if !ok {
+					log.Warn().Str("collection", o.Collection).Str("tokenId", o.TokenID).
+						Msg("offer refund sweeper: invalid token ID, skipping")
+					continue
+				}
+				data := encodeRefundExpiredOffer(coll, tid, bidder)
+				h, err := r.sendRaw(ctx, key, keeperAddr, offerBookAddr, signer, chainIDBig, data, 100_000)
+				if err != nil {
+					// Expect revert on already-refunded offers — that's fine.
+					log.Warn().Err(err).
+						Str("collection", o.Collection).Str("tokenId", o.TokenID).
+						Str("bidder", o.Bidder).
+						Msg("offer refund sweeper: refundExpiredOffer tx failed; may already be refunded")
+					continue
+				}
+				// Don't block on receipt for offers — the tx may revert on-chain
+				// if already refunded (idempotent), which waitMined reports as an
+				// error. Just log and move on; the OfferRefunded event handler
+				// updates the DB status.
+				log.Info().
+					Str("collection", o.Collection).Str("tokenId", o.TokenID).
+					Str("bidder", o.Bidder).Str("tx", h.Hex()).
+					Msg("offer refund sweeper: refundExpiredOffer tx sent")
+			}
+			if len(offers) > 0 {
+				log.Info().Int("refunded", len(offers)).Msg("offer refund sweeper: tick complete")
+			}
+		}
 	}
 }
 

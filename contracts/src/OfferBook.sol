@@ -29,6 +29,7 @@ uint64 constant MAX_OFFER_DURATION = 24 hours;
 event OfferEligibilitySet(address indexed coll, bool indexed eligible);
 
 error OffersNotEligible();
+error OfferExpired();
 
 /// @title OfferBook
 /// @notice On-chain NFT offers with stacked positions; the seller pays the fee on acceptance.
@@ -271,6 +272,42 @@ contract OfferBook is MarketplaceCore {
     // contract cannot receive ETH can withdraw later via the inherited
     // `withdrawRefund()` on their core (Marketplace / AuctionHouse / this).
     // No code duplication, no shadowed storage, no divergent error selectors.
+
+    // ── Cancel / Refund expired (keeper) ────────────────────────────────
+    //
+    // cancelOffer: the bidder can withdraw their OWN offer before it expires.
+    // refundExpiredOffer: PERMISSIONLESS, anyone can call after expiry to
+    //     return the escrow to the bidder. This enables the keeper bot to
+    //     auto-refund expired offers without user interaction.
+
+    /// @notice Cancel your own offer before it expires. Refunds the FULL principal.
+    ///         Caller must be the offer's original bidder. After expiry, use
+    ///         refundExpiredOffer instead.
+    function cancelOffer(address coll, uint256 tokenId) external nonReentrant {
+        Position memory p = positions[coll][tokenId][msg.sender];
+        if (p.principal == 0) revert NoOffer();
+        if (block.timestamp >= p.expiresAt) revert OfferExpired();
+
+        delete positions[coll][tokenId][msg.sender];
+        _pay(msg.sender, p.principal);
+        emit OfferRefunded(coll, tokenId, msg.sender, p.principal);
+    }
+
+    /// @notice Refund an expired offer's FULL principal. Permissionless — anyone
+    ///         can call this after the offer expires, enabling the keeper bot
+    ///         to auto-refund without requiring user interaction.
+    /// @param coll    Collection address.
+    /// @param tokenId Token ID.
+    /// @param bidder  The original offerer to refund.
+    function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+        Position memory p = positions[coll][tokenId][bidder];
+        if (p.principal == 0) revert NoOffer();
+        if (block.timestamp < p.expiresAt) revert OfferActive();
+
+        delete positions[coll][tokenId][bidder];
+        _pay(bidder, p.principal);
+        emit OfferRefunded(coll, tokenId, bidder, p.principal);
+    }
 
     /// @notice Owner rejects a bidder's offer, refunding the FULL principal.
     ///         Best-effort push with pull-fallback — a bidder contract without

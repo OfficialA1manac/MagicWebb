@@ -37,6 +37,7 @@ contract MarketplaceManagerTest is Test {
         vm.startPrank(admin);
         mgr.setCoreContracts(address(mp), address(ah), address(ob));
         mgr.grantRole(mgr.OPERATOR_ROLE(), operator);
+        mgr.grantRole(mgr.KEEPER_ROLE(), rando);   // so settle() test works
         vm.stopPrank();
 
         vm.deal(alice, 100 ether);
