@@ -393,6 +393,7 @@ contract AuctionHouse is MarketplaceCore {
         // Transfer the NFT. On failure, revert entirely — no stall state.
         // The keeper bot retries settlement in the next block once the issue
         // (e.g. seller revoked approval, NFT moved) is resolved.
+        // slither-disable-next-line arbitrary-send-erc20
         if (std == TokenStandard.ERC721) {
             IERC721(coll).transferFrom(sel, winner, tid);
         } else {

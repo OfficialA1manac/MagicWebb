@@ -1,57 +1,17 @@
-# ── .dockerignore ──────────────────────────────────────────────────────────────
-# Excludes unnecessary files from the Fly remote build context. The Dockerfile
-# already uses scoped COPY commands (not COPY . .), so the final image doesn't
-# leak .git / .planning / docs. But the build context uploaded to the Fly remote
-# builder on every deploy still includes the full repository — adding these
-# exclusions reduces upload size, speeds up builds, and removes the only path by
-# which a future accidental secret commit could reach a third-party builder.
-# ───────────────────────────────────────────────────────────────────────────────
-
 .git
-.planning
-.gstack
+.gitattributes
+.gitignore
 .githooks
-.github
+.gitleaksignore
+.planning
 docs/
-
-# Documentation — keep only README.md
 *.md
 !README.md
-
-# Contract build artifacts
 contracts/broadcast/
 contracts/cache/
 contracts/out/
-
-# Dependencies (installed fresh by Dockerfile)
 node_modules/
 app/node_modules/
-contracts/lib/
-
-# Compiled binaries
-bin/
-backend/*.exe
-backend/server
-backend/vendor/
-backend/tmp/
-
-# Build output (frontend)
-app/dist/
-frontend/static/svggen/
-temp_gen/
-svggen/
-
-# Environment files (not in the image, never uploaded)
-.env
-.env.*
-backend/.env
-app/.env
-contracts/.env
-
-# Development tooling
-dev.ps1
 tools/seed-testnet/seed-testnet
-
-# Stale build artifacts
-nul
-app/nul
+.env
+.env.example

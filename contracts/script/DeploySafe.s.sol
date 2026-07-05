@@ -126,7 +126,9 @@ contract DeploySafe is Script {
         // where creationCode is the factory's proxy creation code.
         // We use createProxyWithNonce (create2 with a nonce salt).
         // computeProxyAddress is a pure function that can't revert.
-        address predicted = this.computeProxyAddress(
+        // Called internally (not via `this.`) to avoid Foundry v1.7+'s
+        // prohibition on address(this) in script contracts.
+        address predicted = computeProxyAddress(
             factory, singleton, keccak256(initializer), salt
         );
         console2.log("Predicted Safe (create2):", vm.toString(predicted));
@@ -273,7 +275,7 @@ contract DeploySafe is Script {
         address singleton,
         bytes32 initializerHash,
         uint256 salt
-    ) external pure returns (address) {
+    ) internal pure returns (address) {
         // Standard minimal proxy creation code for Safe v1.3.0 factories.
         // This is the canonical proxy bytecode used by the SafeProxyFactory.
         bytes memory proxyCreationCode = hex"608060405273"
