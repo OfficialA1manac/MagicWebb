@@ -11,7 +11,8 @@
 .planning/
 # Devtools / one-shot scripts (not part of the app)
 # Editor / IDE
-# Foundry
+# Foundry — generated gas snapshot (regenerated on every forge test)
+*.gas-snapshot
 # Foundry (audit install only — never commit lib/)
 # from inheriting on a fresh clone, so it IS tracked.
 # Go dependencies (module cache lives in GOPATH)

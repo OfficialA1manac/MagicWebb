@@ -30,6 +30,7 @@ event OfferEligibilitySet(address indexed coll, bool indexed eligible);
 
 error OffersNotEligible();
 error OfferExpired();
+error NotKeeper();
 
 /// @title OfferBook
 /// @notice On-chain NFT offers with stacked positions; the seller pays the fee on acceptance.
@@ -293,13 +294,27 @@ contract OfferBook is MarketplaceCore {
         emit OfferRefunded(coll, tokenId, msg.sender, p.principal);
     }
 
-    /// @notice Refund an expired offer's FULL principal. Permissionless — anyone
-    ///         can call this after the offer expires, enabling the keeper bot
-    ///         to auto-refund without requiring user interaction.
+    /// @notice Refund an expired offer's FULL principal. Callable only by addresses
+    ///         with KEEPER_ROLE (via the MarketplaceManager) after the offer expires.
+    ///         The keeper bot auto-refunds expired offers without requiring user
+    ///         interaction. If no MarketplaceManager is deployed (manager == address(0)),
+    ///         this stays permissionless as a safety fallback — funds are never trapped.
     /// @param coll    Collection address.
     /// @param tokenId Token ID.
     /// @param bidder  The original offerer to refund.
     function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
+        // Only the keeper can refund expired offers when a MarketplaceManager is deployed.
+        // When no manager is configured (address(0)), refunding stays
+        // permissionless as a safety fallback so funds are never trapped.
+        if (manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
+            );
+            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
+                revert NotKeeper();
+            }
+        }
+
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
         if (block.timestamp < p.expiresAt) revert OfferActive();

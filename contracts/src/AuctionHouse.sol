@@ -450,16 +450,31 @@ contract AuctionHouse is MarketplaceCore {
 
 
     /// @notice Refund a batch of non-winning bidders their full escrow. Callable
-    ///         by anyone once the auction is settled. Idempotent (zeroed escrow
-    ///         is skipped); pull-fallback per address. Bounded `batch.length` (200)
-    ///         keeps a single call inside a block's gas budget, and per-call
-    ///         `gas: 50_000` caps the EIP-150 63/64 forwarding budget so a griefing
-    ///         receiver can't cascade OOG the keeper mid-loop and roll back prior
-    ///         pendingReturns credits (audit-#4).
+    ///         only by addresses with KEEPER_ROLE (via the MarketplaceManager) after
+    ///         the auction is settled. Idempotent (zeroed escrow is skipped);
+    ///         pull-fallback per address. Bounded `batch.length` (200) keeps a single
+    ///         call inside a block's gas budget, and per-call `gas: 50_000` caps the
+    ///         EIP-150 63/64 forwarding budget so a griefing receiver can't cascade
+    ///         OOG the keeper mid-loop and roll back prior pendingReturns credits.
+    ///         If no MarketplaceManager is deployed (manager == address(0)), settlement
+    ///         stays permissionless as a safety fallback — funds are never trapped.
     // slither-disable-next-line reentrancy-eth
     function refundLosers(uint256 id, address[] calldata batch) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0)) revert NotActive();
+
+        // Only the keeper can refund losers when a MarketplaceManager is deployed.
+        // When no manager is configured (address(0)), refunding stays
+        // permissionless as a safety fallback so funds are never trapped.
+        if (manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
+            );
+            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
+                revert NotKeeper();
+            }
+        }
+
         // C-03 fix: allow refundLosers on stalled auctions too, not just
         // settled ones. Without this, all losers' funds are trapped for up
         // to 7+ days while the auction is stalled — only the winner's escrow

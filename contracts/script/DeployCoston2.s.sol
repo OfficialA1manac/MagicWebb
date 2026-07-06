@@ -16,9 +16,22 @@ import {MagicWebbNFT}       from "../src/MagicWebbNFT.sol";
 ///
 /// Required env vars:
 ///   PRIVATE_KEY   -- deployer private key (never commit)
-///   CREATOR_ADDR  -- fee recipient wallet address
+///   CREATOR_ADDR  -- fee recipient wallet address (MUST be a Gnosis Safe multisig for production;
+///                    run DeploySafe.s.sol first and use the resulting SAFE_ADDR)
 /// Optional env vars:
 ///   KEEPER_ADDR   -- keeper identity registered under KEEPER_ROLE
+///
+/// Mainnet safety notes:
+///   - CREATOR_ADDR MUST be a multisig (Safe or equivalent), NOT an EOA.
+///     Compromise of a single EOA with DEFAULT_ADMIN_ROLE + OPERATOR_ROLE
+///     can halt new listings/bids/auctions/offers indefinitely.
+///   - After deploying the Gnosis Safe (via DeploySafe.s.sol), set up the
+///     Zodiac Allowance Module on-chain to authorize the keeper to sweep fees
+///     from the Safe to your personal wallet:
+///       1. enableModule(allowanceModuleAddr) on the Safe
+///       2. addDelegate(KEEPER_ADDR) on the Allowance Module
+///       3. setAllowance(KEEPER_ADDR, address(0), <periodAmount>, <periodInSeconds>, 0)
+///     Then set SAFE_ADDR and PERSONAL_WALLET_ADDR in the backend env for automatic sweeping.
 contract DeployCoston2 is Script {
     function run() external {
         require(block.chainid == 114, "WRONG_CHAIN: this script targets Coston2 (chain 114)");

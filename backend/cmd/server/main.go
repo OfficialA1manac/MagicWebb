@@ -99,6 +99,18 @@ func main() {
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
 
+	// Seed static NFT metadata from embedded JSON files at startup. This
+	// eliminates the circular dependency where the metadata worker would
+	// otherwise call tokenURI() on-chain, HTTP-fetch the same server's
+	// static files, parse them, and store them — all of which is redundant
+	// when the metadata is already available as embedded static files.
+	//
+	// The seeder reads files from frontend/static/nft/metadata/ and creates
+	// DB entries for the NFT_ADDR collection. Once seeded, the metadata
+	// worker finds no missing tokens for this collection and skips it.
+	logStaticMetadataStatus()
+	seedStaticMetadata(ctx, q, config.C.NFTAddr)
+
 	// Seed tracked_collections at startup so the indexer watches Transfer events
 	// for every NFT contract the operator explicitly configured (TRACKED_COLLECTIONS
 	// comma-separated env var) AND every collection that already has rows in

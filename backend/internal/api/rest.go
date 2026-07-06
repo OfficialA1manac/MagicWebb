@@ -71,7 +71,7 @@ const (
 		// api.reown.com (formerly api.web3modal.org) via fetch(), which is
 		// governed by connect-src, not script-src. cca-lite.coinbase.com is
 		// the Coinbase Wallet SDK amp endpoint loaded by AppKit internally.
-	"connect-src 'self' https://coston2-api.flare.network https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org https://api.reown.com https://api.web3modal.org https://cca-lite.coinbase.com https://*.reown.com; " +
+	"connect-src 'self' https://coston2-api.flare.network https://flare-api.flare.network https://songbird-api.flare.network https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org https://api.reown.com https://api.web3modal.org https://cca-lite.coinbase.com https://*.reown.com; " +
 		// worker-src: blob workers needed by WalletConnect SDK crypto relay.
 	"worker-src 'self' blob:; " +
 		// frame-src: WalletConnect + Reown verify iframes + explorer panel.
