@@ -141,7 +141,7 @@ jobs:
           submodules: recursive
 
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@v1.2.0
+        uses: foundry-rs/foundry-toolchain@v1.9.0
 
       - name: Flatten + verify each contract on FlareScan
         # Verifies deployed contracts on FlareScan (blockscout) using forge
