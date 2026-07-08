@@ -1,0 +1,99 @@
+# ── MagicWebb Dependabot configuration ─────────────────────────────────────────
+# Automated dependency updates for Go, npm, GitHub Actions, and Git submodules.
+# Dependabot opens PRs weekly to bump dependencies to their latest versions.
+# CI (ci.yml, nightly.yml) gates every PR — if a bump breaks anything, the
+# pipeline catches it before merge.
+#
+# schedule.interval: "weekly" — daily is too noisy for a marketplace that
+#   values stability over bleeding-edge. Weekly batches reduce PR volume
+#   while keeping dependency lag under 7 days.
+# open-pull-requests-limit: 5 — prevent Dependabot from flooding the PR
+#   queue on the first run after a long gap (which could produce 20+
+#   simultaneous PRs). After the initial catch-up, this limits to 5 open
+#   at any time.
+# ─────────────────────────────────────────────────────────────────────────────
+
+version: 2
+updates:
+  # ── Backend (Go modules) ──────────────────────────────────────────────────
+  - package-ecosystem: "gomod"
+    directory: "/backend"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "go"
+    # Groups small, non-breaking upgrades into a single PR to reduce noise.
+    # Security patches (patch bumps) are always opened individually.
+    groups:
+      go-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── Frontend (npm) ────────────────────────────────────────────────────────
+  - package-ecosystem: "npm"
+    directory: "/app"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "npm"
+    groups:
+      npm-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── CI/CD (GitHub Actions) ────────────────────────────────────────────────
+  - package-ecosystem: "github-actions"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 5
+    labels:
+      - "dependencies"
+      - "github-actions"
+    groups:
+      actions-minor:
+        applies-to: version-updates
+        patterns:
+          - "*"
+        update-types:
+          - "minor"
+          - "patch"
+
+  # ── Smart contracts (Git submodules) ───────────────────────────────────────
+  # Foundry dependencies (forge-std, OpenZeppelin contracts) are tracked as
+  # Git submodules. Dependabot checks for new commits on the tracked branch
+  # and opens a PR when the submodule pointer advances.
+  # NOTE: gitsubmodule ecosystem does NOT support `groups` with `update-types`
+  # (submodules have no version semantics — they track the latest commit).
+  - package-ecosystem: "gitsubmodule"
+    directory: "/"
+    schedule:
+      interval: "weekly"
+      day: "monday"
+      time: "09:00"
+      timezone: "UTC"
+    open-pull-requests-limit: 3
+    labels:
+      - "dependencies"
+      - "submodules"

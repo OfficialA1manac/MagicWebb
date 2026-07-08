@@ -38,12 +38,48 @@ func NewMetricsService(q *db.Q, c *cache.Cache) *MetricsService {
 // RegisterRoutes registers metrics and activity routes under the given router group.
 func (s *MetricsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/metrics", s.handleMetrics)
+	api.Get("/metrics/gas", s.handleGasMetrics)
+	api.Get("/metrics/gas/alerts", s.handleGasAlerts)
 	api.Get("/activity", ValidateQuery(QuerySchema{
 		{Name: "limit", Type: ParamInt},
 		{Name: "address", Type: ParamAddress},
 		{Name: "collection", Type: ParamAddress},
 		{Name: "token_id"},
 	}), s.handleRecentActivity)
+}
+
+func (s *MetricsService) handleGasMetrics(c *fiber.Ctx) error {
+	summary, err := s.q.GetGasMetricsSummary(c.Context())
+	if err != nil {
+		return c.JSON(fiber.Map{"error": "gas metrics unavailable"})
+	}
+	logs, err := s.q.GetRecentGasLogs(c.Context(), 25)
+	if err != nil {
+		logs = []db.GasLogRow{}
+	}
+	return c.JSON(fiber.Map{
+		"summary":     summary,
+		"recentLogs":  logs,
+	})
+}
+
+func (s *MetricsService) handleGasAlerts(c *fiber.Ctx) error {
+	limit := 20
+	if ls := c.Query("limit"); ls != "" {
+		if n, err := strconv.Atoi(ls); err == nil && n > 0 && n <= 100 {
+			limit = n
+		}
+	}
+	alerts, err := s.q.ListGasAlerts(c.Context(), limit)
+	if err != nil {
+		return c.JSON(fiber.Map{"error": "gas alert history unavailable"})
+	}
+	if alerts == nil {
+		alerts = []db.GasAlertRow{}
+	}
+	return c.JSON(fiber.Map{
+		"alerts": alerts,
+	})
 }
 
 func (s *MetricsService) handleMetrics(c *fiber.Ctx) error {

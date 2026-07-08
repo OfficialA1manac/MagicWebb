@@ -1,0 +1,86 @@
+# ── CodeQL analysis ───────────────────────────────────────────────────────────
+# Runs GitHub's CodeQL static analysis against the Go backend and
+# JavaScript/TypeScript frontend on every push + PR to main, plus weekly
+# on a schedule. Alerts surface as code-scanning results in the GitHub
+# Security tab.
+#
+# Why Go + JavaScript only (not Solidity):
+#   Solidity does not have a CodeQL QL pack in the default setup.
+#   The contracts layer is independently covered by:
+#     - Slither (high-severity gate in ci.yml + nightly.yml)
+#     - Foundry fuzz tests (ci.yml: forge test -vvv)
+#     - Audit fuzz suite (AuditFuzz.t.sol: 26 tests)
+#   Adding a third-party CodeQL pack for Solidity would be experimental
+#   and duplicate coverage.
+#
+# schedule: "0 4 * * 1" — every Monday 04:00 UTC (same day as Dependabot
+#   bumps, so new dependency versions are scanned within hours of arrival).
+#
+# permissions: security-events: write is REQUIRED for CodeQL to upload
+#   results to the GitHub Security tab. contents: read is the minimum for
+#   checkout. Both are scoped to this single workflow; other workflows
+#   (ci.yml, deploy.yml) continue to use permissions: contents: read only.
+# ─────────────────────────────────────────────────────────────────────────────
+
+name: "CodeQL"
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+  schedule:
+    - cron: "0 4 * * 1"  # Monday 04:00 UTC
+
+permissions:
+  contents: read
+  security-events: write
+
+jobs:
+  analyze:
+    name: Analyze (${{ matrix.language }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    strategy:
+      fail-fast: false
+      matrix:
+        language:
+          - go
+          - javascript-typescript
+    steps:
+      - uses: actions/checkout@v4.2.0
+
+      # ── Go setup ────────────────────────────────────────────────────────
+      - name: Setup Go
+        if: matrix.language == 'go'
+        uses: actions/setup-go@v5.4.0
+        with:
+          go-version: "1.25"
+          cache: true
+          cache-dependency-path: backend/go.sum
+
+      # ── Initialize CodeQL ───────────────────────────────────────────────
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@v3.28.15
+        with:
+          languages: ${{ matrix.language }}
+          # Custom queries can be added here. For Go, the default queries
+          # (security-extended, security-and-quality) cover:
+          #   - SQL injection, path injection, command injection
+          #   - XSS, CSRF (in JS/TS)
+          #   - Hardcoded credentials
+          #   - Insecure random values
+          #   - Log forging, LDAP injection, NoSQL injection
+          queries: security-extended
+
+      # ── Autobuild: Go ───────────────────────────────────────────────────
+      # For Go, autobuild uses `go build ./...`. For JS/TS, CodeQL analyses
+      # the source files directly without a build step.
+      - name: Autobuild
+        uses: github/codeql-action/autobuild@v3.28.15
+
+      # ── Run analysis ────────────────────────────────────────────────────
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@v3.28.15
+        with:
+          category: "/language:${{ matrix.language }}"

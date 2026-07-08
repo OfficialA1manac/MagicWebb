@@ -91,6 +91,20 @@ type Config struct {
 	// Set to 0 to disable the balance check.
 	KeeperMinBalanceWei string
 
+	// Gas alerting webhook — at least one URL must be set for alerts to fire.
+	DiscordWebhookURL    string // Discord/Slack webhook URL for gas cost alerts
+	PrometheusWebhookURL string // Prometheus Alertmanager-compatible webhook URL
+	GasAlertThresholdWei string // minimum total gas cost (wei) in 24h to trigger alert
+
+	// SMTP email alerting — when SMTPHost and EmailTo are set, gas alerts are
+	// also sent via email as an alternative to webhook-based notifications.
+	SMTPHost   string // SMTP server hostname
+	SMTPPort   int    // SMTP server port (default 587)
+	SMTPUser   string // SMTP username (usually the email address)
+	SMTPPass   string // SMTP password or app-specific token
+	EmailFrom  string // from-address for alert emails
+	EmailTo    string // to-address for alert emails
+
 	// Fee sweep (Zodiac Allowance Module on Gnosis Safe)
 	// SafeAddr is the Gnosis Safe multisig used as feeRecipient. When set and
 	// KeeperKey is also set, a background sweeper periodically checks the
@@ -182,6 +196,17 @@ func Load() {
 		// Phase 4 V4.1: minimum keeper wallet balance. Default 0.1 FLR.
 		// Env: KEEPER_MIN_BALANCE_WEI (empty = 100000000000000000)
 		KeeperMinBalanceWei: envOrDefault("KEEPER_MIN_BALANCE_WEI", "100000000000000000"),
+
+		DiscordWebhookURL:    envOrDefault("DISCORD_WEBHOOK_URL", ""),
+		PrometheusWebhookURL: envOrDefault("PROMETHEUS_WEBHOOK_URL", ""),
+		GasAlertThresholdWei: envOrDefault("GAS_ALERT_THRESHOLD_WEI", "500000000000000000"), // 0.5 native token default
+
+		SMTPHost:   envOrDefault("SMTP_HOST", ""),
+		SMTPPort:   optInt("SMTP_PORT", 587),
+		SMTPUser:   envOrDefault("SMTP_USER", ""),
+		SMTPPass:   envOrDefault("SMTP_PASS", ""),
+		EmailFrom:  envOrDefault("EMAIL_FROM", ""),
+		EmailTo:    envOrDefault("EMAIL_TO", ""),
 
 		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
@@ -283,6 +308,17 @@ func Load() {
 		minWei, ok := new(big.Int).SetString(C.KeeperMinBalanceWei, 10)
 		if !ok || minWei.Sign() < 0 {
 			fmt.Fprintf(os.Stderr, "FATAL: KEEPER_MIN_BALANCE_WEI=%q is not a valid non-negative decimal integer\n", C.KeeperMinBalanceWei)
+			os.Exit(1)
+		}
+	}
+
+	// Validate GasAlertThresholdWei at startup. Must be a valid non-negative
+	// decimal integer (wei value). A typo like "0.5" (missing wei conversion)
+	// is caught here with a clear error rather than silently disabling alerts.
+	if C.GasAlertThresholdWei != "" {
+		thresh, ok := new(big.Int).SetString(C.GasAlertThresholdWei, 10)
+		if !ok || thresh.Sign() < 0 {
+			fmt.Fprintf(os.Stderr, "FATAL: GAS_ALERT_THRESHOLD_WEI=%q is not a valid non-negative decimal integer\n", C.GasAlertThresholdWei)
 			os.Exit(1)
 		}
 	}

@@ -627,6 +627,7 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/token/:addr/:id", uiToken(q))
 	app.Get("/search", uiSearch(q))
 	app.Get("/metrics", uiMetrics(q))
+	app.Get("/metrics/gas", uiGasMetrics(q))
 	app.Get("/admin/stalled", uiAdminStalled(q))
 	app.Get("/docs", uiDocsIndex())
 	app.Get("/docs/:slug", uiDoc())

@@ -212,6 +212,7 @@ var pagePaths = []string{
 	"pages/token.html",
 	"pages/search.html",
 	"pages/metrics.html",
+	"pages/gas_metrics.html",
 	"pages/admin_stalled.html",
 	"pages/docs.html",
 }

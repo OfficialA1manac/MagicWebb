@@ -21,6 +21,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 )
 
 // EthClient is the chain-access surface the indexer and keepers need. Both
@@ -57,6 +58,10 @@ type Runner struct {
 	keeperGate KeeperGate
 	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
 	serverTimeMs *int64
+	// gasAlertLastFired tracks the last time a gas cost alert webhook was sent.
+	// Used to enforce a cooldown so threshold breaches don't spam the webhook.
+	gasAlertLastFired time.Time
+
 	// headLagBlocks is the difference between the chain head and the last
 	// indexed block, updated atomically every watcher tick. Exported via
 	// HeadLagBlocks() for SLO monitoring and health check integration.
@@ -120,6 +125,10 @@ func (r *Runner) Run(ctx context.Context) {
 
 	wg.Add(1)
 	go func() { defer wg.Done(); r.runWithdrawalSweeper(ctx) }()
+
+	// Gas alert worker — runs independently of keeper key; just needs DB access.
+	wg.Add(1)
+	go func() { defer wg.Done(); r.runGasAlertWorker(ctx) }()
 
 	if r.cfg.KeeperKey != "" {
 		// Phase 4 V4.1: one-shot keeper wallet balance check before any
@@ -1024,6 +1033,235 @@ func (r *Runner) runOfferRefundSweeper(ctx context.Context) {
 			}
 		}
 	}
+}
+
+// ── Keeper Address Helper ──────────────────────────────────────────────────
+
+// keeperAddress derives the keeper wallet address from the configured KEEPER_KEY.
+// Returns the address as a hex string (0x-prefixed) on success, or an empty string
+// and an error if the key is empty, too short, or not valid hex.
+func (r *Runner) keeperAddress() (string, error) {
+	if r.cfg.KeeperKey == "" {
+		return "", fmt.Errorf("keeper key is empty")
+	}
+	keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
+	key, err := crypto.HexToECDSA(keeperKeyHex)
+	if err != nil {
+		return "", fmt.Errorf("keeper key parse failed: %w", err)
+	}
+	addr := crypto.PubkeyToAddress(key.PublicKey)
+	return addr.Hex(), nil
+}
+
+// ── Keeper Gas Logger ──────────────────────────────────────────────────────
+
+// logKeeperGas records a keeper transaction's gas consumption in the
+// keeper_gas_logs table for cost tracking and monitoring. If EffectiveGasPrice
+// is nil (should never happen on a mined tx, but defensive), logs a warning
+// and skips the insert. If the keeper key is invalid, logs a warning and
+// skips the insert. Insert errors are logged but not returned (non-fatal —
+// the keeper's primary duty is settlement, not accounting).
+func (r *Runner) logKeeperGas(ctx context.Context, txHash common.Hash, action string, rec *types.Receipt) {
+	// Derive keeper address.
+	addr, err := r.keeperAddress()
+	if err != nil {
+		log.Warn().Err(err).Str("action", action).Str("tx", txHash.Hex()).
+			Msg("gas log: key parse failed")
+		return
+	}
+
+	// Defensive check: EffectiveGasPrice should always be present on a mined
+	// EIP-1559 tx, but a nil value would panic on BigInt math below.
+	if rec.EffectiveGasPrice == nil {
+		log.Warn().Str("keeper", addr).Str("action", action).Str("tx", txHash.Hex()).
+			Msg("keeper gas log: EffectiveGasPrice is nil, skipping")
+		return
+	}
+
+	gasUsed := int64(rec.GasUsed)
+	gasPriceWei := rec.EffectiveGasPrice.String()
+	gasCost := new(big.Int).Mul(rec.EffectiveGasPrice, new(big.Int).SetUint64(rec.GasUsed))
+
+	if err := r.q.InsertGasLog(ctx, addr, action, txHash.Hex(), gasUsed, gasPriceWei, gasCost.String(), int64(r.cfg.ChainID)); err != nil {
+		log.Warn().Err(err).Str("keeper", addr).Str("action", action).Str("tx", txHash.Hex()).
+			Msg("gas log insert failed")
+	}
+
+	// Publish SSE event so the gas metrics dashboard refreshes in real time.
+	// Safe when bcast is nil (test runners don't wire a Broadcaster).
+	if r.bcast != nil {
+		r.bcast.Publish(sse.Event{
+			Type: "keeper-gas-log",
+			Data: map[string]any{
+				"addr":    addr,
+				"action":  action,
+				"tx_hash": txHash.Hex(),
+				"cost":    gasCost.String(),
+			},
+		})
+	}
+}
+
+// ── Gas Cost Alert Worker ────────────────────────────────────────────────────
+
+// gasAlertCooldown is the minimum interval between consecutive webhook alerts
+// for the same threshold breach. Prevents spam when the 24h cost stays above
+// the threshold across multiple worker ticks.
+const gasAlertCooldown = 1 * time.Hour
+
+// runGasAlertWorker periodically checks aggregate keeper gas costs against the
+// configured threshold and fires webhooks (Discord, Prometheus Alertmanager,
+// or both) when the threshold is breached. At least one webhook URL must be
+// configured; if none are set, the worker returns early. Only fires once per
+// gasAlertCooldown period to prevent spam.
+func (r *Runner) runGasAlertWorker(ctx context.Context) {
+	discordURL := r.cfg.DiscordWebhookURL
+	promURL := r.cfg.PrometheusWebhookURL
+	thresholdStr := r.cfg.GasAlertThresholdWei
+	hasAnyURL := discordURL != "" || promURL != ""
+	// SMTP email is an additional channel, not a replacement for webhooks.
+	// When no webhook URL is set AND no SMTP config is set, skip the worker entirely.
+	smtpHost := r.cfg.SMTPHost
+	smtpPort := r.cfg.SMTPPort
+	smtpUser := r.cfg.SMTPUser
+	smtpPass := r.cfg.SMTPPass
+	emailFrom := r.cfg.EmailFrom
+	emailTo := r.cfg.EmailTo
+	hasSMTP := smtpHost != "" && smtpUser != "" && smtpPass != "" && emailFrom != "" && emailTo != ""
+	if !hasAnyURL && !hasSMTP || thresholdStr == "" || thresholdStr == "0" {
+		return
+	}
+	threshold, ok := new(big.Int).SetString(thresholdStr, 10)
+	if !ok || threshold.Sign() <= 0 {
+		log.Warn().Str("threshold", thresholdStr).
+			Msg("gas alert: invalid GAS_ALERT_THRESHOLD_WEI, alerts disabled")
+		return
+	}
+	currency := r.cfg.NativeCurrency
+
+	log.Info().Str("threshold_wei", thresholdStr).Str("currency", currency).
+		Msg("gas alert worker: started")
+
+	ticker := time.NewTicker(5 * time.Minute)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+			costStr, err := r.q.GetGasCostSince(ctx, 24*time.Hour)
+			if err != nil {
+				log.Warn().Err(err).Msg("gas alert: GetGasCostSince failed")
+				continue
+			}
+			cost, ok := new(big.Int).SetString(costStr, 10)
+			if !ok || cost.Sign() < 0 {
+				continue
+			}
+
+			if cost.Cmp(threshold) < 0 {
+				// Below threshold — reset cooldown so the next breach fires immediately.
+				r.gasAlertLastFired = time.Time{}
+				continue
+			}
+
+			// Threshold breached. Check cooldown.
+			if !r.gasAlertLastFired.IsZero() && time.Since(r.gasAlertLastFired) < gasAlertCooldown {
+				continue
+			}
+
+			// Fire webhook(s).
+			costFLR, _ := new(big.Float).Quo(
+				new(big.Float).SetInt(cost),
+				new(big.Float).SetFloat64(1e18),
+			).Float64()
+			thresholdFLR, _ := new(big.Float).Quo(
+				new(big.Float).SetInt(threshold),
+				new(big.Float).SetFloat64(1e18),
+			).Float64()
+
+			title := fmt.Sprintf("Keeper gas cost alert: %.4f %s in last 24h", costFLR, currency)
+			desc := fmt.Sprintf(
+				"Total keeper gas cost over the last 24 hours (%.4f %s) has exceeded the configured threshold (%.4f %s).\n\nThreshold: %s wei (%.4f %s)\nCurrent:   %s wei (%.4f %s)\n\nReview the gas metrics dashboard for a detailed breakdown of keeper costs by transaction type.",
+				costFLR, currency, thresholdFLR, currency,
+				thresholdStr, thresholdFLR, currency,
+				costStr, costFLR, currency,
+			)
+
+			whCtx, whCancel := context.WithTimeout(ctx, 20*time.Second)
+
+			// Fire webhooks and capture results for persistence.
+			var discordErr, promErr, emailErr error
+			if discordURL != "" {
+				if err := webhook.SendDiscordAlert(whCtx, discordURL, title, desc); err != nil {
+					log.Error().Err(err).Msg("gas alert: Discord webhook send failed")
+					discordErr = err
+				}
+			}
+			if promURL != "" {
+				if err := webhook.SendPrometheusAlert(whCtx, promURL, "KeeperGasCostHigh", desc, "warning"); err != nil {
+					log.Error().Err(err).Msg("gas alert: Prometheus webhook send failed")
+					promErr = err
+				}
+			}
+			// Send email alert via SMTP when configured.
+			if hasSMTP {
+				subject := fmt.Sprintf("🚨 %s", title)
+				htmlBody := webhook.BuildAlertEmailBody(
+					title, desc,
+					thresholdStr, costStr,
+					fmt.Sprintf("%.4f", thresholdFLR), fmt.Sprintf("%.4f", costFLR), currency,
+				)
+				if err := webhook.SendEmail(whCtx, smtpHost, smtpPort, smtpUser, smtpPass, emailFrom, emailTo, subject, htmlBody); err != nil {
+					log.Error().Err(err).Msg("gas alert: SMTP email send failed")
+					emailErr = err
+				}
+			}
+			whCancel()
+
+			// Persist alert record to DB.
+			discordErrStr, promErrStr, emailErrStr := "", "", ""
+			if discordErr != nil {
+				discordErrStr = discordErr.Error()
+			}
+			if promErr != nil {
+				promErrStr = promErr.Error()
+			}
+			if emailErr != nil {
+				emailErrStr = emailErr.Error()
+			}
+			if _, err := r.q.InsertGasAlert(ctx, db.GasAlertRow{
+				TotalCostWei:    costStr,
+				ThresholdWei:    thresholdStr,
+				CostFLR:         costFLR,
+				ThresholdFLR:    thresholdFLR,
+				Currency:        currency,
+				DiscordSent:     discordURL != "" && discordErr == nil,
+				PrometheusSent:  promURL != "" && promErr == nil,
+				EmailSent:       hasSMTP && emailErr == nil,
+				DiscordError:    discordErrStr,
+				PrometheusError: promErrStr,
+				EmailError:      emailErrStr,
+			}); err != nil {
+				log.Warn().Err(err).Msg("gas alert: InsertGasAlert failed")
+			}
+
+			r.gasAlertLastFired = time.Now()
+			log.Warn().Str("cost_wei", costStr).Str("threshold_wei", thresholdStr).
+				Str("discord", mapBool(discordURL != "" && discordErr == nil)).
+				Str("prometheus", mapBool(promURL != "" && promErr == nil)).
+				Str("email", mapBool(hasSMTP && emailErr == nil)).
+				Msg("gas alert: threshold breached, alert(s) sent")
+		}
+	}
+}
+
+// mapBool returns "yes" or "no" for structured log fields.
+func mapBool(v bool) string {
+	if v {
+		return "yes"
+	}
+	return "no"
 }
 
 // waitMined polls for a successful receipt. Returns an error if the tx

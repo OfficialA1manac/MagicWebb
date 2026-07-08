@@ -294,6 +294,57 @@ func uiMetrics(q *db.Q) fiber.Handler {
 	}
 }
 
+func uiGasMetrics(q *db.Q) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		summary, err := q.GetGasMetricsSummary(c.Context())
+		if err != nil {
+			return render(c, "pages/gas_metrics.html", fiber.Map{
+				"Title":         "Gas Costs",
+				"Error":         "Gas metrics unavailable",
+				"NativeCurrency": config.C.NativeCurrency,
+			})
+		}
+		logs, err := q.GetRecentGasLogs(c.Context(), 50)
+		if err != nil {
+			logs = []db.GasLogRow{}
+		}
+
+		// Compute percentages for the efficiency gauge bars.
+		// Protect against division by zero when TotalTxCount is 0.
+		var settlePct, refundPct, sweepPct, offerPct float64
+		if summary.TotalTxCount > 0 {
+			total := float64(summary.TotalTxCount)
+			settlePct = float64(summary.SettleCount) / total * 100
+			refundPct = float64(summary.RefundLosersCount) / total * 100
+			sweepPct = float64(summary.FeeSweepCount) / total * 100
+			offerPct = float64(summary.RefundOfferCount) / total * 100
+		}
+
+		// Build alerts for anomalous gas cost conditions.
+		var alerts []string
+		if summary.TotalTxCount > 0 {
+			if summary.AvgGasPriceGwei > 100 {
+				alerts = append(alerts, "High gas price: avg "+fmt.Sprintf("%.1f", summary.AvgGasPriceGwei)+" gwei — consider adjusting KEEPER_MAX_FEE_CAP_GWEI")
+			}
+			if summary.AvgGasUsed > 0 && summary.AvgGasUsed > 200000 {
+				alerts = append(alerts, "High gas usage per tx: avg "+fmt.Sprintf("%d", summary.AvgGasUsed)+" units — check for stuck auctions")
+			}
+		}
+
+		return render(c, "pages/gas_metrics.html", fiber.Map{
+			"Title":         "Gas Costs",
+			"Summary":       summary,
+			"RecentLogs":    logs,
+			"Alerts":        alerts,
+			"NativeCurrency": config.C.NativeCurrency,
+			"SettlePct":     settlePct,
+			"RefundPct":     refundPct,
+			"SweepPct":      sweepPct,
+			"OfferPct":      offerPct,
+		})
+	}
+}
+
 func uiAdminStalled(q *db.Q) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		return render(c, "pages/admin_stalled.html", fiber.Map{

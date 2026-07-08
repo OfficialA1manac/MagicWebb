@@ -1799,3 +1799,186 @@ func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, 
 	}
 	return out, rows.Err()
 }
+
+// ── Keeper Gas Logs ─────────────────────────────────────────────────────────
+
+// GetGasCostSince returns the total effective_gas_cost_wei across all keeper
+// transactions logged since the given interval (e.g. 24h). Returns "0" when
+// there are no rows in the window. Used by the gas alert worker to detect
+// cost threshold breaches.
+func (q *Q) GetGasCostSince(ctx context.Context, since time.Duration) (string, error) {
+	var cost string
+	// Convert duration to a PostgreSQL-compatible interval string (e.g. "86400 seconds").
+	// Go's time.Duration.String() produces "24h0m0s" which PostgreSQL cannot parse.
+	secs := int64(since.Seconds())
+	interval := fmt.Sprintf("%d seconds", secs)
+	err := q.reader().QueryRow(ctx,
+		`SELECT COALESCE(SUM(effective_gas_cost_wei)::text, '0')
+		 FROM keeper_gas_logs WHERE created_at > now() - $1::interval`,
+		interval).Scan(&cost)
+	return cost, err
+}
+
+// InsertGasLog records a keeper transaction's gas consumption for cost tracking
+// and monitoring. A plain INSERT is used (no upsert) — the keeper_gas_logs table
+// has no unique constraint on tx_hash, and duplicate rows from retry/replay are
+// harmless for an append-only audit log.
+func (q *Q) InsertGasLog(ctx context.Context, keeperAddr, txType, txHash string, gasUsed int64, effectiveGasPriceWei, effectiveGasCostWei string, chainID int64) error {
+	_, err := q.writer().Exec(ctx,
+		`INSERT INTO keeper_gas_logs(keeper_addr, tx_type, tx_hash, gas_used, effective_gas_price_wei, effective_gas_cost_wei, chain_id)
+		 VALUES($1,$2,$3,$4,$5,$6,$7)`,
+		keeperAddr, txType, txHash, gasUsed, effectiveGasPriceWei, effectiveGasCostWei, chainID)
+	return err
+}
+
+// ── Gas Metrics Queries ───────────────────────────────────────────────────
+
+// GasMetricsSummary holds aggregate gas-cost stats for the dashboard.
+type GasMetricsSummary struct {
+	TotalTxCount             int64   `json:"totalTxCount"`
+	TotalGasCostWei          string  `json:"totalGasCostWei"`
+	AvgGasCostWei            string  `json:"avgGasCostWei"`
+	AvgGasPriceGwei          float64 `json:"avgGasPriceGwei"`
+	AvgGasUsed               int64   `json:"avgGasUsed"`
+	SettleCount              int64   `json:"settleCount"`
+	SettleTotalCostWei       string  `json:"settleTotalCostWei"`
+	RefundLosersCount        int64   `json:"refundLosersCount"`
+	RefundLosersTotalCostWei string  `json:"refundLosersTotalCostWei"`
+	FeeSweepCount            int64   `json:"feeSweepCount"`
+	FeeSweepTotalCostWei     string  `json:"feeSweepTotalCostWei"`
+	RefundOfferCount         int64   `json:"refundOfferCount"`
+	RefundOfferTotalCostWei  string  `json:"refundOfferTotalCostWei"`
+}
+
+// GetGasMetricsSummary returns aggregate gas cost stats for the last 24 hours.
+func (q *Q) GetGasMetricsSummary(ctx context.Context) (*GasMetricsSummary, error) {
+	var s GasMetricsSummary
+	err := q.reader().QueryRow(ctx, `
+		SELECT
+			COUNT(*)::bigint,
+			COALESCE(SUM(effective_gas_cost_wei)::text, '0'),
+			COALESCE((SUM(effective_gas_cost_wei) / GREATEST(COUNT(*), 1))::text, '0'),
+			COALESCE(AVG(effective_gas_price_wei::numeric), 0),
+			COALESCE(AVG(gas_used)::bigint, 0)
+		FROM keeper_gas_logs
+		WHERE created_at > now() - interval '24 hours'
+	`).Scan(&s.TotalTxCount, &s.TotalGasCostWei, &s.AvgGasCostWei, &s.AvgGasPriceGwei, &s.AvgGasUsed)
+	if err != nil {
+		return nil, err
+	}
+	// Per-type breakdown
+	s.SettleCount, s.SettleTotalCostWei, _ = q.getGasMetricsByType(ctx, "settle")
+	s.RefundLosersCount, s.RefundLosersTotalCostWei, _ = q.getGasMetricsByType(ctx, "refund_losers")
+	s.FeeSweepCount, s.FeeSweepTotalCostWei, _ = q.getGasMetricsByType(ctx, "fee_sweep")
+	s.RefundOfferCount, s.RefundOfferTotalCostWei, _ = q.getGasMetricsByType(ctx, "refund_offer")
+	return &s, nil
+}
+
+// getGasMetricsByType returns count and total cost for a specific tx_type in the last 24 hours.
+func (q *Q) getGasMetricsByType(ctx context.Context, txType string) (int64, string, error) {
+	var count int64
+	var cost string
+	err := q.reader().QueryRow(ctx,
+		`SELECT COUNT(*)::bigint, COALESCE(SUM(effective_gas_cost_wei)::text, '0')
+		 FROM keeper_gas_logs
+		 WHERE tx_type = $1 AND created_at > now() - interval '24 hours'`, txType).
+		Scan(&count, &cost)
+	return count, cost, err
+}
+
+// ── Gas Alert History ───────────────────────────────────────────────────
+
+// GasAlertRow is one gas alert history entry, recording when a threshold
+// breach triggered webhook notifications.
+type GasAlertRow struct {
+	ID              int64     `json:"id"`
+	TotalCostWei    string    `json:"totalCostWei"`
+	ThresholdWei    string    `json:"thresholdWei"`
+	CostFLR         float64   `json:"costFLR"`
+	ThresholdFLR    float64   `json:"thresholdFLR"`
+	Currency        string    `json:"currency"`
+	DiscordSent     bool      `json:"discordSent"`
+	PrometheusSent  bool      `json:"prometheusSent"`
+	EmailSent       bool      `json:"emailSent"`
+	DiscordError    string    `json:"discordError,omitempty"`
+	PrometheusError string    `json:"prometheusError,omitempty"`
+	EmailError      string    `json:"emailError,omitempty"`
+	CreatedAt       time.Time `json:"createdAt"`
+}
+
+// InsertGasAlert records a gas alert event in the history table.
+func (q *Q) InsertGasAlert(ctx context.Context, r GasAlertRow) (int64, error) {
+	var id int64
+	err := q.writer().QueryRow(ctx,
+		`INSERT INTO gas_alert_history
+		 (total_cost_wei, threshold_wei, cost_flr, threshold_flr, currency,
+		  discord_sent, prometheus_sent, email_sent, discord_error, prometheus_error, email_error)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+		 RETURNING id`,
+		r.TotalCostWei, r.ThresholdWei, r.CostFLR, r.ThresholdFLR, r.Currency,
+		r.DiscordSent, r.PrometheusSent, r.EmailSent, r.DiscordError, r.PrometheusError, r.EmailError).Scan(&id)
+	return id, err
+}
+
+// ListGasAlerts returns the most recent gas alert history entries, ordered
+// newest-first. Defaults to 20 when limit is 0 or > 100.
+func (q *Q) ListGasAlerts(ctx context.Context, limit int) ([]GasAlertRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 20
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT id, total_cost_wei, threshold_wei, cost_flr, threshold_flr, currency,
+		        discord_sent, prometheus_sent, email_sent,
+		        COALESCE(discord_error,''), COALESCE(prometheus_error,''), COALESCE(email_error,''),
+		        created_at
+		 FROM gas_alert_history
+		 ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GasAlertRow
+	for rows.Next() {
+		var r GasAlertRow
+		if err := rows.Scan(&r.ID, &r.TotalCostWei, &r.ThresholdWei, &r.CostFLR, &r.ThresholdFLR,
+			&r.Currency, &r.DiscordSent, &r.PrometheusSent, &r.EmailSent,
+			&r.DiscordError, &r.PrometheusError, &r.EmailError, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// GasLogRow is one keeper transaction log entry for the recent-KTX table.
+type GasLogRow struct {
+	TxType              string    `json:"tx_type"`
+	TxHash              string    `json:"tx_hash"`
+	GasUsed             int64     `json:"gas_used"`
+	EffectiveGasCostWei string    `json:"effective_gas_cost_wei"`
+	CreatedAt           time.Time `json:"created_at"`
+}
+
+// GetRecentGasLogs returns the most recent keeper gas log entries.
+func (q *Q) GetRecentGasLogs(ctx context.Context, limit int) ([]GasLogRow, error) {
+	if limit <= 0 || limit > 100 {
+		limit = 50
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT tx_type, tx_hash, gas_used, effective_gas_cost_wei::text, created_at
+		 FROM keeper_gas_logs
+		 ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []GasLogRow
+	for rows.Next() {
+		var r GasLogRow
+		if err := rows.Scan(&r.TxType, &r.TxHash, &r.GasUsed, &r.EffectiveGasCostWei, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
