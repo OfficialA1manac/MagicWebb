@@ -22,7 +22,7 @@ jobs:
     steps:
       # v35: pinned to full semver tags (immutable git references) instead
       # of mutable major-version tags (@v4). Dependabot will bump these.
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
       # ── Disk space recovery ──────────────────────────────────────────────────
       # GitHub-hosted runners start with ~29 GB free but can drop below 1 GB
       # after checkout + tool downloads. Go's test cache, module cache, and
@@ -66,7 +66,7 @@ jobs:
     name: Contracts (Foundry)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
       - name: Install Foundry
@@ -82,7 +82,7 @@ jobs:
     name: Contracts (Slither)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
       - name: Install Foundry
@@ -99,7 +99,7 @@ jobs:
     runs-on: ubuntu-latest
     timeout-minutes: 10
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
       - name: No .test.* files in pages/
         run: |
           bad=$(find app/src/pages -maxdepth 1 -name '*.test.*' 2>/dev/null)
@@ -129,7 +129,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
       - name: gitleaks

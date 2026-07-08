@@ -17,7 +17,7 @@ jobs:
     name: Contracts — Full Audit Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
 
@@ -55,7 +55,7 @@ jobs:
     name: Contracts — Slither Static Analysis
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           submodules: recursive
 
@@ -75,7 +75,7 @@ jobs:
     name: Backend — Full Audit Suite
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
 
       - uses: actions/setup-go@v5.4.0
         with:
@@ -112,7 +112,7 @@ jobs:
     name: Secret scan (gitleaks)
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
         with:
           fetch-depth: 0
 

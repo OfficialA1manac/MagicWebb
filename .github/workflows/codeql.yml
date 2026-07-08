@@ -48,7 +48,7 @@ jobs:
           - go
           - javascript-typescript
     steps:
-      - uses: actions/checkout@v4.2.0
+      - uses: actions/checkout@v7.0.0
 
       # ── Go setup ────────────────────────────────────────────────────────
       - name: Setup Go
