@@ -165,14 +165,14 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
     // ── Role audit shim ───────────────────────────────────────────────────────
 
     /// @dev Mirror every role change into the uniform audit stream.
-    function _grantRole(bytes32 role, address account) internal override returns (bool granted) {
-        granted = super._grantRole(role, account);
-        if (granted) emit AuditLog("GRANT_ROLE", msg.sender, account, role);
+    function _grantRole(bytes32 role, address account) internal override {
+        super._grantRole(role, account);
+        emit AuditLog("GRANT_ROLE", msg.sender, account, role);
     }
 
-    function _revokeRole(bytes32 role, address account) internal override returns (bool revoked) {
-        revoked = super._revokeRole(role, account);
-        if (revoked) emit AuditLog("REVOKE_ROLE", msg.sender, account, role);
+    function _revokeRole(bytes32 role, address account) internal override {
+        super._revokeRole(role, account);
+        emit AuditLog("REVOKE_ROLE", msg.sender, account, role);
     }
 
     /// @dev Storage gap for future role extensions and module slots.
