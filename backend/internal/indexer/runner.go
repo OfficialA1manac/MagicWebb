@@ -762,10 +762,12 @@ func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 }
 
 // ── Auction Keeper (on-chain settlement) ──────────────────────────────────
-// The keeper is the primary settler (1s ticker), but settle() has a
-// permissionless fallback: anyone can call it after endsAt + 25 hours.
+// Three-tier settlement gate:
+//   1. KEEPER_ROLE — settles immediately after endsAt (this 1s ticker).
+//   2. Seller or auction winner — settles after endsAt + 5 minutes.
+//   3. Permissionless — anyone settles after endsAt + 25 hours.
 // If no MarketplaceManager is deployed (manager==address(0)), settlement
-// is fully permissionless. Funds are never trapped.
+// is fully permissionless immediately. Funds are never trapped.
 
 var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
 
@@ -800,11 +802,12 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: settle tx failed")
 					continue
 				}
-				// Confirm the settle tx was mined. The keeper is the designated
-				// settler, but settle() has a permissionless fallback after
-				// endsAt + DURATION_24HR + 1hr — another address could settle
-				// first, and the keeper's call would revert harmlessly with
-				// NotActive on an already-settled auction.
+				// Confirm the settle tx was mined. The keeper settles first,
+				// but the seller or auction winner can also settle after
+				// endsAt + 5 minutes, and anyone after endsAt + 25 hours —
+				// another address could settle first, and the keeper's call
+				// would revert harmlessly with NotActive on an
+				// already-settled auction.
 				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
 						Msg("keeper: settle tx receipt not confirmed; will retry on next tick")
