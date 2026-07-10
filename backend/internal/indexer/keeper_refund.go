@@ -47,11 +47,11 @@ func encodeRefundLosers(auctionID int64, addrs []common.Address) []byte {
 
 // ── Loser Refund Sweeper ──────────────────────────────────────────────────
 //
-// AuctionHouse v2 escrows every bid until settlement and never auto-refunds on
-// outbid. After an auction settles (winner takes the NFT) or cancels (no sale),
-// every non-winning bidder's escrow is reclaimable via refundLosers(id, batch) —
-// permissionless, idempotent (zeroed escrow is skipped). This sweeper makes that
-// reclaim autonomous: no losing bidder ever has to call a function to get paid.
+// AuctionHouse keeps bids escrowed until settlement. After an auction settles
+// or cancels, every non-winning bidder's escrow is reclaimable via
+// refundLosers(id, batch). refundLosers() is fully permissionless on-chain —
+// anyone can call it once the auction is settled. This sweeper automates it
+// so losing bidders never need to call anything themselves.
 func (r *Runner) runLoserRefundSweeper(ctx context.Context) {
 	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
 	if err != nil {

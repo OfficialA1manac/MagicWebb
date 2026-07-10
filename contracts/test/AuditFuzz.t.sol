@@ -190,12 +190,10 @@ contract AuditFuzzTest is Test {
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp) + dt, 500, 0);
-        // Auctions start inactive - seller must activate before bids.
-        ah.activateAuction(id);
         vm.stopPrank();
     }
 
-    function _auction7d() internal returns (uint256 id, uint256 tid) { return _auctionEndsIn(7 days); }
+    function _auction7d() internal returns (uint256 id, uint256 tid) { return _auctionEndsIn(24 hours); }
 
     function _bid(uint256 id, address who, uint128 amt) internal {
         vm.prank(who);
@@ -232,8 +230,7 @@ contract AuditFuzzTest is Test {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, reserve, uint64(block.timestamp + 7 days), minIncBps, minIncFlat);
-        ah.activateAuction(id);
+        id = ah.create(address(nft), tid, reserve, uint64(block.timestamp + 24 hours), minIncBps, minIncFlat);
         vm.stopPrank();
     }
 
@@ -290,8 +287,7 @@ contract AuditFuzzTest is Test {
 
     function test_sellerRevokeCausesSettleRevert() public {
         (uint256 id, uint256 tid) = _auction7d();  // _auction7d already activates
-        _bid(id, alice, 2 ether);
-        vm.warp(block.timestamp + 8 days);
+        _bid(id, alice, 2 ether);		vm.warp(block.timestamp + 30 hours);
 
         vm.prank(seller);
         nft.setApprovalForAll(address(ah), false);
@@ -308,8 +304,7 @@ contract AuditFuzzTest is Test {
 
     function test_sellerMovedNftCausesSettleRevert() public {
         (uint256 id, uint256 tid) = _auction7d();  // _auction7d already activates
-        _bid(id, alice, 2 ether);
-        vm.warp(block.timestamp + 8 days);
+        _bid(id, alice, 2 ether);		vm.warp(block.timestamp + 30 hours);
 
         vm.prank(seller);
         nft.transferFrom(seller, address(0x999), tid);
@@ -374,8 +369,7 @@ contract AuditFuzzTest is Test {
         n = bound(n, 0, 1000);
 
         (uint256 id,) = _auction7d();
-        _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + 8 days);
+        _bid(id, alice, 1 ether);		vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
 
         address[] memory batch = new address[](n);
@@ -416,8 +410,7 @@ contract AuditFuzzTest is Test {
         }
 
         assertEq(address(ah).balance, 200 ether + 200 ether);
-
-        vm.warp(block.timestamp + 8 days);
+		vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
         assertTrue(_settled(id));
         assertEq(ah.cumulative(id, leaderAddr), 0, "leader escrow consumed");
@@ -449,27 +442,29 @@ contract AuditFuzzTest is Test {
     //  (e)  M-01 fix: OfferBook top-up MUST NOT allow expiry reduction.
     // ════════════════════════════════════════════════════════════════════════
 
-    function test_topUpCannotReduceExpiry() public {
+    function test_topUpDoesNotRefreshExpiry() public {
         uint256 tid = nft.mint(seller);
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
 
         _enableOffers(address(nft));
-        uint64 longExp = uint64(block.timestamp + 12 hours);
+        uint64 longExp = uint64(block.timestamp + 4 hours);
         vm.prank(alice);
         ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, longExp);
 
-        // Top-up with shorter expiry → must revert.
-        uint64 shortExp = uint64(block.timestamp + 6 hours);
+        (uint128 pBefore,, uint64 expBefore,) = ob.positions(address(nft), tid, alice);
+        assertEq(pBefore, 1 ether);
+        assertEq(expBefore, longExp);
+
+        // Top-up: expiry MUST NOT change (timer continues from original).
+        // The `expiresAt` param on top-up is ignored — only the principal increases.
+        uint64 shortExp = uint64(block.timestamp + 1 hours);
         vm.prank(alice);
-        vm.expectRevert(InvalidExpiry.selector);
         ob.makeOffer{value: 0.01 ether}(address(nft), tid, 0.01 ether, shortExp);
 
-        // Top-up with same or longer expiry → must succeed.
-        vm.prank(alice);
-        ob.makeOffer{value: 0.01 ether}(address(nft), tid, 0.01 ether, longExp);
-        (uint128 p,,,) = ob.positions(address(nft), tid, alice);
-        assertEq(p, 1.01 ether);
+        (uint128 pAfter,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
+        assertEq(pAfter, 1.01 ether, "principal increased on top-up");
+        assertEq(expAfter, longExp, "expiry UNCHANGED — not reduced to shortExp");
     }
 
     function test_cannotExpireImmediatelyViaTopUp() public {
@@ -482,14 +477,14 @@ contract AuditFuzzTest is Test {
         vm.prank(alice);
         ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, longExp);
 
-        // Attempt to expire in 1 second by topping up → must revert.
+        // Top-up with an arbitrarily short expiry param: it's ignored since
+        // top-ups never change the expiry — the timer stays at original.
         vm.prank(alice);
-        vm.expectRevert(InvalidExpiry.selector);
         ob.makeOffer{value: 0.01 ether}(address(nft), tid, 0.01 ether, uint64(block.timestamp + 1));
 
         (uint128 p,, uint64 exp,) = ob.positions(address(nft), tid, alice);
-        assertEq(p, 5 ether);
-        assertEq(exp, longExp);
+        assertEq(p, 5.01 ether, "principal increased");
+        assertEq(exp, longExp, "expiry UNCHANGED — still original 24hr, not +1");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -534,9 +529,6 @@ contract AuditFuzzTest is Test {
         nft2.setApprovalForAll(address(ah2), true);
         uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah2.activateAuction(id2);
-
         // Griefer bids 1 ETH, then alice outbids with 2 ETH.
         vm.prank(address(griefer));
         ah2.bid{value: 1 ether}(id2);
@@ -578,8 +570,7 @@ contract AuditFuzzTest is Test {
         vm.prank(address(gr));
         ah.bid{value: 1 ether}(id);
         _bid(id, alice, 2 ether); // alice wins
-
-        vm.warp(block.timestamp + 8 days);
+		vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
 
         // gr is a loser - refundLosers tries to push, but gr is blocked.
@@ -627,9 +618,6 @@ contract AuditFuzzTest is Test {
         nft2.setApprovalForAll(address(ah2), true);
         uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah2.activateAuction(id2);
-
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
         vm.warp(block.timestamp + 2 days);
@@ -656,7 +644,6 @@ contract AuditFuzzTest is Test {
         uint256 tid2 = nft2.mint(address(badSeller));
         nft2.setApprovalForAll(address(ah), true);
         uint256 id2 = ah.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
-        ah.activateAuction(id2);
         vm.stopPrank();
 
         vm.prank(alice);
@@ -684,8 +671,6 @@ contract AuditFuzzTest is Test {
         nft.setApprovalForAll(address(ah), true);
         uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
 
         vm.deal(alice, 2 ether);
         _bid(id, alice, 2 ether);
@@ -724,8 +709,7 @@ contract AuditFuzzTest is Test {
             vm.prank(address(greedies[i]));
             ah.bid{value: 1 ether}(id);
         }
-
-        vm.warp(block.timestamp + 8 days);
+		vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
 
         address[] memory batch = new address[](3);
@@ -989,7 +973,7 @@ contract AuditFuzzTest is Test {
             99,
             10,        // amount
             1 ether,  // reserve (>= MIN_PRICE)
-            uint64(block.timestamp + 7 days),
+            uint64(block.timestamp + 24 hours),
             500,        // 5% min increment
             0
         );

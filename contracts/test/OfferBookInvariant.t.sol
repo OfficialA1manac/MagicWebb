@@ -29,6 +29,8 @@ contract OfferHandler is Test {
         }
         nft.setApprovalForAll(address(ob), true);
         vm.stopPrank();
+        // Enable offers on the mock collection so makeOffer succeeds.
+        ob.setOfferEligible(address(nft), true);
     }
 
     function makeOffer(uint256 bSeed, uint256 tSeed, uint128 principal, uint256 ttl) external {
@@ -38,9 +40,16 @@ contract OfferHandler is Test {
 
         // M-01 fix: the new expiry must not reduce an existing position's expiry.
         (uint128 existingPrincipal,, uint64 existingExp,) = ob.positions(address(nft), tid, b);
-        uint64 exp = uint64(block.timestamp + bound(ttl, 1, 14 days));
+        // Pick one of the 6 valid durations for the new position.
+        // For top-ups, existing expiry is kept (the handler ensures >=).
+        uint64[6] memory durations = [
+            uint64(3 minutes), uint64(15 minutes), uint64(30 minutes),
+            uint64(1 hours), uint64(4 hours), uint64(24 hours)
+        ];
+        uint64 exp = uint64(block.timestamp) + durations[ttl % 6];
         // If existing position exists, ensure new expiry >= existing expiry.
-        if (existingPrincipal > 0 && exp < existingExp) {
+        // Top-up: do not change the expiry; timer continues from original.
+        if (existingPrincipal > 0) {
             exp = existingExp;
         }
 

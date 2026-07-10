@@ -12,6 +12,7 @@ error InvalidExpiry();
 error InvalidAmount();
 error WrongValue();
 error OfferActive();
+error OfferExpired();
 
 /// @dev NothingToWithdraw is inherited from MarketplaceCore — OfferBook
 /// does not redeclare or shadow withdrawRefund(), so every caller across all
@@ -19,17 +20,12 @@ error OfferActive();
 /// from the same storage slot. Single selector = simpler frontend/indexer
 /// code, fewer "if/else" branches per error-matching path.
 
-/// @dev Maximum offer lifetime from the latest top-up. Set to 24 hours per the
-///      product requirement: offers automatically expire 24 hours after the last
-///      top-up. Only the seller can reject/refund an expired offer — there is no
-///      permissionless refundExpiredOffer function.
-uint64 constant MAX_OFFER_DURATION = 24 hours;
+
 
 /// @notice Sent when a collection's offer eligibility is toggled.
 event OfferEligibilitySet(address indexed coll, bool indexed eligible);
 
 error OffersNotEligible();
-error OfferExpired();
 error NotKeeper();
 
 /// @title OfferBook
@@ -42,11 +38,15 @@ error NotKeeper();
 ///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
 ///     offerer pays no fee.
 ///   - Multiple offers from the same bidder on the same NFT COMPOUND into one position;
-///     each top-up refreshes the position's expiry.
+///     each top-up does NOT refresh the position's expiry — the timer continues
+///     counting down from the original expiry.
+///   - Bidder can cancel their own offer before expiry via cancelOffer(), receiving a
+///     full principal refund.
 ///   - There is NO individual withdrawal. A position is locked until accept / reject / expiry.
 ///   - acceptOffer DEDUCTS a 1.5% platform fee from the principal; the seller receives 98.5%.
-///   - rejectOffer (owner) or refundExpiredOffer (anyone, after expiry) returns the FULL
-///     principal to the bidder — an offer that never sells costs nothing.
+///   - rejectOffer (owner), cancelOffer (bidder, before expiry), or refundExpiredOffer
+///     (keeper, after expiry) returns the FULL principal to the bidder — an offer
+///     that never sells costs nothing.
 ///
 /// Non-custodial. No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
 contract OfferBook is MarketplaceCore {
@@ -54,7 +54,7 @@ contract OfferBook is MarketplaceCore {
     struct Position {
         uint128       principal; // escrowed ETH (fees already removed)
         uint128       units;     // ERC-1155 units desired (1 for ERC-721)
-        uint64        expiresAt; // refreshed on each top-up
+        uint64        expiresAt; // set once at creation; NOT refreshed on top-up
         TokenStandard standard;  // token kind this offer targets
     }
 
@@ -96,9 +96,14 @@ contract OfferBook is MarketplaceCore {
     );
     event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
-    constructor(address recipient, address manager_)
-        MarketplaceCore(recipient, manager_)
-    {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() { _disableInitializers(); }
+
+    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
+    ///         feeRecipient + manager in upgradeable storage.
+    function initialize(address recipient, address manager_) public initializer {
+        __MarketplaceCore_init(recipient, manager_);
+    }
 
     /// @notice Toggle whether a collection accepts offers. Callable by the
     ///         collection's contract owner (via ERC-173/Ownable owner() selector
@@ -170,7 +175,7 @@ contract OfferBook is MarketplaceCore {
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
-    /// @param expiresAt  Position expiry (now < expiresAt ≤ now + 14 days).
+    /// @param expiresAt  Position expiry (one of 6 fixed durations: 3min–24hr).
     function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant entryGate {
         if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
@@ -195,7 +200,6 @@ contract OfferBook is MarketplaceCore {
         uint128 units,
         uint64  expiresAt
     ) internal {
-        if (expiresAt <= block.timestamp || expiresAt > block.timestamp + MAX_OFFER_DURATION) revert InvalidExpiry();
         // L-13 fix: reject zero-value top-ups. Without this, a caller with
         // an existing position >= MIN_PRICE could call makeOffer with
         // principal=0 to refresh the expiry or rewrite units without
@@ -206,14 +210,8 @@ contract OfferBook is MarketplaceCore {
         // with reduced units would accept fewer units than expected.
         if (principal == 0) revert InvalidAmount();
 
-        // M-01 fix: when topping up an existing position, the new expiry must
-        // not be less than the existing expiry. Without this, a bidder can
-        // top up with MIN_PRICE and expiresAt=block.timestamp+1, effectively
-        // expiring their own locked offer in the next block. This breaks the
-        // "locked until expiry" invariant and lets a bidder front-run a
-        // seller's acceptOffer to withdraw a large escrow.
         Position storage existing = positions[coll][tokenId][msg.sender];
-        if (existing.principal > 0 && expiresAt < existing.expiresAt) revert InvalidExpiry();
+        bool isTopup = existing.principal > 0;
 
         if (msg.value != uint256(principal)) revert WrongValue();
 
@@ -221,17 +219,24 @@ contract OfferBook is MarketplaceCore {
         uint256 newPrincipal = uint256(p.principal) + principal;
         if (newPrincipal > type(uint128).max) revert InvalidAmount();
         // L-01 fix: apply MIN_PRICE to the total position, not the delta.
-        // Previously, a user with a 10 ETH position couldn't add 0.005 ETH
-        // because the check was on the increment. Now the check is on the
-        // new total — micro-top-ups of large positions are allowed while
-        // still preventing dust-sized initial offers.
         if (newPrincipal < MIN_PRICE) revert BelowMinPrice();
         p.principal = uint128(newPrincipal);
         p.units     = units;
-        p.expiresAt = expiresAt;
+        // Top-ups do NOT refresh the expiry timer — it continues counting down
+        // from the original expiry. Only new positions set a fresh expiry.
+        if (!isTopup) {
+            // New positions: validate duration is one of the 6 fixed durations.
+            uint256 dur = uint256(expiresAt) - block.timestamp;
+            if (dur != DURATION_3MIN && dur != DURATION_15MIN
+                && dur != DURATION_30MIN && dur != DURATION_1HR
+                && dur != DURATION_4HR && dur != DURATION_24HR) {
+                revert InvalidDuration();
+            }
+            p.expiresAt = expiresAt;
+        }
         p.standard  = standard;
 
-        emit OfferMade(coll, tokenId, msg.sender, p.principal, units, expiresAt);
+        emit OfferMade(coll, tokenId, msg.sender, p.principal, units, p.expiresAt);
     }
 
     // ── Accept (seller pays 1.5%; seller nets 98.5% of principal) ──────────────
@@ -274,30 +279,18 @@ contract OfferBook is MarketplaceCore {
     // `withdrawRefund()` on their core (Marketplace / AuctionHouse / this).
     // No code duplication, no shadowed storage, no divergent error selectors.
 
-    // ── Cancel / Refund expired (keeper) ────────────────────────────────
+    // ── Refund expired (keeper) ──────────────────────────────────────────
     //
-    // cancelOffer: the bidder can withdraw their OWN offer before it expires.
-    // refundExpiredOffer: PERMISSIONLESS, anyone can call after expiry to
-    //     return the escrow to the bidder. This enables the keeper bot to
-    //     auto-refund expired offers without user interaction.
-
-    /// @notice Cancel your own offer before it expires. Refunds the FULL principal.
-    ///         Caller must be the offer's original bidder. After expiry, use
-    ///         refundExpiredOffer instead.
-    function cancelOffer(address coll, uint256 tokenId) external nonReentrant {
-        Position memory p = positions[coll][tokenId][msg.sender];
-        if (p.principal == 0) revert NoOffer();
-        if (block.timestamp >= p.expiresAt) revert OfferExpired();
-
-        delete positions[coll][tokenId][msg.sender];
-        _pay(msg.sender, p.principal);
-        emit OfferRefunded(coll, tokenId, msg.sender, p.principal);
-    }
+    // refundExpiredOffer: Keeper-only, anyone can call after expiry (if no
+    //     MarketplaceManager) to return the escrow to the bidder. This enables
+    //     the keeper bot to auto-refund expired offers without user interaction.
+    //     Users CAN cancel their own offer before expiry via cancelOffer();
+    //     the seller can reject, and the keeper handles expired offers.
 
     /// @notice Refund an expired offer's FULL principal. Callable only by addresses
     ///         with KEEPER_ROLE (via the MarketplaceManager) after the offer expires.
-    ///         The keeper bot auto-refunds expired offers without requiring user
-    ///         interaction. If no MarketplaceManager is deployed (manager == address(0)),
+    ///         The keeper bot auto-refunds expired offers instantly without requiring
+    ///         user interaction. If no MarketplaceManager is deployed (manager == address(0)),
     ///         this stays permissionless as a safety fallback — funds are never trapped.
     /// @param coll    Collection address.
     /// @param tokenId Token ID.
@@ -322,6 +315,21 @@ contract OfferBook is MarketplaceCore {
         delete positions[coll][tokenId][bidder];
         _pay(bidder, p.principal);
         emit OfferRefunded(coll, tokenId, bidder, p.principal);
+    }
+
+    // ── Cancel (bidder withdraws before expiry) ────────────────────────────
+
+    /// @notice Bidder cancels their own offer before it expires, receiving a full
+    ///         principal refund. Callable only by the bidder and only before expiry.
+    ///         Once expired, only the keeper can refund via refundExpiredOffer.
+    function cancelOffer(address coll, uint256 tokenId) external nonReentrant {
+        Position memory p = positions[coll][tokenId][msg.sender];
+        if (p.principal == 0) revert NoOffer();
+        if (block.timestamp >= p.expiresAt) revert OfferExpired();
+
+        delete positions[coll][tokenId][msg.sender];
+        _pay(msg.sender, p.principal);
+        emit OfferRefunded(coll, tokenId, msg.sender, p.principal);
     }
 
     /// @notice Owner rejects a bidder's offer, refunding the FULL principal.

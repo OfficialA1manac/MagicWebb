@@ -4,7 +4,9 @@ primary_region = "iad"
 [build]
   dockerfile = "Dockerfile"
   [build.args]
-    REOWN_PROJECT_ID = "af6aba4c71274871c3d77a60050171ba"
+    # REQUIRED: Pass via fly deploy --build-arg REOWN_PROJECT_ID=your_id
+    # Get yours at https://cloud.reown.com — it's a public client identifier.
+    # REOWN_PROJECT_ID = "REQUIRED_set_via_build_arg"
 
 # Non-secret config. WalletConnect project IDs are PUBLIC client identifiers
 # (used by the dApp at runtime to look up the pairing relay) — embedding
@@ -14,6 +16,9 @@ primary_region = "iad"
 [env]
   ENV = "production"
   HTTP_ADDR = ":8080"
+  # Network config — set via `fly secrets set` or override per environment.
+  # Defaults target Coston2 testnet; change to 14 (Flare mainnet) or 19 (Songbird)
+  # for production deploys.
   RPC_URL = "https://coston2-api.flare.network/ext/C/rpc"
   RPC_URLS = "https://coston2-api.flare.network/ext/C/rpc,https://coston2.enosys.global/ext/C/rpc,https://rpc.ankr.com/flare_coston2"
   CHAIN_ID = "114"
@@ -37,7 +42,9 @@ primary_region = "iad"
   # WalletConnect v2 cloud relay project id. The pair-UIs (Browse Wallet +
   # WalletConnect QR) are injected into the layout from this env so a
   # redeploy never strands users on a hardcoded / stale ID.
-  WC_PROJECT_ID = "af6aba4c71274871c3d77a60050171ba"
+  # WC_PROJECT_ID — REQUIRED: Run `fly secrets set WC_PROJECT_ID=your_id`
+  # before deploying. Client ID from https://cloud.reown.com
+  WC_PROJECT_ID = ""
 
 [http_service]
   internal_port = 8080

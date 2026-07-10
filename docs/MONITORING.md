@@ -11,10 +11,10 @@
 | `AuctionCreated`     | routine          | New auction live                         | indexer handle                                            |
 | `BidPlaced`          | routine          | Cumulative bid landed                    | indexer handle                                            |
 | `AuctionSettled`     | high             | Fund + NFT distribution                  | confirm indices in DB within 2 s                         |
-| `AuctionReclaimed`   | **critical**     | 7-day safety-valve fired                 | **page on-call; audit the auction; this is the only path that can refund the winner's residual (no auto-resolve)** |
+| `AuctionReclaimed`   | **critical**     | 7-day safety-valve fired                 | **REMOVED — stall window eliminated. `settle()` reverts on transfer failure; keeper retries.** |
 | `OfferMade` / `OfferAccepted` | routine | OfferBook activity               | indexer handle                                            |
 | `PushFailed`         | **MEDIUM**       | A `.call{value: …}` reverted             | `runWithdrawalSweeper` will surface a banner via SSE; if PushFailed frequency >1/min investigate the receiver set |
-| `AuctionStalled`     | **HIGH**         | Buyer-fault sandbox violation           | `settleUnstuck()` 7-day window opens; alert on-chain      |
+| `AuctionStalled`     | **HIGH**         | Buyer-fault sandbox violation           | **REMOVED — no stall state. `settle()` reverts, keeper retries on next tick.** |
 | `EntriesPaused` / `EntriesUnpaused` | routine | Manager activity              | off-chain only (events are not stored on the cores)       |
 | `AuditLog`           | informational    | Manager role + circuit-breaker writes   | audit only                                                |
 
@@ -57,12 +57,11 @@ cast call $AUCTION_ADDR "pendingReturns(address)(uint256)" $TO_ADDR \
 cast estimate $TO_ADDR --rpc-url …  # contract with empty value
 ```
 
-If a receiver is a contract WITHOUT a payable `receive() / fallback()`
-that has been holding escrow for >7 days, **page on-call**: this is
-the only path for funds to be permanently trapped. A replacement
-contract at a new address cannot claim the original address's
-`pendingReturns` credit — the funds are unrecoverable unless the
-receiver contract itself is upgradeable or has an explicit
+If a receiver is a contract WITHOUT a payable `receive() / fallback()`,
+**page on-call**: the pull-fallback via `pendingReturns` + `withdrawRefund()`
+is the recovery path. A replacement contract at a new address cannot claim
+the original address's `pendingReturns` credit — the funds are unrecoverable
+unless the receiver contract itself is upgradeable or has an explicit
 `withdrawRefund()` path.
 
 ## Keeper advisory-lock health
@@ -117,7 +116,7 @@ ORDER BY block_number, log_index;
 
 | Alert                   | Who pages         | First action                                                |
 |:------------------------|:------------------|:-------------------------------------------------------------|
-| `AuctionReclaimed`      | on-call (P0)     | Check the auction was actually stalled — false positives if a seller pre-emptively `settleUnstuck()` triggers the 7-day window |
+| `AuctionReclaimed`      | on-call (P0)     | **REMOVED — stall window eliminated. settle() reverts, keeper retries.** |
 | `PushFailed` rate >1/min| indexer operator | Enumerate receivers, identify non-payable contracts, cohort by deployer |
 | Indexer 60 s behind     | indexer (auto)    | Wait one tick; if persistent, rotate `RPC_URLS` priority    |
 | Keeper lock lost        | on-call (P1)     | Confirm the rotate was intentional (`<CONTRACT_ADMIN>` grantRole trace) |
@@ -498,8 +497,7 @@ AuctionSettled(       uint256 indexed id, address indexed winner, address indexe
 LoserRefunded(        uint256 indexed id, address indexed bidder, uint256 amount)
 AuctionCancelled(     uint256 indexed id)
 RefundPushed(         address indexed bidder, uint256 amount)
-AuctionStalled(       uint256 indexed id, address indexed winner, address indexed seller)
-AuctionReclaimed(     uint256 indexed id, address indexed winner, uint256 refundAmount)
+AuctionCancelled(     uint256 indexed id)
 
 // OfferBook (stacked offers)
 OfferMade(     address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal, uint128 units, uint64 expiresAt)

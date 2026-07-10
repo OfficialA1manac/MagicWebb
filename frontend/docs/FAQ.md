@@ -79,8 +79,7 @@ attempts revert because the token has moved. No fee is taken on a reverted purch
 
 ### How do I list an NFT?
 Approve the marketplace contract for your collection once, then list with a price and
-expiry (up to 90 days). Listing is free. You keep the NFT in your wallet until someone
-buys it.
+expiry (one of 6 fixed durations: 3min, 15min, 30min, 1hr, 4hr, or 24hr). Listing is free. You keep the NFT in your wallet until someone buys it.
 
 ### How much do I receive on a sale?
 98.5% of the sale price. The 1.5% platform fee is deducted at settlement.
@@ -93,9 +92,7 @@ Yes, anytime before it sells, for the cost of gas.
 ## Auctions
 
 ### How do auctions work?
-English (ascending) auctions, up to 7 days. The seller sets a reserve and a minimum bid
-increment. Bidders bid for free; each bid escrows the bid amount and refunds the
-previous high bidder in full.
+English (ascending) auctions, up to 24 hours (one of 6 fixed durations: 3min, 15min, 30min, 1hr, 4hr, 24hr). The seller sets a reserve. Bidders bid for free; bids must overtake the current leader by at least +1 native token (FLR/SGB/C2FLR). Losers can withdraw early; keeper auto-settles instantly.
 
 ### What is anti-snipe protection?
 A bid placed within the final 3 minutes extends the auction end time by 3 minutes, so
@@ -112,9 +109,7 @@ auction cancels — funds are never locked.
 ## Offers
 
 ### How do offers work?
-Make an offer on any NFT with an amount and an expiry (up to 14 days). The offer amount
-is escrowed in the contract — it's free to make and fully refundable. Multiple offers
-from the same wallet on the same NFT stack into one position.
+Make an offer on any NFT with an amount and an expiry (one of 6 fixed durations: 3min–24hr). The offer amount is escrowed in the contract — it's free to make and fully refundable. Multiple offers from the same wallet on the same NFT stack into one position. Top-ups do not refresh the expiry timer.
 
 ### When am I charged?
 Never as an offerer. If the owner accepts your offer, you receive the NFT and the seller
@@ -122,8 +117,7 @@ receives your offer amount minus the 1.5% fee. If they reject it or it expires, 
 your full principal back.
 
 ### Can I withdraw an offer early?
-No. A position is locked until it is accepted, rejected by the owner, or expires — then
-the principal is refunded. This keeps escrow accounting simple and predictable.
+Yes. Bidders can cancel their own offer before expiry via `cancelOffer()` for a full principal refund. Once expired, the keeper auto-refunds. The seller can also reject at any time.
 
 ---
 

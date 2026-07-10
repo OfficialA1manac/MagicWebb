@@ -13,16 +13,6 @@ error NotApproved();
 error InvalidExpiry();
 error InvalidAmount();
 error BatchTooLarge();
-error InvalidDuration();
-
-/// @dev Fixed listing durations: 3 min, 15 min, 30 min, 1 hr, 4 hr, 24 hr.
-///      Sellers must pick one of these exact values for expiresAt - block.timestamp.
-uint64 constant LISTING_DURATION_3MIN   = 3 minutes;
-uint64 constant LISTING_DURATION_15MIN  = 15 minutes;
-uint64 constant LISTING_DURATION_30MIN  = 30 minutes;
-uint64 constant LISTING_DURATION_1HR    = 1 hours;
-uint64 constant LISTING_DURATION_4HR    = 4 hours;
-uint64 constant LISTING_DURATION_24HR   = 24 hours;
 
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
@@ -73,9 +63,14 @@ contract Marketplace is MarketplaceCore {
         uint256 fee
     );
 
-    constructor(address recipient, address manager_)
-        MarketplaceCore(recipient, manager_)
-    {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() { _disableInitializers(); }
+
+    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
+    ///         feeRecipient + manager in upgradeable storage.
+    function initialize(address recipient, address manager_) public initializer {
+        __MarketplaceCore_init(recipient, manager_);
+    }
 
     // ── List (free) ───────────────────────────────────────────────────────────
 
@@ -157,9 +152,9 @@ contract Marketplace is MarketplaceCore {
         // Validate that the listing duration is one of the fixed durations.
         // expiresAt is uint64, block.timestamp is uint256 — cast both to uint256 for math.
         uint256 duration = uint256(expiresAt) - block.timestamp;
-        if (duration != LISTING_DURATION_3MIN && duration != LISTING_DURATION_15MIN
-            && duration != LISTING_DURATION_30MIN && duration != LISTING_DURATION_1HR
-            && duration != LISTING_DURATION_4HR && duration != LISTING_DURATION_24HR) {
+        if (duration != DURATION_3MIN && duration != DURATION_15MIN
+            && duration != DURATION_30MIN && duration != DURATION_1HR
+            && duration != DURATION_4HR && duration != DURATION_24HR) {
             revert InvalidDuration();
         }
 
@@ -197,14 +192,42 @@ contract Marketplace is MarketplaceCore {
         emit Cancelled(coll, id, msg.sender);
     }
 
+    // ── Edit Price ─────────────────────────────────────────────────────────
+
+    /// @notice Change the price of an active listing. Seller only. The listing
+    ///         must not have expired and the new price must be ≥ MIN_PRICE.
+    ///         Emits a Listed event with the updated price so off-chain
+    ///         indexers refresh without a full re-scan.
+    function editPrice(address coll, uint256 id, uint128 newPrice) external nonReentrant entryGate {
+        Listing storage l = listings[coll][id][msg.sender];
+        if (l.seller != msg.sender) revert NotOwner();
+        if (block.timestamp > l.expiresAt) revert Expired();
+        if (newPrice < MIN_PRICE) revert BelowMinPrice();
+        l.price = newPrice;
+        emit Listed(coll, id, msg.sender, l.standard, l.amount, newPrice, l.expiresAt);
+    }
+
     // ── Expire ────────────────────────────────────────────────────────────────
 
-    /// @notice Clean up an expired listing that had no buyer. Permissionless — anyone
-    ///         can call this to remove stale listings from storage. Emits Cancelled event.
-    /// @dev The listing must be expired (block.timestamp > expiresAt). No price check,
-    ///      no seller authorization — the listing is dead and can be safely deleted.
-    ///      The seller must relist the NFT to offer it for sale again.
+    /// @notice Clean up an expired listing that had no buyer. Callable only by
+    ///         addresses with KEEPER_ROLE (via the MarketplaceManager). Expired
+    ///         listings are auto-cleaned by the keeper bot — users cannot cancel
+    ///         expired listings themselves. Emits Cancelled event.
+    ///         If no MarketplaceManager is deployed (manager == address(0)),
+    ///         cleanup stays permissionless as a safety fallback.
+    /// @dev The listing must be expired (block.timestamp > expiresAt). No price
+    ///      check, no seller authorization — the listing is dead and can be
+    ///      safely deleted. The seller must relist the NFT to offer it for sale
+    ///      again.
     function cleanExpired(address coll, uint256 id, address seller_) external nonReentrant {
+        if (manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
+            );
+            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
+                revert NotOwner();
+            }
+        }
         Listing memory l = listings[coll][id][seller_];
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp <= l.expiresAt) revert NotOwner(); // only seller can cancel active listings

@@ -47,12 +47,12 @@ error CannotCancel();
 /// Non-custodial; immutable; no admin, no pause, no upgrade.
 ///
 /// @dev Timestamp usage: This contract uses `block.timestamp` for auction timing
-///      (startsAt, endsAt, extension window, stall window). Miners can manipulate
+///      (startsAt, endsAt, extension window). Miners can manipulate
 ///      block.timestamp by up to ~15 seconds on Ethereum mainnet (less on Flare),
 ///      but all time windows are far larger than the manipulation threshold:
-///      - Auctions last hours to days (up to MAX_AUCTION_DURATION = 7 days)
+///      - Auctions last from 3 minutes to 24 hours (one of 6 fixed durations)
 ///      - Anti-snipe extension window is 3 minutes (EXTENSION_WINDOW)
-///      - Stall recovery window is 7 days (STALL_WINDOW)
+///      - No stall window: settle() reverts entirely on transfer failure; keeper retries
 ///      A 15-second skew is negligible against these magnitudes and cannot be
 ///      exploited to force premature settlement or indefinitely extend an auction.
 contract AuctionHouse is MarketplaceCore {
@@ -60,13 +60,12 @@ contract AuctionHouse is MarketplaceCore {
     uint16 public constant MAX_MIN_INCREMENT_BPS = 5_000;
     /// @notice Anti-snipe: bids inside this closing window extend the auction by it.
     uint64 public constant EXTENSION_WINDOW     = 3 minutes;
-    /// @notice Maximum auction duration from creation.
-    uint64 public constant MAX_AUCTION_DURATION = 7 days;
+
 
     /// @notice Absolute cap on total anti-snipe extensions. Set to 30 minutes
     ///         per the product requirement: the auction can only be extended
     ///         up to 30 minutes past its original end time via anti-snipe bids.
-    ///         startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION = the
+    ///         startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION = the
     ///         absolute latest possible endsAt, regardless of extension count.
     uint64 public constant MAX_TOTAL_EXTENSION = 30 minutes;
     /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
@@ -168,18 +167,29 @@ contract AuctionHouse is MarketplaceCore {
     event RefundPushed(address indexed bidder, uint256 amount);
     event AuctionActivated(uint256 indexed id);
 
-    constructor(address recipient, address manager_) MarketplaceCore(recipient, manager_) {}
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() { _disableInitializers(); }
+
+    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
+    ///         feeRecipient + manager in upgradeable storage.
+    function initialize(address recipient, address manager_) public initializer {
+        __MarketplaceCore_init(recipient, manager_);
+    }
 
     // ── Activate Auction ──────────────────────────────────────────────────────
 
     /// @notice Activate an auction, allowing bids. Only the seller can call this.
     ///         Once activated, the auction cannot be deactivated.
+    /// @dev Auctions are now auto-activated on creation; calling this on an
+    ///      already-active auction reverts.
     /// @param id The auction to activate.
     function activateAuction(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller != msg.sender) revert NotSeller();
         if (a.settled) revert NotActive();
         if (a.active) revert AuctionLive();
+        // Unreachable under current create()-auto-activate behaviour;
+        // retained for ABI backwards-compatibility.
         a.active = true;
         emit AuctionActivated(id);
     }
@@ -218,7 +228,13 @@ contract AuctionHouse is MarketplaceCore {
         uint128 minIncFlat
     ) internal returns (uint256 id) {
         if (endsAt <= block.timestamp) revert InvalidWindow();
-        if (endsAt > block.timestamp + MAX_AUCTION_DURATION) revert InvalidWindow();
+        // Validate auction duration is one of the 6 fixed durations shared across all cores.
+        uint256 duration = uint256(endsAt) - block.timestamp;
+        if (duration != DURATION_3MIN && duration != DURATION_15MIN
+            && duration != DURATION_30MIN && duration != DURATION_1HR
+            && duration != DURATION_4HR && duration != DURATION_24HR) {
+            revert InvalidDuration();
+        }
         if (minIncBps > MAX_MIN_INCREMENT_BPS) revert BadIncrement();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
 
@@ -254,8 +270,10 @@ contract AuctionHouse is MarketplaceCore {
         a.amount          = amount;
         a.minIncrementFlat = minIncFlat;
 
-        // Auction starts INACTIVE — seller must call activateAuction() before bids are accepted.
-        a.active = false;
+        // Auction starts ACTIVE — seller creating the auction is activating it.
+        // Bids are accepted immediately after creation. There is no separate
+        // activate step; creation = activation.
+        a.active = true;
 
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
     }
@@ -264,12 +282,13 @@ contract AuctionHouse is MarketplaceCore {
 
     /// @notice Add `msg.value` to your cumulative bid on auction `id`. No refund on
     ///         being outbid — top up again to reclaim the lead. Your effective bid is
-    ///         the sum of all your bids. The seller must have activated the auction
-    ///         via activateAuction() before bidding is allowed.
+    ///         the sum of all your bids. Auctions are auto-activated on creation —
+    ///         bids are accepted immediately. Bids that do not place the caller in
+    ///         first place (or clear the reserve when there is no leader) revert.
+    ///         Losers can withdraw early via withdrawLoserFunds().
     function bid(uint256 id) external payable nonReentrant entryGate {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
-        if (!a.active) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
         if (msg.value == 0) revert InvalidAmount();
 
@@ -303,13 +322,13 @@ contract AuctionHouse is MarketplaceCore {
         if (a.leader == msg.sender) {
             a.leaderTotal = newTotal; // leader tops up; no leadership change.
         } else if (a.leaderTotal == 0) {
-            // No leader yet: clearing the reserve takes the lead; otherwise the
-            // bid simply accumulates (no revert) toward a future qualifying total.
-            newLead = newTotal >= a.reserve;
-            if (newLead) {
-                a.leader      = msg.sender;
-                a.leaderTotal = newTotal;
-            }
+            // No leader yet: bidder MUST clear the reserve to take the lead.
+            // Sub-reserve bids revert — accumulators that can never lead
+            // just burn gas for no purpose and complicate refund logic.
+            if (newTotal < a.reserve) revert BidTooLow();
+            newLead         = true;
+            a.leader        = msg.sender;
+            a.leaderTotal   = newTotal;
         } else if (newTotal > a.leaderTotal) {
             // Overtaking the leader requires clearing the min increment — a bidder
             // may not sit above the leader without taking the lead.
@@ -335,7 +354,13 @@ contract AuctionHouse is MarketplaceCore {
             a.leaderTotal = newTotal;
             emit OutbidNotification(id, prev, newTotal);
         }
-        // else (newTotal <= leaderTotal): escrow accumulates, no lead change.
+        // else (newTotal <= leaderTotal): bid does not take the lead — revert.
+        // Users must bid enough to claim first place; sub-leader accumulation
+        // is not allowed. If a bidder cannot afford to take the lead, they
+        // should withdraw their funds via withdrawLoserFunds().
+        else {
+            revert BidTooLow();
+        }
 
         // Anti-snipe — gated on `newLead` so sub-threshold accumulation cannot
         // extend the timer. Underflow-safe: the AuctionEnded check above
@@ -346,7 +371,7 @@ contract AuctionHouse is MarketplaceCore {
         // alive indefinitely by alternating the lead by min increment.
         unchecked {
             if (newLead && a.endsAt - block.timestamp < EXTENSION_WINDOW) {
-                uint64 hardCap = a.startsAt + MAX_AUCTION_DURATION + MAX_TOTAL_EXTENSION;
+                uint64 hardCap = a.startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION;
                 uint64 newEnd  = uint64(block.timestamp) + EXTENSION_WINDOW;
                 if (newEnd > hardCap) newEnd = hardCap;
                 if (newEnd > a.endsAt) {
@@ -361,8 +386,9 @@ contract AuctionHouse is MarketplaceCore {
 
     // ── Settle (keeper-only after endsAt) ───────────────────────────────────────
 
-    /// @notice Finalize a finished auction. Callable only by addresses with
-    ///         KEEPER_ROLE (via the MarketplaceManager) after `endsAt`.
+    /// @notice Finalize a finished auction. Keeper-gated (KEEPER_ROLE) with a
+    ///         permissionless fallback after `endsAt + DURATION_24HR + 1 hour`
+    ///         so funds can never be trapped if the keeper goes offline.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable via
     ///         refundLosers). If the NFT can't be delivered, the entire tx reverts —
@@ -372,21 +398,29 @@ contract AuctionHouse is MarketplaceCore {
     ///         Restricting settle() to the keeper prevents users from front-running
     ///         settlement windows and ensures consistent, automated settlement.
     ///         If no MarketplaceManager is deployed (manager == address(0)),
-    ///         settlement is permissionless as a fallback — funds are never trapped.
+    ///         settlement is permissionless immediately as a fallback — funds are
+    ///         never trapped.
     // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
 
-        // Only the keeper can settle when a MarketplaceManager is deployed.
-        // When no manager is configured (address(0)), settlement stays
-        // permissionless as a safety fallback so funds are never trapped.
+        // Keeper-gated settlement with a permissionless fallback.
+        // The keeper (KEEPER_ROLE) settles every 1s after endsAt. If the keeper
+        // is offline for 25+ hours past the auction end, anyone can settle to
+        // prevent trapped funds (DURATION_24HR + 1 hour grace period).
+        // When no manager is deployed (address(0)), settlement is permissionless
+        // immediately — funds are never trapped.
         if (manager != address(0)) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );
-            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
+            bool isKeeper = ok && data.length == 32 && abi.decode(data, (bool));
+            // Permissionless fallback: after DURATION_24HR + 1 hour past endsAt,
+            // anyone can settle. The keeper normally settles within 1 second;
+            // this grace period ensures funds cannot be trapped indefinitely.
+            if (!isKeeper && block.timestamp < a.endsAt + DURATION_24HR + 1 hours) {
                 revert NotKeeper();
             }
         }
@@ -409,17 +443,22 @@ contract AuctionHouse is MarketplaceCore {
         // Consume the winner's escrow up front so refundLosers never repays them.
         cumulative[id][winner] = 0;
 
-        // Transfer the NFT. On failure, revert entirely — no stall state.
-        // The keeper bot retries settlement in the next block once the issue
-        // (e.g. seller revoked approval, NFT moved) is resolved.
+        // Transfer the NFT. Both standards use try/catch with state restoration
+        // so a seller who moved the NFT or revoked approval cannot permanently
+        // trap the winner's escrow. On failure the winner's escrow is restored
+        // and the tx reverts; the keeper retries on the next tick.
         // slither-disable-next-line arbitrary-send-erc20
+        a.settled = true;
         if (std == TokenStandard.ERC721) {
-            IERC721(coll).transferFrom(sel, winner, tid);
+            try IERC721(coll).transferFrom(sel, winner, tid) {}
+            catch {
+                a.settled = false;
+                cumulative[id][winner] = winBid;
+                revert TransferFailed();
+            }
         } else {
-            a.settled = true;
             try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") {}
             catch {
-                // Restore settled and revert so keeper can retry.
                 a.settled = false;
                 cumulative[id][winner] = winBid;
                 revert TransferFailed();
@@ -450,36 +489,22 @@ contract AuctionHouse is MarketplaceCore {
 
 
     /// @notice Refund a batch of non-winning bidders their full escrow. Callable
-    ///         only by addresses with KEEPER_ROLE (via the MarketplaceManager) after
-    ///         the auction is settled. Idempotent (zeroed escrow is skipped);
+    ///         by anyone after the auction is settled — the keeper handles it
+    ///         automatically (1s ticker), but the gate is permissionless so funds
+    ///         can never be trapped. Idempotent (zeroed escrow is skipped);
     ///         pull-fallback per address. Bounded `batch.length` (200) keeps a single
     ///         call inside a block's gas budget, and per-call `gas: 50_000` caps the
     ///         EIP-150 63/64 forwarding budget so a griefing receiver can't cascade
     ///         OOG the keeper mid-loop and roll back prior pendingReturns credits.
-    ///         If no MarketplaceManager is deployed (manager == address(0)), settlement
-    ///         stays permissionless as a safety fallback — funds are never trapped.
     // slither-disable-next-line reentrancy-eth
     function refundLosers(uint256 id, address[] calldata batch) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0)) revert NotActive();
 
-        // Only the keeper can refund losers when a MarketplaceManager is deployed.
-        // When no manager is configured (address(0)), refunding stays
-        // permissionless as a safety fallback so funds are never trapped.
-        if (manager != address(0)) {
-            (bool ok, bytes memory data) = manager.staticcall(
-                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
-            );
-            if (!ok || data.length != 32 || !abi.decode(data, (bool))) {
-                revert NotKeeper();
-            }
-        }
-
-        // C-03 fix: allow refundLosers on stalled auctions too, not just
-        // settled ones. Without this, all losers' funds are trapped for up
-        // to 7+ days while the auction is stalled — only the winner's escrow
-        // was consumed at stall time, but losers cannot pull their escrow
-        // because refundLosers required settled == true.
+        // refundLosers is permissionless — anyone can call it after the auction
+        // is settled. The keeper handles it automatically (1s ticker), but the
+        // gate is open so losing bidders can always recover their escrow. Idempotent:
+        // calling it after all escrow is zeroed simply costs the caller gas.
         if (!a.settled) revert NotSettled();
         if (batch.length == 0 || batch.length > 200) revert BatchTooLarge();
 

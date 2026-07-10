@@ -1,10 +1,12 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {ReentrancyGuard} from "@openzeppelin/contracts/utils/ReentrancyGuard.sol";
-import {IERC721}         from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
-import {IERC1155}        from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
-import {ERC1155Holder}   from "@openzeppelin/contracts/token/ERC1155/utils/ERC1155Holder.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/utils/ReentrancyGuardUpgradeable.sol";
+import {ERC1155HolderUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC1155/utils/ERC1155HolderUpgradeable.sol";
+import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
+import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
 error TransferFailed();
 error WithdrawFailed();
@@ -13,8 +15,18 @@ error ZeroAddress();
 error BelowMinPrice();
 error EntriesHalted();
 error BadManager();
+error InvalidDuration();
 
 enum TokenStandard { ERC721, ERC1155 }
+
+/// @dev Shared durations for listings, auctions, and offers across all cores.
+///      Every time-bound action must pick one of these exact six values.
+uint64 constant DURATION_3MIN  = 3 minutes;
+uint64 constant DURATION_15MIN = 15 minutes;
+uint64 constant DURATION_30MIN = 30 minutes;
+uint64 constant DURATION_1HR   = 1 hours;
+uint64 constant DURATION_4HR   = 4 hours;
+uint64 constant DURATION_24HR  = 24 hours;
 
 /// @dev Read-only surface the cores consult on entry paths.
 interface IMarketplaceManager {
@@ -26,15 +38,17 @@ interface IMarketplaceManager {
 /// @dev Single 1.5% platform fee, charged ONLY on a successful sale and DEDUCTED from the seller's
 ///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient immutable
 ///      post-deploy. No pause, no admin — contracts are unstoppable once deployed.
-abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
+abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, ERC1155HolderUpgradeable, UUPSUpgradeable {
     /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
     uint16 public constant PLATFORM_FEE_BPS = 150;
 
     /// @notice Minimum accepted commitment everywhere (list price, auction reserve, offer amount).
     uint256 public constant MIN_PRICE = 1 ether;
 
-    /// @notice Wallet that receives all platform fees. Immutable post-deploy.
-    address public immutable feeRecipient;
+    /// @notice Wallet that receives all platform fees. Set once during initialization.
+    ///         Was immutable in v1; now upgradeable storage so future upgrades can
+    ///         point fees to a new recipient.
+    address public feeRecipient;
 
     /// @notice Pull-pattern fallback for any push payment that fails.
     ///         Mirrors AuctionHouse / OfferBook pendingReturns so refund
@@ -47,15 +61,25 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
     ///         EXIT paths (settle, refunds, withdrawals, cancels, reject) never
     ///         consult it — escrowed funds can always leave regardless of any
     ///         role, pause, or manager compromise.
+    ///         Was immutable in v1; now upgradeable storage.
     /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
     event PushFailed(address indexed to, uint256 amount);
 
-    address public immutable manager;
+    address public manager;
 
-    constructor(address recipient, address manager_) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() { _disableInitializers(); }
+
+    /// @notice One-time initializer replacing the legacy constructor.
+    ///         Validates and stores feeRecipient + manager in upgradeable storage.
+    function __MarketplaceCore_init(address recipient, address manager_) internal onlyInitializing {
+        __ReentrancyGuard_init();
+        __ERC1155Holder_init();
+        __UUPSUpgradeable_init();
         if (recipient == address(0)) revert ZeroAddress();
-        // manager is immutable: a typo'd/EOA address would brick every entry
-        // path forever, so validate it answers the gate probe at deploy time.
+        // manager is stored in upgradeable storage (was immutable). A typo'd/EOA
+        // address would brick every entry path forever, so validate it answers the
+        // gate probe at init time.
         if (manager_ != address(0)) {
             if (manager_.code.length == 0) revert BadManager();
             IMarketplaceManager(manager_).entriesAllowed(); // must not revert
@@ -90,7 +114,7 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
         return (commitment * PLATFORM_FEE_BPS) / 10_000;
     }
 
-    /// @notice Pay the platform fee to the immutable feeRecipient.
+    /// @notice Pay the platform fee to the on-chain feeRecipient.
     /// @param fee Amount to forward (already computed via `_feeOf`).
     /// @dev Best-effort push with a 50,000-gas cap per EIP-150 63/64 forwarding.
     ///      If the feeRecipient is a contract that needs >50k gas for its receive()
@@ -159,4 +183,22 @@ abstract contract MarketplaceCore is ReentrancyGuard, ERC1155Holder {
             IERC1155(coll).safeTransferFrom(from, to, id, amount, "");
         }
     }
+
+    // ── UUPS upgrade authorization ───────────────────────────────────────────
+
+    /// @notice UUPS upgrade authorization — only the DEFAULT_ADMIN_ROLE holder
+    ///         on the linked MarketplaceManager can authorize contract upgrades.
+    ///         When manager == address(0), upgrades are permissionless (test/dev only).
+    function _authorizeUpgrade(address) internal override {
+        if (manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
+            );
+            require(ok && data.length == 32 && abi.decode(data, (bool)), "Not authorized");
+        }
+    }
+
+    /// @dev Storage gap for future upgrades — preserves child storage layout
+    ///      across implementation upgrades. Follows OpenZeppelin UUPS convention.
+    uint256[48] private __gap;
 }

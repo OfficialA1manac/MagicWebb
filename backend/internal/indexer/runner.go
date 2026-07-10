@@ -61,6 +61,11 @@ type Runner struct {
 	// gasAlertLastFired tracks the last time a gas cost alert webhook was sent.
 	// Used to enforce a cooldown so threshold breaches don't spam the webhook.
 	gasAlertLastFired time.Time
+	// gasAlertWasFiring tracks whether the gas cost was above the threshold on
+	// the last tick. When the cost drops below threshold after having been above,
+	// a "resolved" notification is sent to inform operators the situation is
+	// back to normal.
+	gasAlertWasFiring bool
 
 	// headLagBlocks is the difference between the chain head and the last
 	// indexed block, updated atomically every watcher tick. Exported via
@@ -642,7 +647,7 @@ func (r *Runner) computeAllScores(ctx context.Context) {
 // the seller is notified and if nobody has purchased the nft then it is
 // removed from listing and the seller must relist the nft on the marketplace."
 func (r *Runner) runListingExpirySweeper(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -686,7 +691,7 @@ func (r *Runner) runListingExpirySweeper(ctx context.Context) {
 // ── Offer Expiry Sweeper ──────────────────────────────────────────────────
 
 func (r *Runner) runOfferExpirySweeper(ctx context.Context) {
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -714,7 +719,7 @@ var pendingReturnsSelector = crypto.Keccak256([]byte("pendingReturns(address)"))
 // the row; a positive balance verifies it (UI banner) and notifies once.
 func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 	auctionAddr := common.HexToAddress(r.cfg.AuctionAddr)
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -757,6 +762,10 @@ func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 }
 
 // ── Auction Keeper (on-chain settlement) ──────────────────────────────────
+// The keeper is the primary settler (1s ticker), but settle() has a
+// permissionless fallback: anyone can call it after endsAt + 25 hours.
+// If no MarketplaceManager is deployed (manager==address(0)), settlement
+// is fully permissionless. Funds are never trapped.
 
 var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
 
@@ -773,7 +782,7 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	signer := types.NewLondonSigner(chainIDBig)
 
 	log.Info().Str("keeper", keeperAddr.Hex()).Msg("keeper: started")
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -791,14 +800,11 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: settle tx failed")
 					continue
 				}
-				// Wait for receipt confirmation before moving to the next auction.
-				// Without this, sequential settle calls in one tick race on
-				// PendingNonceAt (all see the same nonce) and only the first
-				// tx is accepted — the rest fail with "nonce too low" and the
-				// auctions remain unsettled until the next keeper tick. The
-				// waitMined call also confirms the tx was mined successfully
-				// (not reverted), which reduces the number of keeper retries
-				// on already-settled auctions.
+				// Confirm the settle tx was mined. The keeper is the designated
+				// settler, but settle() has a permissionless fallback after
+				// endsAt + DURATION_24HR + 1hr — another address could settle
+				// first, and the keeper's call would revert harmlessly with
+				// NotActive on an already-settled auction.
 				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
 						Msg("keeper: settle tx receipt not confirmed; will retry on next tick")
@@ -988,7 +994,7 @@ func (r *Runner) runOfferRefundSweeper(ctx context.Context) {
 	signer := types.NewLondonSigner(chainIDBig)
 
 	log.Info().Str("keeper", keeperAddr.Hex()).Msg("offer refund sweeper: started")
-	ticker := time.NewTicker(2 * time.Minute)
+	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
 	for {
 		select {
@@ -1159,18 +1165,8 @@ func (r *Runner) runGasAlertWorker(ctx context.Context) {
 				continue
 			}
 
-			if cost.Cmp(threshold) < 0 {
-				// Below threshold — reset cooldown so the next breach fires immediately.
-				r.gasAlertLastFired = time.Time{}
-				continue
-			}
-
-			// Threshold breached. Check cooldown.
-			if !r.gasAlertLastFired.IsZero() && time.Since(r.gasAlertLastFired) < gasAlertCooldown {
-				continue
-			}
-
-			// Fire webhook(s).
+			// Compute FLR values early so they're available in both the
+			// below-threshold (resolved) and above-threshold (alert) branches.
 			costFLR, _ := new(big.Float).Quo(
 				new(big.Float).SetInt(cost),
 				new(big.Float).SetFloat64(1e18),
@@ -1180,6 +1176,25 @@ func (r *Runner) runGasAlertWorker(ctx context.Context) {
 				new(big.Float).SetFloat64(1e18),
 			).Float64()
 
+			if cost.Cmp(threshold) < 0 {
+				// Below threshold. Reset cooldown so the next breach fires immediately.
+				r.gasAlertLastFired = time.Time{}
+
+				// If we were previously firing, send a resolved notification.
+				if r.gasAlertWasFiring {
+					r.gasAlertWasFiring = false
+					r.fireGasAlertResolved(ctx, costStr, thresholdStr, costFLR, thresholdFLR, currency,
+						discordURL, promURL, hasSMTP, smtpHost, smtpPort, smtpUser, smtpPass, emailFrom, emailTo)
+				}
+				continue
+			}
+
+			// Threshold breached. Check cooldown.
+			if !r.gasAlertLastFired.IsZero() && time.Since(r.gasAlertLastFired) < gasAlertCooldown {
+				continue
+			}
+
+			// Fire webhook(s).
 			title := fmt.Sprintf("Keeper gas cost alert: %.4f %s in last 24h", costFLR, currency)
 			desc := fmt.Sprintf(
 				"Total keeper gas cost over the last 24 hours (%.4f %s) has exceeded the configured threshold (%.4f %s).\n\nThreshold: %s wei (%.4f %s)\nCurrent:   %s wei (%.4f %s)\n\nReview the gas metrics dashboard for a detailed breakdown of keeper costs by transaction type.",
@@ -1247,6 +1262,7 @@ func (r *Runner) runGasAlertWorker(ctx context.Context) {
 			}
 
 			r.gasAlertLastFired = time.Now()
+			r.gasAlertWasFiring = true
 			log.Warn().Str("cost_wei", costStr).Str("threshold_wei", thresholdStr).
 				Str("discord", mapBool(discordURL != "" && discordErr == nil)).
 				Str("prometheus", mapBool(promURL != "" && promErr == nil)).
@@ -1254,6 +1270,82 @@ func (r *Runner) runGasAlertWorker(ctx context.Context) {
 				Msg("gas alert: threshold breached, alert(s) sent")
 		}
 	}
+}
+
+// fireGasAlertResolved sends resolved notifications across all configured channels
+// when the gas cost drops back below the threshold after having been in alert state.
+func (r *Runner) fireGasAlertResolved(ctx context.Context, costStr, thresholdStr string, costFLR, thresholdFLR float64, currency string,
+	discordURL, promURL string, hasSMTP bool, smtpHost string, smtpPort int, smtpUser, smtpPass, emailFrom, emailTo string) {
+
+	title := fmt.Sprintf("Keeper gas cost resolved: %.4f %s in last 24h", costFLR, currency)
+	desc := fmt.Sprintf(
+		"Keeper gas cost has dropped back below the configured threshold.\n\nThreshold: %s wei (%.4f %s)\nCurrent:   %s wei (%.4f %s)\n\nNo action needed — costs are back to normal levels.",
+		thresholdStr, thresholdFLR, currency,
+		costStr, costFLR, currency,
+	)
+
+	whCtx, whCancel := context.WithTimeout(ctx, 20*time.Second)
+	defer whCancel()
+
+	var discordErr, promErr, emailErr error
+
+	if discordURL != "" {
+		if err := webhook.SendDiscordResolvedAlert(whCtx, discordURL, title, desc); err != nil {
+			log.Error().Err(err).Msg("gas alert resolved: Discord webhook send failed")
+			discordErr = err
+		}
+	}
+	if promURL != "" {
+		if err := webhook.SendPrometheusResolvedAlert(whCtx, promURL, "KeeperGasCostHigh", desc); err != nil {
+			log.Error().Err(err).Msg("gas alert resolved: Prometheus webhook send failed")
+			promErr = err
+		}
+	}
+	if hasSMTP {
+		subject := fmt.Sprintf("✅ Keeper gas cost resolved: %.4f %s", costFLR, currency)
+		htmlBody := webhook.BuildResolvedAlertEmailBody(
+			title, desc,
+			thresholdStr, costStr,
+			fmt.Sprintf("%.4f", thresholdFLR), fmt.Sprintf("%.4f", costFLR), currency,
+		)
+		if err := webhook.SendEmail(whCtx, smtpHost, smtpPort, smtpUser, smtpPass, emailFrom, emailTo, subject, htmlBody); err != nil {
+			log.Error().Err(err).Msg("gas alert resolved: SMTP email send failed")
+			emailErr = err
+		}
+	}
+
+	// Persist resolved alert record to DB.
+	discordErrStr, promErrStr, emailErrStr := "", "", ""
+	if discordErr != nil {
+		discordErrStr = discordErr.Error()
+	}
+	if promErr != nil {
+		promErrStr = promErr.Error()
+	}
+	if emailErr != nil {
+		emailErrStr = emailErr.Error()
+	}
+	if _, err := r.q.InsertGasAlert(ctx, db.GasAlertRow{
+		TotalCostWei:    costStr,
+		ThresholdWei:    thresholdStr,
+		CostFLR:         costFLR,
+		ThresholdFLR:    thresholdFLR,
+		Currency:        currency,
+		DiscordSent:     discordURL != "" && discordErr == nil,
+		PrometheusSent:  promURL != "" && promErr == nil,
+		EmailSent:       hasSMTP && emailErr == nil,
+		DiscordError:    discordErrStr,
+		PrometheusError: promErrStr,
+		EmailError:      emailErrStr,
+	}); err != nil {
+		log.Warn().Err(err).Msg("gas alert resolved: InsertGasAlert failed")
+	}
+
+	log.Warn().Str("cost_wei", costStr).Str("threshold_wei", thresholdStr).
+		Str("discord", mapBool(discordURL != "" && discordErr == nil)).
+		Str("prometheus", mapBool(promURL != "" && promErr == nil)).
+		Str("email", mapBool(hasSMTP && emailErr == nil)).
+		Msg("gas alert: threshold recovered, resolved notification(s) sent")
 }
 
 // mapBool returns "yes" or "no" for structured log fields.

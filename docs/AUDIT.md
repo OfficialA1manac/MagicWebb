@@ -946,11 +946,10 @@ v22 merge landed:
 - **Status:** FIXED. Verified by
   `contracts/test/AuditFuzz.t.sol::testFuzz_antiSnipe1kLateBids`.
 
-### C-02 (audit-#2) — Seller hijacks stalled delivery; old code rewarded it 🟠 P1 — FIXED
-- **Where:** `contracts/src/AuctionHouse.sol`, `settle()` + `settleUnstuck()` + `reclaim()`. Anchored to `STALL_WINDOW = 7 days`.
+### C-02 (audit-#2) — Seller hijacks stalled delivery → removed stall window entirely 🟠 P1 — FIXED
+- **Where:** `contracts/src/AuctionHouse.sol`, `settle()`. The stall window, `settleUnstuck()`, and `reclaim()` were all removed in favor of a simpler model where `settle()` reverts entirely on transfer failure and the keeper retries.
 - **Key:** `c02-stalled-state-recovery`
-- **Status:** FIXED. Verified by
-  `contracts/test/AuctionHouseSettleSafety.t.sol`.
+- **Status:** FIXED (stall window removed; settle reverts cleanly on failure).
 
 ### C-03 (audit-#3) — Offer refund reverts when bidder is a contract dead to receive ETH 🟠 P1 — FIXED
 - **Where:** `contracts/src/OfferBook.sol`, `rejectOffer()` +
@@ -1183,9 +1182,9 @@ during customer support.
      so only one instance broadcasts at a time (no split-brain).
 2. **Contract path:**
    - **Happy:** NFT → winner; 98.5% of `bid_total` → seller; 1.5% fee → recipient.
-   - **Seller revoked NFT:** `auction.stalledAt = block.timestamp`;
-     `AuctionStalled` event. After `STALL_WINDOW = 7 days` the seller
-     can `reclaim(id)` — full escrow refund to winner, NFT returned to seller.
+   - **Seller revoked NFT:** `settle()` reverts entirely — no stall state.
+     Keeper retries on next tick once the transfer issue is resolved.
+     No funds are lost; the auction stays active until a successful settlement.
 3. **Indexer:** `onAuctionSettled` flips status to `settled`. SSE.
    Loser refund sweep (`runLoserRefundSweeper`) calls
    `refundLosers(id, batch[])` once settled + NOT `losers_refunded`.
@@ -1292,7 +1291,7 @@ each UNION ALL branch (mirrors `getRecentTxnsLimit`).
 | F-02    | 🟠 P1 | `f02-accountschanged-listener-scope`    | FIXED                                   | wallet.js connect(); manual + browser tests on magicwebb.fly.dev                          |
 | F-03    | 🟠 P1 | `f03-silent-siwe-failure`               | FIXED                                   | wallet.js _authenticate(); manual + browser tests on magicwebb.fly.dev                     |
 | C-01    | 🔴 P0 | `c01-anti-snipe-accumulation`           | FIXED                                   | `AuctionHouse.bid()` gated on `EXTENSION_WINDOW = 3 minutes`; `AuditFuzz.t.sol::testFuzz_antiSnipe…` |
-| C-02    | 🟠 P1 | `c02-stalled-state-recovery`            | FIXED                                   | `AuctionHouse.settle()` + `settleUnstuck()` + `reclaim()`, gated on `STALL_WINDOW = 7 days`; `SettleSafety.t.sol` |
+| C-02    | 🟠 P1 | `c02-stalled-state-recovery`            | FIXED (stall window removed)            | `AuctionHouse.settle()` — reverts entirely on transfer failure; no stall state, keeper retries |
 | C-03    | 🟠 P1 | `c03-offer-pull-fallback`               | FIXED                                   | `OfferBook.rejectOffer()` + ... + `_pushPullRefund()`; `AuditFuzz.t.sol::test_offerExpired…` |
 | C-04    | 🟠 P1 | `c04-refundlosers-gas-bound`            | FIXED                                   | `refundLosers()` `BatchTooLarge()` + per-iteration `gas: 50_000`; `AuditFuzz.t.sol::test_refundLosers…` |
 | onTransferBatch | 🔴 P0 | `onTransferBatch`              | FIXED                                   | `indexer/handlers.go::onTransferBatch` bounded by `maxBatchLength = 1024` (constant) + `dataWords` + cross-checks; reviewed against hostile `idsLen=2**256` log invariant. |

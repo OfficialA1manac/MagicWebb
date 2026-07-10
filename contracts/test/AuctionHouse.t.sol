@@ -2,7 +2,8 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel, BidOverflow} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel, BidOverflow, NotKeeper} from "../src/AuctionHouse.sol";
+import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -55,11 +56,9 @@ contract AuctionHouseTest is Test {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
+        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
         vm.stopPrank();
-        // Auctions start inactive — seller must activate before bids.
-        vm.prank(seller);
-        ah.activateAuction(id);
+        // Auctions auto-activate on creation — no separate activateAuction() needed.
     }
 
     function _bid(uint256 id, address who, uint128 amt) internal {
@@ -194,8 +193,6 @@ contract AuctionHouseTest is Test {
         uint64 end = uint64(block.timestamp + 1 hours);
         uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
         // endsAt at position 7, struct has 14 fields total
@@ -209,7 +206,7 @@ contract AuctionHouseTest is Test {
         (uint256 id, uint256 tid) = _create();
         _bid(id, alice, 1 ether);
         _bid(id, bob, 3 ether);                  // bob wins
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
 
         uint256 sellerBefore = seller.balance;
         uint256 vaultBefore  = feeRecipient.balance;
@@ -225,7 +222,7 @@ contract AuctionHouseTest is Test {
     function test_settlePermissionlessByAnyone() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         vm.prank(carol);                          // not keeper, not party
         ah.settle(id);
         // settled at position 3
@@ -244,7 +241,7 @@ contract AuctionHouseTest is Test {
     function test_settleNoLeaderCancels() public {
         (uint256 id,) = _create();
         _bid(id, alice, 0.5 ether);               // below reserve → no leader
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
         // settled at position 3, struct has 14 fields total
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
@@ -255,7 +252,7 @@ contract AuctionHouseTest is Test {
     function test_doubleSettleReverts() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
         vm.expectRevert(NotActive.selector);
         ah.settle(id);
@@ -268,7 +265,7 @@ contract AuctionHouseTest is Test {
         _bid(id, alice, 1 ether);
         _bid(id, bob, 2 ether);
         _bid(id, carol, 3 ether);                 // carol wins
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
 
         uint256 aBefore = alice.balance;
@@ -363,12 +360,10 @@ contract AuctionHouseTest is Test {
         vm.startPrank(seller);
         multi.mint(seller, 7, 5);
         multi.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
         _bid(id, alice, 2 ether);
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         uint256 sellerBefore = seller.balance;
         ah.settle(id);
         assertEq(multi.balanceOf(alice, 7), 5);
@@ -383,12 +378,10 @@ contract AuctionHouseTest is Test {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, amt, uint64(block.timestamp + 7 days), 0, 0);
+        uint256 id = ah.create(address(nft), tid, amt, uint64(block.timestamp + 24 hours), 0, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
         _bid(id, alice, amt);
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
         uint256 sb = seller.balance; uint256 vb = feeRecipient.balance;
         ah.settle(id);
         assertEq(feeRecipient.balance - vb, _fee(amt));
@@ -427,8 +420,6 @@ contract AuctionHouseTest is Test {
         uint64 end = uint64(block.timestamp + 1 hours);
         uint256 id = ah.create(address(nft), tid, 1 ether, end, 500, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
         _bid(id, alice, 2 ether);                  // alice leads at 2 ETH
         vm.warp(end - 1 minutes);                  // inside extension window
         _bid(id, bob, 0.5 ether);                  // below leader, no lead change
@@ -466,10 +457,8 @@ contract AuctionHouseTest is Test {
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         // minIncBps=0, minIncFlat=0 → floor is MIN_BID_INCREMENT
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 0, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 0, 0);
         vm.stopPrank();
-        vm.prank(seller);
-        ah.activateAuction(id);
         _bid(id, alice, 1 ether);                  // alice leads
         // Bob tries to overtake with just 1 wei above — must be rejected.
         vm.prank(bob);
@@ -482,6 +471,124 @@ contract AuctionHouseTest is Test {
         _bid(id, bob, qualifying);
         (address l,) = _leader(id);
         assertEq(l, bob, "bob leads after meeting min increment floor");
+    }
+
+    // ── Permissionless settle() fallback ─────────────────────────────────────
+    // When a MarketplaceManager is deployed, settle() is gated on KEEPER_ROLE
+    // with a 25-hour grace period after endsAt. The keeper can always settle;
+    // anyone can settle after endsAt + DURATION_24HR + 1 hour.
+
+    function test_settle_keeperAlwaysAllowed() public {
+        // Deploy with a manager so the keeper gate is active.
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        // Create an auction on the gated AuctionHouse.
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Bob has KEEPER_ROLE — settles immediately.
+        vm.prank(bob);
+        gated.settle(id);
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertTrue(settled);
+    }
+
+    function test_settle_nonKeeperBlockedBeforeGrace() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Carol is NOT the keeper — blocked before grace period.
+        vm.prank(carol);
+        vm.expectRevert(NotKeeper.selector);
+        gated.settle(id);
+        // Confirm auction still unsettled after the blocked attempt.
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertFalse(settled);
+    }
+
+    function test_settle_nonKeeperAllowedAfterGrace() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        // Warp past endsAt + DURATION_24HR + 1 hour (25 hours after endsAt).
+        vm.warp(block.timestamp + 24 hours + 24 hours + 2 hours);
+
+        // Carol is NOT the keeper, but the grace period has elapsed.
+        vm.prank(carol);
+        gated.settle(id);
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertTrue(settled);
+    }
+
+    function test_settle_permissionlessWithNoManager() public {
+        // Existing test contract deploys with address(0) manager.
+        // This test proves the zero-manager fallback works: anyone can settle.
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        vm.warp(block.timestamp + 30 hours);
+        vm.prank(carol); // carol is not the seller, not a bidder, no role
+        ah.settle(id);
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        assertTrue(settled);
+    }
+
+    // ── Permissionless refundLosers() ────────────────────────────────────────
+    // refundLosers() is ungated — anyone can call it after settlement.
+
+    function test_refundLosers_permissionlessWithManager() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        vm.prank(bob);
+        gated.bid{value: 2 ether}(id); // bob wins + has KEEPER_ROLE
+        vm.warp(block.timestamp + 10 minutes);
+
+        // Keeper settles.
+        vm.prank(bob);
+        gated.settle(id);
+
+        // Carol (no role) calls refundLosers — permissionless, should succeed.
+        address[] memory batch = new address[](1);
+        batch[0] = alice;
+        uint256 aBefore = alice.balance;
+        vm.prank(carol);
+        gated.refundLosers(id, batch);
+        assertEq(alice.balance, aBefore + 1 ether);
     }
 
 

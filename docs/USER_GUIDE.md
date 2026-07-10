@@ -3,7 +3,7 @@
 MagicWebb is a fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network. This guide is a complete walk-through: every user action, what happens on-chain, what the backend records, and what the UI does in response. Use this when onboarding a new contributor, during customer-support escalations, or as the post-deploy smoke-test checklist.
 
 > **Network:** MagicWebb runs on **Coston2 testnet** (chain id 114 / `0x72`). The wallet picker auto-fills the chain when you connect.
-> **Fee model:** seller-pays 1.5% on every sale (deducted from seller's proceeds). **Listings, auction creation, bidding, and making offers are all free.** Sellers receive 98.5% of every sale; the platform fee is a Solidity `constant` — no admin key can change it. There is no admin, no pause, and no upgrade proxy on any contract.
+> **Fee model:** seller-pays 1.5% on every sale (deducted from seller's proceeds). **Listings, auction creation, bidding, and making offers are all free.** Sellers receive 98.5% of every sale. Contracts use UUPS proxies — upgradeable during development; immutability is planned for mainnet launch.
 
 ---
 
@@ -104,7 +104,7 @@ Settlement is **permissionless**. It can happen three ways:
 
 1. You click "Settle" on the auction page (`AUCTION.settle(id)`).
 2. Any user calls `settle(id)` from their wallet.
-3. The MagicWebb **keeper** broadcasts `settle` automatically every 30 s for any auction where `status='active' AND ends_at < now()`.
+3. The MagicWebb **keeper** broadcasts `settle` and refunds instantly (1-second polling) for any auction where `status='active' AND ends_at < now()`.
 
 The keeper runs under a Postgres advisory-lock single-flight gate (`db.WaitKeeperLock`) so cluster-wide only one machine broadcasts at any time — no split-brain.
 
@@ -113,8 +113,8 @@ Settle paths:
 | Outcome | Contract | Indexer |
 |---------|----------|---------|
 | **Happy** (winner exists, NFT OK) | NFT → winner; 98.5% of `effective_wei` → seller; 1.5% → recipient; `AuctionSettled(id, winner, seller, bidAmt, fee)` | `onAuctionSettled` flips status → SSE `auction-updated` + auction_won/sold notifications |
-| **Seller revoked NFT / moved it** (delivery reverts) | `auction.stalledAt = block.timestamp`; `AuctionStalled(id)` emitted. After `STALL_WINDOW = 7 days`, seller can `reclaim(id)` for full escrow refund to winner | `onAuctionSettled` does NOT fire; status stays `active` for 7 days, then `reclaim` flips to `cancelled` |
-| **Loser refund sweep** (post-settle) | `refundLosers(id, batch[])` with `gas: 50_000` per iter + `BatchTooLarge()` guard at 200 — losers receive escrow, greedy receivers parks in `pendingReturns` | `onLoserRefunded` seeds `pending_withdrawals`; `runWithdrawalSweeper` verifies every 2 min and fires "Action needed: withdraw your refund" notification when verified |
+| **Seller revoked NFT / moved it** (delivery reverts) | `settle()` reverts entirely — no stall state. The keeper bot retries on the next tick once the transfer issue is resolved | `onAuctionSettled` does NOT fire; auction stays active for keeper retry |
+| **Loser refund sweep** (post-settle) | `refundLosers(id, batch[])` with `gas: 50_000` per iter + `BatchTooLarge()` guard at 200 — losers receive escrow, greedy receivers park in `pendingReturns`. Keeper auto-refunds losers instantly after settlement. | `onLoserRefunded` seeds `pending_withdrawals`; `runWithdrawalSweeper` verifies and fires "Action needed: withdraw your refund" notification when verified |
 
 ### H. Make an offer
 
@@ -122,11 +122,11 @@ Open offers are escrowed principal until accepted/rejected/expired.
 
 | Step | UI | Contract | Indexer |
 |------|-----|----------|---------|
-| 1 | Token page (non-owner view) → "Make an offer" → principal + expiry (default 7d, capped at 14d) | — | — |
+| 1 | Token page (non-owner view) → "Make an offer" → principal + expiry (one of 6 fixed durations: 3min–24hr) | — | — |
 | 2 | Sign | `OFFERBOOK.makeOffer(coll, id, principal, expiresAt, { value: principal })` → `OfferMade(coll, id, bidder, principal, units, expiresAt)` | `onOfferMade` upserts offer position + notifies owner + SSE `offer-updated` |
 | 3 | Owner sees offer under "Offers received" | — | — |
 
-The escrow is fully refundable until the offer is accepted, rejected, or expires automatically (the keeper refunds every minute for expired positions).
+The escrow is fully refundable until accepted, rejected, cancelled by the bidder, or expired (the keeper auto-refunds expired offers instantly). Top-ups do not refresh the expiry timer — it continues counting down from the original expiry.
 
 ### I. Accept an offer (owner)
 
@@ -155,7 +155,7 @@ Listing cancel is **gas-free** for the seller. Your NFT immediately stops being 
 
 ### L. Cancel an auction early
 
-Only allowed **before any bid**. After the first bid lands, the auction is locked.
+Only allowed **before any qualifying leader exists** (reserve-met). Once a leader clears the reserve, the auction is locked.
 
 | Step | UI | Contract | Indexer |
 |------|-----|----------|---------|

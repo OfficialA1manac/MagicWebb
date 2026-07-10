@@ -1,7 +1,9 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {AccessControl} from "@openzeppelin/contracts/access/AccessControl.sol";
+import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
+import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
+import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
 import {IMarketplaceManager} from "./MarketplaceCore.sol";
 
 error ZeroAddr();
@@ -37,7 +39,7 @@ error SameValue();
 ///   - setFeeDistributor    — future token-based fee rebate module.
 ///   - setStakingModule     — future token utility.
 ///   - setGovernanceModule  — future on-chain governance.
-contract MarketplaceManager is AccessControl, IMarketplaceManager {
+contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgradeable, IMarketplaceManager {
     bytes32 public constant OPERATOR_ROLE    = keccak256("OPERATOR_ROLE");
     bytes32 public constant KEEPER_ROLE      = keccak256("KEEPER_ROLE");
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
@@ -64,7 +66,14 @@ contract MarketplaceManager is AccessControl, IMarketplaceManager {
     event EntriesUnpaused(address indexed by);
     event ModuleSet(bytes32 indexed slot, address indexed addr);
 
-    constructor(address admin) {
+    /// @custom:oz-upgrades-unsafe-allow constructor
+    constructor() { _disableInitializers(); }
+
+    /// @notice One-time initializer. Grants DEFAULT_ADMIN_ROLE + OPERATOR_ROLE
+    ///         to the supplied admin address.
+    function initialize(address admin) public initializer {
+        __AccessControl_init();
+        __UUPSUpgradeable_init();
         if (admin == address(0)) revert ZeroAddr();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
         _grantRole(OPERATOR_ROLE, admin);
@@ -148,6 +157,11 @@ contract MarketplaceManager is AccessControl, IMarketplaceManager {
         emit AuditLog("SET_GOVERNANCE", msg.sender, gm, 0);
     }
 
+    // ── UUPS upgrade authorization ───────────────────────────────────────────
+
+    /// @notice Only the DEFAULT_ADMIN_ROLE holder can authorize upgrades.
+    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+
     // ── Role audit shim ───────────────────────────────────────────────────────
 
     /// @dev Mirror every role change into the uniform audit stream.
@@ -160,4 +174,7 @@ contract MarketplaceManager is AccessControl, IMarketplaceManager {
         revoked = super._revokeRole(role, account);
         if (revoked) emit AuditLog("REVOKE_ROLE", msg.sender, account, role);
     }
+
+    /// @dev Storage gap for future role extensions and module slots.
+    uint256[50] private __gap;
 }

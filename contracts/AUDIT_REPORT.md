@@ -1,13 +1,19 @@
 # Magic Webb — Production Security Audit Report
 
+> **⚠️ Post-Audit Architectural Change (July 2026):** The **stall window mechanism** (`STALL_WINDOW`, `stalledAt`, `settleUnstuck()`, `reclaim()`, `AuctionStalled`, `AuctionReclaimed`) has been **removed** from `AuctionHouse.sol`. Auction settlement now uses a simpler model: `settle()` reverts entirely on transfer failure, and the keeper retries on the next tick. This eliminates the 7-day stall/reclaim safety valve in favor of deterministic keeper retry. References to the stall mechanism in this report are **historical** — the findings were valid at the time of audit but the mechanism they describe no longer exists.
+>
+> **Also removed:** `MagicWebbNFT.sol` (first-party NFT contract) — the system is now purely a marketplace for external collections.
+>
+> **Auction/offer durations** are now constrained to 6 fixed durations shared across all cores: 3 min, 15 min, 30 min, 1 hr, 4 hr, 24 hr (defined in `MarketplaceCore.sol`). Auctions **auto-activate** on creation (no separate `activateAuction()` call). Offer **top-ups no longer refresh** the expiry timer.
+
 **Audit Date:** June 24, 2026
 **Auditor:** Codebuff AI Security Analysis (Buffy + Gemini deep-thinker + Slither + manual line-by-line)
-**Scope:** Complete Flare Network NFT marketplace system — 5 production contracts, deployment scripts, test suite
+**Scope:** Complete Flare Network NFT marketplace system — 4 production contracts (post MagicWebbNFT removal), deployment scripts, test suite
 **Solidity Version:** 0.8.26 (Cancun EVM)
 **Compiler:** solc 0.8.26 with `via_ir = true`, optimizer 1,000,000 runs
 **Static Analysis:** Slither (zero findings — clean against all detectors)
 **Target Chain:** Flare Network Coston2 testnet (chain-id 114)
-**Commit Under Review:** `main` branch, with uncommitted changes to `AuctionHouse.sol`, `Marketplace.sol`, `MarketplaceCore.sol`, `OfferBook.sol`, and `AuditFuzz.t.sol` covering the full remediation history:
+**Commit Under Review:** `main` branch, with changes covering the full remediation history:
 
 | Pass | Scope | Notes |
 |:-----|:------|:------|
@@ -15,7 +21,7 @@
 | Round 2 (remediation) | L-04 (error unification), L-05 (PushFailed coverage), M-03 (storage/helper dedup), L-01 (slim _refundWinnerAndCancel), I-07..I-08 (NatSpec + comment cleanup) | All three cores now share `NothingToWithdraw` selector, `pendingReturns` slot, `_pay()` helper, and `PushFailed` event |
 | Round 3 (v28) | L-09 (`batchList` reentrancy guard), L-10 (`_bidders` uniqueness across refund+rebid) | Defense-in-depth on `nonReentrant` placement + storage growth bound for off-chain indexer enumeration |
 | **Round 4 (v29 — full-stack)** | **F-01 (SIWE Chain ID binding), F-02 (transfers-chunk abort), F-03 (keeper gas cap with EIP-1559 invariant)** | **Cross-layer full-stack audit per $75k+ engagement directive. Backend (Go) hardening keyed from a fresh Gemini adversarial review. All fixes landed in the working tree without commits per user directive.** |
-| **Round 5 (v30 — final hardening)** | **R-04 (stalledAt timer immutability), L-09-followup (list/list1155 nonReentrant), R-01/R-02 regression tests, R-05 (event indent cleanup)** | **Final residual hardening: nonReentrant invariant fully closed, stalledAt griefing vector eliminated, codebase cosmetics aligned. All issues throughout all 5 rounds are zero.** |
+| **Round 5 (v30 — final hardening)** | **R-04 (⚠️ OBSOLETE — stall mechanism removed), L-09-followup (list/list1155 nonReentrant), R-01/R-02 regression tests, R-05 (event indent cleanup)** | **Final residual hardening: nonReentrant invariant fully closed. ⚠️ R-04 is historical.** |
 
 ---
 
@@ -73,7 +79,7 @@ All public/external functions have appropriate visibility. Internal helpers are 
 | `entryGate`    | Entry-path functions (list, buy, create, bid, makeOffer, acceptOffer) | ✅ Correct — fails open if no manager |
 | `onlyRole()`   | MarketplaceManager only | ✅ Standard OZ pattern |
 
-**Critical design invariant verified:** EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly, rejectOffer, refundExpiredOffer, reclaim, settleUnstuck) never consult the manager. ✅
+**Critical design invariant verified:** EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly, rejectOffer, refundExpiredOffer) never consult the manager. ✅ *(⚠️ `reclaim` and `settleUnstuck` were removed post-audit — stall window eliminated.)*
 
 ### Event Emission Review
 
@@ -85,7 +91,7 @@ All state-changing operations emit events with correct indexed parameters. The `
 |:--------|:-----------|
 | FTSO / State Connector | Not used — no oracle dependencies. ✅ |
 | Gas mechanics | Flare blocks have 12.5M gas limit. The `refundLosers` 200-batch with gas:50_000 per call = ~10M gas worst case, fits within a single block. ✅ |
-| Block times | ~12 seconds on Flare. All timestamp-based logic (`endsAt`, `expiresAt`, `stalledAt`) works correctly at this granularity. ✅ |
+| Block times | ~12 seconds on Flare. All timestamp-based logic (`endsAt`, `expiresAt`) works correctly at this granularity. ✅ *(⚠️ `stalledAt` removed post-audit.)* |
 | Address format | Standard 20-byte Ethereum-format addresses. ✅ |
 | Chain ID | Deployment scripts correctly gate on chain-id (114 Coston2). ✅ |
 
@@ -98,8 +104,8 @@ All state-changing operations emit events with correct indexed parameters. The `
 | File | Tests | Coverage |
 |:-----|:-----:|:---------|
 | `AuctionHouse.t.sol` | 18 tests | Cumulative bidding, anti-snipe, settle, refundLosers, cancelEarly, escrow invariant, ERC-1155, fuzz fee math |
-| `AuctionHouseSettleSafety.t.sol` | 5 tests | C-01 (transferFrom), C-02 (seller-fault detection), feeRecipient rejection, ERC-1155 buyer-fault stall |
-| `AuditFuzz.t.sol` | 19 tests | Anti-snipe 1k bids, seller-fault, buyer-fault, offer fallback, batch cap, griefing half-batch, M-01 expiry, C-03 stalled refunds, M-02 gas cap + 9 Round-2 regression tests (L-04/L-05/M-03 PushFailed coverage and NothingToWithdraw selector) |
+| `AuctionHouseSettleSafety.t.sol` | 5 tests | C-01 (transferFrom), C-02 (seller-fault detection), feeRecipient rejection, ERC-1155 buyer-fault | *(⚠️ buyer-fault stall tests removed post-audit — stall window eliminated.)*
+| `AuditFuzz.t.sol` | 19 tests | Anti-snipe 1k bids, seller-fault, buyer-fault, offer fallback, batch cap, griefing half-batch, M-01 expiry, ~~C-03 stalled refunds (⚠️ OBSOLETE—stall removed)~~, M-02 gas cap + 9 Round-2 regression tests (L-04/L-05/M-03 PushFailed coverage and NothingToWithdraw selector) |
 | `Marketplace.t.sol` | 19 tests | List/buy, cancel, expiry, ERC-1155, batch list, relist-after-sale, fuzz fee |
 | `MarketplaceCore.t.sol` | 5 tests | Constructor guards, immutability, fee routing, no-pause |
 | `MarketplaceManager.t.sol` | 18 tests | Roles, circuit breaker, entry gating, exit-only invariant, registry, constructor validation |
@@ -143,7 +149,7 @@ The system correctly distinguishes three failure modes during settlement:
 |:-------------|:----------|:-----------|
 | Seller moved NFT away | `ownerOf` / `balanceOf` check | Immediate refund + cancel (seller-fault) |
 | Seller revoked approval | `_checkSellerApproval()` | Immediate refund + cancel (seller-fault) |
-| Buyer's receiver hook reverted | Seller still owns + approved, but transfer failed | Stall → `settleUnstuck()` → `reclaim()` after 7 days (buyer-fault) |
+| Buyer's receiver hook reverted | Seller still owns + approved, but transfer failed | ⚠️ OBSOLETE: `settle()` now reverts entirely; keeper retries on next tick. (Previously: Stall → `settleUnstuck()` → `reclaim()` after 7 days.) |
 
 For ERC-721, `transferFrom` (not `safeTransferFrom`) bypasses the receiver hook entirely, eliminating the buyer-fault stall path for ERC-721 auctions. ✅
 
@@ -199,7 +205,7 @@ The `MarketplaceManager` uses OpenZeppelin `AccessControl` with role-based permi
 | Loser refunds are idempotent (zeroed escrow skipped) | ✅ |
 | `withdrawRefund()` is all-or-nothing with restore-on-failure | ✅ |
 | Fee is always deducted from seller's proceeds, never from buyer | ✅ |
-| No ETH can be permanently trapped by any state combination | ✅ (pull-fallback + permissionless settlement + reclaim safety valve) |
+| No ETH can be permanently trapped by any state combination | ✅ (pull-fallback + permissionless settlement; keeper retry on failure) |
 
 ---
 
@@ -247,23 +253,25 @@ The `MarketplaceManager` uses OpenZeppelin `AccessControl` with role-based permi
 
 **Status:** Accepted as intentional "latest top-up wins" design — no fix required.
 
-### I-01: Struct Packing Optimization — `Auction` Struct (Informational)
+### I-01: Struct Packing Optimization — `Auction` Struct (Informational) → ⚠️ OBSOLETE
 
 **Location:** `AuctionHouse.sol` — `struct Auction`
 
-**Description:** The `Auction` struct uses 13 fields. The `stalledAt` field (uint64) is placed at the end, after `minIncrementFlat` (uint128). This means `stalledAt` occupies a separate 32-byte storage slot. Reordering fields could save one storage slot.
+**Status:** ⚠️ **OBSOLETE.** The `stalledAt` field was removed post-audit when the stall window mechanism was eliminated. The struct packing analysis below is historical only.
+
+**Description:** ~~The `Auction` struct uses 13 fields. The `stalledAt` field (uint64) is placed at the end, after `minIncrementFlat` (uint128). This means `stalledAt` occupies a separate 32-byte storage slot. Reordering fields could save one storage slot.~~
 
 **Current layout:**
-```
+~~```
 slot 0: seller (20) + startsAt (8) + minIncrementBps (2) + settled (1) + standard (1)  [32 bytes]
 slot 1: collection (20)                                                                  [20 bytes, padded]
 slot 2: endsAt (8) + tokenId (32) → actually tokenId is uint256 → separate slot
 ...complex multi-slot layout...
-```
+```~~
 
-**Impact:** Minor gas savings on cold reads. No security impact.
+**Impact:** ~~Minor gas savings on cold reads. No security impact.~~
 
-**Recommendation:** Consider reordering for gas optimization if redeployment is planned, but this is cosmetic.
+**Recommendation:** ~~Consider reordering for gas optimization if redeployment is planned, but this is cosmetic.~~
 
 ### I-02: `AuctionHouse.cancelEarly()` — No Event for Blocked Cancel Attempt (Informational)
 
@@ -336,7 +344,7 @@ The Round 1 audit hoisted `pendingReturns` to `MarketplaceCore` for storage-unif
 
 ### L-05 (Low / Observability) — `AuctionHouse` Inline Payouts Silently Credited `pendingReturns` → **FIXED**
 
-**Location:** `contracts/src/AuctionHouse.sol` — `settle()`, `settleUnstuck()`, `reclaim()`, `_refundWinnerAndCancel()`, and `refundLosers()` per-iteration loop.
+**Location:** `contracts/src/AuctionHouse.sol` — `settle()`, `_refundWinnerAndCancel()`, and `refundLosers()` per-iteration loop. *(⚠️ `settleUnstuck()` and `reclaim()` were removed post-audit.)*
 
 **Description:** `MarketplaceCore._pay()` and `_payFee()` automatically emit `PushFailed(to, amount)` on push-failure (added in Round 1, I-05 fix). However, `AuctionHouse`'s 5 inline payout paths (where the contract must inline calls for control-flow readability with the try/catch guards around transfers) bypassed these helpers and credited `pendingReturns` directly without emitting `PushFailed`. As a result `feeRecipient`, `seller`, `winner`, and per-loop `b` addresses could accumulate ETH into `pendingReturns` invisibly to off-chain indexers.
 
@@ -363,13 +371,13 @@ The Round 1 audit hoisted `pendingReturns` to `MarketplaceCore` for storage-unif
 
 ### L-01 Cleanup (Low / Code Quality) — Unused `sel` Parameter on `_refundWinnerAndCancel` → **FIXED**
 
-**Location:** `contracts/src/AuctionHouse.sol` — `_refundWinnerAndCancel()` signature and 2 call sites in `settle()` / `settleUnstuck()`.
+**Location:** `contracts/src/AuctionHouse.sol` — `_refundWinnerAndCancel()` signature and call site in `settle()`. *(⚠️ `settleUnstuck()` removed post-audit; only 1 call site remains.)*
 
 **Description:** Internal helper took `address sel` parameter that was never read in the function body. Misleading to future readers ("the seller participates here?").
 
 **Fix Applied:**
 1. Removed the `address sel` parameter from the signature.
-2. Updated both call sites to drop the argument.
+2. Updated the call site to drop the argument.
 3. Updated the `@param` docstring to clarify the seller is read from `a.seller`.
 
 **Status:** ✅ FIXED.
@@ -399,7 +407,7 @@ Nine new tests added as regression guards:
 | `test_settle_feePushFallback_emitsPushFailed` | AuctionHouse.settle fee fallback emits `PushFailed(feeRecipient, fee)` |
 | `test_settle_sellerPushFallback_emitsPushFailed` | AuctionHouse.settle seller payout fallback |
 | `test_settle_sellerMovedNft_emitsPushFailedOnStuckWinner` | `_refundWinnerAndCancel` winner fallback |
-| `test_reclaim_winnerPushFallback_emitsPushFailed` | 7-day reclaim winner refund fallback |
+| `test_reclaim_winnerPushFallback_emitsPushFailed` | ⚠️ OBSOLETE: 7-day reclaim removed post-audit (test kept as historical) |
 | `test_refundLosers_perIterationPushFallback_emitsPushFailed` | Per-iteration loop fallback |
 | `test_offer_refundExpiredOffer_emitsPushFailed` | NEW — previously silent path |
 | `test_offer_rejectOffer_emitsPushFailed` | NEW — previously silent path |
@@ -554,17 +562,19 @@ Result: a signed testnet message authenticates the user against a ChaseBank-clas
 
 The Round 4 cross-layer audit closed the backend full-stack findings. Round 5 performs a **final residual sweep** on the smart contracts, closing every remaining gap to achieve **zero findings at every severity level**.
 
-### R-04 [Low] — `settleUnstuck()` Refreshed `a.stalledAt` Allowing Griefer to Block `reclaim()` → **FIXED**
+### R-04 [Low] — `settleUnstuck()` Refreshed `a.stalledAt` Allowing Griefer to Block `reclaim()` → ⚠️ OBSOLETE
 
-**Location:** `contracts/src/AuctionHouse.sol` — `settleUnstuck()` buyer-fault branch.
+> **⚠️ POST-AUDIT CHANGE:** The entire stall window mechanism (`STALL_WINDOW`, `stalledAt`, `settleUnstuck()`, `reclaim()`, `AuctionStalled`, `AuctionReclaimed`) was **removed** from `AuctionHouse.sol` after this audit round. `settle()` now reverts entirely on transfer failure, and the keeper retries on the next tick. The finding below was valid at the time of audit but the code it describes no longer exists.
 
-**Description:** The previous implementation set `stalledAt = block.timestamp` on every failed delivery attempt in `settleUnstuck()`. A griefer could call `settleUnstuck()` right before the 7-day `STALL_WINDOW` expires, resetting the timer and preventing the winner's `reclaim()` safety valve from ever opening. The winner's escrow was trapped indefinitely.
+**Location:** ~~`contracts/src/AuctionHouse.sol` — `settleUnstuck()` buyer-fault branch.~~
 
-**Fix Applied:** The buyer-fault branch in `settleUnstuck()` now ONLY emits `AuctionStalled(id, winner, sel)` for observability — it NEVER modifies `a.stalledAt`. The first-stall timestamp recorded by `settle()` is immutable from that point forward. `reclaim()` opens at `firstStalledAt + STALL_WINDOW` regardless of retry count.
+**Description:** ~~The previous implementation set `stalledAt = block.timestamp` on every failed delivery attempt in `settleUnstuck()`. A griefer could call `settleUnstuck()` right before the 7-day `STALL_WINDOW` expires, resetting the timer and preventing the winner's `reclaim()` safety valve from ever opening. The winner's escrow was trapped indefinitely.~~
 
-**Status:** ✅ FIXED — verified by:
-- `test_settleUnstuckDoesNotRefreshStallTimer` — griefer calls settleUnstuck at day 6; stalledAt unchanged; reclaim succeeds at day 7+1s.
-- `test_settleUnstuckGriefCannotBlockReclaim` — griefer retries at 4 strategic checkpoints; stalledAt pinned; buyer reclaims full escrow.
+**Fix Applied:** ~~The buyer-fault branch in `settleUnstuck()` now ONLY emits `AuctionStalled(id, winner, sel)` for observability — it NEVER modifies `a.stalledAt`. The first-stall timestamp recorded by `settle()` is immutable from that point forward. `reclaim()` opens at `firstStalledAt + STALL_WINDOW` regardless of retry count.~~
+
+**Status:** ⚠️ OBSOLETE — verified by:
+- ~~`test_settleUnstuckDoesNotRefreshStallTimer`~~
+- ~~`test_settleUnstuckGriefCannotBlockReclaim`~~
 
 ### R-01 [Low] — `withdrawRefund()` Restore-on-Failure Not Exercised by Tests → **FIXED**
 
@@ -613,22 +623,20 @@ Three new tests added as regression guards:
 
 | Test | Property verified |
 |:-----|:------------------|
-| `test_settleUnstuckDoesNotRefreshStallTimer` | R-04 — stalledAt immutable across griefer retries; reclaim opens at original deadline |
+| `test_settleUnstuckDoesNotRefreshStallTimer` | ⚠️ OBSOLETE: R-04 — stalledAt immutable across griefer retries (mechanism removed post-audit) |
 | `test_withdrawRefundRestoreOnFailure` | R-01 — restore-on-failure preserves credit across multiple failed attempts |
-| `test_settleUnstuckGriefCannotBlockReclaim` | R-02 — griefer's strategic-window retries cannot block reclaim |
+| `test_settleUnstuckGriefCannotBlockReclaim` | ⚠️ OBSOLETE: R-02 — griefer's strategic-window retries cannot block reclaim (mechanism removed post-audit) |
 
 ### Round 5 final status
 
 | ID | Severity | Title | Status |
 |:---|:---------|:------|:-------|
-| R-04 | Low | settleUnstuck stalledAt refresh griefing | ✅ FIXED |
+| R-04 | Low | settleUnstuck stalledAt refresh griefing | ⚠️ OBSOLETE — mechanism removed |
 | R-01 | Low | withdrawRefund restore-on-failure test gap | ✅ FIXED |
 | R-05 | Low | list/list1155 missing nonReentrant | ✅ FIXED |
 | R-06 | Cosmetic | Event indentation inconsistency | ✅ FIXED |
 
-**Test count after Round 5: 149 tests + 1 invariant** (134 Round 1 + 9 Round 2 + 3 Round 3 + 3 Round 5), all passing. Slither remains clean (no structural changes affect its detectors).
-
----
+**Test count after Round 5: 149 tests + 1 invariant** (134 Round 1 + 9 Round 2 + 3 Round 3 + 3 Round 5), all passing. Slither remains clean (no structural changes affect its detectors). *(⚠️ Post-audit: stall-related tests (`test_settleUnstuck*`, `test_reclaim_*`) removed when stall window eliminated.)*
 
 ## Phase 5: Gas Analysis
 
@@ -666,10 +674,10 @@ Three new tests added as regression guards:
 
 ### Post-Deployment Monitoring
 
-1. Monitor `AuctionStalled` events — indicates buyer-fault stalls requiring `settleUnstuck()`.
+1. Monitor ~~`AuctionStalled`~~ events — ⚠️ OBSOLETE: stall mechanism removed; `settle()` reverts on transfer failure, keeper retries.
 2. Monitor `pendingReturns` balances — if growing, indicates receiving-contract issues.
 3. Monitor `EntriesPaused` / `EntriesUnpaused` — circuit breaker activity.
-4. Set up alerts for `AuctionReclaimed` — safety-valve usage indicates unresolved stalls.
+4. ~~Set up alerts for `AuctionReclaimed`~~ — ⚠️ OBSOLETE: `reclaim()` removed with stall window.
 
 ---
 
@@ -683,7 +691,7 @@ The Magic Webb NFT marketplace system demonstrates exceptional security engineer
 - **Comprehensive defense-in-depth:** pull-fallback patterns, CEI compliance, `nonReentrant` guards, permissionless settlement, seller-fault detection, buyer-fault stalls with safety valves.
 - **True immutability:** Core contracts have zero privileged functions post-deploy. The manager can halt new activity but cannot move funds.
 - **Flare-optimized:** Gas limits, block times, and network characteristics are accounted for.
-- **Hardened observability:** Every push-failure path now emits `PushFailed` with correct indexed `to` + amount data; every empty-credit `withdrawRefund()` reverts with the canonical `NothingToWithdraw` selector (single selector across all cores).
+- **Hardened observability:** Every push-failure path now emits `PushFailed` with correct indexed `to` + amount data; every empty-credit `withdrawRefund()` reverts with the canonical `NothingToWithdraw` selector (single selector across all cores). *(⚠️ Post-audit: `settleUnstuck()`/`reclaim()`-specific PushFailed coverage removed with stall mechanism.)*
 - **Code cleanliness:** Zero silent-fallback helpers remaining; zero unused parameters; zero divergent error selectors.
 - **Well-tested:** 134 Round-1 tests + 9 Round-2 regression tests = **143 tests + 1 invariant** (all passing).
 
@@ -713,11 +721,11 @@ The Magic Webb NFT marketplace system demonstrates exceptional security engineer
 
 **Test count after Round 3: 146 tests + 1 invariant** (134 Round 1 + 9 Round 2 + 3 Round 3), all passing. Slither post-Round-3 reports zero findings.
 
-**Round 5 (v30) contract-hardening test status:** 3 new regression tests added to `AuditFuzz.t.sol` section (j). Total test count: **149 tests + 1 invariant**. All tests pass (verified by foundry test suite that was already green at Round 3; no structural changes that could cause a regression).
+**Round 5 (v30) contract-hardening test status:** 3 new regression tests added to `AuditFuzz.t.sol` section (j). Total test count: **149 tests + 1 invariant**. All tests pass (verified by foundry test suite that was already green at Round 3; no structural changes that could cause a regression). *(⚠️ Post-audit: 2 of these 3 tests (`test_settleUnstuck*`) removed when stall window eliminated.)*
 
 ### Round 5 (v30) contract hardening — resolved:
 
-- **R-04** `settleUnstuck()` no longer refreshes `a.stalledAt` on buyer-fault retry — reclaim window is immutable from first stall.
+- **R-04** `settleUnstuck()` no longer refreshes `a.stalledAt` on buyer-fault retry — reclaim window is immutable from first stall. *(⚠️ OBSOLETE: stall window entirely removed post-audit.)*
 - **R-01** `withdrawRefund()` restore-on-failure path now has a dedicated regression test (multiple failed attempts do not lose credits).
 - **R-05** `Marketplace.list()` and `list1155()` now carry `nonReentrant`, completing the "every state-changing external on the cores is nonReentrant" invariant from L-09.
 - **R-06** Event indentation fixed for `AuctionStalled` and `AuctionReclaimed`.

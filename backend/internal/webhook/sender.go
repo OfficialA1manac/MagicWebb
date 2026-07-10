@@ -126,6 +126,99 @@ func SendPrometheusAlert(ctx context.Context, url, alertName, description, sever
 	return SendPrometheus(ctx, url, payload)
 }
 
+// ── Resolved notification helpers (green / "resolved" status) ─────────────────
+
+// SendDiscordResolvedAlert sends a green-coloured embed indicating the gas cost
+// has dropped back below the threshold (resolved status).
+func SendDiscordResolvedAlert(ctx context.Context, url, title, description string) error {
+	return SendDiscord(ctx, url, Payload{
+		Content: fmt.Sprintf("✅ **%s**", title),
+		Embeds: []Embed{{
+			Title:       title,
+			Description: description,
+			Color:       0x2ECC71, // green
+		}},
+	})
+}
+
+// SendPrometheusResolvedAlert sends an Alertmanager-compatible alert with
+// status "resolved" and an endsAt timestamp set to now. This tells
+// Alertmanager the alert is no longer firing and can be auto-resolved.
+// The Labels/CommonLabels severity MUST match the firing alert's severity
+// so Alertmanager links them as the same alert (same fingerprint); a
+// different severity creates a separate alert group.
+func SendPrometheusResolvedAlert(ctx context.Context, url, alertName, description string) error {
+	now := time.Now().UTC().Format(time.RFC3339Nano)
+	payload := PromPayload{
+		Version:         "4",
+		GroupKey:        fmt.Sprintf("{}:{alertname=\"%s\"}", alertName),
+		TruncatedAlerts: 0,
+		Status:          "resolved",
+		Receiver:        "gas-alert",
+		GroupLabels: map[string]string{
+			"alertname": alertName,
+		},
+		CommonLabels: map[string]string{
+			"alertname": alertName,
+			"severity":  "warning", // MUST match firing alert severity for Alertmanager fingerprint linking
+		},
+		CommonAnnotations: map[string]string{
+			"summary":     fmt.Sprintf("Keeper gas cost resolved: %s", alertName),
+			"description": description,
+		},
+		ExternalURL: "",
+		Alerts: []PromAlert{{
+			Status: "resolved",
+			Labels: map[string]string{
+				"alertname": alertName,
+				"severity":  "warning", // MUST match firing alert severity
+			},
+			Annotations: map[string]string{
+				"summary":     fmt.Sprintf("Keeper gas cost resolved: %s", alertName),
+				"description": description,
+			},
+			StartsAt: now,
+			EndsAt:   now, // resolved immediately
+		}},
+	}
+	return SendPrometheus(ctx, url, payload)
+}
+
+// BuildResolvedAlertEmailBody returns a green-themed HTML email body for a
+// gas cost resolved notification.
+func BuildResolvedAlertEmailBody(title, description, thresholdWei, costWei, thresholdFLR, costFLR, currency string) string {
+	return fmt.Sprintf(`<!DOCTYPE html>
+<html>
+<head><meta charset="UTF-8"><style>
+body{font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,sans-serif;background:#0a0a0f;color:#fafafa;margin:0;padding:2rem;}
+.container{max-width:600px;margin:0 auto;background:#16161f;border-radius:12px;padding:2rem;border:1px solid rgba(34,197,94,0.3);}
+h1{color:#22c55e;font-size:1.25rem;margin:0 0 1rem;}
+.stat{display:flex;justify-content:space-between;padding:0.75rem 0;border-bottom:1px solid rgba(255,255,255,0.08);}
+.stat:last-child{border-bottom:none;}
+.label{color:rgba(255,255,255,0.5);font-size:0.875rem;}
+.value{color:#fafafa;font-family:'JetBrains Mono','SF Mono',monospace;font-weight:700;}
+.threshold{color:#fbbf24;}
+.current{color:#22c55e;}
+.footer{margin-top:1.5rem;font-size:0.75rem;color:rgba(255,255,255,0.35);text-align:center;}
+</style></head>
+<body>
+<div class=container>
+<h1>✅ %s</h1>
+<p style="color:rgba(255,255,255,0.7);margin:0 0 1.5rem;">%s</p>
+<div class=stat><span class=label>Threshold</span><span class="value threshold">%s wei (%s %s)</span></div>
+<div class=stat><span class=label>Current (24h)</span><span class="value current">%s wei (%s %s)</span></div>
+<div class=stat><span class=label>Currency</span><span class=value>%s</span></div>
+<div class=footer>MagicWebb Keeper Gas Alert · <a href="https://magicwebb.fly.dev/metrics/gas" style="color:#818cf8;">Gas Dashboard</a></div>
+</div>
+</body>
+</html>`,
+		title, description,
+		thresholdWei, thresholdFLR, currency,
+		costWei, costFLR, currency,
+		currency,
+	)
+}
+
 // ── SMTP Email ──────────────────────────────────────────────────────────
 
 // SendEmail sends an HTML email via SMTP. Requires SMTP host/port, credentials,

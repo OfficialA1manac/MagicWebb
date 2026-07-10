@@ -183,12 +183,12 @@ contract MarketplaceManagerTest is Test {
         ah.bid{value: 2 ether}(id);
 
         _pause();
-        vm.warp(block.timestamp + 8 days);
+        vm.warp(block.timestamp + 30 hours);
 
         uint256 sellerBefore = seller.balance;
         uint256 aliceBefore  = alice.balance;
 
-        // settle: permissionless, ungated.
+        // settle: keeper-only when manager deployed.
         vm.prank(rando);
         ah.settle(id);
         assertGt(seller.balance, sellerBefore);
@@ -313,8 +313,7 @@ contract MarketplaceManagerTest is Test {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
-        ah.activateAuction(id);
+        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
         vm.stopPrank();
     }
 }

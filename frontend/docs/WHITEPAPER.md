@@ -58,9 +58,9 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 ### Offers (the bidder side)
 
 1. Make an offer on any NFT — the contract escrows your FLR on-chain. Offering is free.
-2. Repeat offers on the same NFT stack into one position; each refreshes the expiry.
+2. Repeat offers on the same NFT stack into one position; top-ups do NOT refresh the expiry timer — it continues counting down from the original expiry. Bidders can cancel their offer before expiry via `cancelOffer()`.
 3. If the owner accepts, the NFT transfers to you and your escrow pays the seller (minus the 1.5% fee).
-4. If the offer is rejected or expires, your full principal is refunded. Offers are locked until then — there is no early withdrawal.
+4. If the offer is rejected, cancelled, or expires, your full principal is refunded. Bidders can cancel their own offer before expiry; the keeper auto-refunds expired offers instantly.
 
 ### Auctions (the bidder side)
 

@@ -83,7 +83,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 
 ### 4.2 On-chain offer acceptance
 
-1. Bidder calls `makeOffer` / `makeOffer1155` (**payable**), escrowing the full principal in `OfferBook`. Repeat offers on the same NFT stack into one position and refresh its expiry. Offering is free.
+1. Bidder calls `makeOffer` / `makeOffer1155` (**payable**), escrowing the full principal in `OfferBook`. Repeat offers on the same NFT stack into one position; top-ups do NOT refresh the expiry timer. Offering is free. Bidders can cancel their offer before expiry via `cancelOffer()`.
 2. Owner calls `acceptOffer` / `acceptOffer1155` (must currently own and have approved the NFT).
 3. Contract validates the position and ownership/approval, transfers the NFT to the bidder, then pays the seller `principal − 1.5%` and the fee to `feeRecipient` — one atomic transaction. Rejected or expired offers refund the full principal.
 

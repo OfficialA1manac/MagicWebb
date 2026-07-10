@@ -41,11 +41,8 @@ contract AuctionHouseHandler is Test {
         vm.startPrank(seller);
         tokenId = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(block.timestamp + 7 days), 500, 0);
+        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
         vm.stopPrank();
-        // Auctions start inactive — seller must activate before bids
-        vm.prank(seller);
-        ah.activateAuction(auctionId);
     }
 
     function bid(uint256 bSeed, uint128 value) external {

@@ -6,7 +6,11 @@ WORKDIR /astro
 # Injected at build time so Astro's import.meta.env.PUBLIC_REOWN_PROJECT_ID
 # is available in WalletConnect.tsx. Falls back to the same WC_PROJECT_ID
 # used by the Go backend (fly.toml passes it as a build arg).
-ARG REOWN_PROJECT_ID=af6aba4c71274871c3d77a60050171ba
+# REOWN_PROJECT_ID: MUST be passed via --build-arg (or via fly deploy --build-arg).
+# Get yours at https://cloud.reown.com — it's a public client identifier.
+ARG REOWN_PROJECT_ID
+# Fail fast if REOWN_PROJECT_ID is not set at build time.
+RUN test -n "$REOWN_PROJECT_ID" || (echo "FATAL: REOWN_PROJECT_ID build arg is required. Pass --build-arg REOWN_PROJECT_ID=..." && exit 1)
 ENV PUBLIC_REOWN_PROJECT_ID=$REOWN_PROJECT_ID
 
 # Copy app directory (Astro + Svelte + React + AppKit)

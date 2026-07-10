@@ -45,7 +45,7 @@ You can offer on **any** NFT — there is no eligibility gate, and offering is f
 2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your C2FLR is escrowed on-chain)
 3. The owner may accept, reject, or let it expire
 4. If accepted: the NFT transfers to you automatically
-5. Your offer is free and locked until accepted, rejected, or expired — then your full amount is refunded. Repeat offers on the same NFT stack into one position; there is no early withdrawal. If the automatic refund push fails, the amount is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund**.
+5. Your offer is free and locked until accepted, rejected, cancelled, or expired — then your full amount is refunded. Bidders can cancel their own offer before expiry via `cancelOffer()` for a full principal refund. Repeat offers on the same NFT stack into one position; expired offers are auto-refunded by the keeper. If the automatic refund push fails, the amount is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund**.
 
 ## Accept an offer (owner)
 Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.
