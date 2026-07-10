@@ -4,7 +4,8 @@
 //     (b) AuctionHouse.settle() seller-fault immediate refund + buyer-fault stall recovery
 //     (c) OfferBook _pay() fallback (rejectOffer + refundExpiredOffer) - L-05 M-03
 //     (d) AuctionHouse.refundLosers batch cap (BatchTooLarge) + per-call gas bound
-//     (e) OfferBook M-01: expiry reduction on top-up is blocked
+//     (e) OfferBook edit model: expiry CAN change on edit; invalid
+//         durations revert (edit model replaces compounding).
 //     (f) AuctionHouse.refundLosers works on stalled auctions (C-03)
 //     (g) AuctionHouse.withdrawRefund gas:50_000 cap (M-02)
 //     (h) L-04/L-05/M-03: PushFailed event coverage + NothingToWithdraw selector
@@ -34,10 +35,9 @@ import {
     OfferBook,
     NoOffer,
     OfferActive,
-    InvalidExpiry,
     OffersNotEligible
 } from "../src/OfferBook.sol";
-import {BelowMinPrice, NothingToWithdraw, WithdrawFailed, TokenStandard} from "../src/MarketplaceCore.sol";
+import {BelowMinPrice, NothingToWithdraw, WithdrawFailed, TokenStandard, InvalidDuration} from "../src/MarketplaceCore.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
@@ -439,10 +439,13 @@ contract AuditFuzzTest is Test {
     }
 
     // ════════════════════════════════════════════════════════════════════════
-    //  (e)  M-01 fix: OfferBook top-up MUST NOT allow expiry reduction.
+    //  (e)  OfferBook edit model: calling makeOffer again on the same NFT
+    //      replaces the position (refunds old principal, sets new
+    //      principal/units/expiry) rather than compounding. Expiry CAN
+    //      change on edit; invalid durations always revert.
     // ════════════════════════════════════════════════════════════════════════
 
-    function test_topUpDoesNotRefreshExpiry() public {
+    function test_makeOfferEditChangesExpiry() public {
         uint256 tid = nft.mint(seller);
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
@@ -456,18 +459,23 @@ contract AuditFuzzTest is Test {
         assertEq(pBefore, 1 ether);
         assertEq(expBefore, longExp);
 
-        // Top-up: expiry MUST NOT change (timer continues from original).
-        // The `expiresAt` param on top-up is ignored — only the principal increases.
+        // Edit: replace the 4hr offer with a 1hr offer at higher principal.
+        // Old 1 ether is refunded atomically; new 2 ether replaces it.
         uint64 shortExp = uint64(block.timestamp + 1 hours);
+        uint256 aliceBalBefore = alice.balance;
         vm.prank(alice);
-        ob.makeOffer{value: 0.01 ether}(address(nft), tid, 0.01 ether, shortExp);
+        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, shortExp);
 
         (uint128 pAfter,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
-        assertEq(pAfter, 1.01 ether, "principal increased on top-up");
-        assertEq(expAfter, longExp, "expiry UNCHANGED — not reduced to shortExp");
+        // Position REPLACED (not compounded): principal = 2 ether, expiry = 1hr.
+        assertEq(pAfter, 2 ether, "principal replaced on edit, not compounded");
+        assertEq(expAfter, shortExp, "expiry UPDATED on edit");
+        // Net: sent 2 eth, got 1 eth back (old principal refunded).
+        assertEq(alice.balance, aliceBalBefore - 2 ether + 1 ether, "net paid 1 eth more on edit-up");
+        assertEq(ob.pendingReturns(alice), 0, "no fallback - push succeeded");
     }
 
-    function test_cannotExpireImmediatelyViaTopUp() public {
+    function test_makeOfferEditInvalidDurationReverts() public {
         uint256 tid = nft.mint(seller);
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
@@ -477,14 +485,12 @@ contract AuditFuzzTest is Test {
         vm.prank(alice);
         ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, longExp);
 
-        // Top-up with an arbitrarily short expiry param: it's ignored since
-        // top-ups never change the expiry — the timer stays at original.
+        // Edit with an invalid (+1 second) duration must revert InvalidDuration.
+        // Every makeOffer call (create + edit) validates against the 6 fixed
+        // durations shared across all cores.
         vm.prank(alice);
-        ob.makeOffer{value: 0.01 ether}(address(nft), tid, 0.01 ether, uint64(block.timestamp + 1));
-
-        (uint128 p,, uint64 exp,) = ob.positions(address(nft), tid, alice);
-        assertEq(p, 5.01 ether, "principal increased");
-        assertEq(exp, longExp, "expiry UNCHANGED — still original 24hr, not +1");
+        vm.expectRevert(InvalidDuration.selector);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1));
     }
 
     // ════════════════════════════════════════════════════════════════════════
