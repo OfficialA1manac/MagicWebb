@@ -473,10 +473,10 @@ contract AuctionHouseTest is Test {
         assertEq(l, bob, "bob leads after meeting min increment floor");
     }
 
-    // ── Permissionless settle() fallback ─────────────────────────────────────
-    // When a MarketplaceManager is deployed, settle() is gated on KEEPER_ROLE
-    // with a 25-hour grace period after endsAt. The keeper can always settle;
-    // anyone can settle after endsAt + DURATION_24HR + 1 hour.
+    // ── 3-tier settle() gate ────────────────────────────────────────────────
+    // 1. KEEPER_ROLE — settles immediately after endsAt.
+    // 2. Seller or auction winner — settles after endsAt + 5 minutes.
+    // 3. Permissionless — anyone settles after endsAt + DURATION_24HR + 1hr.
 
     function test_settle_keeperAlwaysAllowed() public {
         // Deploy with a manager so the keeper gate is active.
@@ -556,6 +556,105 @@ contract AuctionHouseTest is Test {
         ah.settle(id);
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
+    }
+
+    // ── 3-tier gate: seller/winner 5-minute window ─────────────────────────
+
+    function test_settle_sellerBlockedBefore5Min() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        // Warp to 3 minutes after endsAt — seller is within the 5-min window.
+        vm.warp(block.timestamp + 3 minutes + 3 minutes);
+
+        // Seller tries to settle before the 5-minute cooldown elapses.
+        vm.prank(seller);
+        vm.expectRevert(NotKeeper.selector);
+        gated.settle(id);
+        // Confirm auction still unsettled.
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertFalse(settled);
+    }
+
+    function test_settle_sellerAllowedAfter5Min() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        // Warp to 6 minutes after endsAt — past the 5-minute cooldown.
+        vm.warp(block.timestamp + 3 minutes + 6 minutes);
+
+        // Seller settles after the 5-minute cooldown.
+        uint256 sellerBefore = seller.balance;
+        vm.prank(seller);
+        gated.settle(id);
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertTrue(settled);
+        // Seller received proceeds (net of fee).
+        assertGt(seller.balance, sellerBefore);
+    }
+
+    function test_settle_winnerAllowedAfter5Min() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 500, 0);
+        vm.stopPrank();
+        // Alice is the winner.
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        // Warp to 6 minutes after endsAt.
+        vm.warp(block.timestamp + 3 minutes + 6 minutes);
+
+        // Alice (winner) settles — should pass via tier 2.
+        vm.prank(alice);
+        gated.settle(id);
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertTrue(settled);
+        // Alice now owns the NFT.
+        assertEq(nft.ownerOf(tid), alice);
+    }
+
+    function test_settle_randomBlockedBefore25Hr() public {
+        MarketplaceManager mgr = new MarketplaceManager(address(this));
+        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(gated), true);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
+        vm.stopPrank();
+        vm.prank(alice);
+        gated.bid{value: 1 ether}(id);
+        // Warp to 10 hours after endsAt — past 5min but before 25hr.
+        vm.warp(block.timestamp + 24 hours + 10 hours);
+
+        // Carol is NOT the keeper, NOT the seller, NOT the winner.
+        vm.prank(carol);
+        vm.expectRevert(NotKeeper.selector);
+        gated.settle(id);
+        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        assertFalse(settled);
     }
 
     // ── Permissionless refundLosers() ────────────────────────────────────────

@@ -2,8 +2,8 @@
 pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
-import {OfferBook, NoOffer, NotOwner, WrongValue, OfferActive, InvalidExpiry} from "../src/OfferBook.sol";
-import {BelowMinPrice} from "../src/MarketplaceCore.sol";
+import {OfferBook, NoOffer, NotOwner, WrongValue, OfferActive} from "../src/OfferBook.sol";
+import {BelowMinPrice, InvalidDuration} from "../src/MarketplaceCore.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -101,7 +101,9 @@ contract OfferBookTest is Test {
         assertEq(_principalOf(address(nft), tid, bidder), 1 ether);
     }
 
-    function test_makeOfferCompoundsPosition() public {
+    // ── Edit (one offer per NFT — calling again replaces the position) ────────
+
+    function test_makeOfferEditReplacesNotCompounds() public {
         _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
 
@@ -110,8 +112,61 @@ contract OfferBookTest is Test {
         ob.makeOffer{value: _total(0.5 ether)}(address(nft), tid, 0.5 ether, _exp());
         vm.stopPrank();
 
-        // Principals compound into one position; offers are free.
-        assertEq(_principalOf(address(nft), tid, bidder), 1.5 ether);
+        // Only ONE offer per buyer per NFT — the second call REPLACES the
+        // position. Old principal is refunded atomically; new principal stands.
+        // Not compounded: position shows 0.5 ether, not 1.5 ether.
+        assertEq(_principalOf(address(nft), tid, bidder), 0.5 ether);
+    }
+
+    function test_makeOfferEditUp() public {
+        _enableOffers(address(nft));
+        uint256 tid = _mintAndApprove(seller);
+
+        vm.startPrank(bidder);
+        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
+        uint256 balBefore = bidder.balance;
+        // Edit up: replace 1 ether with 2 ether. Old 1 ether refunded, net cost = +1 ether.
+        ob.makeOffer{value: _total(2 ether)}(address(nft), tid, 2 ether, _exp());
+        vm.stopPrank();
+
+        assertEq(_principalOf(address(nft), tid, bidder), 2 ether, "position updated to 2 eth");
+        // Net: sent 2 eth, got 1 eth back → paid 1 eth more (plus gas).
+        assertEq(bidder.balance, balBefore - 2 ether + 1 ether, "net paid 1 eth more");
+    }
+
+    function test_makeOfferEditDown() public {
+        _enableOffers(address(nft));
+        uint256 tid = _mintAndApprove(seller);
+
+        vm.startPrank(bidder);
+        ob.makeOffer{value: _total(2 ether)}(address(nft), tid, 2 ether, _exp());
+        uint256 balBefore = bidder.balance;
+        // Edit down: replace 2 ether with 1 ether. Old 2 ether refunded, net return = +1 ether.
+        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
+        vm.stopPrank();
+
+        assertEq(_principalOf(address(nft), tid, bidder), 1 ether, "position updated to 1 eth");
+        // Net: sent 1 eth, got 2 eth back → received 1 eth back (minus gas).
+        assertEq(bidder.balance, balBefore - 1 ether + 2 ether, "net received 1 eth back");
+    }
+
+    function test_makeOfferEditWithNewExpiry() public {
+        _enableOffers(address(nft));
+        uint256 tid = _mintAndApprove(seller);
+
+        uint64 expiry24h = uint64(block.timestamp + 24 hours);
+
+        vm.startPrank(bidder);
+        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, expiry24h);
+        // Edit: same principal, new 1-hour expiry.
+        uint64 expiry1h = uint64(block.timestamp + 1 hours);
+        ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, expiry1h);
+        vm.stopPrank();
+
+        (uint128 principal,,, uint64 storedExpiry) = ob.positions(address(nft), tid, bidder);
+        assertEq(principal, 1 ether);
+        // Expiry updated to the new 1-hour duration.
+        assertEq(storedExpiry, expiry1h, "expiry updated on edit");
     }
 
     function test_makeOfferWrongValueReverts() public {
@@ -134,7 +189,7 @@ contract OfferBookTest is Test {
         _enableOffers(address(nft));
         uint256 tid = _mintAndApprove(seller);
         vm.prank(bidder);
-        vm.expectRevert(InvalidExpiry.selector);
+        vm.expectRevert(InvalidDuration.selector);
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, uint64(block.timestamp + 15 days));
     }
 
