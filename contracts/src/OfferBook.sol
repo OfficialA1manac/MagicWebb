@@ -29,20 +29,20 @@ error OffersNotEligible();
 error NotKeeper();
 
 /// @title OfferBook
-/// @notice On-chain NFT offers with stacked positions; the seller pays the fee on acceptance.
+/// @notice On-chain NFT offers: one active position per (NFT, buyer); the seller pays the fee on acceptance.
 ///
-/// Fee model (seller-pays, Option-4 stacked positions):
+/// Fee model (seller-pays):
 ///   - Making an offer is FREE, but only on collections marked as offer-eligible.
 ///     The collection owner (or admin via the MarketplaceManager) sets the flag.
-///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
-///   - makeOffer is PAYABLE: send exactly `principal`. The full amount is escrowed; the
-///     offerer pays no fee.
-///   - Multiple offers from the same bidder on the same NFT COMPOUND into one position;
-///     each top-up does NOT refresh the position's expiry — the timer continues
-///     counting down from the original expiry.
+///   - makeOffer is PAYABLE: send exactly the new `principal`. The full amount is
+///     escrowed; the offerer pays no fee.
+///   - Only ONE offer per buyer per NFT. Calling makeOffer again on the same NFT
+///     EDITS the position — the old principal is refunded atomically and the new
+///     principal replaces it. Units and expiry can also be updated in the same call.
 ///   - Bidder can cancel their own offer before expiry via cancelOffer(), receiving a
 ///     full principal refund.
-///   - There is NO individual withdrawal. A position is locked until accept / reject / expiry.
+///   - There is NO individual withdrawal while the position is active. A position is
+///     locked until accept / reject / expiry / edit.
 ///   - acceptOffer DEDUCTS a 1.5% platform fee from the principal; the seller receives 98.5%.
 ///   - rejectOffer (owner), cancelOffer (bidder, before expiry), or refundExpiredOffer
 ///     (keeper, after expiry) returns the FULL principal to the bidder — an offer
@@ -50,11 +50,13 @@ error NotKeeper();
 ///
 /// Non-custodial. No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
 contract OfferBook is MarketplaceCore {
-    /// @notice A bidder's compounded offer on one NFT.
+    /// @notice A bidder's offer on one NFT — one position per (coll, tokenId, bidder).
+    ///         Calling makeOffer again edits the position (refunds old principal,
+    ///         sets new principal/units/expiry) rather than compounding.
     struct Position {
         uint128       principal; // escrowed ETH (fees already removed)
         uint128       units;     // ERC-1155 units desired (1 for ERC-721)
-        uint64        expiresAt; // set once at creation; NOT refreshed on top-up
+        uint64        expiresAt; // set on creation or edit; validated against 6 fixed durations
         TokenStandard standard;  // token kind this offer targets
     }
 
@@ -80,7 +82,7 @@ contract OfferBook is MarketplaceCore {
         address indexed coll,
         uint256 indexed tokenId,
         address indexed bidder,
-        uint256 principal, // cumulative escrowed principal after this top-up
+        uint256 principal, // new escrowed principal (replaces any previous position)
         uint128 units,
         uint64  expiresAt
     );
@@ -183,7 +185,7 @@ contract OfferBook is MarketplaceCore {
 
     /// @notice Offer on ERC-1155 units. Send exactly `principal` as msg.value. FREE.
     ///         The target collection must be offer-eligible (setOfferEligible).
-    /// @param units  Number of ERC-1155 units desired (latest top-up wins).
+    /// @param units  Number of ERC-1155 units desired (replaces any previous position).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
         external payable nonReentrant entryGate
     {
@@ -200,41 +202,42 @@ contract OfferBook is MarketplaceCore {
         uint128 units,
         uint64  expiresAt
     ) internal {
-        // L-13 fix: reject zero-value top-ups. Without this, a caller with
-        // an existing position >= MIN_PRICE could call makeOffer with
-        // principal=0 to refresh the expiry or rewrite units without
-        // adding escrow, breaking the "locked until accept/reject/expiry"
-        // invariant — the offerer can effectively cancel and re-issue at
-        // a shorter expiry or different unit count without the seller's
-        // awareness, and a front-running seller who observed a top-up
-        // with reduced units would accept fewer units than expected.
+        // Zero-value offers are rejected — every position must have escrow.
         if (principal == 0) revert InvalidAmount();
-
-        Position storage existing = positions[coll][tokenId][msg.sender];
-        bool isTopup = existing.principal > 0;
-
+        if (principal < MIN_PRICE) revert BelowMinPrice();
         if (msg.value != uint256(principal)) revert WrongValue();
 
-        Position storage p = existing;
-        uint256 newPrincipal = uint256(p.principal) + principal;
-        if (newPrincipal > type(uint128).max) revert InvalidAmount();
-        // L-01 fix: apply MIN_PRICE to the total position, not the delta.
-        if (newPrincipal < MIN_PRICE) revert BelowMinPrice();
-        p.principal = uint128(newPrincipal);
-        p.units     = units;
-        // Top-ups do NOT refresh the expiry timer — it continues counting down
-        // from the original expiry. Only new positions set a fresh expiry.
-        if (!isTopup) {
-            // New positions: validate duration is one of the 6 fixed durations.
-            uint256 dur = uint256(expiresAt) - block.timestamp;
-            if (dur != DURATION_3MIN && dur != DURATION_15MIN
-                && dur != DURATION_30MIN && dur != DURATION_1HR
-                && dur != DURATION_4HR && dur != DURATION_24HR) {
-                revert InvalidDuration();
-            }
-            p.expiresAt = expiresAt;
+        Position storage p = positions[coll][tokenId][msg.sender];
+        bool isEdit = p.principal > 0;
+
+        // Only ONE offer per buyer per NFT. If a position already exists,
+        // this call EDITS it: the old principal is refunded atomically and
+        // the new principal replaces it. This lets buyers adjust their bid
+        // up or down without cancelling and re-creating.
+        uint256 oldPrincipal = uint256(p.principal);
+
+        // Validate duration — must be one of the 6 fixed durations shared
+        // across all cores. Checked on both creation and edit (the buyer
+        // can change the expiry when editing).
+        uint256 dur = uint256(expiresAt) - block.timestamp;
+        if (dur != DURATION_3MIN && dur != DURATION_15MIN
+            && dur != DURATION_30MIN && dur != DURATION_1HR
+            && dur != DURATION_4HR && dur != DURATION_24HR) {
+            revert InvalidDuration();
         }
+
+        p.principal = principal;
+        p.units     = units;
+        p.expiresAt = expiresAt;
         p.standard  = standard;
+
+        // Refund the old principal to the buyer atomically in the same tx.
+        // The net effect: buyer sends `principal` wei and receives
+        // `oldPrincipal` wei back. If increasing the offer, they net-pay
+        // the difference; if decreasing, they net-receive the delta.
+        if (isEdit && oldPrincipal > 0) {
+            _pay(msg.sender, oldPrincipal);
+        }
 
         emit OfferMade(coll, tokenId, msg.sender, p.principal, units, p.expiresAt);
     }

@@ -36,10 +36,12 @@ error CannotCancel();
 ///     the current leader by the min increment. Sub-threshold bids still escrow
 ///     (accumulate) but do not lead.
 ///
-/// Settlement (no on-chain roles — fully permissionless, so funds are never trapped):
-///   - `settle(id)` is callable by ANYONE after `endsAt` (a keeper is just the
-///     default caller). NFT → winner; 1.5% fee → feeRecipient; winningBid−fee →
-///     seller. The winner's escrow is consumed.
+/// Settlement (three-tier gate, so funds are never trapped):
+///   1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
+///   2. Seller OR auction winner — settles after `endsAt + 5 minutes`.
+///   3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
+///   NFT → winner; 1.5% fee → feeRecipient; winningBid−fee → seller.
+///   The winner's escrow is consumed.
 ///   - `refundLosers(id, batch)` is callable by ANYONE after settlement and returns
 ///     each non-winner's full escrow. Batched + pull-fallback so one non-receiving
 ///     bidder can never brick the refunds. Bounded gas per call.
@@ -384,19 +386,18 @@ contract AuctionHouse is MarketplaceCore {
         emit BidPlaced(id, msg.sender, msg.value, newTotal);
     }
 
-    // ── Settle (keeper-only after endsAt) ───────────────────────────────────────
+    // ── Settle (3-tier: keeper, seller/winner after 5min, permissionless after 25hr)
 
-    /// @notice Finalize a finished auction. Keeper-gated (KEEPER_ROLE) with a
-    ///         permissionless fallback after `endsAt + DURATION_24HR + 1 hour`
-    ///         so funds can never be trapped if the keeper goes offline.
+    /// @notice Finalize a finished auction. Three-tier settlement gate:
+    ///         1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
+    ///         2. Seller OR auction winner — settles after `endsAt + 5 minutes`.
+    ///         3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable via
     ///         refundLosers). If the NFT can't be delivered, the entire tx reverts —
     ///         no stall state. The keeper bot retries on the next block.
     ///         Losers are refunded separately via refundLosers.
     ///
-    ///         Restricting settle() to the keeper prevents users from front-running
-    ///         settlement windows and ensures consistent, automated settlement.
     ///         If no MarketplaceManager is deployed (manager == address(0)),
     ///         settlement is permissionless immediately as a fallback — funds are
     ///         never trapped.
@@ -406,10 +407,10 @@ contract AuctionHouse is MarketplaceCore {
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
 
-        // Keeper-gated settlement with a permissionless fallback.
-        // The keeper (KEEPER_ROLE) settles every 1s after endsAt. If the keeper
-        // is offline for 25+ hours past the auction end, anyone can settle to
-        // prevent trapped funds (DURATION_24HR + 1 hour grace period).
+        // Three-tier settlement gate:
+        // 1. KEEPER_ROLE — settles immediately after endsAt (1s ticker).
+        // 2. Seller or auction winner — settles after endsAt + 5 minutes.
+        // 3. Permissionless — anyone settles after endsAt + DURATION_24HR + 1hr.
         // When no manager is deployed (address(0)), settlement is permissionless
         // immediately — funds are never trapped.
         if (manager != address(0)) {
@@ -417,10 +418,15 @@ contract AuctionHouse is MarketplaceCore {
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );
             bool isKeeper = ok && data.length == 32 && abi.decode(data, (bool));
+            // Seller or auction winner can settle after a 5-minute cooldown
+            // post-auction. This gives the primary parties control over
+            // settlement timing without waiting for the keeper or the full
+            // 25-hour permissionless fallback.
+            bool isSellerOrWinner = (msg.sender == a.seller || msg.sender == a.leader);
+            bool canSettle = isKeeper || (isSellerOrWinner && block.timestamp >= a.endsAt + 5 minutes);
             // Permissionless fallback: after DURATION_24HR + 1 hour past endsAt,
-            // anyone can settle. The keeper normally settles within 1 second;
-            // this grace period ensures funds cannot be trapped indefinitely.
-            if (!isKeeper && block.timestamp < a.endsAt + DURATION_24HR + 1 hours) {
+            // anyone can settle.
+            if (!canSettle && block.timestamp < a.endsAt + DURATION_24HR + 1 hours) {
                 revert NotKeeper();
             }
         }
