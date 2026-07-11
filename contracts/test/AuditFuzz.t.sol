@@ -274,11 +274,14 @@ contract AuditFuzzTest is Test {
             address grain = _grain(i);
             vm.deal(grain, 1);
             vm.prank(grain);
+            // Sub-leader bids revert with BidTooLow — no accumulation path.
+            // This is even stronger than the original anti-snipe fix:
+            // non-lead bids can't even enter the contract, let alone extend.
+            vm.expectRevert(BidTooLow.selector);
             ah.bid{value: 1}(id);
-            assertEq(_endsAt(id), endAfterLead, "non-lead 1-wei bid MUST NOT extend endsAt");
         }
 
-        assertEq(_endsAt(id), endAfterLead, "endsAt unchanged across N accreting 1-wei bids");
+        assertEq(_endsAt(id), endAfterLead, "endsAt unchanged - sub-leader bids revert entirely");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -390,32 +393,41 @@ contract AuditFuzzTest is Test {
     // ════════════════════════════════════════════════════════════════════════
 
     function test_refundLosersGriefingHalfBatchDoesNotOOG() public {
-        (uint256 id,) = _auction7d();
+        // Use 0 BPS so MIN_BID_INCREMENT (1 ether flat) is the only increment.
+        // With 500 BPS the percentage increment would dominate at higher
+        // leaderTotals, breaking the simple +1 ether chain.
+        (uint256 id,) = _createWithIncrement(1 ether, 0, 0);
 
-        address leaderAddr = address(uint160(uint256(keccak256(abi.encodePacked("AUCTION_LEADER")))));
-        vm.deal(leaderAddr, 200 ether);
-        _bid(id, leaderAddr, 200 ether);
+        // Alice starts as leader at 1 ETH (clears reserve).
+        _bid(id, alice, 1 ether);
 
         address[] memory eoas = new address[](100);
         for (uint256 i; i < 100; ++i) {
             eoas[i] = _eoa(i);
-            vm.deal(eoas[i], 1 ether);
-            _bid(id, eoas[i], 1 ether);
+            // Each EOA overtakes: bids (i+2) ETH → leader.
+            uint128 bidAmt = uint128((i + 2) * 1 ether);
+            vm.deal(eoas[i], uint256(bidAmt) + 1 ether);
+            _bid(id, eoas[i], bidAmt);
         }
 
         GreedyReceiver[] memory greedies = new GreedyReceiver[](100);
         for (uint256 i; i < 100; ++i) {
             greedies[i] = new GreedyReceiver();
-            vm.deal(address(greedies[i]), 1 ether);
+            // Each greedy overtakes: bids (i+102) ETH → leader.
+            uint128 bidAmt = uint128((i + 102) * 1 ether);
+            vm.deal(address(greedies[i]), uint256(bidAmt) + 1 ether);
             vm.prank(address(greedies[i]));
-            ah.bid{value: 1 ether}(id);
+            ah.bid{value: bidAmt}(id);
         }
+        // greedies[99] is leader at 201 ETH.
 
-        assertEq(address(ah).balance, 200 ether + 200 ether);
-		vm.warp(block.timestamp + 30 hours);
+        // Total escrow = alice(1) + sum(eoas 2..101) + sum(greedies 102..201)
+        // = sum(1..201) = 201*202/2 = 20301 ETH
+        vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
         assertTrue(_settled(id));
-        assertEq(ah.cumulative(id, leaderAddr), 0, "leader escrow consumed");
+        // Winner (greedies[99]) cumulative consumed.
+        assertEq(ah.cumulative(id, address(greedies[99])), 0, "winner escrow consumed");
 
         address[] memory batch = new address[](200);
         for (uint256 i; i < 200; ++i) {
@@ -424,20 +436,25 @@ contract AuditFuzzTest is Test {
 
         ah.refundLosers(id, batch);
 
+        // Verify EOAs got pushed their refunds directly (cumulative cleared, no pendingReturns).
         for (uint256 i; i < 100; ++i) {
-            assertEq(eoas[i].balance, 1 ether, "EOA loser refund succeeded");
+            uint128 expectedRefund = uint128((i + 2) * 1 ether);
             assertEq(ah.cumulative(id, eoas[i]), 0, "EOA cumulative cleared");
             assertEq(ah.pendingReturns(eoas[i]), 0, "EOA has no pendingReturns");
+            assertEq(eoas[i].balance, expectedRefund + 1 ether, "EOA loser refund succeeded");
         }
-        for (uint256 i; i < 100; ++i) {
+        // Verify greedies 0..98 got pendingReturns (greedies[99] is winner, consumed).
+        for (uint256 i; i < 99; ++i) {
+            uint128 expectedRefund = uint128((i + 102) * 1 ether);
             assertEq(ah.cumulative(id, address(greedies[i])), 0, "greedy cumulative cleared");
-            assertEq(ah.pendingReturns(address(greedies[i])), 1 ether, "greedy -> pendingReturns");
+            assertEq(ah.pendingReturns(address(greedies[i])), expectedRefund, "greedy -> pendingReturns");
         }
+        // Verify greedies[0] can withdraw via withdrawRefund().
         greedies[0].setBlocked(false);
         uint256 balBefore = address(greedies[0]).balance;
         greedies[0].proxyWithdrawAuction(ah);
         assertEq(ah.pendingReturns(address(greedies[0])), 0, "withdrawRefund clears credit");
-        assertEq(address(greedies[0]).balance, balBefore + 1 ether, "greedy pulled refund");
+        assertEq(address(greedies[0]).balance, balBefore + 102 ether, "greedy pulled refund");
     }
 
     // ════════════════════════════════════════════════════════════════════════
@@ -708,31 +725,39 @@ contract AuditFuzzTest is Test {
 
 
     /// @dev refundLosers per-iteration fallback → PushFailed(b, amt) fires per stuck bidder.
+    ///      With sub-leader accumulation removed, each greedies must overtake to
+    ///      participate. Alice wins; all 3 greedies become losers.
     function test_refundLosers_perIterationPushFallback_emitsPushFailed() public {
         (uint256 id,) = _auction7d();
-        _bid(id, alice, 2 ether);
 
+        // 3 greedies each overtake: 1, 2, 3 ether.
         GreedyReceiver[] memory greedies = new GreedyReceiver[](3);
         for (uint256 i; i < 3; ++i) {
             greedies[i] = new GreedyReceiver();
-            vm.deal(address(greedies[i]), 1 ether);
+            uint128 bidAmt = uint128((i + 1) * 1 ether);
+            vm.deal(address(greedies[i]), uint256(bidAmt) + 1 ether);
             vm.prank(address(greedies[i]));
-            ah.bid{value: 1 ether}(id);
+            ah.bid{value: bidAmt}(id);
         }
-		vm.warp(block.timestamp + 30 hours);
+        // greedies[2] leads at 3 ether. Alice overtakes to win.
+        _bid(id, alice, 4 ether);
+
+        vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
 
         address[] memory batch = new address[](3);
         for (uint256 i; i < 3; ++i) batch[i] = address(greedies[i]);
 
         for (uint256 i; i < 3; ++i) {
+            uint128 expectedRefund = uint128((i + 1) * 1 ether);
             vm.expectEmit(true, false, false, true, address(ah));
-            emit PushFailed(address(greedies[i]), 1 ether);
+            emit PushFailed(address(greedies[i]), expectedRefund);
         }
         ah.refundLosers(id, batch);
 
         for (uint256 i; i < 3; ++i) {
-            assertEq(ah.pendingReturns(address(greedies[i])), 1 ether, "grief receiver credited");
+            uint128 expectedRefund = uint128((i + 1) * 1 ether);
+            assertEq(ah.pendingReturns(address(greedies[i])), expectedRefund, "grief receiver credited");
         }
     }
 

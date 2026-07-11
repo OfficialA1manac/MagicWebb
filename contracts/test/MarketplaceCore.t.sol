@@ -27,8 +27,8 @@ contract MarketplaceCoreTest is Test {
     // ── Constructor guard ───────────────────────────────────────────────────────
 
     function test_initializeZeroRecipientReverts() public {
-        vm.expectRevert();
         Marketplace m = new Marketplace();
+        vm.expectRevert();
         m.initialize(address(0), address(0));
     }
 

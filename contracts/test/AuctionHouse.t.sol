@@ -85,16 +85,13 @@ contract AuctionHouseTest is Test {
         assertEq(ah.cumulative(id, alice), 1 ether);
     }
 
-    function test_subReserveAccumulatesButNoLead() public {
+    // ── Sub-reserve bids now revert (no accumulator path) ─────────────────
+
+    function test_subReserveFirstBidReverts() public {
         (uint256 id,) = _create();
-        _bid(id, alice, 0.4 ether);
-        (address l,) = _leader(id);
-        assertEq(l, address(0));                 // below reserve → no leader
-        assertEq(ah.cumulative(id, alice), 0.4 ether);
-        _bid(id, alice, 0.6 ether);              // cumulative now 1 ether == reserve
-        (address l2, uint128 t2) = _leader(id);
-        assertEq(l2, alice);
-        assertEq(t2, 1 ether);
+        vm.prank(alice);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 0.4 ether}(id);            // below reserve → reverts
     }
 
     function test_outbidNoRefundThenReclaim() public {
@@ -128,12 +125,11 @@ contract AuctionHouseTest is Test {
         ah.bid{value: 1.01 ether}(id);           // 1.01 < 1.05 and > leaderTotal → reverts
     }
 
-    function test_belowReserveFirstBidAccumulates() public {
+    function test_subReserveFirstBidReverts2() public {
         (uint256 id,) = _create();
-        _bid(id, bob, 0.9 ether);                // below reserve, no leader yet → accumulates
-        (address l,) = _leader(id);
-        assertEq(l, address(0));
-        assertEq(ah.cumulative(id, bob), 0.9 ether);
+        vm.prank(bob);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 0.9 ether}(id);            // below reserve → reverts
     }
 
     function test_zeroBidReverts() public {
@@ -147,8 +143,9 @@ contract AuctionHouseTest is Test {
 
     /// @dev L-11 regression: when leaderTotal is near uint128 max, the
     ///      minNext comparison must operate in uint256 to avoid silent
-    ///      truncation. A bid that would push newTotal over uint128 max
-    ///      reverts with BidOverflow.
+    ///      truncation. With sub-leader accumulation removed, bob's
+    ///      overtake attempt triggers BidOverflow (minNext > uint128.max)
+    ///      rather than BidTooLow — proving the guard works in uint256.
     function test_nearMaxLeaderBidDoesNotTruncate() public {
         (uint256 id,) = _create();
         // Set up alice as leader at near uint128 max.
@@ -160,29 +157,35 @@ contract AuctionHouseTest is Test {
         assertEq(l, alice);
         assertEq(t, nearMax, "alice leads at nearMax");
 
-        // Bob accumulates close to the ceiling, then tops up to
-        // overflow his own cumulative (exercising the BidOverflow
-        // guard on the bidder's cumulative, not the leader-minNext path).
+        // Bob tries to overtake — minNext = nearMax + MIN_BID_INCREMENT
+        // overflows uint128, triggering BidOverflow (L-11 guard).
+        // type(uint128).max is the only value guaranteed > nearMax while
+        // still <= uint128.max, so it reaches the overtake branch.
+        vm.deal(bob, type(uint128).max);
+        vm.prank(bob);
+        vm.expectRevert(BidOverflow.selector);
+        ah.bid{value: type(uint128).max}(id);
+
+        // Verify alice is still leader and total unchanged.
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice, "alice still leader after BidOverflow");
+        assertEq(t2, nearMax, "leaderTotal unchanged");
+
+        // Bob's cumulative overflow guard: a bid that pushes bob's own
+        // cumulative past uint128 max also reverts BidOverflow.
+        // First bid: bob becomes leader (no leader yet? No — alice leads).
+        // Deploy fresh auction for the cumulative overflow path.
+        (uint256 id2,) = _create();
         uint128 bobFirst = nearMax - 1 ether;
         vm.deal(bob, uint256(bobFirst) + 10 ether);
         vm.prank(bob);
-        ah.bid{value: bobFirst}(id);
-        assertEq(ah.cumulative(id, bob), bobFirst, "bob accumulated close to max");
+        ah.bid{value: bobFirst}(id2);
+        assertEq(ah.cumulative(id2, bob), bobFirst, "bob accumulated close to max");
 
         // Bob tops up by enough to push cumulative past uint128 max.
         vm.prank(bob);
         vm.expectRevert(BidOverflow.selector);
-        ah.bid{value: 1.5 ether}(id);
-
-        // Carol bids below leaderTotal — accumulates without overflow.
-        uint128 smallBid = 0.01 ether;
-        vm.deal(carol, uint256(smallBid) + 1 ether);
-        vm.prank(carol);
-        ah.bid{value: smallBid}(id);
-        assertEq(ah.cumulative(id, carol), smallBid, "carol escrow accumulated");
-        (address l2, uint128 t2) = _leader(id);
-        assertEq(l2, alice, "alice still leader");
-        assertEq(t2, nearMax, "leaderTotal unchanged");
+        ah.bid{value: 1.5 ether}(id2);
     }
 
     // ── Anti-snipe ────────────────────────────────────────────────────────────
@@ -239,15 +242,13 @@ contract AuctionHouseTest is Test {
         ah.settle(id);
     }
 
-    function test_settleNoLeaderCancels() public {
+    function test_settleNoBidsCancels() public {
         (uint256 id,) = _create();
-        _bid(id, alice, 0.5 ether);               // below reserve → no leader
+        // No bids — no leader. Settle cancels the auction.
         vm.warp(block.timestamp + 30 hours);
         ah.settle(id);
-        // settled at position 3, struct has 14 fields total
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
-        assertEq(ah.cumulative(id, alice), 0.5 ether, "refundable, not consumed");
     }
 
     function test_doubleSettleReverts() public {
@@ -296,23 +297,14 @@ contract AuctionHouseTest is Test {
 
     // ── cancelEarly ─────────────────────────────────────────────────────────────
 
-    function test_cancelEarlyRefundsAllViaLosers() public {
-        // v21 — audit-#6: cancelEarly is now BLOCKED once a qualifying leader
-        // exists (leaderTotal >= reserve). To exercise the original "refund
-        // everyone via refundLosers" path we keep both bids BELOW the reserve
-        // (1 ETH). No leader is set, cancelEarly proceeds, and refundLosers
-        // returns every escrow to its bidder.
+    function test_cancelEarlyNoBids() public {
+        // cancelEarly works when there are no qualifying bids.
+        // Sub-reserve bids now revert, so cancel-only works for bid-less auctions.
         (uint256 id,) = _create();
-        _bid(id, alice, 0.4 ether);                // below reserve → no leader
-        _bid(id, bob,   0.5 ether);                // below reserve → still no leader
         vm.prank(seller);
         ah.cancelEarly(id);
-        address[] memory batch = new address[](2);
-        batch[0] = alice; batch[1] = bob;
-        uint256 aB = alice.balance; uint256 bB = bob.balance;
-        ah.refundLosers(id, batch);
-        assertEq(alice.balance, aB + 0.4 ether);
-        assertEq(bob.balance,   bB + 0.5 ether);  // full escrow returned
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        assertTrue(settled);
     }
 
     // ── cancelEarly reserve-met invariant (audit-#6) ───────────────────────────
@@ -326,8 +318,8 @@ contract AuctionHouseTest is Test {
 
     function test_cancelEarlyAfterLeaderOvertakesReserveReverts() public {
         (uint256 id,) = _create();
-        _bid(id, alice, 0.5 ether);                // below reserve
-        _bid(id, bob,   1.5 ether);                // newLead, clears reserve
+        _bid(id, alice, 1 ether);                  // alice meets reserve → leader
+        _bid(id, bob,   2 ether);                  // bob overtakes, clears reserve
         vm.prank(seller);
         vm.expectRevert(CannotCancel.selector);
         ah.cancelEarly(id);
@@ -344,14 +336,14 @@ contract AuctionHouseTest is Test {
 
     function test_escrowEqualsSumOfCumulatives() public {
         (uint256 id,) = _create();
-        _bid(id, alice, 1 ether);
-        _bid(id, bob, 2 ether);
-        _bid(id, carol, 1.5 ether);
-        // contract holds alice+bob+carol
-        assertEq(address(ah).balance, 4.5 ether);
+        _bid(id, alice, 1 ether);                  // alice leads at 1
+        _bid(id, bob, 3 ether);                    // bob overtakes at 3
+        _bid(id, carol, 5 ether);                  // carol overtakes at 5
+        // contract holds alice+bob+carol = 1+3+5 = 9
+        assertEq(address(ah).balance, 9 ether);
         assertEq(
             uint256(ah.cumulative(id, alice)) + ah.cumulative(id, bob) + ah.cumulative(id, carol),
-            4.5 ether
+            9 ether
         );
     }
 
@@ -401,20 +393,19 @@ contract AuctionHouseTest is Test {
         assertEq(t, 1 ether);
     }
 
-    /// @dev Bid one wei below reserve must accumulate but NOT take the lead.
-    function test_oneWeiBelowReserveDoesNotLead() public {
+    /// @dev Bid one wei below reserve must revert (sub-reserve bids no longer accumulate).
+    function test_oneWeiBelowReserveReverts() public {
         (uint256 id,) = _create();                 // reserve = 1 ether
-        _bid(id, alice, 1 ether - 1);              // 1 wei below
-        (address l,) = _leader(id);
-        assertEq(l, address(0), "one wei below reserve does not lead");
-        assertEq(ah.cumulative(id, alice), 1 ether - 1);
+        vm.prank(alice);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 1 ether - 1}(id);            // 1 wei below → reverts
     }
 
     // ── Anti-snipe: non-newLead does NOT extend ───────────────────────────────
 
-    /// @dev Sub-threshold accumulation (below leader, no lead change) must NOT
-    ///      trigger anti-snipe extension. Only `newLead=true` extends the timer.
-    function test_antiSnipeNotTriggeredByAccumulation() public {
+    /// @dev Only new-lead bids trigger anti-snipe extension. Sub-leader bids
+    ///      now revert entirely (can't accumulate below the leader).
+    function test_antiSnipeOnlyExtendsOnNewLead() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
@@ -423,13 +414,15 @@ contract AuctionHouseTest is Test {
         vm.stopPrank();
         _bid(id, alice, 2 ether);                  // alice leads at 2 ETH
         vm.warp(end - 1 minutes);                  // inside extension window
-        _bid(id, bob, 0.5 ether);                  // below leader, no lead change
-        // endsAt at position 7, struct has 14 fields total
+        // Bob tries sub-leader bid — must revert BidTooLow.
+        vm.prank(bob);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 0.5 ether}(id);
+        // endsAt unchanged — timer not extended.
         (,,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
-        assertEq(newEnd, end, "timer NOT extended for sub-threshold bid");
-        // Now bob overtakes with a qualifying bid → timer extends
-        // bob cumulative = 0.5 + 2.5 = 3.0 > 2.0 + 1.0 (MIN_BID_INCREMENT) = 3.0 → overtakes at minNext
-        _bid(id, bob, 2.5 ether);
+        assertEq(newEnd, end, "timer NOT extended");
+        // Now bob overtakes with a qualifying bid → timer extends.
+        _bid(id, bob, 3 ether);
         (,,,,,,,newEnd,,,,,,) = ah.auctions(id);
         assertGt(newEnd, end, "timer extended on newLead");
     }

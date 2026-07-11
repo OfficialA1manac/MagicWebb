@@ -282,15 +282,15 @@ contract MarketplaceManagerTest is Test {
     // ── Constructor manager validation (immutable — a bad value is forever) ──
 
     function test_coreRejectsEOAManager() public {
-        vm.expectRevert(BadManager.selector);
         Marketplace m = new Marketplace();
+        vm.expectRevert(BadManager.selector);
         m.initialize(feeRecipient, rando); // EOA: no code
     }
 
     function test_coreRejectsNonManagerContract() public {
         // A contract without entriesAllowed() must fail the deploy probe.
-        vm.expectRevert();
         Marketplace m = new Marketplace();
+        vm.expectRevert();
         m.initialize(feeRecipient, address(nft));
     }
 

@@ -109,14 +109,14 @@ contract OfferBookTest is Test {
         uint256 tid = _mintAndApprove(seller);
 
         vm.startPrank(bidder);
+        ob.makeOffer{value: _total(2 ether)}(address(nft), tid, 2 ether, _exp());
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, _exp());
-        ob.makeOffer{value: _total(0.5 ether)}(address(nft), tid, 0.5 ether, _exp());
         vm.stopPrank();
 
         // Only ONE offer per buyer per NFT — the second call REPLACES the
         // position. Old principal is refunded atomically; new principal stands.
-        // Not compounded: position shows 0.5 ether, not 1.5 ether.
-        assertEq(_principalOf(address(nft), tid, bidder), 0.5 ether);
+        // Not compounded: position shows 1 ether, not 3 ether.
+        assertEq(_principalOf(address(nft), tid, bidder), 1 ether);
     }
 
     function test_makeOfferEditUp() public {

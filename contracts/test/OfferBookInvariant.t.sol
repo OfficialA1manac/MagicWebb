@@ -28,9 +28,9 @@ contract OfferHandler is Test {
             tokenIds[i] = nft.mint(owner);
         }
         nft.setApprovalForAll(address(ob), true);
+        // setOfferEligible is called in the test's setUp() (as token-0 owner)
+        // before OfferHandler is deployed; skip it here.
         vm.stopPrank();
-        // Enable offers on the mock collection so makeOffer succeeds.
-        ob.setOfferEligible(address(nft), true);
     }
 
     function makeOffer(uint256 bSeed, uint256 tSeed, uint128 principal, uint256 ttl) external {
@@ -91,6 +91,10 @@ contract OfferBookInvariantTest is Test {
         ob = new OfferBook();
         ob.initialize(feeRecipient, address(0));
         nft = new MockERC721();
+        // Token 0 was minted to this test contract by MockERC721's constructor.
+        // Enable offers here (as the token-0 owner) so OfferHandler doesn't
+        // need to call setOfferEligible itself.
+        ob.setOfferEligible(address(nft), true);
         handler = new OfferHandler(ob, nft);
         targetContract(address(handler));
     }
