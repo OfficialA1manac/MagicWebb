@@ -99,7 +99,8 @@ contract MarketplaceInvariantTest is Test {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        mp = new Marketplace(feeRecipient, address(0));
+        mp = new Marketplace();
+        mp.initialize(feeRecipient, address(0));
         nft = new MockERC721();
         handler = new MarketplaceHandler(mp, nft);
         targetContract(address(handler));

@@ -67,7 +67,7 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
     event ModuleSet(bytes32 indexed slot, address indexed addr);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor() {}
 
     /// @notice One-time initializer. Grants DEFAULT_ADMIN_ROLE + OPERATOR_ROLE
     ///         to the supplied admin address.

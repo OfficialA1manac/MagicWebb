@@ -40,7 +40,8 @@ contract AuctionHouseTest is Test {
     address carol        = address(0xCab01);
 
     function setUp() public {
-        ah    = new AuctionHouse(feeRecipient, address(0));
+        ah = new AuctionHouse();
+        ah.initialize(feeRecipient, address(0));
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);
@@ -480,8 +481,10 @@ contract AuctionHouseTest is Test {
 
     function test_settle_keeperAlwaysAllowed() public {
         // Deploy with a manager so the keeper gate is active.
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         // Create an auction on the gated AuctionHouse.
@@ -502,8 +505,10 @@ contract AuctionHouseTest is Test {
     }
 
     function test_settle_nonKeeperBlockedBeforeGrace() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -525,8 +530,10 @@ contract AuctionHouseTest is Test {
     }
 
     function test_settle_nonKeeperAllowedAfterGrace() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -561,8 +568,10 @@ contract AuctionHouseTest is Test {
     // ── 3-tier gate: seller/winner 5-minute window ─────────────────────────
 
     function test_settle_sellerBlockedBefore5Min() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -585,8 +594,10 @@ contract AuctionHouseTest is Test {
     }
 
     function test_settle_sellerAllowedAfter5Min() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -610,8 +621,10 @@ contract AuctionHouseTest is Test {
     }
 
     function test_settle_winnerAllowedAfter5Min() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -635,8 +648,10 @@ contract AuctionHouseTest is Test {
     }
 
     function test_settle_randomBlockedBefore25Hr() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.startPrank(seller);
@@ -661,8 +676,10 @@ contract AuctionHouseTest is Test {
     // refundLosers() is ungated — anyone can call it after settlement.
 
     function test_refundLosers_permissionlessWithManager() public {
-        MarketplaceManager mgr = new MarketplaceManager(address(this));
-        AuctionHouse gated = new AuctionHouse(feeRecipient, address(mgr));
+        MarketplaceManager mgr = new MarketplaceManager();
+        mgr.initialize(address(this));
+        AuctionHouse gated = new AuctionHouse();
+        gated.initialize(feeRecipient, address(mgr));
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
 

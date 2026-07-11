@@ -170,8 +170,10 @@ contract AuditFuzzTest is Test {
     address bob          = address(0xB0B);
 
     function setUp() public {
-        ah    = new AuctionHouse(feeRecipient, address(0));
-        ob    = new OfferBook(feeRecipient, address(0));
+        ah = new AuctionHouse();
+        ah.initialize(feeRecipient, address(0));
+        ob = new OfferBook();
+        ob.initialize(feeRecipient, address(0));
         nft   = new MockERC721();
         multi = new MockERC1155();
 
@@ -527,7 +529,8 @@ contract AuditFuzzTest is Test {
         vm.deal(address(griefer), 10 ether);
 
         // Set up an auction where griefer bids and gets outbid.
-        AuctionHouse ah2 = new AuctionHouse(feeRecipient, address(0));
+        AuctionHouse ah2 = new AuctionHouse();
+        ah2.initialize(feeRecipient, address(0));
         MockERC721 nft2 = new MockERC721();
 
         vm.startPrank(seller);
@@ -616,7 +619,8 @@ contract AuditFuzzTest is Test {
     function test_settle_feePushFallback_emitsPushFailed() public {
         // Replace ah with one whose feeRecipient can't receive ETH.
         RejectEtherNoReceive badFee = new RejectEtherNoReceive();
-        AuctionHouse ah2 = new AuctionHouse(address(badFee), address(0));
+        AuctionHouse ah2 = new AuctionHouse();
+        ah2.initialize(address(badFee), address(0));
         MockERC721 nft2 = new MockERC721();
 
         vm.startPrank(seller);
@@ -801,7 +805,8 @@ contract AuditFuzzTest is Test {
 
     /// @notice L-09 happy-path: batchList writes exactly N listings for N items.
     function test_batchList_listsAllItemsAtomically() public {
-        Marketplace mp = new Marketplace(feeRecipient, address(0));
+        Marketplace mp = new Marketplace();
+        mp.initialize(feeRecipient, address(0));
         MockERC721 coll = new MockERC721();
 
         vm.startPrank(seller);
@@ -847,7 +852,8 @@ contract AuditFuzzTest is Test {
     ///         onERC721Received can re-enter mp.batchList with a SECOND, distinct
     ///         batch (item 99 at 0.99 ETH).
     function test_batchList_protectedByNonReentrant() public {
-        Marketplace mp = new Marketplace(feeRecipient, address(0));
+        Marketplace mp = new Marketplace();
+        mp.initialize(feeRecipient, address(0));
         MockERC721 coll = new MockERC721();
 
         // Seller mints and lists tokens 1 and 2.

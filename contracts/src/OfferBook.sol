@@ -8,7 +8,6 @@ import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 error NotOwner();
 error NoOffer();
 error NotApproved();
-error InvalidExpiry();
 error InvalidAmount();
 error WrongValue();
 error OfferActive();
@@ -99,7 +98,7 @@ contract OfferBook is MarketplaceCore {
     event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor() {}
 
     /// @notice One-time initializer. Calls __MarketplaceCore_init to store
     ///         feeRecipient + manager in upgradeable storage.

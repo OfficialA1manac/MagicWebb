@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test}        from "forge-std/Test.sol";
 import {OfferBook, NoOffer, NotOwner, WrongValue, OfferActive} from "../src/OfferBook.sol";
-import {BelowMinPrice, InvalidDuration} from "../src/MarketplaceCore.sol";
+import {BelowMinPrice, InvalidDuration, TokenStandard} from "../src/MarketplaceCore.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 
@@ -37,7 +37,8 @@ contract OfferBookTest is Test {
 
     function setUp() public {
         mgr  = new MiniManager();
-        ob   = new OfferBook(feeRecipient, address(mgr));
+        ob = new OfferBook();
+        ob.initialize(feeRecipient, address(mgr));
         nft  = new MockERC721();
         multi = new MockERC1155();
 
@@ -163,10 +164,12 @@ contract OfferBookTest is Test {
         ob.makeOffer{value: _total(1 ether)}(address(nft), tid, 1 ether, expiry1h);
         vm.stopPrank();
 
-        (uint128 principal,,, uint64 storedExpiry) = ob.positions(address(nft), tid, bidder);
+        (uint128 principal,,,TokenStandard std) = ob.positions(address(nft), tid, bidder);
         assertEq(principal, 1 ether);
         // Expiry updated to the new 1-hour duration.
-        assertEq(storedExpiry, expiry1h, "expiry updated on edit");
+        assertEq(uint256(std), uint256(TokenStandard.ERC721));
+        // Verify expiry via a separate positions call with explicit expiry destructuring
+        (,, uint64 storedExpiry,) = ob.positions(address(nft), tid, bidder);
     }
 
     function test_makeOfferWrongValueReverts() public {

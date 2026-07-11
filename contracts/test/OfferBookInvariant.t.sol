@@ -38,29 +38,24 @@ contract OfferHandler is Test {
         uint256 tid = tokenIds[tSeed % 3];
         principal = uint128(bound(principal, 0.01 ether, 100 ether));
 
-        // M-01 fix: the new expiry must not reduce an existing position's expiry.
-        (uint128 existingPrincipal,, uint64 existingExp,) = ob.positions(address(nft), tid, b);
+        // Edit model: calling makeOffer again on the same NFT replaces the
+        // position entirely. Expiry CAN change on edit — the handler lets the
+        // random duration pass through rather than forcing the old expiry.
+        (uint128 existingPrincipal,,,) = ob.positions(address(nft), tid, b);
         // Pick one of the 6 valid durations for the new position.
-        // For top-ups, existing expiry is kept (the handler ensures >=).
         uint64[6] memory durations = [
             uint64(3 minutes), uint64(15 minutes), uint64(30 minutes),
             uint64(1 hours), uint64(4 hours), uint64(24 hours)
         ];
         uint64 exp = uint64(block.timestamp) + durations[ttl % 6];
-        // If existing position exists, ensure new expiry >= existing expiry.
-        // Top-up: do not change the expiry; timer continues from original.
-        if (existingPrincipal > 0) {
-            exp = existingExp;
-        }
 
-        if (uint256(existingPrincipal) + principal > type(uint128).max) return;
+        if (uint256(existingPrincipal) > type(uint128).max) return;
 
         vm.prank(b);
-        // Fix: send exactly `principal` as msg.value (not principal + fee).
-        // makeOffer checks msg.value == principal. The seller-pays-fee model
-        // means offers are FREE — no fee at offer time.
+        // Edit model: old principal is refunded atomically, new principal replaces.
+        // Ghost tracks the NEW principal (not the old).
         ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, exp);
-        ghostEscrowed += principal;
+        ghostEscrowed = ghostEscrowed + principal - uint256(existingPrincipal);
     }
 
     function rejectOffer(uint256 bSeed, uint256 tSeed) external {
@@ -93,7 +88,8 @@ contract OfferBookInvariantTest is Test {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        ob = new OfferBook(feeRecipient, address(0));
+        ob = new OfferBook();
+        ob.initialize(feeRecipient, address(0));
         nft = new MockERC721();
         handler = new OfferHandler(ob, nft);
         targetContract(address(handler));

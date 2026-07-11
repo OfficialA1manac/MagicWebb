@@ -16,7 +16,8 @@ contract MarketplaceTest is Test {
     address other   = address(0xDEAD);
 
     function setUp() public {
-        mp    = new Marketplace(creator, address(0));
+        mp = new Marketplace();
+        mp.initialize(creator, address(0));
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(buyer, 10 ether);
@@ -264,7 +265,8 @@ contract MarketplaceTest is Test {
     function testFuzz_sellerPaysFee(uint128 price) public {
         price = uint128(bound(price, 1 ether, 100 ether));
 
-        Marketplace freshMp = new Marketplace(creator, address(0));
+        Marketplace freshMp = new Marketplace();
+        freshMp.initialize(creator, address(0));
 
         address freshSeller = address(0xF001);
         address freshBuyer  = address(0xF002);

@@ -28,10 +28,14 @@ contract MarketplaceManagerTest is Test {
     address rando        = address(0x4444);
 
     function setUp() public {
-        mgr = new MarketplaceManager(admin);
-        mp  = new Marketplace (feeRecipient, address(mgr));
-        ah  = new AuctionHouse(feeRecipient, address(mgr));
-        ob  = new OfferBook   (feeRecipient, address(mgr));
+        mgr = new MarketplaceManager();
+        mgr.initialize(admin);
+        mp = new Marketplace();
+        mp.initialize(feeRecipient, address(mgr));
+        ah = new AuctionHouse();
+        ah.initialize(feeRecipient, address(mgr));
+        ob = new OfferBook();
+        ob.initialize(feeRecipient, address(mgr));
         nft = new MockERC721();
 
         vm.startPrank(admin);
@@ -279,19 +283,22 @@ contract MarketplaceManagerTest is Test {
 
     function test_coreRejectsEOAManager() public {
         vm.expectRevert(BadManager.selector);
-        new Marketplace(feeRecipient, rando); // EOA: no code
+        Marketplace m = new Marketplace();
+        m.initialize(feeRecipient, rando); // EOA: no code
     }
 
     function test_coreRejectsNonManagerContract() public {
         // A contract without entriesAllowed() must fail the deploy probe.
         vm.expectRevert();
-        new Marketplace(feeRecipient, address(nft));
+        Marketplace m = new Marketplace();
+        m.initialize(feeRecipient, address(nft));
     }
 
     // ── Ungated cores (manager == address(0)) stay fully open ────────────────
 
     function test_zeroManagerCoreIgnoresBreaker() public {
-        Marketplace freeMp = new Marketplace(feeRecipient, address(0));
+        Marketplace freeMp = new Marketplace();
+        freeMp.initialize(feeRecipient, address(0));
         uint256 tid = nft.mint(seller);
         vm.startPrank(seller);
         nft.setApprovalForAll(address(freeMp), true);

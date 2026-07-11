@@ -68,7 +68,7 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     address public manager;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor() {}
 
     /// @notice One-time initializer replacing the legacy constructor.
     ///         Validates and stores feeRecipient + manager in upgradeable storage.

@@ -123,7 +123,8 @@ contract AuctionHouseInvariantTest is Test {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        ah = new AuctionHouse(feeRecipient, address(0));
+        ah = new AuctionHouse();
+        ah.initialize(feeRecipient, address(0));
         nft = new MockERC721();
         handler = new AuctionHouseHandler(ah, nft);
         targetContract(address(handler));
