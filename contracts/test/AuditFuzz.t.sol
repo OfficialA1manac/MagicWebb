@@ -408,6 +408,7 @@ contract AuditFuzzTest is Test, TestHelpers {
     // ── PushFailed event coverage ─────────────────────────────────────────────
 
     event PushFailed(address indexed to, uint256 amount);
+    event AuctionForceCancelled(uint256 indexed id);
 
     function test_settle_feePushFallback_emitsPushFailed() public {
         RejectEtherNoReceive badFee = new RejectEtherNoReceive();
@@ -735,6 +736,120 @@ contract AuditFuzzTest is Test, TestHelpers {
         ob.withdrawRefund();
         assertEq(ob.pendingReturns(address(bidder)), 0, "credit cleared on successful withdraw");
         assertEq(address(bidder).balance, balBeforeSuccess + 1 ether, "bidder received full 1 ETH escrow back");
+    }
+
+    // ── v30: forceCancel safety valve (permanently-failed delivery → escrow recovery) ──
+
+    function test_forceCancel_tooEarly_reverts() public {
+        (uint256 id,) = _auction7d();
+        _bid(id, alice, 2 ether);
+        vm.warp(block.timestamp + 30 hours); // past endsAt but within SELLER_DEFAULT_WINDOW
+        vm.expectRevert(AuctionLive.selector);
+        ah.forceCancel(id);
+        assertFalse(_settled(id), "NOT settled - forceCancel before window reverts");
+    }
+
+    function test_forceCancel_unlocksRefundLosers() public {
+        (uint256 id, uint256 tid) = _auction7d();
+        _bid(id, alice, 2 ether);
+        _bid(id, bob, 3 ether);
+        vm.warp(block.timestamp + 30 hours);
+        // Seller permanently blocks delivery by transferring NFT away.
+        vm.prank(seller);
+        nft.transferFrom(seller, address(0x999), tid);
+        // settle() reverts — NFT undeliverable.
+        vm.expectRevert();
+        ah.settle(id);
+        assertFalse(_settled(id), "NOT settled - settle reverted on moved NFT");
+        // Losers can withdraw via withdrawLoserFunds() since auction is unsettled.
+        uint256 aliceBalBefore = alice.balance;
+        vm.prank(alice);
+        ah.withdrawLoserFunds(id);
+        assertEq(alice.balance, aliceBalBefore + 2 ether, "alice recovered escrow via withdrawLoserFunds");
+        // But bob is the leader — withdrawLoserFunds blocks the leader.
+        vm.prank(bob);
+        vm.expectRevert(AuctionLive.selector);
+        ah.withdrawLoserFunds(id);
+        assertEq(ah.cumulative(id, bob), 3 ether, "bob's escrow still trapped (leader)");
+        // Warp past SELLER_DEFAULT_WINDOW (3 days after endsAt).
+        vm.warp(block.timestamp + 3 days + 1 hours);
+        vm.expectEmit(true, false, false, false, address(ah));
+        emit AuctionForceCancelled(id);
+        ah.forceCancel(id);
+        assertTrue(_settled(id), "settled after forceCancel");
+        // Now refundLosers is unlocked — bob can be refunded.
+        address[] memory batch = new address[](1);
+        batch[0] = bob;
+        uint256 bobBalBefore = bob.balance;
+        ah.refundLosers(id, batch);
+        assertEq(ah.cumulative(id, bob), 0, "bob's cumulative cleared");
+        assertEq(bob.balance, bobBalBefore + 3 ether, "bob recovered escrow via refundLosers");
+    }
+
+    function test_forceCancel_alreadySettled_reverts() public {
+        (uint256 id,) = _auction7d();
+        // settle() cancels this immediately (no leader → cancelled).
+        vm.warp(block.timestamp + 30 hours);
+        ah.settle(id);
+        assertTrue(_settled(id), "settled - settle cancelled no-leader auction");
+        // forceCancel on already-settled auction reverts.
+        vm.expectRevert(NotActive.selector);
+        ah.forceCancel(id);
+    }
+
+    function test_forceCancel_noLeader_unsettled_works() public {
+        (uint256 id,) = _auction7d();
+        // No bids — no leader. settle() would cancel this, but we skip settle
+        // and go straight to forceCancel after the grace window.
+        vm.warp(block.timestamp + 3 days + 1 hours);
+        vm.expectEmit(true, false, false, false, address(ah));
+        emit AuctionForceCancelled(id);
+        ah.forceCancel(id);
+        assertTrue(_settled(id), "forceCancel settled no-leader auction");
+    }
+
+    function test_forceCancel_multipleBidders_allRefunded() public {
+        (uint256 id,) = _auction7d();
+        // Alice bids 2, Bob bids 3, Carol bids 5 (leader).
+        address carol = address(0xC0DE);
+        vm.deal(carol, 100 ether);
+        _bid(id, alice, 2 ether);
+        _bid(id, bob, 3 ether);
+        vm.prank(carol);
+        ah.bid{value: 5 ether}(id);
+        (address l, uint128 lt) = _leader(id);
+        assertEq(l, carol, "carol is leader");
+        assertEq(lt, 5 ether, "carol leaderTotal = 5 ether");
+        vm.warp(block.timestamp + 30 hours);
+        // Seller blocks delivery.
+        vm.prank(seller);
+        nft.setApprovalForAll(address(ah), false);
+        vm.expectRevert();
+        ah.settle(id);
+        assertFalse(_settled(id));
+        // Alice and Bob withdraw early (not leaders).
+        vm.prank(alice);
+        ah.withdrawLoserFunds(id);
+        assertEq(ah.cumulative(id, alice), 0, "alice withdrew");
+        vm.prank(bob);
+        ah.withdrawLoserFunds(id);
+        assertEq(ah.cumulative(id, bob), 0, "bob withdrew");
+        // Carol (leader) is trapped.
+        vm.prank(carol);
+        vm.expectRevert(AuctionLive.selector);
+        ah.withdrawLoserFunds(id);
+        // Warp past grace window, force cancel.
+        vm.warp(block.timestamp + 3 days + 1 hours);
+        vm.expectEmit(true, false, false, false, address(ah));
+        emit AuctionForceCancelled(id);
+        ah.forceCancel(id);
+        assertTrue(_settled(id));
+        // Refund carol.
+        address[] memory batch = new address[](1);
+        batch[0] = carol;
+        uint256 carolBalBefore = carol.balance;
+        ah.refundLosers(id, batch);
+        assertEq(carol.balance, carolBalBefore + 5 ether, "carol recovered 5 ETH escrow");
     }
 }
 

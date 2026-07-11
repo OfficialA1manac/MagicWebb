@@ -48,11 +48,13 @@ contracts/broadcast/
 contracts/foundry.lock
 contracts/lib/
 *.gas-snapshot
+gas-report.txt
 
 # ── Frontend / app ──────────────────────────────────────────────────────────
 app/node_modules/
 app/dist/
 app/.astro/
+frontend/static/appkit-bridge.js
 frontend/static/svggen/
 
 # ── Build artifacts ─────────────────────────────────────────────────────────

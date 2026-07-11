@@ -75,7 +75,6 @@ function _cleanupListeners() {
 function setupProfilePage(opts: {
   pathname?: string;
   localStorageAddr?: string | null;
-  localStorageJwt?: string | null;
 } = {}) {
   // 1. Clean up listeners from previous test runs
   _cleanupListeners();
@@ -103,10 +102,6 @@ function setupProfilePage(opts: {
   if (opts.localStorageAddr !== undefined) {
     if (opts.localStorageAddr) localStorage.setItem('mw_addr', opts.localStorageAddr);
     else localStorage.removeItem('mw_addr');
-  }
-  if (opts.localStorageJwt !== undefined) {
-    if (opts.localStorageJwt) localStorage.setItem('mw_jwt', opts.localStorageJwt);
-    else localStorage.removeItem('mw_jwt');
   }
 
   // 6. Evaluate the profile script (it's an IIFE)
@@ -711,7 +706,6 @@ describe('Edit Profile Modal', () => {
     | { type: 'networkError'; message: string };
 
   interface LoadOwnProfileOpts {
-    jwt?: string;
     putBehavior?: PutBehavior;
     /** Called each time the profile GET endpoint is hit (for tracking call count) */
     onProfileGet?: () => void;
@@ -727,11 +721,6 @@ describe('Edit Profile Modal', () => {
   async function loadOwnProfileWithPut(opts: LoadOwnProfileOpts = {}) {
     const addr = opts.ownAddr ?? ADDR_A;
     localStorage.setItem('mw_addr', addr);
-    if (opts.jwt) {
-      localStorage.setItem('mw_jwt', opts.jwt);
-    } else {
-      localStorage.removeItem('mw_jwt');
-    }
 
     const putCalls: Array<{ url: string; body: any }> = [];
     const putBehavior = opts.putBehavior ?? { type: 'success' as const };
@@ -793,7 +782,7 @@ describe('Edit Profile Modal', () => {
   // ── Open / Close ──────────────────────────────────────────────────────────
 
   it('opens the modal when Edit Profile button is clicked', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     const editBtn = document.getElementById('edit-profile-btn')!;
     expect(editBtn).not.toBeNull();
@@ -815,7 +804,7 @@ describe('Edit Profile Modal', () => {
   });
 
   it('closes modal when X close button is clicked', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
     expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
@@ -827,7 +816,7 @@ describe('Edit Profile Modal', () => {
   });
 
   it('closes modal when Cancel button is clicked', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
     expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
@@ -838,7 +827,7 @@ describe('Edit Profile Modal', () => {
   });
 
   it('closes modal when overlay background is clicked', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
     const overlay = document.getElementById('edit-profile-overlay')!;
@@ -851,7 +840,7 @@ describe('Edit Profile Modal', () => {
   });
 
   it('closes modal when Escape key is pressed', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
     expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
@@ -864,7 +853,7 @@ describe('Edit Profile Modal', () => {
   // ── Form Pre-fill ────────────────────────────────────────────────────────
 
   it('pre-fills form fields with current profile data', async () => {
-    await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
 
@@ -882,28 +871,34 @@ describe('Edit Profile Modal', () => {
     expect(websiteInput.value).toBe(profileData.website);
   });
 
-  // ── JWT Requirement ──────────────────────────────────────────────────────
+  // ── JWT Requirement (removed — now uses HttpOnly cookie via credentials:'include') ──
 
-  it('shows error when submitting without JWT', async () => {
-    // No JWT set
+  it('submits form without pre-flight JWT check (cookie auth)', async () => {
+    // No JWT in localStorage — auth relies on HttpOnly cookie now
     await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
 
-    // Submit the form (JWT check is synchronous, no await needed)
+    const nameInput = document.querySelector('input[name="display_name"]') as HTMLInputElement;
+    nameInput.value = 'No JWT Check';
+    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
+
+    // Submit the form — no pre-flight JWT check anymore
     const form = document.getElementById('edit-profile-form') as HTMLFormElement;
     form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
 
-    // Should show JWT error immediately (no async fetch involved)
+    // Flush microtasks — the PUT should have been called (backend auth handles 401)
+    await vi.runAllTicks();
+
     const statusEl = document.getElementById('edit-profile-status')!;
-    expect(statusEl.style.display).toBe('block');
-    expect(statusEl.innerHTML).toContain('reconnect your wallet');
+    // Should NOT show JWT error — form submitted with credentials:'include'
+    expect(statusEl.innerHTML).not.toContain('reconnect your wallet');
   });
 
   // ── Successful Save ──────────────────────────────────────────────────────
 
   it('saves successfully and shows success message', async () => {
-    const { putCalls } = await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    const { putCalls } = await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
 
@@ -945,7 +940,7 @@ describe('Edit Profile Modal', () => {
   // ── Form Field Trimming ─────────────────────────────────────────────────
 
   it('trims leading/trailing whitespace from form fields in PUT payload', async () => {
-    const { putCalls } = await loadOwnProfileWithPut({ jwt: 'test-jwt' });
+    const { putCalls } = await loadOwnProfileWithPut();
 
     document.getElementById('edit-profile-btn')!.click();
 
@@ -986,7 +981,7 @@ describe('Edit Profile Modal', () => {
   it('closes modal and re-renders profile in-place after successful save', async () => {
     // Track how many profile GET calls happen
     let profileGetCount = 0;
-    await loadOwnProfileWithPut({ jwt: 'test-jwt', onProfileGet: () => { profileGetCount++; } });
+    await loadOwnProfileWithPut({ onProfileGet: () => { profileGetCount++; } });
     const initialGetCount = profileGetCount;
 
     // Open modal and submit
@@ -1016,7 +1011,6 @@ describe('Edit Profile Modal', () => {
 
   it('shows server error message when PUT returns non-OK', async () => {
     await loadOwnProfileWithPut({
-      jwt: 'test-jwt',
       putBehavior: { type: 'serverError', status: 400, error: 'Display name too long' },
     });
 
@@ -1045,7 +1039,6 @@ describe('Edit Profile Modal', () => {
 
   it('shows network error when PUT fetch throws', async () => {
     await loadOwnProfileWithPut({
-      jwt: 'test-jwt',
       putBehavior: { type: 'networkError', message: 'Network failure' },
     });
 

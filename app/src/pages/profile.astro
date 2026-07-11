@@ -63,9 +63,7 @@ import WalletConnect from '../components/WalletConnect';
   })();
 
       // JWT for authenticated requests
-      function getJWT(){
-        try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
-      }
+
 
       const root = document.getElementById('profile-root');
       if (!root) return;
@@ -426,13 +424,6 @@ import WalletConnect from '../components/WalletConnect';
 
               form.addEventListener('submit', async function(e){
                 e.preventDefault();
-                const jwt = getJWT();
-                if(!jwt){
-                  statusEl.style.display = 'block';
-                  statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;font-weight:600;">Please reconnect your wallet to edit</p>';
-                  return;
-                }
-
                 const formData = new FormData(form);
                 const payload = {
               display_name: (formData.get('display_name')||'').trim(),
@@ -451,9 +442,9 @@ import WalletConnect from '../components/WalletConnect';
                   const res = await fetch('/api/v1/profile/'+encAddr, {
                 method: 'PUT',
                 headers: {
-                  'Content-Type': 'application/json',
-                  'Authorization': 'Bearer '+jwt
+                  'Content-Type': 'application/json'
                 },
+                credentials: 'include',
                 body: JSON.stringify(payload)
               });
 

@@ -70,6 +70,15 @@ contract AuctionHouse is MarketplaceCore {
     ///         startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION = the
     ///         absolute latest possible endsAt, regardless of extension count.
     uint64 public constant MAX_TOTAL_EXTENSION = 30 minutes;
+    /// @notice Grace period after endsAt before a permanently-failed auction
+    ///         (NFT undeliverable: seller moved it or revoked approval) can be
+    ///         force-cancelled via forceCancel(). The keeper retries settlement
+    ///         every tick during this window; 3 days gives ample time for the
+    ///         seller to resolve delivery (re-approve, return the NFT). After
+    ///         the window, anyone can call forceCancel() to mark the auction
+    ///         settled and unlock refundLosers() for all bidders — the leader's
+    ///         escrow is never permanently trapped.
+    uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
     /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
     ///         the current leader. The user's new cumulative bid must exceed the
     ///         leader's total by at least this amount. The percentage-based
@@ -166,6 +175,8 @@ contract AuctionHouse is MarketplaceCore {
     event AuctionSettled(uint256 indexed id, address indexed winner, address indexed seller, uint128 winningBid, uint256 fee);
     event LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount);
     event AuctionCancelled(uint256 indexed id);
+    /// @notice Emitted by forceCancel() — auction was permanently undeliverable.
+    event AuctionForceCancelled(uint256 indexed id);
     event RefundPushed(address indexed bidder, uint256 amount);
     event AuctionActivated(uint256 indexed id);
 
@@ -556,6 +567,33 @@ contract AuctionHouse is MarketplaceCore {
         if (a.leader != address(0) && a.leaderTotal >= a.reserve) revert CannotCancel();
         a.settled = true;
         emit AuctionCancelled(id);
+    }
+
+    // ── Force cancel (permissionless safety valve for permanently-failed delivery) ──
+
+    /// @notice Permissionless safety valve: after `endsAt + SELLER_DEFAULT_WINDOW`,
+    ///         anyone can force-cancel an auction whose settle() has permanently
+    ///         failed (seller moved the NFT away or revoked approval, making
+    ///         delivery impossible). This sets `a.settled = true`, unlocking
+    ///         refundLosers() so ALL bidders — including the trapped leader —
+    ///         recover their escrow. Before the window, settle() must be
+    ///         retried normally (the keeper does this every tick). The NFT
+    ///         stays with whoever holds it; forceCancel is purely an escrow
+    ///         recovery path, not a trade reversal.
+    ///
+    ///         Design rationale: the contract docstring promises "funds are
+    ///         never trapped" — without this path, a seller who permanently
+    ///         blocks NFT delivery (by transferring it elsewhere or revoking
+    ///         approval forever) would trap the leader's cumulative escrow
+    ///         with zero on-chain recovery. The 3-day window is far longer
+    ///         than the longest auction (24h) and gives the keeper ample time
+    ///         to retry; after that, bidder protection dominates.
+    function forceCancel(uint256 id) external nonReentrant {
+        Auction storage a = auctions[id];
+        if (a.seller == address(0) || a.settled) revert NotActive();
+        if (block.timestamp < a.endsAt + SELLER_DEFAULT_WINDOW) revert AuctionLive();
+        a.settled = true;
+        emit AuctionForceCancelled(id);
     }
 
 

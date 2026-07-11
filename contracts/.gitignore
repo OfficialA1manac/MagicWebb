@@ -1,1 +1,4 @@
-contracts/gas-report.txt
+gas-report.txt
+out/
+cache/
+broadcast/

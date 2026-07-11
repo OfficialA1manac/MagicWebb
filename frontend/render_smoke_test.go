@@ -41,6 +41,13 @@ import (
 var tailwindCSS string
 
 func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
+	// Init() must be called before accessing Templates — it parses the
+	// embedded template files. The backend server calls this at startup;
+	// in test context we call it here with a passthrough mediaURL function.
+	if Templates == nil {
+		Init(func(uri string) string { return uri })
+	}
+
 	tmpl, ok := Templates["pages/home.html"]
 	if !ok {
 		t.Fatal("pages/home.html not in Templates")
@@ -202,11 +209,11 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	// cache-buster assertions had been silently failing pre-patch.
 	// Bumping to ?v=28 here closes the drift and pins the next-deployed
 	// buster version on lock-step with layout.html's <script src=> tags.
-	{"tailwind-static-link", "tailwind.css?v=31"},
-	{"wallet-js-defer",      "wallet.js?v=31"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=31"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=31"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=31"},
+	{"tailwind-static-link", "tailwind.css?v=34"},
+	{"wallet-js-defer",      "wallet.js?v=34"},
+	{"ethers-umd-defer",     "ethers.umd.min.js?v=34"},
+	{"cdn-min-js-defer",     "cdn.min.js?v=34"},
+	{"htmx-min-js-defer",    "htmx.min.js?v=34"},
 		// Reown AppKit built-in modal handles QR display (showQrModal: true).
 		// The custom WC QR overlay was removed; no manual overlay events needed.
 		// NFT picker v7 hardening — same close-pattern as the WC
@@ -242,8 +249,8 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// 1s polling guard: The `[!document.hidden]` condition is pinned
 		// below by `every-1s-condition`. The home page activity ticker
 		// was removed per user request.
-		{"home-listings-grid-poll", "id=\"listings-grid\""},
-		{"every-1s-condition",      "every 1s [!document.hidden]"},
+	{"home-listings-grid-poll", "id=\"listings-grid\""},
+	{"every-1s-condition",      "every 60s [!document.hidden]"},
 		// (WC-connect-call assertion removed in v24.0.1 — the
 		// `store.wallet.connect(kind, ...)` API was reduced to
 		// `connect({silent=false})` in v23.2 per the v24.0/23.2

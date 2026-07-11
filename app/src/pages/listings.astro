@@ -321,9 +321,7 @@ const sortParam = urlParams.get('sort') || 'recent';
       const savedBtn = document.getElementById('saved-searches-btn');
       const savedDropdown = document.getElementById('saved-searches-dropdown');
 
-      function getJWT(){
-        try { return localStorage.getItem('mw_jwt') || ''; } catch(_) { return ''; }
-      }
+
 
       function getConnectedAddr(){
         try { return localStorage.getItem('mw_addr') || ''; } catch(_) { return ''; }
@@ -339,9 +337,8 @@ const sortParam = urlParams.get('sort') || 'recent';
       }
 
       function checkWalletAndShowButtons(){
-        const jwt = getJWT();
         const addr = getConnectedAddr();
-        if(jwt && addr && isEthAddr(addr)){
+        if(addr && isEthAddr(addr)){
           if(hasActiveFilters()) saveBtn.style.display = 'inline-flex';
           else saveBtn.style.display = 'none';
           savedBtn.style.display = 'inline-flex';
@@ -358,12 +355,11 @@ const sortParam = urlParams.get('sort') || 'recent';
 
       // ── Load saved searches ──
       async function loadSavedSearches(){
-        const jwt = getJWT();
-        if(!jwt || !savedDropdown) return;
+        if(!savedDropdown) return;
         try {
           const res = await fetch('/api/v1/saved-searches?limit=20&page=listings', {
-        headers: {'Authorization': 'Bearer '+jwt}
-      });
+            credentials: 'include'
+          });
           if(!res.ok) throw new Error('HTTP '+res.status);
           let searches = await res.json();
           if(!Array.isArray(searches)) searches = [];
@@ -390,12 +386,11 @@ const sortParam = urlParams.get('sort') || 'recent';
               e.preventDefault();
               e.stopPropagation();
               const id = btn.dataset.id;
-              const jwt2 = getJWT();
-              if(!jwt2 || !id) return;
+              if(!id) return;
               try {
                 const delRes = await fetch('/api/v1/saved-searches/'+id, {
               method: 'DELETE',
-              headers: {'Authorization': 'Bearer '+jwt2}
+              credentials: 'include'
             });
                 if(delRes.ok || delRes.status === 204){
                   loadSavedSearches();
@@ -455,13 +450,6 @@ const sortParam = urlParams.get('sort') || 'recent';
               return;
             }
 
-            const jwt = getJWT();
-            if(!jwt){
-              statusEl.style.display = 'block';
-              statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;">Please reconnect your wallet</p>';
-              return;
-            }
-
             // Build current params
             const params = new URLSearchParams();
             const coll = (collectionInput ? collectionInput.value.trim() : '');
@@ -483,7 +471,8 @@ const sortParam = urlParams.get('sort') || 'recent';
             try {
               const res = await fetch('/api/v1/saved-searches', {
             method: 'POST',
-            headers: {'Content-Type': 'application/json', 'Authorization': 'Bearer '+jwt},
+            headers: {'Content-Type': 'application/json'},
+            credentials: 'include',
             body: JSON.stringify({name: name, page: 'listings', params: params.toString()})
           });
               if(res.ok || res.status === 201){
