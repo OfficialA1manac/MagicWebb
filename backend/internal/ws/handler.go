@@ -6,6 +6,7 @@ package ws
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"strings"
 	"sync"
 	"sync/atomic"
@@ -22,13 +23,6 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
-// FastHTTP upgrader — works directly with fasthttp.RequestCtx from Fiber.
-var upgrader = websocket.FastHTTPUpgrader{
-	CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
-		return true // CSP + CORS middleware already enforce origin at the Fiber level
-	},
-}
-
 // Per-IP connection limits (same pattern as SSE handler).
 const wsPerIPLimit = 20
 const wsGlobalLimit = 5_000
@@ -43,7 +37,7 @@ type Connection struct {
 	done          chan struct{}
 	once          sync.Once
 	subscriptions map[string]struct{} // set of subscribed channels (guarded by subMu)
-	subMu         sync.RWMutex         // guards subscriptions against concurrent read/write
+	subMu         sync.RWMutex        // guards subscriptions against concurrent read/write
 }
 
 // writePump sends messages from the broadcaster to the WebSocket connection.
@@ -106,31 +100,31 @@ func (c *Connection) readPump(h *Handler) {
 		case MsgPing:
 			c.writeJSON(Message{Type: MsgPong, Data: mustJSON(PongData{ServerTimeMs: h.serverTimeMs()})})
 
-	case MsgAction:
-		var act ActionData
-		if err := json.Unmarshal(msg.Data, &act); err != nil {
-			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid action"})})
-			continue
-		}
-		h.dispatchAction(c, act)
+		case MsgAction:
+			var act ActionData
+			if err := json.Unmarshal(msg.Data, &act); err != nil {
+				c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid action"})})
+				continue
+			}
+			h.dispatchAction(c, act)
 
-	case MsgSubscribe:
-		var sub SubscribeData
-		if err := json.Unmarshal(msg.Data, &sub); err != nil {
-			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid subscribe payload"})})
-			continue
-		}
-		c.subscribe(sub.Channels)
+		case MsgSubscribe:
+			var sub SubscribeData
+			if err := json.Unmarshal(msg.Data, &sub); err != nil {
+				c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid subscribe payload"})})
+				continue
+			}
+			c.subscribe(sub.Channels)
 
-	case MsgUnsubscribe:
-		var unsub UnsubscribeData
-		if err := json.Unmarshal(msg.Data, &unsub); err != nil {
-			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid unsubscribe payload"})})
-			continue
-		}
-		c.unsubscribe(unsub.Channels)
+		case MsgUnsubscribe:
+			var unsub UnsubscribeData
+			if err := json.Unmarshal(msg.Data, &unsub); err != nil {
+				c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid unsubscribe payload"})})
+				continue
+			}
+			c.unsubscribe(unsub.Channels)
 
-	default:
+		default:
 			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{
 				Status:  "error",
 				Message: "unknown message type: " + string(msg.Type),
@@ -160,13 +154,13 @@ func mustJSON(v any) json.RawMessage {
 
 // Handler manages WebSocket connections and bridges them with the SSE broadcaster.
 type Handler struct {
-	cfg          *config.Config
-	bcast        *sse.Broadcaster
-	q            *db.Q
-	serverTime   func() int64
-	mu           sync.RWMutex
-	conns        map[string]*Connection // id → Connection
-	ipCounters   map[string]*int64      // ip → atomic counter
+	cfg        *config.Config
+	bcast      *sse.Broadcaster
+	q          *db.Q
+	serverTime func() int64
+	mu         sync.RWMutex
+	conns      map[string]*Connection // id → Connection
+	ipCounters map[string]*int64      // ip → atomic counter
 }
 
 // NewHandler creates a WebSocket Handler.
@@ -208,7 +202,7 @@ func (h *Handler) serverTimeMs() int64 {
 // subscribes to the SSE broadcaster for push events, and manages the read/write
 // lifecycle. Returns 429 when the per-IP or global connection limit is exceeded.
 func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
-	ip := c.IP()
+	ip := clientIP(c)
 
 	// Per-IP connection cap
 	if !h.acquireIP(ip) {
@@ -229,6 +223,11 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 
 	// Upgrade to WebSocket
 	var wsConn *websocket.Conn
+	upgrader := websocket.FastHTTPUpgrader{
+		CheckOrigin: func(ctx *fasthttp.RequestCtx) bool {
+			return originAllowed(ctx, h.cfg)
+		},
+	}
 	upgradeErr := upgrader.Upgrade(c.Context(), func(conn *websocket.Conn) {
 		wsConn = conn
 	})
@@ -321,6 +320,91 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	conn.writePump()
 
 	return nil
+}
+
+func clientIP(c *fiber.Ctx) string {
+	if v := strings.TrimSpace(c.Get("Fly-Client-IP")); v != "" {
+		return v
+	}
+	if v := strings.TrimSpace(c.Get("Forwarded")); v != "" {
+		for _, part := range strings.Split(v, ";") {
+			p := strings.TrimSpace(part)
+			if !strings.HasPrefix(strings.ToLower(p), "for=") {
+				continue
+			}
+			id := strings.Trim(p[4:], " \"")
+			if id = stripAddrPort(id); id != "" {
+				return id
+			}
+		}
+	}
+	if v := strings.TrimSpace(c.Get("X-Forwarded-For")); v != "" {
+		if i := strings.LastIndex(v, ","); i >= 0 {
+			v = strings.TrimSpace(v[i+1:])
+		}
+		if v != "" {
+			return v
+		}
+	}
+	return c.IP()
+}
+
+func stripAddrPort(id string) string {
+	if id == "" {
+		return id
+	}
+	if strings.HasPrefix(id, "[") {
+		if end := strings.Index(id, "]"); end >= 0 {
+			return id[1:end]
+		}
+		return id[1:]
+	}
+	if strings.Count(id, ":") > 1 {
+		return id
+	}
+	if colon := strings.LastIndex(id, ":"); colon >= 0 && looksLikePort(id[colon+1:]) {
+		return id[:colon]
+	}
+	return id
+}
+
+func looksLikePort(s string) bool {
+	if s == "" {
+		return false
+	}
+	for _, r := range s {
+		if r < '0' || r > '9' {
+			return false
+		}
+	}
+	return true
+}
+
+func originAllowed(ctx *fasthttp.RequestCtx, cfg *config.Config) bool {
+	origin := strings.TrimSpace(string(ctx.Request.Header.Peek("Origin")))
+	if origin == "" {
+		return true
+	}
+	originURL, err := url.Parse(origin)
+	if err != nil || originURL.Scheme == "" || originURL.Host == "" {
+		return false
+	}
+	if sameOriginHost(originURL.Host, strings.TrimSpace(string(ctx.Host()))) {
+		return true
+	}
+	if cfg == nil || cfg.FrontendURL == "" {
+		return false
+	}
+	frontendURL, err := url.Parse(cfg.FrontendURL)
+	if err != nil || frontendURL.Host == "" {
+		return false
+	}
+	return sameOriginHost(originURL.Host, frontendURL.Host) &&
+		(originURL.Scheme == frontendURL.Scheme || frontendURL.Scheme == "")
+}
+
+func sameOriginHost(a, b string) bool {
+	return strings.EqualFold(strings.TrimSuffix(a, "."), strings.TrimSuffix(b, "."))
 }
 
 // sseToWSMessage converts an SSE-formatted broadcaster event to a WebSocket JSON
@@ -562,14 +646,14 @@ func (h *Handler) handleGetToken(c *Connection, raw json.RawMessage) {
 		return
 	}
 	resp := struct {
-		Collection  string `json:"collection"`
-		TokenID     string `json:"token_id"`
-		Name        string `json:"name"`
-		Description string `json:"description"`
-		ImageURI    string `json:"image_uri"`
+		Collection   string `json:"collection"`
+		TokenID      string `json:"token_id"`
+		Name         string `json:"name"`
+		Description  string `json:"description"`
+		ImageURI     string `json:"image_uri"`
 		AnimationURI string `json:"animation_uri"`
 		MetadataURI  string `json:"metadata_uri"`
-		FetchedAt   string `json:"fetched_at"`
+		FetchedAt    string `json:"fetched_at"`
 	}{
 		Collection:   p.Collection,
 		TokenID:      p.TokenID,
@@ -692,5 +776,3 @@ func (h *Handler) ActiveConns() int {
 	defer h.mu.RUnlock()
 	return len(h.conns)
 }
-
-

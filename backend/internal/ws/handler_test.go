@@ -7,7 +7,9 @@ import (
 
 	"github.com/jackc/pgx/v5"
 	"github.com/pashagolub/pgxmock/v4"
+	"github.com/valyala/fasthttp"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -514,5 +516,50 @@ func TestServerTimeMs_Fallback(t *testing.T) {
 	now := h.serverTimeMs()
 	if now <= 0 {
 		t.Fatal("expected positive server time")
+	}
+}
+
+func TestOriginAllowed(t *testing.T) {
+	cfg := &config.Config{FrontendURL: "https://magicwebb.fly.dev"}
+
+	tests := []struct {
+		name   string
+		host   string
+		origin string
+		want   bool
+	}{
+		{"no origin", "magicwebb.fly.dev", "", true},
+		{"same origin", "magicwebb.fly.dev", "https://magicwebb.fly.dev", true},
+		{"configured frontend", "internal.fly.dev", "https://magicwebb.fly.dev", true},
+		{"evil origin", "magicwebb.fly.dev", "https://evil.example", false},
+		{"malformed", "magicwebb.fly.dev", "://bad", false},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			var ctx fasthttp.RequestCtx
+			ctx.Request.SetHost(tt.host)
+			if tt.origin != "" {
+				ctx.Request.Header.Set("Origin", tt.origin)
+			}
+			if got := originAllowed(&ctx, cfg); got != tt.want {
+				t.Fatalf("originAllowed = %v, want %v", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestStripAddrPort(t *testing.T) {
+	tests := map[string]string{
+		"192.0.2.1:443":       "192.0.2.1",
+		"192.0.2.1":           "192.0.2.1",
+		"[2001:db8::1]:443":   "2001:db8::1",
+		"2001:db8::1":         "2001:db8::1",
+		"example.com:notport": "example.com:notport",
+	}
+	for in, want := range tests {
+		if got := stripAddrPort(in); got != want {
+			t.Fatalf("stripAddrPort(%q) = %q, want %q", in, got, want)
+		}
 	}
 }

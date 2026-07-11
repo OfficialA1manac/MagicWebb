@@ -299,8 +299,8 @@ func uiGasMetrics(q *db.Q) fiber.Handler {
 		summary, err := q.GetGasMetricsSummary(c.Context())
 		if err != nil {
 			return render(c, "pages/gas_metrics.html", fiber.Map{
-				"Title":         "Gas Costs",
-				"Error":         "Gas metrics unavailable",
+				"Title":          "Gas Costs",
+				"Error":          "Gas metrics unavailable",
 				"NativeCurrency": config.C.NativeCurrency,
 			})
 		}
@@ -332,15 +332,15 @@ func uiGasMetrics(q *db.Q) fiber.Handler {
 		}
 
 		return render(c, "pages/gas_metrics.html", fiber.Map{
-			"Title":         "Gas Costs",
-			"Summary":       summary,
-			"RecentLogs":    logs,
-			"Alerts":        alerts,
+			"Title":          "Gas Costs",
+			"Summary":        summary,
+			"RecentLogs":     logs,
+			"Alerts":         alerts,
 			"NativeCurrency": config.C.NativeCurrency,
-			"SettlePct":     settlePct,
-			"RefundPct":     refundPct,
-			"SweepPct":      sweepPct,
-			"OfferPct":      offerPct,
+			"SettlePct":      settlePct,
+			"RefundPct":      refundPct,
+			"SweepPct":       sweepPct,
+			"OfferPct":       offerPct,
 		})
 	}
 }
@@ -555,12 +555,12 @@ func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
 // has /profile/:addr (a specific user's page) but NOT /profile — a
 // user typing that in the address bar (or clicking any link that points
 // at the bare path) hits Fiber's 404. We rescue by:
-//   1. Walking every cookie on the request.
-//   2. Looking for any mw_s_<prefix> cookie (the SIWE session cookie).
-//   3. Verifying its JWT against JWT_SECRET + DefaultAudience.
-//   4. Returning a 302 to /profile/<sub> where sub = wallet address.
-//   5. Falling back to a 307 to /listings when no valid session cookie
-//      is present (this is what a logged-out browser sees).
+//  1. Walking every cookie on the request.
+//  2. Looking for any mw_s_<prefix> cookie (the SIWE session cookie).
+//  3. Verifying its JWT against JWT_SECRET + DefaultAudience.
+//  4. Returning a 302 to /profile/<sub> where sub = wallet address.
+//  5. Falling back to a 307 to /listings when no valid session cookie
+//     is present (this is what a logged-out browser sees).
 //
 // We deliberately use auth.Verify (signature validation) rather than
 // jwt.ParseUnverified — a stolen cookie with a forged signature MUST
@@ -792,7 +792,7 @@ func jsStringEscape(s string) string {
 	return s
 }
 
-// astroConfigScript is the <script> block injected into every Astro HTML
+// astroConfigScript returns the <script> block injected into every Astro HTML
 // response so the frontend's window.MW_* globals reflect the running
 // server's chain config (RPC URL, chain ID, network name, native currency
 // symbol, block explorer URL). Without this, Astro pages fall back to
@@ -807,7 +807,8 @@ func jsStringEscape(s string) string {
 // All string values are jsStringEscape'd to prevent XSS via config values
 // containing quotes or backslashes (defence-in-depth even though config
 // is operator-controlled).
-var astroConfigScript = fmt.Sprintf(`<script>
+func astroConfigScript() string {
+	return fmt.Sprintf(`<script>
 window.MW_CHAIN_ID='%d';
 window.MW_RPC_URL='%s';
 window.MW_NETWORK_NAME='%s';
@@ -818,16 +819,17 @@ window.MW_MARKETPLACE='%s';
 window.MW_AUCTION='%s';
 window.MW_OFFERBOOK='%s';
 </script>`,
-	config.C.ChainID,
-	jsStringEscape(config.C.RPCURL),
-	jsStringEscape(config.C.NetworkName),
-	jsStringEscape(config.C.NativeCurrency),
-	jsStringEscape(config.C.ExplorerURL),
-	jsStringEscape(config.C.WCProjectID),
-	jsStringEscape(config.C.MarketplaceAddr),
-	jsStringEscape(config.C.AuctionAddr),
-	jsStringEscape(config.C.OfferBookAddr),
-)
+		config.C.ChainID,
+		jsStringEscape(config.C.RPCURL),
+		jsStringEscape(config.C.NetworkName),
+		jsStringEscape(config.C.NativeCurrency),
+		jsStringEscape(config.C.ExplorerURL),
+		jsStringEscape(config.C.WCProjectID),
+		jsStringEscape(config.C.MarketplaceAddr),
+		jsStringEscape(config.C.AuctionAddr),
+		jsStringEscape(config.C.OfferBookAddr),
+	)
+}
 
 // sendHTMLWithConfig serves an Astro-built HTML file with the server's
 // chain config injected as a <script> block immediately before </head>.
@@ -875,9 +877,9 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 	// (2) </head> appears exactly once in a well-formed HTML document.
 	idx := strings.Index(content, "</head>")
 	if idx < 0 {
-		content = astroConfigScript + content
+		content = astroConfigScript() + content
 	} else {
-		content = content[:idx] + astroConfigScript + content[idx:]
+		content = content[:idx] + astroConfigScript() + content[idx:]
 	}
 
 	// Server-side replacement of .mw-cur span content so the correct
@@ -899,7 +901,7 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 }
 
 // htmlCache caches Astro HTML file content with server config injected.
-// The astroConfigScript and currency/network replacements are static per
+// The astroConfigScript() and currency/network replacements are static per
 // process (they only depend on config.C, which is immutable after Load()).
 // Without caching, every uncached request re-reads the file from disk and
 // re-runs strings.Index + 2× strings.ReplaceAll — avoidable disk I/O and
@@ -915,8 +917,8 @@ var htmlCache sync.Map
 // the file's current modtime still matches entry.modtime — if not, the
 // cache is stale and must be recomputed.
 type htmlCacheEntry struct {
-	content  string
-	modtime  time.Time
+	content string
+	modtime time.Time
 }
 
 // envOrDefault reads an env var, returning the default if empty or unset.
