@@ -98,7 +98,7 @@ contract OfferBook is MarketplaceCore {
     event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {}
+    constructor() { _disableInitializers(); }
 
     /// @notice One-time initializer. Calls __MarketplaceCore_init to store
     ///         feeRecipient + manager in upgradeable storage.

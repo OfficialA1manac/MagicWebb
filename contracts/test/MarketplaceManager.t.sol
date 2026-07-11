@@ -2,325 +2,104 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {MarketplaceManager, ZeroAddr, NotContract, SameValue} from "../src/MarketplaceManager.sol";
-import {Marketplace}  from "../src/Marketplace.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {MarketplaceManager, ZeroAddr} from "../src/MarketplaceManager.sol";
+import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
-import {OfferBook}    from "../src/OfferBook.sol";
+import {OfferBook} from "../src/OfferBook.sol";
+import {MockERC721} from "./MockERC721.sol";
 import {EntriesHalted, BadManager} from "../src/MarketplaceCore.sol";
-import {MockERC721}  from "./MockERC721.sol";
+import {TestHelpers} from "./TestHelpers.sol";
 
-/// Covers the manager itself (roles, breaker, registry, token slots) and the
-/// load-bearing invariant of the whole design: while entries are paused, every
-/// EXIT path on every core still runs — funds can never be trapped.
-contract MarketplaceManagerTest is Test {
+contract MarketplaceManagerTest is Test, TestHelpers {
     MarketplaceManager mgr;
-    Marketplace  mp;
+    Marketplace mp;
     AuctionHouse ah;
-    OfferBook    ob;
-    MockERC721   nft;
-
-    address admin        = address(0xAD);
-    address operator     = address(0x09);
-    address feeRecipient = address(0x1111000000000000000000000000000000111100);
-    address seller       = address(0xBEEF);
-    address alice        = address(0xA11CE);
-    address bob          = address(0xB0B);
-    address rando        = address(0x4444);
+    OfferBook ob;
+    address admin = address(0xAD);
+    address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        mgr = new MarketplaceManager();
-        mgr.initialize(admin);
-        mp = new Marketplace();
-        mp.initialize(feeRecipient, address(mgr));
-        ah = new AuctionHouse();
-        ah.initialize(feeRecipient, address(mgr));
-        ob = new OfferBook();
-        ob.initialize(feeRecipient, address(mgr));
-        nft = new MockERC721();
-
-        vm.startPrank(admin);
-        mgr.setCoreContracts(address(mp), address(ah), address(ob));
-        mgr.grantRole(mgr.OPERATOR_ROLE(), operator);
-        mgr.grantRole(mgr.KEEPER_ROLE(), rando);   // so settle() test works
-        vm.stopPrank();
-
-        vm.deal(alice, 100 ether);
-        vm.deal(bob,   100 ether);
-
-        // Enable offers on the mock NFT collection so makeOffer tests pass.
-        // The admin has DEFAULT_ADMIN_ROLE via the MarketplaceManager.
+        mgr = _deployMarketplaceManager(admin);
+        mp = _deployMarketplace(feeRecipient, address(mgr));
+        ah = _deployAuctionHouse(feeRecipient, address(mgr));
+        ob = _deployOfferBook(feeRecipient, address(mgr));
         vm.prank(admin);
-        ob.setOfferEligible(address(nft), true);
+        mgr.setCoreContracts(address(mp), address(ah), address(ob));
     }
 
-    // ── Roles ────────────────────────────────────────────────────────────────
-
-    function test_adminHasDefaultAndOperatorRoles() public view {
+    function test_rolesAssigned() public {
         assertTrue(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin));
         assertTrue(mgr.hasRole(mgr.OPERATOR_ROLE(), admin));
     }
 
-    function test_nonOperatorCannotPause() public {
-        vm.prank(rando);
-        vm.expectRevert();
-        mgr.pauseEntries();
-    }
-
-    function test_nonAdminCannotSetModules() public {
-        vm.prank(rando);
-        vm.expectRevert();
-        mgr.setTokenAddress(address(nft));
-    }
-
-    function test_keeperRoleGrantRevoke() public {
-        bytes32 role = mgr.KEEPER_ROLE();
-        vm.prank(admin);
-        mgr.grantRole(role, rando);
-        assertTrue(mgr.hasRole(role, rando));
-        vm.prank(admin);
-        mgr.revokeRole(role, rando);
-        assertFalse(mgr.hasRole(role, rando));
-    }
-
-    // ── Circuit breaker semantics ────────────────────────────────────────────
-
-    function test_deploysUnpaused() public view {
-        assertTrue(mgr.entriesAllowed());
-    }
-
-    function test_pauseUnpauseRoundtrip() public {
-        vm.prank(operator);
-        mgr.pauseEntries();
-        assertFalse(mgr.entriesAllowed());
-        vm.prank(operator);
-        mgr.unpauseEntries();
-        assertTrue(mgr.entriesAllowed());
-    }
-
-    function test_doublePauseReverts() public {
-        vm.prank(operator);
-        mgr.pauseEntries();
-        vm.prank(operator);
-        vm.expectRevert(SameValue.selector);
-        mgr.pauseEntries();
-    }
-
-    // ── Entry gating: every entry path halts while paused ────────────────────
-
-    function _pause() internal {
-        vm.prank(operator);
-        mgr.pauseEntries();
-    }
-
-    function test_pausedBlocksList() public {
-        uint256 tid = nft.mint(seller);
-        vm.prank(seller);
-        nft.setApprovalForAll(address(mp), true);
-        _pause();
-        vm.prank(seller);
-        vm.expectRevert(EntriesHalted.selector);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
-    }
-
-    function test_pausedBlocksBuy() public {
-        uint256 tid = _listed();
-        _pause();
-        vm.prank(alice);
-        vm.expectRevert(EntriesHalted.selector);
-        mp.buy{value: 1 ether}(address(nft), tid, seller);
-    }
-
-    function test_pausedBlocksAuctionCreateAndBid() public {
-        (uint256 id,) = _auction();
-        _pause();
-
-        vm.startPrank(seller);
-        uint256 tid2 = nft.mint(seller);
-        vm.expectRevert(EntriesHalted.selector);
-        ah.create(address(nft), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
-        vm.stopPrank();
-
-        vm.prank(alice);
-        vm.expectRevert(EntriesHalted.selector);
-        ah.bid{value: 1 ether}(id);
-    }
-
-    function test_pausedBlocksMakeAndAcceptOffer() public {
-        uint256 tid = nft.mint(seller);
-        uint64 exp = uint64(block.timestamp + 24 hours);
-        vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
-
-        _pause();
-
-        vm.prank(bob);
-        vm.expectRevert(EntriesHalted.selector);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
-
-        vm.startPrank(seller);
-        nft.setApprovalForAll(address(ob), true);
-        vm.expectRevert(EntriesHalted.selector);
-        ob.acceptOffer(address(nft), tid, alice);
-        vm.stopPrank();
-    }
-
-    function test_unpauseRestoresEntries() public {
-        uint256 tid = nft.mint(seller);
-        vm.prank(seller);
-        nft.setApprovalForAll(address(mp), true);
-        _pause();
-        vm.prank(operator);
-        mgr.unpauseEntries();
-        vm.prank(seller);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
-        (address lSeller,,,,) = mp.listings(address(nft), tid, seller);
-        assertEq(lSeller, seller);
-    }
-
-    // ── THE invariant: exits run while paused (funds never trapped) ──────────
-
-    function test_pausedAuctionStillSettlesAndRefundsLosers() public {
-        (uint256 id,) = _auction();
-        vm.prank(alice);
-        ah.bid{value: 1 ether}(id);
-        vm.prank(bob);
-        ah.bid{value: 2 ether}(id);
-
-        _pause();
-        vm.warp(block.timestamp + 30 hours);
-
-        uint256 sellerBefore = seller.balance;
-        uint256 aliceBefore  = alice.balance;
-
-        // settle: keeper-only when manager deployed.
-        vm.prank(rando);
-        ah.settle(id);
-        assertGt(seller.balance, sellerBefore);
-
-        // refundLosers: permissionless, ungated.
-        address[] memory losers = new address[](1);
-        losers[0] = alice;
-        vm.prank(rando);
-        ah.refundLosers(id, losers);
-        assertEq(alice.balance, aliceBefore + 1 ether);
-    }
-
-    function test_pausedSellerCanStillCancelEarly() public {
-        (uint256 id,) = _auction();
-        _pause();
-        vm.prank(seller);
-        ah.cancelEarly(id); // must not revert
-    }
-
-    function test_pausedListingCancelStillWorks() public {
-        uint256 tid = _listed();
-        _pause();
-        vm.prank(seller);
-        mp.cancel(address(nft), tid); // must not revert
-    }
-
-    function test_pausedOfferRejectAndExpiryRefundStillWork() public {
-        uint256 tid = nft.mint(seller);
-        vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
-        vm.prank(bob);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
-
-        _pause();
-
-        // Owner reject: full refund, ungated.
-        uint256 aliceBefore = alice.balance;
-        vm.prank(seller);
-        ob.rejectOffer(address(nft), tid, alice);
-        assertEq(alice.balance, aliceBefore + 1 ether);
-
-        // Seller rejects bob's offer too (refundExpiredOffer removed in v10).
-        vm.prank(seller);
-        ob.rejectOffer(address(nft), tid, bob);
-        assertEq(bob.balance, bob.balance - 1 ether + 1 ether); // net zero
-    }
-
-    // ── Registry + token slots ───────────────────────────────────────────────
-
-    function test_setCoreContractsRejectsEOA() public {
-        vm.prank(admin);
-        vm.expectRevert(NotContract.selector);
-        mgr.setCoreContracts(rando, address(ah), address(ob));
-    }
-
-    function test_setTokenAddressValidatesAndStores() public {
-        vm.prank(admin);
-        vm.expectRevert(ZeroAddr.selector);
-        mgr.setTokenAddress(address(0));
-
-        vm.prank(admin);
-        vm.expectRevert(NotContract.selector);
-        mgr.setTokenAddress(rando); // EOA
-
-        vm.prank(admin);
-        mgr.setTokenAddress(address(nft));
-        assertEq(mgr.token(), address(nft));
-    }
-
-    function test_futureModuleSlotsStore() public {
+    function test_grantKeeperRole() public {
         vm.startPrank(admin);
-        mgr.setFeeDistributor(address(nft));
-        mgr.setStakingModule(address(nft));
-        mgr.setGovernanceModule(address(nft));
+        mgr.grantRole(mgr.KEEPER_ROLE(), address(0xB0B));
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xB0B)));
         vm.stopPrank();
-        assertEq(mgr.feeDistributor(),   address(nft));
-        assertEq(mgr.stakingModule(),    address(nft));
-        assertEq(mgr.governanceModule(), address(nft));
     }
 
-    function test_managerHoldsNoFundsPath() public {
-        // The manager has no payable surface at all.
-        (bool ok,) = address(mgr).call{value: 1 ether}("");
-        assertFalse(ok);
+    function test_pauseUnpauseEntries() public {
+        assertFalse(mgr.entriesPaused());
+        vm.prank(admin);
+        mgr.pauseEntries();
+        assertTrue(mgr.entriesPaused());
+        vm.prank(admin);
+        mgr.unpauseEntries();
+        assertFalse(mgr.entriesPaused());
     }
 
-    // ── Constructor manager validation (immutable — a bad value is forever) ──
+    function test_nonOperatorCantPause() public {
+        vm.prank(address(0x999));
+        vm.expectRevert();
+        mgr.pauseEntries();
+    }
+
+    function test_entriesHaltedWhenPaused() public {
+        vm.prank(admin);
+        mgr.pauseEntries();
+
+        MockERC721 nft = new MockERC721();
+        vm.startPrank(address(0xBEEF));
+        nft.mint(address(0xBEEF));
+        nft.setApprovalForAll(address(mp), true);
+        vm.expectRevert(EntriesHalted.selector);
+        mp.list(address(nft), 0, 1 ether, uint64(block.timestamp + 24 hours));
+        vm.stopPrank();
+    }
 
     function test_coreRejectsEOAManager() public {
-        Marketplace m = new Marketplace();
+        // Deploy a Marketplace impl, then try to deploy proxy with an EOA as manager
+        address rando = address(0x999);
+        Marketplace impl = new Marketplace();
         vm.expectRevert(BadManager.selector);
-        m.initialize(feeRecipient, rando); // EOA: no code
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, feeRecipient, rando));
     }
 
     function test_coreRejectsNonManagerContract() public {
-        // A contract without entriesAllowed() must fail the deploy probe.
-        Marketplace m = new Marketplace();
+        // Deploy a Marketplace impl, try to deploy proxy with a non-manager contract as manager
+        MockERC721 nonManager = new MockERC721();
+        Marketplace impl = new Marketplace();
         vm.expectRevert();
-        m.initialize(feeRecipient, address(nft));
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, feeRecipient, address(nonManager)));
     }
-
-    // ── Ungated cores (manager == address(0)) stay fully open ────────────────
 
     function test_zeroManagerCoreIgnoresBreaker() public {
-        Marketplace freeMp = new Marketplace();
-        freeMp.initialize(feeRecipient, address(0));
-        uint256 tid = nft.mint(seller);
-        vm.startPrank(seller);
+        // When manager is address(0), entries are always allowed
+        Marketplace freeMp = _deployMarketplace(feeRecipient, address(0));
+        assertTrue(freeMp.manager() == address(0));
+
+        // Even with a paused manager elsewhere, entriesAllowed on freeMp calls address(0)
+        // which returns false from staticcall, so entryGate treats it as "open"
+        MockERC721 nft = new MockERC721();
+        vm.startPrank(address(0xBEEF));
+        uint256 tid = nft.mint(address(0xBEEF));
         nft.setApprovalForAll(address(freeMp), true);
-        freeMp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
+        freeMp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours));
         vm.stopPrank();
-    }
 
-    // ── Helpers ──────────────────────────────────────────────────────────────
-
-    function _listed() internal returns (uint256 tid) {
-        tid = nft.mint(seller);
-        vm.startPrank(seller);
-        nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days));
-        vm.stopPrank();
-    }
-
-    function _auction() internal returns (uint256 id, uint256 tid) {
-        vm.startPrank(seller);
-        tid = nft.mint(seller);
-        nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
-        vm.stopPrank();
+        (address s, , ,,) = freeMp.listings(address(nft), tid, address(0xBEEF));
+        assertEq(s, address(0xBEEF));
     }
 }

@@ -170,7 +170,7 @@ contract AuctionHouse is MarketplaceCore {
     event AuctionActivated(uint256 indexed id);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {}
+    constructor() { _disableInitializers(); }
 
     /// @notice One-time initializer. Calls __MarketplaceCore_init to store
     ///         feeRecipient + manager in upgradeable storage.
