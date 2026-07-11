@@ -57,8 +57,7 @@ contract AuctionHouseHandler is Test {
         unchecked { minNext = leaderTotal + minInc; }
 
         if (val < minNext) {
-            // Not enough to overtake leader — bid must still be possible
-            // (sub-leader accumulation is allowed but doesn't overtake)
+            // Not enough to overtake leader — skip (sub-leader bids revert in the new model)
             return;
         }
 
