@@ -1,0 +1,23 @@
+syntax = "proto3";
+
+package sse;
+
+option go_package = "github.com/OfficialA1manac/MagicWebb/backend/internal/sse/proto";
+
+// EventMessage is the cross-instance event envelope. It mirrors the existing
+// sse.wire struct but uses protobuf binary encoding instead of JSON, removing
+// the pg_notify 8KB payload limit and eliminating JSON marshal/unmarshal
+// overhead for cross-instance fan-out.
+message EventMessage {
+  string origin = 1;  // instance UUID — skip self-originated events
+  string type   = 2;  // e.g. "listing-updated", "auction-updated"
+  bytes  data   = 3;  // JSON-marshalled event payload (kept as bytes for zero-copy)
+}
+
+// EventBridge is a bidirectional streaming RPC. Each instance opens a single
+// persistent stream to every peer. Both sides send EventMessages — the stream
+// is bidirectional so each instance can both publish to and receive from every
+// peer over a single TCP connection.
+service EventBridge {
+  rpc StreamEvents(stream EventMessage) returns (stream EventMessage);
+}

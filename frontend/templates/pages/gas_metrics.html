@@ -190,15 +190,15 @@
   {{end}}
 </div>
 
-<!-- SSE live-update: re-fetch full page when keeper gas log is recorded -->
+<!-- WebSocket live-update: re-fetch full page when keeper gas log is recorded -->
 <script>
   (function() {
-    try {
-      var sse = new EventSource('/events');
-      sse.addEventListener('keeper-gas-log', function() {
+    window.addEventListener('mw-ws-event', function (e) {
+      var detail = e.detail || {};
+      if (detail.type === 'keeper-gas-log') {
         window.location.reload();
-      });
-    } catch(_) {}
+      }
+    });
   })();
 
   (function() {

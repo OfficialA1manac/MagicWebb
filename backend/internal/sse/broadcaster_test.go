@@ -1,42 +1,47 @@
 package sse
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 )
 
-func recv(t *testing.T, ch <-chan string) string {
+// recvRaw reads a raw Event from a SubscribeRaw channel.
+func recvRaw(t *testing.T, ch <-chan Event) Event {
 	t.Helper()
 	select {
-	case msg := <-ch:
-		return msg
+	case ev := <-ch:
+		return ev
 	case <-time.After(time.Second):
-		t.Fatal("timed out waiting for SSE message")
-		return ""
+		t.Fatal("timed out waiting for event")
 	}
+	return Event{}
 }
 
 func TestPublishDelivers(t *testing.T) {
 	b := New()
-	ch, cancel, ok := b.Subscribe()
+	ch, cancel, ok := b.SubscribeRaw()
 	if !ok {
 		t.Fatal("subscribe should succeed")
 	}
 	defer cancel()
 
 	b.Publish(Event{Type: "test", Data: map[string]int{"x": 1}})
-	got := recv(t, ch)
-	want := "event: test\ndata: {\"x\":1}\n\n"
-	if got != want {
-		t.Fatalf("msg = %q, want %q", got, want)
+	got := recvRaw(t, ch)
+	if got.Type != "test" {
+		t.Fatalf("event type = %q, want %q", got.Type, "test")
+	}
+	payload, _ := json.Marshal(got.Data)
+	if string(payload) != `{"x":1}` {
+		t.Fatalf("data = %s, want {\"x\":1}", payload)
 	}
 }
 
 func TestFanOutToAllSubscribers(t *testing.T) {
 	b := New()
-	chans := make([]<-chan string, 3)
+	chans := make([]<-chan Event, 3)
 	for i := range chans {
-		ch, cancel, ok := b.Subscribe()
+		ch, cancel, ok := b.SubscribeRaw()
 		if !ok {
 			t.Fatal("subscribe should succeed")
 		}
@@ -45,67 +50,65 @@ func TestFanOutToAllSubscribers(t *testing.T) {
 	}
 	b.Publish(Event{Type: "x", Data: 1})
 	for i, ch := range chans {
-		if recv(t, ch) == "" {
-			t.Fatalf("subscriber %d received nothing", i)
+		ev := recvRaw(t, ch)
+		if ev.Type != "x" {
+			t.Fatalf("subscriber %d received type %q, want %q", i, ev.Type, "x")
 		}
 	}
 }
 
 func TestCancelUnsubscribes(t *testing.T) {
 	b := New()
-	_, cancel, _ := b.Subscribe()
+	_, cancel, _ := b.SubscribeRaw()
 
-	b.mu.RLock()
-	before := len(b.clients)
-	b.mu.RUnlock()
+	rawClientsMu.RLock()
+	before := len(rawClients)
+	rawClientsMu.RUnlock()
 	if before != 1 {
-		t.Fatalf("clients = %d, want 1", before)
+		t.Fatalf("rawClients = %d, want 1", before)
 	}
 
 	cancel()
-	b.mu.RLock()
-	after := len(b.clients)
-	b.mu.RUnlock()
+	rawClientsMu.RLock()
+	after := len(rawClients)
+	rawClientsMu.RUnlock()
 	if after != 0 {
-		t.Fatalf("clients after cancel = %d, want 0", after)
+		t.Fatalf("rawClients after cancel = %d, want 0", after)
 	}
 }
 
 func TestSubscriberCap(t *testing.T) {
 	b := New()
 	for i := range MaxClients {
-		if _, _, ok := b.Subscribe(); !ok {
+		if _, _, ok := b.SubscribeRaw(); !ok {
 			t.Fatalf("subscribe %d should be within cap", i)
 		}
 	}
-	if _, _, ok := b.Subscribe(); ok {
+	if _, _, ok := b.SubscribeRaw(); ok {
 		t.Fatal("subscribe beyond MaxClients should be rejected")
 	}
 }
 
-
 func TestPublishSaturationMetricsIncrement(t *testing.T) {
-	// Use newNoLoop() so the loop goroutine doesn't drain events while we
-	// fill the channel. With the loop running, the 256-capacity channel
-	// could be partially drained by the loop between pushes, making
-	// saturation non-deterministic.
 	b := newNoLoop()
 	preDrop := DroppedTotal.Load()
 	preStreak := SaturationStreak.Load()
-	for i := 0; i < 256; i++ { b.events <- Event{Type: "filler"} }
-	// Channel is now full; the next Publish must saturate.
+	for i := 0; i < 256; i++ {
+		b.events <- Event{Type: "filler"}
+	}
 	b.Publish(Event{Type: "dropped"})
-	if DroppedTotal.Load()-preDrop < 1 { t.Fatal("expected drop") }
-	if SaturationStreak.Load()-preStreak < 1 { t.Fatal("expected streak increase") }
-	// Start the loop goroutine and drain so the channel has room again.
-	// Drain one event directly from b.events without spawning a loop
-	// goroutine — this avoids a lingering goroutine that can make the
-	// test nondeterministic on future operations.
+	if DroppedTotal.Load()-preDrop < 1 {
+		t.Fatal("expected drop")
+	}
+	if SaturationStreak.Load()-preStreak < 1 {
+		t.Fatal("expected streak increase")
+	}
 	select {
 	case <-b.events:
 	default:
 	}
-	// Now events channel has room; Publish should succeed and reset streak.
 	b.Publish(Event{Type: "ok"})
-	if SaturationStreak.Load() != 0 { t.Fatal("expected streak reset") }
+	if SaturationStreak.Load() != 0 {
+		t.Fatal("expected streak reset")
+	}
 }

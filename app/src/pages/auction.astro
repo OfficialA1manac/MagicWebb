@@ -177,13 +177,12 @@ import WalletConnect from '../components/WalletConnect';
             if (el) el.textContent = fmtTimeLeft(currentEndsAt, now2);
           }, 1000);
 
-          // SSE: refresh bids AND price display (not full page reload)
-          try {
-            const sse = new EventSource('/events');
-            let sseReloading = false;
-            sse.addEventListener('auction-updated',function(){
-              if (sseReloading) return;
-              sseReloading = true;
+          // WebSocket push: refresh bids AND price display (not full page reload)
+          window.addEventListener('mw-ws-event', function handler(e){
+            var detail = e.detail || {};
+            if (detail.type !== 'auction-updated') return;
+            if (sseReloading) return;
+            sseReloading = true;
               // Refetch both auction + bids to update everything
               Promise.all([
                 fetch('/api/v1/auctions/'+aid),

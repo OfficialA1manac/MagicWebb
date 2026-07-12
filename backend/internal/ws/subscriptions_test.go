@@ -46,20 +46,20 @@ func TestIsValidChannel_InvalidPatterns(t *testing.T) {
 	}
 }
 
-// ── channelMatchesEventType ─────────────────────────────────────────────────
+// channelMatchesPrefix coarse filter (no payload needed)
 
-func TestChannelMatchesEventType_TokenOrCollectionMatchesAll(t *testing.T) {
+func TestChannelMatchesPrefix_TokenOrCollectionMatchesAll(t *testing.T) {
 	eventTypes := []string{"listing-updated", "auction-updated", "offer-updated", "notification", "activity", "some-unknown-event"}
 	for _, ch := range []string{"token:0xabc:1", "collection:0xabc"} {
 		for _, ev := range eventTypes {
-			if !channelMatchesEventType(ch, ev) {
-				t.Errorf("channelMatchesEventType(%q, %q) = false, want true", ch, ev)
+			if !channelMatchesPrefix(ch, ev) {
+				t.Errorf("channelMatchesPrefix(%q, %q) = false, want true", ch, ev)
 			}
 		}
 	}
 }
 
-func TestChannelMatchesEventType_UserMatchesNotificationOnly(t *testing.T) {
+func TestChannelMatchesPrefix_UserMatchesNotificationOnly(t *testing.T) {
 	tests := []struct {
 		eventType string
 		want      bool
@@ -72,9 +72,9 @@ func TestChannelMatchesEventType_UserMatchesNotificationOnly(t *testing.T) {
 		{"", false},
 	}
 	for _, tc := range tests {
-		got := channelMatchesEventType("user:0xabc", tc.eventType)
+		got := channelMatchesPrefix("user:0xabc", tc.eventType)
 		if got != tc.want {
-			t.Errorf("channelMatchesEventType(\"user:0xabc\", %q) = %v, want %v", tc.eventType, got, tc.want)
+			t.Errorf("channelMatchesPrefix(\"user:0xabc\", %q) = %v, want %v", tc.eventType, got, tc.want)
 		}
 	}
 }
@@ -212,11 +212,10 @@ func TestUnsubscribe_NonExistentChannel(t *testing.T) {
 
 func TestIsSubscribedToEvent_NoSubscriptionsReturnsTrue(t *testing.T) {
 	conn := newTestConn()
-	// No subscriptions — backward-compatible default: receive all
-	if !conn.isSubscribedToEvent("listing-updated") {
+	if !conn.isSubscribedToEvent("listing-updated", nil) {
 		t.Error("expected true for listing-updated with no subscriptions")
 	}
-	if !conn.isSubscribedToEvent("unknown-event") {
+	if !conn.isSubscribedToEvent("unknown-event", nil) {
 		t.Error("expected true for unknown event with no subscriptions")
 	}
 }
@@ -227,20 +226,20 @@ func TestIsSubscribedToEvent_TokenOrCollectionSubscribed(t *testing.T) {
 		"token:0xabc:1": {},
 	}
 
-	// Token subscriptions match all event types
-	if !conn.isSubscribedToEvent("listing-updated") {
+	// Token subscriptions match all event types (coarse prefix filter with nil payload)
+	if !conn.isSubscribedToEvent("listing-updated", nil) {
 		t.Error("token subscription should match listing-updated")
 	}
-	if !conn.isSubscribedToEvent("auction-updated") {
+	if !conn.isSubscribedToEvent("auction-updated", nil) {
 		t.Error("token subscription should match auction-updated")
 	}
-	if !conn.isSubscribedToEvent("offer-updated") {
+	if !conn.isSubscribedToEvent("offer-updated", nil) {
 		t.Error("token subscription should match offer-updated")
 	}
-	if !conn.isSubscribedToEvent("notification") {
+	if !conn.isSubscribedToEvent("notification", nil) {
 		t.Error("token subscription should match notification")
 	}
-	if !conn.isSubscribedToEvent("activity") {
+	if !conn.isSubscribedToEvent("activity", nil) {
 		t.Error("token subscription should match activity")
 	}
 }
@@ -251,13 +250,13 @@ func TestIsSubscribedToEvent_UserSubscribed(t *testing.T) {
 		"user:0xabc": {},
 	}
 
-	if !conn.isSubscribedToEvent("notification") {
+	if !conn.isSubscribedToEvent("notification", nil) {
 		t.Error("user subscription should match notification")
 	}
-	if conn.isSubscribedToEvent("listing-updated") {
+	if conn.isSubscribedToEvent("listing-updated", nil) {
 		t.Error("user subscription should NOT match listing-updated")
 	}
-	if conn.isSubscribedToEvent("auction-updated") {
+	if conn.isSubscribedToEvent("auction-updated", nil) {
 		t.Error("user subscription should NOT match auction-updated")
 	}
 }
@@ -270,11 +269,11 @@ func TestIsSubscribedToEvent_MultipleSubscriptions(t *testing.T) {
 	}
 
 	// Collection subscribes to all
-	if !conn.isSubscribedToEvent("listing-updated") {
+	if !conn.isSubscribedToEvent("listing-updated", nil) {
 		t.Error("collection subscription should match listing-updated")
 	}
 	// User subscribes to notification only
-	if !conn.isSubscribedToEvent("notification") {
+	if !conn.isSubscribedToEvent("notification", nil) {
 		t.Error("at least one subscription should match notification")
 	}
 }
@@ -292,7 +291,7 @@ func TestSubscribeUnsubscribeConcurrentSafe(t *testing.T) {
 	}()
 	go func() {
 		for i := 0; i < 100; i++ {
-			_ = conn.isSubscribedToEvent("listing-updated")
+			_ = conn.isSubscribedToEvent("listing-updated", nil)
 		}
 		done <- struct{}{}
 	}()

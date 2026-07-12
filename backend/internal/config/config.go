@@ -42,7 +42,9 @@ type Config struct {
 	ReadPoolURL  string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
 
 	// Servers
-	HTTPAddr string
+	HTTPAddr  string
+	GRPCPort  int      // gRPC event bridge port (0 = disabled)
+	GRPCPeers []string // gRPC peer addresses (host:port) for cross-instance fan-out
 
 	// Auth
 	SIWEDomain string
@@ -128,6 +130,19 @@ type Config struct {
 	// Empty = injected-wallet (MetaMask) only.
 	WCProjectID string
 
+	// SentryDSN enables error/panic reporting to Sentry. Empty = disabled.
+	// When set, the Sentry SDK is initialised at startup and a Fiber recovery
+	// middleware captures all panics and sends them to the configured project.
+	// The DSN is a secret — set via fly secrets, not fly.toml [env].
+	SentryDSN string
+
+	// OTELExporterOTLPEndpoint is the OTLP/gRPC collector endpoint for distributed
+	// tracing (e.g. Honeycomb, Grafana Tempo, Jaeger). Empty = tracing disabled.
+	// When set, the OpenTelemetry SDK is initialised at startup with a batch
+	// span exporter and an otelfiber middleware that creates a span per HTTP
+	// request. The endpoint is a secret — set via fly secrets.
+	OTELExporterOTLPEndpoint string
+
 	// AdminAllowlist is the set of lowercased addresses permitted to call admin
 	// endpoints (e.g. profile verification). Off-chain admin = env allowlist + SIWE JWT.
 	AdminAllowlist []string
@@ -166,6 +181,8 @@ func Load() {
 		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
 
 		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
+		GRPCPort: optInt("GRPC_PORT", 0),
+		GRPCPeers: parseURLList(os.Getenv("GRPC_PEERS")),
 
 		SIWEDomain: envOrDefault("SIWE_DOMAIN", "localhost"),
 		JWTSecret:  required("JWT_SECRET"),
@@ -212,6 +229,9 @@ func Load() {
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
+
+		SentryDSN:               envOrDefault("SENTRY_DSN", ""),
+		OTELExporterOTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 
 		AdminAllowlist: parseAddrList(envOrDefault("ADMIN_ALLOWLIST", "")),
 	}

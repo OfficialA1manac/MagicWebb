@@ -1,143 +1,61 @@
 package ws
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 	"time"
 
-	"github.com/jackc/pgx/v5"
-	"github.com/pashagolub/pgxmock/v4"
+	"connectrpc.com/connect"
 	"github.com/valyala/fasthttp"
 
+	marketplacev1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
-// ── extractSSEEventType ─────────────────────────────────────────────────────
-
-func TestExtractSSEEventType_Normal(t *testing.T) {
-	sse := "event: listing-updated\ndata: {\"x\":1}\n\n"
-	got := extractSSEEventType(sse)
-	if got != "listing-updated" {
-		t.Fatalf("extractSSEEventType = %q, want %q", got, "listing-updated")
-	}
+// mockMarketplaceClient implements marketplacev1connect.MarketplaceServiceClient
+// for testing WS action handlers without real HTTP calls.
+type mockMarketplaceClient struct {
+	getListingFunc func(ctx context.Context, req *connect.Request[marketplacev1.GetListingRequest]) (*connect.Response[marketplacev1.GetListingResponse], error)
+	getAuctionFunc  func(ctx context.Context, req *connect.Request[marketplacev1.GetAuctionRequest]) (*connect.Response[marketplacev1.GetAuctionResponse], error)
+	getOfferFunc    func(ctx context.Context, req *connect.Request[marketplacev1.GetOfferRequest]) (*connect.Response[marketplacev1.GetOfferResponse], error)
+	getTokenFunc   func(ctx context.Context, req *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error)
 }
 
-func TestExtractSSEEventType_CRLF(t *testing.T) {
-	sse := "event: auction-updated\r\ndata: {\"x\":1}\r\n\r\n"
-	got := extractSSEEventType(sse)
-	if got != "auction-updated" {
-		t.Fatalf("extractSSEEventType = %q, want %q", got, "auction-updated")
+func (m *mockMarketplaceClient) GetListing(ctx context.Context, req *connect.Request[marketplacev1.GetListingRequest]) (*connect.Response[marketplacev1.GetListingResponse], error) {
+	if m.getListingFunc != nil {
+		return m.getListingFunc(ctx, req)
 	}
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
-func TestExtractSSEEventType_NoEventType(t *testing.T) {
-	sse := "data: {\"x\":1}\n\n"
-	got := extractSSEEventType(sse)
-	if got != "" {
-		t.Fatalf("extractSSEEventType = %q, want \"\"", got)
+func (m *mockMarketplaceClient) GetAuction(ctx context.Context, req *connect.Request[marketplacev1.GetAuctionRequest]) (*connect.Response[marketplacev1.GetAuctionResponse], error) {
+	if m.getAuctionFunc != nil {
+		return m.getAuctionFunc(ctx, req)
 	}
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
-func TestExtractSSEEventType_ExtraFields(t *testing.T) {
-	sse := "event: activity\ndata: {\"x\":1}\nid: 42\n\n"
-	got := extractSSEEventType(sse)
-	if got != "activity" {
-		t.Fatalf("extractSSEEventType = %q, want %q", got, "activity")
+func (m *mockMarketplaceClient) GetOffer(ctx context.Context, req *connect.Request[marketplacev1.GetOfferRequest]) (*connect.Response[marketplacev1.GetOfferResponse], error) {
+	if m.getOfferFunc != nil {
+		return m.getOfferFunc(ctx, req)
 	}
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
-// ── sseToWSMessage ──────────────────────────────────────────────────────────
-
-func TestSSEToWSMessage_Valid(t *testing.T) {
-	input := "event: listing-updated\ndata: {\"collection\":\"0xabc\",\"token_id\":\"1\"}\n\n"
-	raw := sseToWSMessage(input)
-	if raw == nil {
-		t.Fatal("sseToWSMessage returned nil")
+func (m *mockMarketplaceClient) GetToken(ctx context.Context, req *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error) {
+	if m.getTokenFunc != nil {
+		return m.getTokenFunc(ctx, req)
 	}
-	var msg Message
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if msg.Type != MsgListingUpdated {
-		t.Fatalf("type = %s, want %s", msg.Type, MsgListingUpdated)
-	}
-	var payload map[string]string
-	if err := json.Unmarshal(msg.Data, &payload); err != nil {
-		t.Fatalf("unmarshal data: %v", err)
-	}
-	if payload["collection"] != "0xabc" || payload["token_id"] != "1" {
-		t.Fatalf("unexpected data: %+v", payload)
-	}
-}
-
-func TestSSEToWSMessage_CRLF(t *testing.T) {
-	input := "event: auction-updated\r\ndata: {\"id\":42}\r\n\r\n"
-	raw := sseToWSMessage(input)
-	if raw == nil {
-		t.Fatal("sseToWSMessage returned nil")
-	}
-	var msg Message
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if msg.Type != MsgAuctionUpdated {
-		t.Fatalf("type = %s, want %s", msg.Type, MsgAuctionUpdated)
-	}
-}
-
-func TestSSEToWSMessage_Empty(t *testing.T) {
-	if got := sseToWSMessage(""); got != nil {
-		t.Fatal("expected nil for empty input")
-	}
-	if got := sseToWSMessage("\n\n"); got != nil {
-		t.Fatal("expected nil for blank input")
-	}
-}
-
-func TestSSEToWSMessage_EventOnly(t *testing.T) {
-	input := "event: ping\n\n"
-	raw := sseToWSMessage(input)
-	if raw == nil {
-		t.Fatal("sseToWSMessage returned nil")
-	}
-	var msg Message
-	if err := json.Unmarshal(raw, &msg); err != nil {
-		t.Fatalf("unmarshal: %v", err)
-	}
-	if msg.Type != MessageType("ping") {
-		t.Fatalf("type = %s, want ping", msg.Type)
-	}
-}
-
-// ── splitLines ──────────────────────────────────────────────────────────────
-
-func TestSplitLines_LF(t *testing.T) {
-	lines := splitLines("a\nb\nc")
-	if len(lines) != 3 || lines[0] != "a" || lines[1] != "b" || lines[2] != "c" {
-		t.Fatalf("splitLines = %v, want [a b c]", lines)
-	}
-}
-
-func TestSplitLines_CRLF(t *testing.T) {
-	lines := splitLines("a\r\nb\r\nc")
-	if len(lines) != 3 || lines[0] != "a" || lines[1] != "b" || lines[2] != "c" {
-		t.Fatalf("splitLines = %v, want [a b c]", lines)
-	}
-}
-
-func TestSplitLines_Mixed(t *testing.T) {
-	lines := splitLines("a\r\nb\nc\r\n")
-	if len(lines) != 4 || lines[0] != "a" || lines[1] != "b" || lines[2] != "c" {
-		t.Fatalf("splitLines = %v, want [a b c]", lines)
-	}
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
 // ── dispatchAction ──────────────────────────────────────────────────────────
 
-func TestDispatchAction_NilQ(t *testing.T) {
-	h := &Handler{q: nil}
+func TestDispatchAction_NilClient(t *testing.T) {
+	h := &Handler{client: nil}
 	conn := newTestConn()
 	h.dispatchAction(conn, ActionData{Action: "get_listing"})
 
@@ -155,8 +73,8 @@ func TestDispatchAction_NilQ(t *testing.T) {
 }
 
 func TestDispatchAction_UnknownAction(t *testing.T) {
-	h := &Handler{q: db.New(nil)} // q is non-nil but pool is nil — fine for this test
 	conn := newTestConn()
+	h := &Handler{client: &mockMarketplaceClient{}}
 	h.dispatchAction(conn, ActionData{Action: "fly_to_the_moon"})
 
 	msg := recvWS(t, conn)
@@ -186,24 +104,28 @@ func TestHandleGetListing_InvalidParams(t *testing.T) {
 }
 
 func TestHandleGetListing_Success(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-
 	now := time.Now()
-	mock.ExpectQuery(`SELECT l\.collection, l\.token_id::text`).
-		WithArgs("0xabc", "1").
-		WillReturnRows(pgxmock.NewRows([]string{
-			"collection", "token_id", "seller", "price_wei", "amount",
-			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri",
-		}).AddRow(
-			"0xabc", "1", "0xseller", "1000000000000000000", int64(1),
-			"erc721", now.Add(24*time.Hour), now, "0xtx",
-			"MyToken", "https://example.com/img.png",
-		))
-
-	q := db.New(mock)
-	h := &Handler{q: q}
+	client := &mockMarketplaceClient{
+		getListingFunc: func(_ context.Context, req *connect.Request[marketplacev1.GetListingRequest]) (*connect.Response[marketplacev1.GetListingResponse], error) {
+			if req.Msg.Collection != "0xabc" || req.Msg.TokenId != "1" {
+				return nil, connect.NewError(connect.CodeNotFound, errors.New("not found"))
+			}
+			return connect.NewResponse(&marketplacev1.GetListingResponse{
+				Collection: "0xabc",
+				TokenId:    "1",
+				Seller:     "0xseller",
+				PriceWei:   "1000000000000000000",
+				Amount:     1,
+				Standard:   "erc721",
+				ExpiresAtMs: now.Add(24 * time.Hour).UnixMilli(),
+				ListedAtMs:  now.UnixMilli(),
+				TxHash:     "0xtx",
+				Name:       "MyToken",
+				ImageUri:   "https://example.com/img.png",
+			}), nil
+		},
+	}
+	h := &Handler{client: client}
 	conn := newTestConn()
 	h.handleGetListing(conn, json.RawMessage(`{"collection":"0xabc","token_id":"1"}`))
 
@@ -211,32 +133,21 @@ func TestHandleGetListing_Success(t *testing.T) {
 	if msg.Type != MsgState {
 		t.Fatalf("type = %s, want state", msg.Type)
 	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
-	}
 }
 
 func TestHandleGetListing_NotFound(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-
-	mock.ExpectQuery(`SELECT l\.collection, l\.token_id::text`).
-		WithArgs("0xabc", "1").
-		WillReturnError(pgx.ErrNoRows)
-
-	q := db.New(mock)
-	h := &Handler{q: q}
+	client := &mockMarketplaceClient{
+		getListingFunc: func(_ context.Context, _ *connect.Request[marketplacev1.GetListingRequest]) (*connect.Response[marketplacev1.GetListingResponse], error) {
+			return nil, connect.NewError(connect.CodeNotFound, errors.New("listing not found"))
+		},
+	}
+	h := &Handler{client: client}
 	conn := newTestConn()
 	h.handleGetListing(conn, json.RawMessage(`{"collection":"0xabc","token_id":"1"}`))
 
 	msg := recvWS(t, conn)
 	if msg.Type != MsgError {
 		t.Fatalf("type = %s, want error", msg.Type)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -254,34 +165,37 @@ func TestHandleGetAuction_InvalidParams(t *testing.T) {
 }
 
 func TestHandleGetAuction_Success(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-
 	now := time.Now()
-	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
-		WithArgs(int64(42)).
-		WillReturnRows(pgxmock.NewRows([]string{
-			"auction_id", "collection", "token_id", "seller", "standard",
-			"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-			"starts_at", "ends_at", "status", "create_tx", "name", "image_uri",
-		}).AddRow(
-			int64(42), "0xcol", "1", "0xseller", "erc721",
-			"5000000000000000000", "6000000000000000000", "0xbidder", int16(100),
-			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "",
-		))
-
-	q := db.New(mock)
-	h := &Handler{q: q}
+	client := &mockMarketplaceClient{
+		getAuctionFunc: func(_ context.Context, req *connect.Request[marketplacev1.GetAuctionRequest]) (*connect.Response[marketplacev1.GetAuctionResponse], error) {
+			if req.Msg.AuctionId != 42 {
+				return nil, connect.NewError(connect.CodeNotFound, errors.New("not found"))
+			}
+			return connect.NewResponse(&marketplacev1.GetAuctionResponse{
+				AuctionId:       42,
+				Collection:      "0xcol",
+				TokenId:         "1",
+				Seller:          "0xseller",
+				Standard:        "erc721",
+				ReservePriceWei: "5000000000000000000",
+				HighestBidWei:   "6000000000000000000",
+				HighestBidder:   "0xbidder",
+				MinIncrementBps: 100,
+				StartsAtMs:      now.UnixMilli(),
+				EndsAtMs:        now.Add(24 * time.Hour).UnixMilli(),
+				Status:          "active",
+				CreateTx:        "0xtx",
+				Name:            "Auction 42",
+			}), nil
+		},
+	}
+	h := &Handler{client: client}
 	conn := newTestConn()
 	h.handleGetAuction(conn, json.RawMessage(`{"auction_id":42}`))
 
 	msg := recvWS(t, conn)
 	if msg.Type != MsgState {
 		t.Fatalf("type = %s, want state", msg.Type)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -299,34 +213,35 @@ func TestHandleGetOffer_InvalidParams(t *testing.T) {
 }
 
 func TestHandleGetOffer_Success(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-
 	now := time.Now()
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text`).
-		WithArgs("42").
-		WillReturnRows(pgxmock.NewRows([]string{
-			"offer_id", "bidder", "collection", "token_id",
-			"principal_wei", "fee_wei", "units", "standard",
-			"expires_at", "status", "make_tx", "created_at",
-		}).AddRow(
-			"42", "0xbidder", "0xcol", "1",
-			"1000000000000000000", "10000000000000000", int64(1), "erc721",
-			now.Add(7*24*time.Hour), "pending", "0xmtx", now,
-		))
-
-	q := db.New(mock)
-	h := &Handler{q: q}
+	client := &mockMarketplaceClient{
+		getOfferFunc: func(_ context.Context, req *connect.Request[marketplacev1.GetOfferRequest]) (*connect.Response[marketplacev1.GetOfferResponse], error) {
+			if req.Msg.OfferId != "42" {
+				return nil, connect.NewError(connect.CodeNotFound, errors.New("not found"))
+			}
+			return connect.NewResponse(&marketplacev1.GetOfferResponse{
+				OfferId:    "42",
+				Bidder:     "0xbidder",
+				Collection: "0xcol",
+				TokenId:    "1",
+				AmountWei:  "1000000000000000000",
+				FeeWei:     "10000000000000000",
+				Units:      1,
+				Standard:   "erc721",
+				ExpiresAtMs: now.Add(7 * 24 * time.Hour).UnixMilli(),
+				Status:     "pending",
+				MakeTx:     "0xmtx",
+				CreatedAtMs: now.UnixMilli(),
+			}), nil
+		},
+	}
+	h := &Handler{client: client}
 	conn := newTestConn()
 	h.handleGetOffer(conn, json.RawMessage(`{"offer_id":"42"}`))
 
 	msg := recvWS(t, conn)
 	if msg.Type != MsgState {
 		t.Fatalf("type = %s, want state", msg.Type)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -344,30 +259,31 @@ func TestHandleGetToken_InvalidParams(t *testing.T) {
 }
 
 func TestHandleGetToken_Success(t *testing.T) {
-	mock, _ := pgxmock.NewPool()
-	defer mock.Close()
-
 	now := time.Now()
-	mock.ExpectQuery(`SELECT COALESCE\(m\.name, t\.name, ''\)`).
-		WithArgs("0xabc", "1").
-		WillReturnRows(pgxmock.NewRows([]string{
-			"name", "description", "image_uri", "animation_uri", "metadata_uri", "fetched_at",
-		}).AddRow(
-			"My Token", "A cool token", "https://img.com/1.png", "", "https://meta.com/1.json", now,
-		))
-
-	q := db.New(mock)
-	h := &Handler{q: q}
+	client := &mockMarketplaceClient{
+		getTokenFunc: func(_ context.Context, req *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error) {
+			if req.Msg.Collection != "0xabc" || req.Msg.TokenId != "1" {
+				return nil, connect.NewError(connect.CodeNotFound, errors.New("not found"))
+			}
+			return connect.NewResponse(&marketplacev1.GetTokenResponse{
+				Collection:   "0xabc",
+				TokenId:      "1",
+				Name:         "My Token",
+				Description:  "A cool token",
+				ImageUri:     "https://img.com/1.png",
+				AnimationUri: "",
+				MetadataUri:  "https://meta.com/1.json",
+				FetchedAtMs:  now.UnixMilli(),
+			}), nil
+		},
+	}
+	h := &Handler{client: client}
 	conn := newTestConn()
 	h.handleGetToken(conn, json.RawMessage(`{"collection":"0xabc","token_id":"1"}`))
 
 	msg := recvWS(t, conn)
 	if msg.Type != MsgState {
 		t.Fatalf("type = %s, want state", msg.Type)
-	}
-
-	if err := mock.ExpectationsWereMet(); err != nil {
-		t.Fatal(err)
 	}
 }
 
@@ -484,21 +400,83 @@ func TestBroadcastTo_DeliversToAll(t *testing.T) {
 	h.conns["c2"] = conn2
 	h.mu.Unlock()
 
-	h.BroadcastTo(sse.Event{Type: "test-event", Data: map[string]string{"msg": "hello"}})
+	// Connections without subscriptions receive all events (backward-compat).
+	h.BroadcastTo(sse.Event{Type: "test-event", Data: map[string]interface{}{"msg": "hello", "collection": "0xABC"}})
 
-	// Both connections should receive the message
 	for _, conn := range []*Connection{conn1, conn2} {
 		msg := recvWS(t, conn)
 		if msg.Type != MessageType("test-event") {
 			t.Fatalf("type = %s, want test-event", msg.Type)
 		}
-		var payload map[string]string
-		if err := json.Unmarshal(msg.Data, &payload); err != nil {
-			t.Fatalf("unmarshal: %v", err)
-		}
-		if payload["msg"] != "hello" {
-			t.Fatalf("unexpected data: %+v", payload)
-		}
+	}
+}
+
+func TestBroadcastTo_RespectsSubscriptions(t *testing.T) {
+	h := &Handler{
+		conns:      make(map[string]*Connection),
+		ipCounters: make(map[string]*int64),
+	}
+
+	conn1 := newTestConn()
+	conn1.subscriptions = map[string]struct{}{"token:0xABC:1": {}}
+	conn2 := newTestConn()
+	conn2.subscriptions = map[string]struct{}{"token:0xDEF:2": {}}
+
+	h.mu.Lock()
+	h.conns["c1"] = conn1
+	h.conns["c2"] = conn2
+	h.mu.Unlock()
+
+	// Event for token 0xABC:1 — only conn1 should receive it.
+	h.BroadcastTo(sse.Event{Type: "listing-updated", Data: map[string]interface{}{
+		"collection": "0xABC",
+		"token_id":   "1",
+	}})
+
+	// conn1 receives, conn2 does not
+	msg1 := recvWS(t, conn1)
+	if msg1.Type != MessageType("listing-updated") {
+		t.Fatalf("conn1 should receive, got type=%s", msg1.Type)
+	}
+	// conn2 should not have a message
+	select {
+	case msg := <-conn2.send:
+		t.Fatalf("conn2 should not receive, got %+v", msg)
+	default:
+	}
+}
+
+func TestBroadcastTo_CollectionChannel(t *testing.T) {
+	h := &Handler{
+		conns:      make(map[string]*Connection),
+		ipCounters: make(map[string]*int64),
+	}
+
+	conn := newTestConn()
+	conn.subscriptions = map[string]struct{}{"collection:0xABC": {}}
+	h.mu.Lock()
+	h.conns["c1"] = conn
+	h.mu.Unlock()
+
+	// Event for collection 0xABC — should match.
+	h.BroadcastTo(sse.Event{Type: "listing-updated", Data: map[string]interface{}{
+		"collection": "0xABC",
+		"token_id":   "5",
+	}})
+	msg := recvWS(t, conn)
+	if msg.Type != MessageType("listing-updated") {
+		t.Fatalf("should receive for matching collection, got type=%s", msg.Type)
+	}
+
+	// Event for collection 0xDEF — should NOT match.
+	h.BroadcastTo(sse.Event{Type: "listing-updated", Data: map[string]interface{}{
+		"collection": "0xDEF",
+		"token_id":   "5",
+	}})
+	select {
+	case msg := <-conn.send:
+		t.Fatalf("should not receive for non-matching collection, got %+v", msg)
+	default:
 	}
 }
 

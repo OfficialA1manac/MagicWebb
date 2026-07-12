@@ -127,10 +127,8 @@
              from cache if both are non-idle, and otherwise opens the
              spinner so the user sees progress. -->
   <script src="/static/htmx.min.js?v=34" defer></script>
-  <script src="/static/sse.js?v=34" defer></script>
-  <!-- WebSocket client for bidirectional real-time communication.
-       Complements the SSE-based /events subscription with client-to-server
-       messaging capabilities (live bidding, ping/keepalive, action dispatch).
+  <!-- WebSocket client for ALL real-time communication (replaces SSE /events).
+       Bi-directional: server→client push events + client→server action queries.
        Self-contained — no external dependencies. Exposes window.MW_WS API
        for Alpine / inline scripts. -->
   <script src="/static/ws.js?v=34" defer></script>
@@ -270,7 +268,7 @@
     .progress-bar { height: 3px; border-radius: 999px; transition: width 280ms ease, background-color 280ms ease; background: linear-gradient(90deg, #7dd3fc, #fcd34d, #c4b5fd); }
   </style>
 </head>
-<body hx-ext="sse" sse-connect="/events" x-data>
+<body x-data>
 
 <!-- Nav -->
 <!-- v23.2 — only `open` (mobile drawer) remains. The v22-era `wcOpen`
@@ -607,69 +605,54 @@
 <!-- Toast container -->
 <div id="toasts" class="fixed bottom-4 right-4 z-[55] flex flex-col gap-2 pointer-events-none" aria-live="polite"></div>
 
-<!-- SSE bump + live-refresh wiring.
-     Per-page `[data-live]` containers now carry their own `hx-get` +
-     `hx-trigger` (SSE + 1s polling + ![document.hidden] guard), so the
-     whole-page reload below was retired. The SSE bump stays so the
-     notification-bell unread counter still runs on every event. -->
+<!-- ── WS event → Alpine bridge ────────────────────────────────────────────────
+     ws.js dispatches CustomEvents for ALL WebSocket message types (push events,
+     subscription confirmations, state responses). This script bridges those into
+     Alpine's reactive $store.ws so that Alpine components (x-data, $store expressions)
+     react to real-time data without polling. ws.js ITSELF handles direct HTMX
+     hx-trigger matching on [hx-trigger] elements — no SSE bridge needed. -->
 <script>
   (() => {
-    document.body.addEventListener('htmx:sseMessage', () => {
+    function wsStore() { return window.Alpine && window.Alpine.store && window.Alpine.store('ws'); }
+
+    // Bump the notification-bell unread counter on every push event.
+    window.addEventListener('mw-ws-event', function () {
       window.dispatchEvent(new Event('mw-notification'));
     });
 
-    // ── WebSocket subscription/state event listeners ─────────────────────────
-    // These bridge WebSocket CustomEvents into Alpine's reactive store so
-    // page components can react to state data and subscription changes
-    // without polling the REST API.
-
-    /** Update Alpine store when channels are subscribed. */
+    // Update Alpine $store.ws.subscribed when channels are confirmed.
     window.addEventListener('mw-ws-subscribed', function (e) {
-      var channels = (e.detail && e.detail.channels) || [];
-      if (window.Alpine && window.Alpine.store) {
-        var s = window.Alpine.store('ws');
-        if (s) { s.subscribed = channels; }
-      }
+      var s = wsStore();
+      if (s) { s.subscribed = (e.detail && e.detail.channels) || []; }
     });
 
-    /** Update Alpine store when channels are unsubscribed. */
+    // Update Alpine $store.ws.subscribed when channels are removed.
     window.addEventListener('mw-ws-unsubscribed', function (e) {
-      var channels = (e.detail && e.detail.channels) || [];
-      if (window.Alpine && window.Alpine.store) {
-        var s = window.Alpine.store('ws');
-        if (s) {
-          s.subscribed = (s.subscribed || []).filter(function (c) {
-            return channels.indexOf(c) === -1;
-          });
-        }
+      var s = wsStore();
+      if (s) {
+        var removed = (e.detail && e.detail.channels) || [];
+        s.subscribed = (s.subscribed || []).filter(function (c) {
+          return removed.indexOf(c) === -1;
+        });
       }
     });
 
-    /** Update Alpine store when state data arrives (get_listing/get_auction/etc). */
+    // Update Alpine $store.ws.lastState when state data arrives.
     window.addEventListener('mw-ws-state', function (e) {
-      if (!window.Alpine || !window.Alpine.store) return;
-      var s = window.Alpine.store('ws');
+      var s = wsStore();
       if (!s) return;
       s.lastState = e.detail;
       s.lastStateAt = Date.now();
-      // Expose the raw state data as a reactive property for Alpine components
-      // to bind with x-text, x-show, etc. The parent page template can
-      // subscribe to '$store.ws.lastState' in Alpine expressions.
 
       // ── Price-drop detection via WS state ─────────────────────────────
       // When a get_listing response arrives with a price_wei, compare it
       // against the last known price for that (collection, token_id). If
       // the price dropped, fire a toast so the user knows without polling.
-      // Tracks previous prices in window.__wsPrices and a cooldown in
-      // window.__wsToastCooldown to prevent a stack of notifications
-      // during rapid price changes (e.g. Dutch-style auctions, bot war).
       var detail = e.detail;
       if (detail && detail.price_wei && detail.collection && detail.token_id) {
         var key = detail.collection + ':' + detail.token_id;
         var prev = (window.__wsPrices || {})[key];
         if (prev && BigInt(detail.price_wei) < BigInt(prev)) {
-          // Cooldown: skip if we already showed a toast for this key in
-          // the last 10 seconds.
           var cooldowns = window.__wsToastCooldown || (window.__wsToastCooldown = {});
           var lastToast = cooldowns[key];
           var now = Date.now();

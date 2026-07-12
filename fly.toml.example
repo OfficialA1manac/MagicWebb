@@ -1,0 +1,97 @@
+# ───────────────────────────────────────────────────────────────────────────────
+# MagicWebb — Fly.io deployment configuration (PUBLIC TEMPLATE)
+#
+# This is fly.toml.example — the public template committed to the repo.
+# The REAL fly.toml is gitignored and generated in CI from this template
+# using GitHub Actions repository variables and secrets.
+#
+# To deploy locally or to a new environment:
+#   1. Copy this file to fly.toml:  cp fly.toml.example fly.toml
+#   2. Replace every CHANGE_ME_* placeholder with your actual values
+#   3. Run: fly deploy --remote-only --strategy rolling
+#
+# To set up CI deployment (GitHub Actions):
+#   1. Add repository variables (Settings → Secrets and variables → Actions):
+#      - RPC_URL, RPC_URLS, CHAIN_ID
+#      - MARKETPLACE_ADDR, AUCTION_ADDR, OFFERBOOK_ADDR, NFT_ADDR, MARKETPLACE_MANAGER_ADDR
+#      - TRACKED_COLLECTIONS, INDEX_FROM_BLOCK
+#      - SIWE_DOMAIN, FRONTEND_URL
+#   2. Add repository secrets:
+#      - FLY_API_TOKEN (Fly deploy token)
+#      - REOWN_PROJECT_ID (WalletConnect project ID from cloud.reown.com)
+#   3. Push to main — CI generates fly.toml and deploys automatically.
+#
+# Secrets set via `fly secrets set` (NOT in this file):
+#   POSTGRES_URL, JWT_SECRET, KEEPER_KEY, SERVICE_TOKEN
+#   WC_PROJECT_ID, READ_POOL_URL, SAFE_ADDR, PERSONAL_WALLET_ADDR
+#   DISCORD_WEBHOOK_URL, PROMETHEUS_WEBHOOK_URL, SMTP_*
+#   SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT
+#   (See backend/.env.example for the full list)
+# ───────────────────────────────────────────────────────────────────────────────
+
+app = "magicwebb"
+primary_region = "iad"
+
+[build]
+  dockerfile = "Dockerfile"
+  # REOWN_PROJECT_ID is passed via --build-arg in CI (fly deploy --build-arg REOWN_PROJECT_ID=...).
+  # When deploying locally, pass it manually: fly deploy --build-arg REOWN_PROJECT_ID=your_id
+  # The [build.args] block is intentionally empty — build args come from the CLI.
+
+# ── Environment variables injected at runtime ──────────────────────────────
+# These replace CHANGE_ME_* placeholders in CI via sed from GitHub vars/secrets.
+# Secrets (POSTGRES_URL, JWT_SECRET, KEEPER_KEY, etc.) are set via `fly secrets set`
+# and are NOT listed here — they never appear in any committed file.
+[env]
+  ENV = "production"
+  HTTP_ADDR = ":8080"
+
+  # Network — change to 14 (Flare mainnet) or 19 (Songbird) for other chains.
+  RPC_URL = "CHANGE_ME_RPC_URL"
+  RPC_URLS = "CHANGE_ME_RPC_URLS"
+  CHAIN_ID = "CHANGE_ME_CHAIN_ID"
+
+  # Contract addresses from forge deployment (lowercase).
+  MARKETPLACE_ADDR = "CHANGE_ME_MARKETPLACE_ADDR"
+  AUCTION_ADDR = "CHANGE_ME_AUCTION_ADDR"
+  OFFERBOOK_ADDR = "CHANGE_ME_OFFERBOOK_ADDR"
+  NFT_ADDR = "CHANGE_ME_NFT_ADDR"
+  MARKETPLACE_MANAGER_ADDR = "CHANGE_ME_MARKETPLACE_MANAGER_ADDR"
+
+  # Optional read-replica pool (Neon read-only branch). Unset = primary only.
+  # READ_POOL_URL = "CHANGE_ME_READ_POOL_URL"
+
+  # NFT contracts the indexer watches for Transfer events.
+  TRACKED_COLLECTIONS = "CHANGE_ME_TRACKED_COLLECTIONS"
+  INDEX_FROM_BLOCK = "CHANGE_ME_INDEX_FROM_BLOCK"
+
+  # SIWE domain (must match the public URL users sign in from).
+  SIWE_DOMAIN = "CHANGE_ME_SIWE_DOMAIN"
+  FRONTEND_URL = "CHANGE_ME_FRONTEND_URL"
+
+  # WalletConnect v2 project ID — set via `fly secrets set WC_PROJECT_ID=...`
+  # before deploying. CI also injects it from GitHub secrets into the generated
+  # fly.toml so the build-arg is available at Docker build time. The `fly secrets`
+  # value takes precedence at runtime. Get yours at https://cloud.reown.com
+  WC_PROJECT_ID = "CHANGE_ME_WC_PROJECT_ID"
+
+[http_service]
+  internal_port = 8080
+  force_https = true
+  # Indexer + keeper run in-process: the machine must never scale to zero.
+  auto_stop_machines = "off"
+  auto_start_machines = true
+  min_machines_running = 1
+
+[[vm]]
+  size = "shared-cpu-1x"
+  memory = "512mb"
+
+[checks]
+  [checks.health]
+    type = "http"
+    port = 8080
+    path = "/healthz"
+    interval = "30s"
+    timeout = "5s"
+    grace_period = "30s"

@@ -1,0 +1,108 @@
+syntax = "proto3";
+
+package marketplace.v1;
+
+option go_package = "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1";
+
+// MarketplaceService provides lightweight state queries. These replace the
+// WebSocket action-based queries (get_listing, get_auction, get_offer,
+// get_token) with standard gRPC-Web unary RPCs served over HTTP/1.1 via
+// Connect-RPC. The WS connection continues to handle real-time push events.
+
+service MarketplaceService {
+  // GetListing returns the current active listing for a token.
+  rpc GetListing(GetListingRequest) returns (GetListingResponse);
+
+  // GetAuction returns auction state by auction ID.
+  rpc GetAuction(GetAuctionRequest) returns (GetAuctionResponse);
+
+  // GetOffer returns an offer by its on-chain ID.
+  rpc GetOffer(GetOfferRequest) returns (GetOfferResponse);
+
+  // GetToken returns full on-chain metadata for a token.
+  rpc GetToken(GetTokenRequest) returns (GetTokenResponse);
+}
+
+// ── GetListing ────────────────────────────────────────────────────────────────
+
+message GetListingRequest {
+  string collection = 1; // hex-encoded contract address
+  string token_id = 2;   // decimal uint256 token ID
+}
+
+message GetListingResponse {
+  string collection = 1;
+  string token_id = 2;
+  string seller = 3;
+  string price_wei = 4;
+  int64 amount = 5;
+  string standard = 6;    // "erc721" | "erc1155"
+  int64 expires_at_ms = 7;
+  int64 listed_at_ms = 8;
+  string tx_hash = 9;
+  string name = 10;      // denormalised from nft_metadata / nft_tokens
+  string image_uri = 11; // denormalised metadata
+}
+
+// ── GetAuction ────────────────────────────────────────────────────────────────
+
+message GetAuctionRequest {
+  int64 auction_id = 1;
+}
+
+message GetAuctionResponse {
+  int64 auction_id = 1;
+  string collection = 2;
+  string token_id = 3;
+  string seller = 4;
+  string standard = 5;
+  string reserve_price_wei = 6;
+  string highest_bid_wei = 7;
+  string highest_bidder = 8;
+  int32 min_increment_bps = 9;
+  int64 starts_at_ms = 10;
+  int64 ends_at_ms = 11;
+  string status = 12;    // "active" | "settled" | "cancelled"
+  string create_tx = 13;
+  string name = 14;
+  string image_uri = 15;
+}
+
+// ── GetOffer ──────────────────────────────────────────────────────────────────
+
+message GetOfferRequest {
+  string offer_id = 1;
+}
+
+message GetOfferResponse {
+  string offer_id = 1;
+  string bidder = 2;
+  string collection = 3;
+  string token_id = 4;
+  string amount_wei = 5; // principal_wei: escrowed amount (fee excluded)
+  string fee_wei = 6;
+  int64 units = 7;
+  string standard = 8;
+  int64 expires_at_ms = 9;
+  string status = 10;    // "pending" | "accepted" | "cancelled" | "expired"
+  string make_tx = 11;
+  int64 created_at_ms = 12;
+}
+
+// ── GetToken ──────────────────────────────────────────────────────────────────
+
+message GetTokenRequest {
+  string collection = 1;
+  string token_id = 2;
+}
+
+message GetTokenResponse {
+  string collection = 1;
+  string token_id = 2;
+  string name = 3;
+  string description = 4;
+  string image_uri = 5;
+  string animation_uri = 6;
+  string metadata_uri = 7;
+  int64 fetched_at_ms = 8;
+}

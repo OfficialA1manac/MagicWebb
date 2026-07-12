@@ -181,27 +181,23 @@
         this.refreshHighestOffer();
         this.refreshPrevBid();
       }, 3000);
-      // SSE: refresh on BOTH auction-updated (bid/extend events) AND
+      // WebSocket push: refresh on BOTH auction-updated (bid/extend events) AND
       // offer-updated (new offer on the same NFT). The OfferBook contract
       // emits offer-updated, not auction-updated, so without this the
       // offer floor would lag by up to 3s on a new bid landing.
-      try {
-        const es = new EventSource('/events');
-        ['auction-updated','offer-updated'].forEach((evt) =>
-          es.addEventListener(evt, () => {
-            this.refreshHighestOffer();
-            this.refreshPrevBid();
-          })
-        );
-      } catch (_) { /* SSE optional; polls above still run */ }
+      window.addEventListener('mw-ws-event', function (e) {
+        var detail = e.detail || {};
+        if (detail.type === 'auction-updated' || detail.type === 'offer-updated') {
+          self.refreshHighestOffer();
+          self.refreshPrevBid();
+        }
+      });
     }
   }" class="grid lg:grid-cols-5 gap-8">
 
   <!-- Live region: image + bid lists + summary. innerHTML swap so the
        outer x-data + bid amount + countdown survive the refresh. -->
-  <div class="lg:col-span-3"
-       hx-get="/partials/auction/{{.AuctionID}}"
-       hx-trigger="sse:auction-updated, every 1s [!document.hidden]"
+  <div class="lg:col-span-3"        hx-get="/partials/auction/{{.AuctionID}}"        hx-trigger="auction-updated, every 300s [!document.hidden]"
        hx-swap="innerHTML"
        hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
     {{template "partials/auction_live.html" .}}

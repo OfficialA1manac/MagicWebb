@@ -328,3 +328,27 @@ type Query {
   """Total 24h volume in wei."""
   totalVolume24h: String!
 }
+
+# ── Subscriptions (real-time push over WebSocket) ────────────────────────────
+
+# The subscription root type. A single WebSocket connection using the
+# graphql-transport-ws protocol receives push events without polling.
+# Supported transports: /graphql WS (graphql-ws) or /ws (legacy push events).
+type Subscription {
+  """Push a listing update when the indexer detects an on-chain change."""
+  listingUpdated(
+    collection: String
+    tokenID: String
+  ): Listing!
+
+  """Push an auction update when a bid is placed or status changes."""
+  auctionUpdated(
+    auctionId: Int
+  ): Auction!
+
+  """Push a new activity event when a marketplace transaction occurs."""
+  activityUpdated: Activity!
+
+  """Push a notification for the authenticated user."""
+  notificationUpdated: Notification!
+}

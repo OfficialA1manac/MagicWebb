@@ -19,10 +19,7 @@ const (
 
 // isValidChannel reports whether a channel name follows our naming convention.
 func isValidChannel(ch string) bool {
-	// Must match a known prefix AND have at least one character after the colon.
-	// Token channels additionally require a second colon ("token:addr:id" format).
 	if len(ch) > len(channelToken) && strings.HasPrefix(ch, channelToken) {
-		// Enforce "token:<addr>:<id>" — must contain a second colon.
 		rest := ch[len(channelToken):]
 		return strings.Contains(rest, ":")
 	}
@@ -30,24 +27,92 @@ func isValidChannel(ch string) bool {
 		(len(ch) > len(channelUser) && strings.HasPrefix(ch, channelUser))
 }
 
-// channelMatchesEventType returns true if the channel pattern could ever
-// produce relevant events. This is a coarse pre-filter used by the SSE
-// bridge goroutine to skip events the client doesn't care about.
+// eventPayload is the JSON shape extracted from sse.Event.Data for per-entity
+// subscription scoping (W5). Only fields relevant to channel matching are
+// included — collection address, token ID, and address-like fields.
+type eventPayload struct {
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id"`
+	Address    string `json:"address"`
+	Seller     string `json:"seller"`
+	Buyer      string `json:"buyer"`
+	Bidder     string `json:"bidder"`
+	Owner      string `json:"owner"`
+	FromAddr   string `json:"from_addr"`
+	ToAddr     string `json:"to_addr"`
+}
+
+// channelMatchesEvent returns true if the channel matches the event, using
+// per-entity scoping when an event payload is available (W5).
 //
-// v1 filter granularity: only the channel prefix (token:/collection:/user:)
-// is checked, not the full encoded address/ID. A subscription to
-// "token:0xAAA:1" matches ALL token events across every collection/token,
-// not just 0xAAA:1. Per-entity scoping would require peeking into SSE
-// payload bodies; this coarse category-level filter is the intentional
-// v1 trade-off. Clients should not assume per-entity event isolation.
-func channelMatchesEventType(channel, eventType string) bool {
-	// Token and collection channels match all event types.
+// When ev is nil, falls back to coarse prefix-only matching (v1 behaviour):
+// token/collection channels receive all events, user channels receive only
+// notification events. This preserves backward compatibility for consumers
+// that don't yet pass payload data.
+//
+// When ev is non-nil, performs exact entity matching:
+//   - "token:0xABC:1" matches events where collection=="0xABC" AND token_id=="1"
+//   - "collection:0xABC" matches events where collection=="0xABC"
+//   - "user:0xDEF" matches events where any address field equals "0xDEF"
+func channelMatchesEvent(channel, eventType string, ev *eventPayload) bool {
+	if !channelMatchesPrefix(channel, eventType) {
+		return false
+	}
+	if ev == nil {
+		return true // no payload → coarse match
+	}
+	return channelMatchesPayload(channel, ev)
+}
+
+// channelMatchesPrefix is the v1 coarse filter — checks only the channel
+// prefix against the event type. Token/collection channels match all events;
+// user channels match notification events only.
+func channelMatchesPrefix(channel, eventType string) bool {
 	if strings.HasPrefix(channel, channelToken) || strings.HasPrefix(channel, channelCollection) {
 		return true
 	}
-	// User channels primarily match notification events.
 	if strings.HasPrefix(channel, channelUser) {
 		return eventType == "notification"
+	}
+	return false
+}
+
+// channelMatchesPayload performs exact entity matching between the channel
+// and the event payload.
+func channelMatchesPayload(channel string, ev *eventPayload) bool {
+	switch {
+	case strings.HasPrefix(channel, channelToken):
+		return channelMatchesToken(channel, ev)
+	case strings.HasPrefix(channel, channelCollection):
+		return channelMatchesCollection(channel, ev)
+	case strings.HasPrefix(channel, channelUser):
+		return channelMatchesUser(channel, ev)
+	}
+	return false
+}
+
+func channelMatchesToken(channel string, ev *eventPayload) bool {
+	rest := strings.TrimPrefix(channel, channelToken)
+	if rest == "" {
+		return false
+	}
+	idx := strings.LastIndex(rest, ":")
+	if idx <= 0 || idx >= len(rest)-1 {
+		return false
+	}
+	return strings.EqualFold(rest[:idx], ev.Collection) && rest[idx+1:] == ev.TokenID
+}
+
+func channelMatchesCollection(channel string, ev *eventPayload) bool {
+	return strings.EqualFold(strings.TrimPrefix(channel, channelCollection), ev.Collection)
+}
+
+func channelMatchesUser(channel string, ev *eventPayload) bool {
+	chanAddr := strings.TrimPrefix(channel, channelUser)
+	for _, a := range []string{ev.Address, ev.Seller, ev.Buyer, ev.Bidder, ev.Owner, ev.FromAddr, ev.ToAddr} {
+		if a != "" && strings.EqualFold(chanAddr, a) {
+			return true
+		}
 	}
 	return false
 }

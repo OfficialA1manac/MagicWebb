@@ -17,15 +17,25 @@ import (
 
 	"github.com/ethereum/go-ethereum/common/hexutil"
 	"github.com/ethereum/go-ethereum/crypto"
+	"github.com/getsentry/sentry-go"
+	sentryfiber "github.com/getsentry/sentry-go/fiber"
 	"github.com/gofiber/fiber/v2"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
+	"go.opentelemetry.io/otel"
+	"go.opentelemetry.io/otel/attribute"
+	"go.opentelemetry.io/otel/codes"
+	"go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc"
+	"go.opentelemetry.io/otel/propagation"
+	sdktrace "go.opentelemetry.io/otel/sdk/trace"
+	"go.opentelemetry.io/otel/trace"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
@@ -33,6 +43,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/frontend"
+	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
 func main() {
@@ -40,6 +51,20 @@ func main() {
 
 	if config.C.Env != "production" {
 		log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr, TimeFormat: time.RFC3339})
+	}
+
+	// ── Sentry error reporting (optional — disabled when SENTRY_DSN is empty) ──
+	if config.C.SentryDSN != "" {
+		if err := sentry.Init(sentry.ClientOptions{
+			Dsn:              config.C.SentryDSN,
+			Environment:      config.C.Env,
+			EnableTracing:    true,
+			TracesSampleRate: 0.1, // capture 10% of transactions to control cost
+		}); err != nil {
+			log.Warn().Err(err).Msg("sentry: init failed")
+		} else {
+			log.Info().Msg("sentry: error reporting enabled")
+		}
 	}
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -79,14 +104,35 @@ func main() {
 		q = q.WithReadReplica(readPool)
 	}
 
-	// SSE broadcaster with cross-instance fan-out via Postgres LISTEN/NOTIFY.
+	// SSE broadcaster with cross-instance fan-out via gRPC streaming mesh.
 	// Degrades to local-only delivery if the listen conn is unavailable.
-	bcast := sse.NewBridged(ctx, pool, config.C.PostgresURL)
+	bcast := sse.NewGrpcBridged(ctx, config.C.GRPCPort, config.C.GRPCPeers)
 
 	// Shared (Postgres) rate limiter + nonce store, so limits and single-use
 	// SIWE nonces hold across instances.
 	rl := ratelimit.NewPg(pool)
 	ns := nonce.NewPg(pool)
+
+	// ── OpenTelemetry tracing (optional — disabled when endpoint is empty) ──
+	var tp *sdktrace.TracerProvider
+	if config.C.OTELExporterOTLPEndpoint != "" {
+		expCtx, expCancel := context.WithTimeout(ctx, 5*time.Second)
+		exp, err := otlptracegrpc.New(expCtx,
+			otlptracegrpc.WithEndpoint(config.C.OTELExporterOTLPEndpoint),
+			otlptracegrpc.WithInsecure(),
+		)
+		expCancel()
+		if err != nil {
+			log.Warn().Err(err).Msg("otel: exporter init failed")
+		} else {
+			tp = sdktrace.NewTracerProvider(sdktrace.WithBatcher(exp))
+			otel.SetTracerProvider(tp)
+			// Set global propagator so trace context is propagated via
+			// W3C TraceContext headers (traceparent, tracestate).
+			otel.SetTextMapPropagator(propagation.TraceContext{})
+			log.Info().Msg("otel: tracing enabled")
+		}
+	}
 
 	// Ethereum access: rotation + failover across every configured endpoint
 	// (RPC_URLS, falling back to RPC_URL). All indexer/keeper reads, writes and
@@ -160,13 +206,41 @@ func main() {
 		BodyLimit: 1 * 1024 * 1024, // 1 MB
 	})
 
+	// ── Monitoring middleware ───────────────────────────────────────────
+	// Sentry recovery: captures panics and sends them to Sentry with full
+	// request context. Must be registered BEFORE other middleware so it
+	// can wrap the entire handler chain.
+	if config.C.SentryDSN != "" {
+		app.Use(sentryfiber.New(sentryfiber.Options{}))
+	}
+	// OTEL tracing: creates a span per HTTP request and propagates trace
+	// context to downstream services. Registered after Sentry so trace IDs
+	// are attached to error reports.
+	if tp != nil {
+		app.Use(otelTraceMiddleware())
+	}
+
 	// Mount all REST + SSE routes
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs)
+
+	// ── gRPC health service (standard grpc.health.v1.Health) ──────────────
+	// Registered on the event bridge's gRPC server so Fly.io can probe this
+	// instance with a sub-millisecond gRPC health check instead of a full HTTP
+	// round-trip through /healthz. The health server probes DB + RPC + head lag.
+	// Placed AFTER runner creation so runner.HeadLagBlocks is available.
+	if grpcSrv := bcast.GRPCServer(); grpcSrv != nil {
+		grpc_health_v1.RegisterHealthServer(grpcSrv, health.New(q, eth, runner.HeadLagBlocks))
+		log.Info().Int("port", config.C.GRPCPort).Msg("grpc: health service registered")
+	}
 
 	// Admin-only endpoint: force re-scan of Transfer events for a specific
 	// collection (mounted after runner creation so the handler can call
 	// runner.ReindexCollection).
 	api.MountReindexRoute(app, runner, &config.C)
+
+	// Prometheus /metrics endpoint — exposes gauges and counters in text
+	// format for scraping by Prometheus / Grafana / Datadog agents.
+	registerMetricsRoute(app, q, runner.HeadLagBlocks)
 
 	// Register SLO (Prometheus gauge) and healthz (DB + RPC + lag threshold) routes.
 	// Extracted into a function for unit testability — the getHeadLag callback
@@ -180,9 +254,10 @@ func main() {
 	// Serve HTMX templates + static files
 	mountUI(app, q, &serverTimeMs)
 
-	// Graceful shutdown: SIGINT/SIGTERM stops accepting traffic, then cancels
-	// ctx and WAITS for the indexer/keepers to drain so no settle/refund
-	// broadcast is cut mid-flight and the advisory lock releases cleanly.
+	// Graceful shutdown: SIGINT/SIGTERM stops accepting traffic, shuts down
+	// the gRPC event bridge, then cancels ctx and WAITS for the indexer/keepers
+	// to drain so no settle/refund broadcast is cut mid-flight and the advisory
+	// lock releases cleanly.
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -191,11 +266,26 @@ func main() {
 		if err := app.ShutdownWithTimeout(10 * time.Second); err != nil {
 			log.Error().Err(err).Msg("http shutdown")
 		}
+		// Shut down the gRPC event bridge after HTTP so in-flight events
+		// from the indexer can still drain before peer connections close.
+		bcast.Shutdown()
 	}()
 
 	log.Info().Str("addr", config.C.HTTPAddr).Msg("server starting")
 	if err := app.Listen(config.C.HTTPAddr); err != nil {
 		log.Fatal().Err(err).Msg("server failed")
+	}
+
+	// ── Monitoring teardown ─────────────────────────────────────────────
+	if config.C.SentryDSN != "" {
+		sentry.Flush(2 * time.Second)
+	}
+	if tp != nil {
+		shutdownCtx, shutdownCancel := context.WithTimeout(context.Background(), 5*time.Second)
+		defer shutdownCancel()
+		if err := tp.Shutdown(shutdownCtx); err != nil {
+			log.Warn().Err(err).Msg("otel: shutdown failed")
+		}
 	}
 
 	cancel()
@@ -204,6 +294,115 @@ func main() {
 		log.Info().Msg("indexer drained")
 	case <-time.After(15 * time.Second):
 		log.Warn().Msg("indexer drain timed out")
+	}
+}
+
+// ── Prometheus /metrics endpoint ────────────────────────────────────────────
+
+// registerMetricsRoute mounts a Prometheus-compatible /metrics endpoint that
+// exposes gauges and counters from across the system. Formatted as
+// Prometheus text exposition format so standard scrapers (Prometheus,
+// Grafana Agent, Datadog Agent with OpenMetrics check) can ingest it.
+//
+// Exported metrics:
+//
+//	magicwebb_sse_dropped_total      counter — events dropped due to fan-out saturation
+//	magicwebb_sse_saturation_streak  gauge   — consecutive saturated Publish calls
+//	magicwebb_head_lag_blocks        gauge   — indexer lag behind chain head
+//	magicwebb_build_info             gauge   — 1, with sha label
+//
+// The endpoint is NOT rate-limited — Prometheus scrapes typically run every
+// 15-60s and a rate limit would silently drop scrape intervals, creating gaps
+// in dashboards.
+func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
+	app.Get("/metrics", func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "text/plain; charset=utf-8")
+
+		// SSE saturation metrics from the broadcaster.
+		dropped := sse.DroppedTotal.Load()
+		streak := sse.SaturationStreak.Load()
+
+		// Indexer head lag.
+		lag := uint64(0)
+		if getHeadLag != nil {
+			lag = getHeadLag()
+		}
+
+		// DB pool stats (approximate — pgxpool.Stat() not exposed through db.Q).
+		// We surface build info and the key operational metrics that don't
+		// require a DB round-trip.
+
+		return c.SendString(fmt.Sprintf(
+			"# HELP magicwebb_sse_dropped_total Total SSE events dropped due to fan-out saturation.\n"+
+				"# TYPE magicwebb_sse_dropped_total counter\n"+
+				"magicwebb_sse_dropped_total %d\n"+
+				"# HELP magicwebb_sse_saturation_streak Consecutive saturated Publish calls (0 when healthy).\n"+
+				"# TYPE magicwebb_sse_saturation_streak gauge\n"+
+				"magicwebb_sse_saturation_streak %d\n"+
+				"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
+				"# TYPE magicwebb_head_lag_blocks gauge\n"+
+				"magicwebb_head_lag_blocks %d\n"+
+				"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
+				"# TYPE magicwebb_build_info gauge\n"+
+				"magicwebb_build_info{sha=\"%s\",env=\"%s\"} 1\n",
+			dropped, streak, lag, api.MWServerBuildSHA, config.C.Env,
+		))
+	})
+}
+
+// ── OTEL tracing middleware ──────────────────────────────────────────────
+
+// otelTraceMiddleware returns a Fiber middleware that creates an OpenTelemetry
+// span for every HTTP request. It extracts incoming trace context from W3C
+// TraceContext headers (traceparent, tracestate) and creates a child span
+// with http.method, http.url, http.status_code, and http.route attributes.
+//
+// This replaces the otelfiber contrib package, avoiding an external dependency
+// whose module path changed between OTEL contrib versions. The logic is a
+// minimal subset of the OTEL HTTP semantic conventions — sufficient for
+// tracing request latency and error rates in any OTLP-compatible backend
+// (Honeycomb, Grafana Tempo, Jaeger, Datadog).
+func otelTraceMiddleware() fiber.Handler {
+	tracer := otel.Tracer("magicwebb")
+	return func(c *fiber.Ctx) error {
+		// Extract incoming trace context from W3C headers.
+		// fasthttp's GetReqHeaders() returns map[string][]string;
+		// propagation.HeaderCarrier is http.Header which has the same
+		// underlying type. Conversion is valid per Go spec.
+		ctx := otel.GetTextMapPropagator().Extract(
+			c.Context(),
+			propagation.HeaderCarrier(c.GetReqHeaders()),
+		)
+
+		spanName := string(c.Request().Header.Method()) + " " + c.Path()
+		route := c.Path()
+		if r := c.Route(); r != nil {
+			route = r.Path
+		}
+		ctx, span := tracer.Start(ctx, spanName,
+			trace.WithSpanKind(trace.SpanKindServer),
+			trace.WithAttributes(
+				attribute.String("http.method", string(c.Request().Header.Method())),
+				attribute.String("http.url", c.Request().URI().String()),
+				attribute.String("http.route", route),
+			),
+		)
+		defer span.End()
+
+		// Store the span context in the request context so downstream
+		// handlers (DB queries, RPC calls) can create child spans.
+		c.SetUserContext(ctx)
+
+		err := c.Next()
+
+		// Record the response status on the span.
+		statusCode := c.Response().StatusCode()
+		span.SetAttributes(attribute.Int("http.status_code", statusCode))
+		if statusCode >= 400 {
+			span.SetStatus(codes.Error, "")
+		}
+
+		return err
 	}
 }
 

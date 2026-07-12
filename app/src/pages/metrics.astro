@@ -276,14 +276,15 @@ import WalletConnect from '../components/WalletConnect';
             }
           } catch(_) {}
 
-          // SSE live refresh — re-fetch metrics data in-place instead of full page reload
+          // WebSocket live refresh — re-fetch metrics data in-place instead of full page reload
           (function(){
-            try {
-              const sse = new EventSource('/events');
-              sse.addEventListener('listing-updated', function(){window.__MW_REFRESH_METRICS__();});
-              sse.addEventListener('auction-updated', function(){window.__MW_REFRESH_METRICS__();});
-              sse.addEventListener('activity', function(){window.__MW_REFRESH_METRICS__();});
-            } catch(_) {}
+            if (typeof window.MW_WS !== 'undefined') {
+              window.addEventListener('mw-ws-event', function(e) {
+                if (e.detail && (e.detail.type === 'listing-updated' || e.detail.type === 'auction-updated' || e.detail.type === 'activity')) {
+                  window.__MW_REFRESH_METRICS__();
+                }
+              });
+            }
           })();
 
           // Expose refresh function so SSE events can re-fetch without full reload

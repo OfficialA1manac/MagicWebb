@@ -2,11 +2,10 @@
 package api
 
 import (
-	"bufio"
 	"context"
 	"encoding/json"
+	"net/http"
 	"strings"
-	"sync"
 	"sync/atomic"
 	"time"
 
@@ -15,12 +14,17 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/rs/zerolog/log"
+	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
+	connectv1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
+	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+
+	"connectrpc.com/grpcreflect" // gRPC server reflection for grpcurl discovery
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
@@ -38,7 +42,7 @@ import (
 // where image handlers already set it.
 const (
 	cspHeader = "default-src 'self'; " +	// All JS bundles are SELF-HOSTED under /static (htmx, ethers, alpinejs,
-	// qrcode, wc-bundle, wallet.js, sse.js). No third-party CDN script
+	// qrcode, wc-bundle, wallet.js, ws.js). No third-party CDN script
 	// dependencies remain. The AppKit bridge (appkit-bridge.js) is built
 	// by Astro/Vite from app/src/appkit-bridge.js and served same-origin.
 		// Alpine.js evaluates expressions via `new Function()` at runtime, so
@@ -142,28 +146,8 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// gzip/brotli compression on every compressible response — bandwidth
 	// is by far the largest line item in our Fly bill and the JSON HTMX
 	// partials (listings/auctions/activity/token_live/etc.) compress >10x.
-	// Fiber's compress middleware ships with a default Content-Type
-	// allow-list that excludes text/event-stream (and the SSE handler
-	// below also sets X-Accel-Buffering: no), so a LevelDefault install
-	// keeps the SSE channel uncompressed. If you switch to LevelBestSpeed
-	// or otherwise loosen the filter, audit the SSE path here — a
-	// compressed text/event-stream breaks the nginx buffering fix.
-	//
-	// Belt-and-braces path-level skip for `/events` itself: the default
-	// filter excludes SSE by Content-Type but Fiber still installs its
-	// response-writer wrap around the handler. With our `SetBodyStreamWriter`
-	// callback pattern that streaming writer can race with the wrap and
-	// stall the response — clients see no headers, no body, and (because
-	// the server has nothing to flush) eventually a 502 from the fly.io
-	// edge. Bridging to /parts/event-types by path (not just content-type)
-	// means the compress middleware never touches the SSE stream — not
-	// even as a pass-through. The default whitelist still excludes the
-	// actual encode step; this skip just removes the wrap entirely.
 	app.Use(compress.New(compress.Config{
 		Level: compress.LevelDefault,
-		Next: func(c *fiber.Ctx) bool {
-			return c.Path() == "/events"
-		},
 	}))
 
 	// /healthz = liveness. Must respond 200 within ~3.5s even when the
@@ -207,14 +191,15 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		return c.SendStatus(fiber.StatusOK)
 	})
 
-	app.Get("/events", sseHandler(bcast))
-
 	// WebSocket endpoint for bidirectional real-time communication.
-	// Registered at app level (like /events) to avoid rate-limit conflicts.
 	// Supports authenticated (SIWE JWT cookie) and unauthenticated connections.
-	// db.Q enables lightweight state queries via WebSocket actions (get_listing,
-	// get_auction, etc.) without REST API round-trips.
-	wsHandler := ws.NewHandler(cfg, bcast, q, func() int64 { return atomic.LoadInt64(serverTimeMs) })
+	// Action queries (get_listing, get_auction, etc.) are served via a
+	// Connect-RPC client pointing to the local HTTP server.
+	wsClient := marketplacev1connect.NewMarketplaceServiceClient(
+		http.DefaultClient,
+		"http://localhost"+cfg.HTTPAddr,
+	)
+	wsHandler := ws.NewHandler(cfg, bcast, q, wsClient, func() int64 { return atomic.LoadInt64(serverTimeMs) })
 	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	// GraphQL endpoint for rich data queries.
@@ -228,6 +213,49 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
 	app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
+
+	// ── Connect-RPC (gRPC-Web / gRPC / Connect protocol) ─────────────────
+	// Serves the MarketplaceService defined in marketplace.proto. Clients
+	// can use any supported protocol (Connect JSON, Connect Protobuf, gRPC,
+	// gRPC-Web). The handler is mounted at /marketplace.v1.MarketplaceService/*
+	// and dispatched by Connect-RPC's built-in router.
+	//
+	// This service replaces the WebSocket action-based queries (get_listing,
+	// get_auction, get_offer, get_token) with standard typed RPCs that
+	// work over HTTP/1.1, HTTP/2, or any gRPC-compatible transport.
+	// Not rate-limited — each RPC is a simple DB query comparable to the
+	// equivalent REST endpoint.
+	connectSrv := connectv1.NewServer(q)
+	connectPath, connectHandler := marketplacev1connect.NewMarketplaceServiceHandler(connectSrv)
+	// Adapt the net/http Connect-RPC handler for Fiber's fasthttp.
+	app.All(connectPath+"*", func(c *fiber.Ctx) error {
+		fasthttpadaptor.NewFastHTTPHandler(connectHandler)(c.Context())
+		return nil
+	})
+
+	// ── gRPC Server Reflection ──────────────────────────────────────────
+	// Enables discovery tools (grpcurl, grpc_cli) to list services and
+	// call methods without the proto file. Both v1 and v1alpha reflection
+	// handlers are registered for maximum client compatibility.
+	reflector := grpcreflect.NewStaticReflector(
+		marketplacev1connect.MarketplaceServiceName,
+	)
+	reflectV1Path, reflectV1Handler := grpcreflect.NewHandlerV1(reflector)
+	reflectV1AlphaPath, reflectV1AlphaHandler := grpcreflect.NewHandlerV1Alpha(reflector)
+	for _, r := range []struct {
+		path    string
+		handler http.Handler
+	}{
+		{reflectV1Path, reflectV1Handler},
+		{reflectV1AlphaPath, reflectV1AlphaHandler},
+	} {
+		p := r.path
+		h := r.handler
+		app.All(p+"*", func(c *fiber.Ctx) error {
+			fasthttpadaptor.NewFastHTTPHandler(h)(c.Context())
+			return nil
+		})
+	}
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
@@ -496,138 +524,6 @@ func isNotFound(err error) bool {
 
 func bodyDecode(c *fiber.Ctx, v any) error {
 	return json.Unmarshal(c.Body(), v)
-}
-
-// ── SSE handler ───────────────────────────────────────────────────────────────
-
-// ssePerIPLimit is the maximum concurrent SSE connections per IP.
-// /events serves only public market data (listings, auctions, offers,
-// activity) — no auth, no PII — but a single IP holding thousands of
-// connections can exhaust the 10k subscriber pool. Capping at 20 per IP
-// leaves plenty of headroom for legitimate browser tabs while preventing
-// a single actor from dominating the pool.
-const ssePerIPLimit = 20
-
-// sseConns tracks active SSE connections per IP. Writes happen on
-// subscribe/cancel (low frequency — at most one per tab open/close).
-// sync.Map chosen over RWMutex+map because subscribe is called during
-// request setup (not in the stream-write hot path) and the map grows
-// slowly (one entry per unique IP).
-var sseConns sync.Map // IP string → *int64
-
-// sseHandler streams events from a Broadcaster to the browser. The /events
-// route is the live update channel for bids, listings, offers, auction
-// tick-downs, and notifications — every page subscribes to it as a
-// background EventSource.
-//
-// Per-IP connection cap (v35): before subscribing, increments an atomic
-// counter keyed on ClientIP. Returns 429 if the IP exceeds ssePerIPLimit.
-// Decrements on cancel/disconnect so the slot is released when the tab
-// closes. The cap prevents a single IP from exhausting the global 10k
-// subscriber pool.
-//
-// Cleanup contract (the fix this revision introduces):
-//   • `cancel()` is deferred INSIDE the SetBodyStreamWriter callback, not
-//     at the outer handler scope. Putting `defer cancel()` on the outer
-//     scope fired the instant the handler returned `nil` — BEFORE fasthttp
-//     could serialise headers or hand the bufio.Writer to the stream
-//     callback — tearing the subscriber out before a single byte was
-//     written and leaving the browser stalled on /events with zero
-//     headers and zero body.
-//   • Every `w.WriteString` and `w.Flush` is now error-checked; on error
-//     (which happens when the TCP socket / fasthttp response closes
-//     because the client disconnected, the edge proxy timed out, or the
-//     broadcaster cancelled the channel) we `return` from the callback
-//     so the deferred `cancel()` reliably releases the subscriber slot.
-//   • Earlier revisions spawned a `go func() { <-c.Context().Done(); ... }`
-//     watcher to "belt-and-braces" the lifecycle, but `fasthttp`'s
-//     `RequestCtx.Done()` closes immediately when the request handler
-//     returns, not when the TCP socket actually drops — so that
-//     goroutine fired the cancel atomically, also tearing the
-//     subscriber out before any stream, AND racing with `RequestCtx`
-//     state mutation (a documented fasthttp gotcha). It is gone. The
-//     write/flush error path inside the callback is the only reliable
-//     signal we have on the fiber side, and when combined with the
-//     deferred `cancel()` it covers every disconnect path we care about.
-func sseHandler(bcast *sse.Broadcaster) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		c.Set("Content-Type", "text/event-stream")
-		c.Set("Cache-Control", "no-cache")
-		c.Set("Connection", "keep-alive")
-		c.Set("X-Accel-Buffering", "no")
-
-		// Per-IP concurrent connection cap. The increment happens here
-		// (pre-stream), but the DEFERMENT is INSIDE the stream callback —
-		// the outer handler returns nil immediately after SetBodyStreamWriter,
-		// so a defer here would fire before the stream is active.
-		ip := ClientIP(c)
-		raw, _ := sseConns.LoadOrStore(ip, new(int64))
-		cnt := raw.(*int64)
-		if n := atomic.AddInt64(cnt, 1); n > ssePerIPLimit {
-			atomic.AddInt64(cnt, -1)
-			return c.Status(fiber.StatusTooManyRequests).SendString("too many connections from this IP")
-		}
-
-		ch, cancel, ok := bcast.Subscribe()
-		if !ok {
-			atomic.AddInt64(cnt, -1)
-			return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
-		}
-
-		c.Context().SetBodyStreamWriter(func(w *bufio.Writer) {
-			defer cancel()
-			// Decrement the per-IP counter when the stream ends (client
-			// disconnect, TCP close, or broadcaster cancel). This is
-			// INSIDE the stream callback, not the outer handler, because
-			// the outer handler returns nil immediately (before the
-			// stream is active) — a defer there would fire instantly.
-			defer atomic.AddInt64(cnt, -1)
-
-			// Keepalive cadence: short enough to detect dead connections
-			// within ~30s, long enough not to spam clients with empty
-			// frames. Until the ticker fires, the sentinel flush below
-			// is what keeps the edge proxy from holding buffered bytes.
-			ticker := time.NewTicker(15 * time.Second)
-			defer ticker.Stop()
-
-			// Sentinel first-byte flush. Forces fasthttp to commit the
-			// response headers + the first chunk in the same TCP write
-			// so the edge proxy and the browser never see a zero-bytes
-			// prelude. ": connected" is an SSE comment line (ignored by
-			// EventSource consumers but transported identically to a
-			// data frame). On error, return immediately — the deferred
-			// `cancel()` releases the subscriber.
-			if _, err := w.WriteString(": connected\n\n"); err != nil {
-				return
-			}
-			if err := w.Flush(); err != nil {
-				return
-			}
-
-			for {
-				select {
-				case msg, ok := <-ch:
-					if !ok {
-						return
-					}
-					if _, err := w.WriteString(msg); err != nil {
-						return
-					}
-					if err := w.Flush(); err != nil {
-						return
-					}
-				case <-ticker.C:
-					if _, err := w.WriteString(": keepalive\n\n"); err != nil {
-						return
-					}
-					if err := w.Flush(); err != nil {
-						return
-					}
-				}
-			}
-		})
-		return nil
-	}
 }
 
 // ── Reindex Collection ──────────────────────────────────────────────────────

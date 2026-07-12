@@ -41,10 +41,18 @@
 # This drops the third-party-action supply-chain dependency entirely.
 #
 # Secrets required (GitHub → Settings → Secrets and variables → Actions):
-#   FLY_API_TOKEN   — Fly API token with deploy scope.
-#                     Create once with:  fly tokens create deploy
+#   FLY_API_TOKEN      — Fly API token with deploy scope.
+#                        Create once with:  fly tokens create deploy
+#   REOWN_PROJECT_ID   — WalletConnect/Reown project ID from cloud.reown.com
 #
-# Once the secret is set, every push to `main` runs the full pipeline.
+# Repository variables (GitHub → Settings → Secrets and variables → Actions → Variables):
+#   RPC_URL, RPC_URLS, CHAIN_ID
+#   MARKETPLACE_ADDR, AUCTION_ADDR, OFFERBOOK_ADDR, NFT_ADDR, MARKETPLACE_MANAGER_ADDR
+#   TRACKED_COLLECTIONS, INDEX_FROM_BLOCK
+#   SIWE_DOMAIN, FRONTEND_URL
+#
+# fly.toml is generated in CI from fly.toml.example + the above vars/secrets.
+# fly.toml itself is gitignored — never commit real deployment config.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Deploy (push to main)
@@ -145,44 +153,30 @@ jobs:
 
       - name: Flatten + verify each contract on FlareScan
         # Verifies deployed contracts on FlareScan (blockscout) using forge
-        # verify-contract. Requires EXPLORER_API_KEY as a GitHub secret.
-        # The contract addresses must match the current Coston2 deployment.
-        # When re-deploying, update the addresses here or pass them via
-        # GitHub Actions variables.
-        #
-        # Each contract is flattened first (remix-imports style), then
-        # verified against the chain. FlareScan uses Blockscout under the
-        # hood, which supports standard-json verification.
+        # verify-contract. Contract addresses and chain ID come from GitHub
+        # repository variables (vars.*) — the same source as the fly.toml
+        # generation step. No addresses are hardcoded in this file.
         #
         # EXPLORER_API_KEY is a GitHub Actions secret. FlareScan requires
         # an API key obtained from https://coston2-explorer.flare.network/.
         env:
           EXPLORER_API_KEY: ${{ secrets.EXPLORER_API_KEY }}
+          CHAIN_ID: ${{ vars.CHAIN_ID }}
+          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
+          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
+          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
+          NFT_ADDR: ${{ vars.NFT_ADDR }}
+          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
         run: |
           set -euo pipefail
 
-          # Map chain ID to explorer URL from config.go
-          CHAIN_ID=${CHAIN_ID:-114}
+          # Map chain ID to explorer URL
           case "$CHAIN_ID" in
             14) EXPLORER_URL="https://flare-explorer.flare.network" ;;
             19) EXPLORER_URL="https://songbird-explorer.flare.network" ;;
             114) EXPLORER_URL="https://coston2-explorer.flare.network" ;;
             *) echo "Unknown CHAIN_ID=$CHAIN_ID"; exit 1 ;;
           esac
-
-          # Contract addresses (from current Coston2 deploy)
-          MARKETPLACE_ADDR="0x34b53209eC694Ce243e28606233CFc72D0673436"
-          AUCTION_ADDR="0x93627Ca0032bc1B8eE0D9134a7c9c4f74d97d04C"
-          OFFERBOOK_ADDR="0x918bF8748c9950Dc6aDbB2796dE6DfFaf3f44d5E"
-          NFT_ADDR="0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
-          MANAGER_ADDR="0xCb4424999B04f7e747cc33Aa3f99fdeB36Cd9E4F"
-
-          # Use env vars or CI variables to override addresses
-          MARKETPLACE_ADDR="${MARKETPLACE_ADDR:-$MARKETPLACE_ADDR}"
-          AUCTION_ADDR="${AUCTION_ADDR:-$AUCTION_ADDR}"
-          OFFERBOOK_ADDR="${OFFERBOOK_ADDR:-$OFFERBOOK_ADDR}"
-          NFT_ADDR="${NFT_ADDR:-$NFT_ADDR}"
-          MANAGER_ADDR="${MANAGER_ADDR:-$MANAGER_ADDR}"
 
           echo "Verifying contracts on $EXPLORER_URL (chain $CHAIN_ID)..."
 
@@ -201,7 +195,7 @@ jobs:
           }
 
           # Verify marketplace contracts (all are MarketplaceCore derivations)
-          verify "MarketplaceManager" "$MANAGER_ADDR" "MarketplaceManager.sol"
+          verify "MarketplaceManager" "$MARKETPLACE_MANAGER_ADDR" "MarketplaceManager.sol"
           verify "Marketplace"       "$MARKETPLACE_ADDR" "Marketplace.sol"
           verify "AuctionHouse"      "$AUCTION_ADDR" "AuctionHouse.sol"
           verify "OfferBook"         "$OFFERBOOK_ADDR" "OfferBook.sol"
@@ -239,14 +233,54 @@ jobs:
         run: |
           echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
           echo "  stamped backend/internal/api/build_sha_gen.go → $GITHUB_SHA"
+      - name: Generate fly.toml from template
+        # v35 — fly.toml is gitignored and never committed. It is generated
+        # here from the public fly.toml.example template by replacing
+        # CHANGE_ME_* placeholders with values from GitHub repository
+        # variables (vars.*) and secrets (secrets.*). This keeps real
+        # deployment config (contract addresses, RPC endpoints, domains)
+        # out of the public repository while preserving a readable,
+        # self-documenting template for contributors.
+        env:
+          RPC_URL: ${{ vars.RPC_URL }}
+          RPC_URLS: ${{ vars.RPC_URLS }}
+          CHAIN_ID: ${{ vars.CHAIN_ID }}
+          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
+          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
+          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
+          NFT_ADDR: ${{ vars.NFT_ADDR }}
+          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
+          TRACKED_COLLECTIONS: ${{ vars.TRACKED_COLLECTIONS }}
+          INDEX_FROM_BLOCK: ${{ vars.INDEX_FROM_BLOCK }}
+          SIWE_DOMAIN: ${{ vars.SIWE_DOMAIN }}
+          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
+          WC_PROJECT_ID: ${{ secrets.WC_PROJECT_ID }}
+        run: |
+          cp fly.toml.example fly.toml
+          sed -i "s|CHANGE_ME_RPC_URL|${RPC_URL}|g" fly.toml
+          sed -i "s|CHANGE_ME_RPC_URLS|${RPC_URLS}|g" fly.toml
+          sed -i "s|CHANGE_ME_CHAIN_ID|${CHAIN_ID}|g" fly.toml
+          sed -i "s|CHANGE_ME_MARKETPLACE_ADDR|${MARKETPLACE_ADDR}|g" fly.toml
+          sed -i "s|CHANGE_ME_AUCTION_ADDR|${AUCTION_ADDR}|g" fly.toml
+          sed -i "s|CHANGE_ME_OFFERBOOK_ADDR|${OFFERBOOK_ADDR}|g" fly.toml
+          sed -i "s|CHANGE_ME_NFT_ADDR|${NFT_ADDR}|g" fly.toml
+          sed -i "s|CHANGE_ME_MARKETPLACE_MANAGER_ADDR|${MARKETPLACE_MANAGER_ADDR}|g" fly.toml
+          sed -i "s|CHANGE_ME_TRACKED_COLLECTIONS|${TRACKED_COLLECTIONS}|g" fly.toml
+          sed -i "s|CHANGE_ME_INDEX_FROM_BLOCK|${INDEX_FROM_BLOCK}|g" fly.toml
+          sed -i "s|CHANGE_ME_SIWE_DOMAIN|${SIWE_DOMAIN}|g" fly.toml
+          sed -i "s|CHANGE_ME_FRONTEND_URL|${FRONTEND_URL}|g" fly.toml
+          sed -i "s|CHANGE_ME_WC_PROJECT_ID|${WC_PROJECT_ID}|g" fly.toml
+          echo "  generated fly.toml from fly.toml.example"
       - name: Deploy (Fly remote build → rolling release)
         # FLY_API_TOKEN scoped to this single step — narrower blast
         # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
+        # REOWN_PROJECT_ID passed as --build-arg so the Dockerfile can inject
+        # PUBLIC_REOWN_PROJECT_ID into the Astro build.
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           echo "  deploying commit $GITHUB_SHA"
-          fly deploy --remote-only --strategy rolling
+          fly deploy --remote-only --strategy rolling --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }}
       - name: Post-deploy smoke check (curl /healthz)
         # Catches the class of failure where `fly deploy` succeeds
         # (image pushes, machine replaces) but the new binary boots

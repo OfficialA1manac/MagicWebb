@@ -687,7 +687,6 @@ func mountAstro(app *fiber.App) {
 			strings.HasPrefix(path, "/auth/") ||
 			strings.HasPrefix(path, "/static/") ||
 			strings.HasPrefix(path, "/partials/") ||
-			path == "/events" ||
 			path == "/healthz" ||
 			path == "/readyz" {
 			return c.Next()

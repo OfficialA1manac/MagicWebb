@@ -1,7 +1,6 @@
 {{template "layout.html" .}}
 {{define "content"}}
-<!-- Outer x-data = tab state. Static header + connect prompt live above.
-     Live region swaps every 1s OR on offer-updated SSE. Alpine.initTree
+<!-- Outer x-data = tab state. Static header + connect prompt live above.      Live region swaps every 60s OR on offer-updated WS event. Alpine.initTree
      on after-swap re-applies x-show on the new node children so the
      active tab still gates the right offer list. -->
 <div x-data="{
@@ -67,9 +66,7 @@
        hx-swap="outerHTML" on the entire tab bar + list region combined.
        The Alpine x-data tab state is preserved on the outer div (above)
        so the active-tab selection survives the inner swap. -->
-  <div id="offers-tab-bar"
-       hx-get="/partials/offers?addr={{.Addr}}"
-       hx-trigger="{{if .Addr}}sse:offer-updated, sse:listing-updated, every 30s [!document.hidden]{{end}}"
+  <div id="offers-tab-bar"        hx-get="/partials/offers?addr={{.Addr}}"        hx-trigger="{{if .Addr}}offer-updated, listing-updated, every 300s [!document.hidden]{{end}}"
        hx-swap="outerHTML"
        hx-target="#offers-tab-bar"
        hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">

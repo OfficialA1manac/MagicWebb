@@ -228,6 +228,7 @@ type CollectionStats struct {
 // three small queries that share the connection. Each could be a CTE merged
 // into one statement; splitting keeps the SQL legible and the index pool is
 // cheap (3 round-trips ~= 10ms under typical Coston load).
+// Prefer GetCollectionStatsBatch for multi-collection queries (DataLoader path).
 func (q *Q) GetCollectionStats(ctx context.Context, collection string) (CollectionStats, error) {
 	var s CollectionStats
 	floor, ferr := q.GetFloorPrice(ctx, collection)
@@ -243,6 +244,132 @@ func (q *Q) GetCollectionStats(ctx context.Context, collection string) (Collecti
 		s.ListedCount = int64(listed)
 	}
 	return s, nil
+}
+
+// GetCollectionStatsBatch returns stats for multiple collections in a single
+// round-trip using CTEs with ANY($1) for each metric. Used by the DataLoader
+// to collapse N individual GetCollectionStats calls into 1 query.
+// Floor and listed count are merged into one listings scan (same WHERE clause),
+// reducing 3 round-trips to 2.
+func (q *Q) GetCollectionStatsBatch(ctx context.Context, addrs []string) (map[string]CollectionStats, error) {
+	if len(addrs) == 0 {
+		return map[string]CollectionStats{}, nil
+	}
+	out := make(map[string]CollectionStats, len(addrs))
+
+	// Floor prices + listed counts: merged into one pass over listings.
+	// Both use identical WHERE clauses, so a single GROUP BY with MIN+COUNT
+	// saves one round-trip vs the previous two-query approach.
+	flRows, err := q.reader().Query(ctx,
+		`SELECT collection, COALESCE(MIN(price_wei)::text,'0'), COUNT(*)
+		   FROM listings
+		  WHERE collection = ANY($1) AND active=true AND expires_at > now()
+		  GROUP BY collection`, addrs)
+	if err != nil {
+		return nil, err
+	}
+	for flRows.Next() {
+		var addr, price string
+		var count int64
+		if err := flRows.Scan(&addr, &price, &count); err != nil {
+			flRows.Close()
+			return nil, err
+		}
+		s := out[addr]
+		s.FloorPriceWei = price
+		s.ListedCount = count
+		out[addr] = s
+	}
+	flRows.Close()
+
+	// 24h volumes: SUM(price_wei) per collection from sales.
+	volRows, err := q.reader().Query(ctx,
+		`SELECT collection, COALESCE(SUM(price_wei)::text,'0')
+		   FROM sales
+		  WHERE collection = ANY($1) AND occurred_at > now()-interval '24 hours'
+		  GROUP BY collection`, addrs)
+	if err != nil {
+		return nil, err
+	}
+	for volRows.Next() {
+		var addr, vol string
+		if err := volRows.Scan(&addr, &vol); err != nil {
+			volRows.Close()
+			return nil, err
+		}
+		s := out[addr]
+		s.Volume24hWei = vol
+		out[addr] = s
+	}
+	volRows.Close()
+
+	// Fill defaults for collections with no data (empty stats).
+	for _, addr := range addrs {
+		if _, ok := out[addr]; !ok {
+			out[addr] = CollectionStats{FloorPriceWei: "0", Volume24hWei: "0", ListedCount: 0}
+		}
+	}
+
+	return out, nil
+}
+
+// ── Batch bid queries for DataLoader ──────────────────────────────────────
+
+// GetBidsForAuctionsBatch returns bids for multiple auctions, keyed by
+// auction ID. Used by the DataLoader to batch per-auction bid fetches.
+func (q *Q) GetBidsForAuctionsBatch(ctx context.Context, ids []int64) (map[int64][]BidRow, error) {
+	if len(ids) == 0 {
+		return map[int64][]BidRow{}, nil
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT auction_id, bidder, amount_wei::text, tx_hash, placed_at
+		   FROM bids
+		  WHERE auction_id = ANY($1)
+		  ORDER BY auction_id, placed_at DESC`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int64][]BidRow, len(ids))
+	for rows.Next() {
+		var auctionID int64
+		var r BidRow
+		if err := rows.Scan(&auctionID, &r.Bidder, &r.AmountWei, &r.TxHash, &r.PlacedAt); err != nil {
+			return nil, err
+		}
+		out[auctionID] = append(out[auctionID], r)
+	}
+	return out, rows.Err()
+}
+
+// GetEffectiveBidsBatch returns effective bids for multiple auctions, keyed
+// by auction ID. Used by the DataLoader to batch per-auction effective bid
+// fetches.
+func (q *Q) GetEffectiveBidsBatch(ctx context.Context, ids []int64) (map[int64][]EffectiveBidRow, error) {
+	if len(ids) == 0 {
+		return map[int64][]EffectiveBidRow{}, nil
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT auction_id, bidder, effective_wei::text, bid_count, last_bid_at
+		   FROM effective_bids
+		  WHERE auction_id = ANY($1)
+		  ORDER BY auction_id, effective_wei DESC, last_bid_at ASC`, ids)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	out := make(map[int64][]EffectiveBidRow, len(ids))
+	for rows.Next() {
+		var auctionID int64
+		var r EffectiveBidRow
+		if err := rows.Scan(&auctionID, &r.Bidder, &r.EffectiveWei, &r.BidCount, &r.LastBidAt); err != nil {
+			return nil, err
+		}
+		out[auctionID] = append(out[auctionID], r)
+	}
+	return out, rows.Err()
 }
 
 // ── wei-string helpers (centralised — Priority Stack `parseWeiHelper`) ────

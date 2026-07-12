@@ -1,10 +1,10 @@
 /* ─────────────────────────────────────────────────────────────────────────────
- * MagicWebb — WebSocket client for bidirectional real-time communication.
+ * MagicWebb — WebSocket client for ALL real-time communication.
  *
- * Connects to /ws alongside the existing SSE (/events) connection.
- * SSE handles server-to-client push for HTMX partial swaps (page content).
- * WebSocket augments this with client-to-server messaging (live actions, ping)
- * and also receives the same push events for non-HTMX consumers.
+ * Replaces the legacy SSE (/events) connection — this is now the single
+ * persistent transport for server→client push AND client→server messaging.
+ * Push events (listing-updated, auction-updated, etc.) are dispatched as
+ * DOM CustomEvents so HTMX hx-trigger attributes pick them up directly.
  *
  * Reconnect strategy: exponential backoff, capped at 30s, no jitter.
  * ───────────────────────────────────────────────────────────────────────────── */
@@ -21,6 +21,7 @@
   let retry   = 0;
   let timer   = null;
   let closing = false;
+  let pendingSubs = []; // channels queued for subscription on next connect
 
   /* ── Global API ─────────────────────────────────────────────────────────────
    * Exposed as window.MW_WS so Alpine or inline scripts can send messages.
@@ -56,15 +57,31 @@
 
     // ── Action helpers ────────────────────────────────────────────────────────
 
-    /** Subscribe to event channels ("token:0xabc:123", "collection:0xabc", "user:0xdef"). */
+    /** Subscribe to event channels ("token:0xabc:123", "collection:0xabc", "user:0xdef").
+     *  Channels are persisted locally and re-subscribed on reconnect so push
+     *  events resume immediately after a network interruption. */
     subscribe: function (channels) {
+      // Deduplicate against pending subscriptions
+      for (var i = 0; i < channels.length; i++) {
+        if (pendingSubs.indexOf(channels[i]) === -1) {
+          pendingSubs.push(channels[i]);
+        }
+      }
       this.send({ type: 'subscribe', data: { channels: channels } });
     },
 
     /** Unsubscribe from event channels. */
     unsubscribe: function (channels) {
+      // Remove from pending list so reconnects don't re-subscribe
+      for (var i = 0; i < channels.length; i++) {
+        var idx = pendingSubs.indexOf(channels[i]);
+        if (idx !== -1) pendingSubs.splice(idx, 1);
+      }
       this.send({ type: 'unsubscribe', data: { channels: channels } });
     },
+
+    /** Returns the list of currently tracked subscriptions. */
+    get subscriptions() { return pendingSubs.slice(); },
 
     /** Request the current state of a listing by collection + token ID. */
     getListing: function (collection, tokenId) {
@@ -106,6 +123,14 @@
 
     ws.onopen = function () {
       retry = 0; // reset backoff on successful connect
+      // Re-subscribe any channels that were subscribed before disconnect.
+      // Page-level Alpine components subscribe on init() via MW_WS.subscribe();
+      // on reconnect we replay those subscriptions so the server re-activates
+      // the push event filters that were lost when the old connection closed.
+      var subs = pendingSubs.slice();
+      if (subs.length > 0) {
+        api.send({ type: 'subscribe', data: { channels: subs } });
+      }
       // Fire a custom event so Alpine / other listeners can react
       window.dispatchEvent(new CustomEvent('mw-ws-open'));
     };
@@ -159,11 +184,30 @@
             break;
 
           default:
-            // Forward SSE-style events as DOM events for HTMX
+            // Forward push events as DOM events for HTMX hx-trigger attributes.
+            // Server-sent events (listing-updated, auction-updated, activity,
+            // notification, etc.) trigger matching HTMX elements directly.
             if (msg.type && msg.data) {
+              // Custom event for programmatic listeners
               window.dispatchEvent(new CustomEvent('mw-ws-event', {
                 detail: { type: msg.type, data: msg.data },
               }));
+            // Trigger HTMX elements with hx-trigger matching this event type.
+              // HTMX registers listeners per-element, so we iterate all [hx-trigger]
+              // elements and trigger those whose trigger matches the event type
+              // (using word-boundary match to avoid false positives like "update"
+              // matching "auction-updated").
+              if (typeof htmx !== 'undefined') {
+                document.querySelectorAll('[hx-trigger]').forEach(function(el) {
+                  var triggers = (el.getAttribute('hx-trigger') || '').split(',');
+                  var matches = triggers.some(function(t) {
+                    return t.trim().split(/\s+/)[0] === msg.type;
+                  });
+                  if (matches) {
+                    htmx.trigger(el, msg.type);
+                  }
+                });
+              }
             }
         }
       } catch (_) {

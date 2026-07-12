@@ -12,6 +12,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"connectrpc.com/connect"
 	"github.com/fasthttp/websocket"
 	"github.com/gofiber/fiber/v2"
 	"github.com/google/uuid"
@@ -19,6 +20,8 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
+	marketplacev1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
+	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -157,6 +160,7 @@ type Handler struct {
 	cfg        *config.Config
 	bcast      *sse.Broadcaster
 	q          *db.Q
+	client     marketplacev1connect.MarketplaceServiceClient
 	serverTime func() int64
 	mu         sync.RWMutex
 	conns      map[string]*Connection // id → Connection
@@ -165,29 +169,18 @@ type Handler struct {
 
 // NewHandler creates a WebSocket Handler.
 // serverTime is a function that returns the latest block timestamp in ms (from indexer).
-func NewHandler(cfg *config.Config, bcast *sse.Broadcaster, q *db.Q, serverTime func() int64) *Handler {
+// client is a Connect-RPC client for the MarketplaceService, used to serve
+// action-based queries (get_listing, get_auction, get_offer, get_token).
+func NewHandler(cfg *config.Config, bcast *sse.Broadcaster, q *db.Q, client marketplacev1connect.MarketplaceServiceClient, serverTime func() int64) *Handler {
 	return &Handler{
 		cfg:        cfg,
 		bcast:      bcast,
 		q:          q,
+		client:     client,
 		serverTime: serverTime,
 		conns:      make(map[string]*Connection),
 		ipCounters: make(map[string]*int64),
 	}
-}
-
-// extractSSEEventType parses an SSE-formatted string and returns the event
-// type (the value after "event:"). Returns "" when no event type is found.
-// SSE format: "event: TYPE\ndata: JSON\n\n"
-func extractSSEEventType(sse string) string {
-	s := strings.ReplaceAll(sse, "\r\n", "\n")
-	for _, line := range strings.Split(s, "\n") {
-		line = strings.TrimSpace(line)
-		if strings.HasPrefix(line, "event:") {
-			return strings.TrimSpace(line[6:])
-		}
-	}
-	return ""
 }
 
 func (h *Handler) serverTimeMs() int64 {
@@ -199,8 +192,8 @@ func (h *Handler) serverTimeMs() int64 {
 
 // HandleWebSocket is the Fiber handler for GET /ws.
 // It upgrades the HTTP connection to WebSocket, authenticates via JWT cookie,
-// subscribes to the SSE broadcaster for push events, and manages the read/write
-// lifecycle. Returns 429 when the per-IP or global connection limit is exceeded.
+// subscribes to the broadcaster for push events (raw Event objects, no SSE
+// formatting), and manages the read/write lifecycle.
 func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	ip := clientIP(c)
 
@@ -236,8 +229,8 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 		return c.Status(fiber.StatusBadRequest).SendString("websocket upgrade failed")
 	}
 
-	// Subscribe to SSE broadcaster for push events
-	ch, cancel, ok := h.bcast.Subscribe()
+	// Subscribe to broadcaster for raw push events (no SSE formatting).
+	eventCh, cancel, ok := h.bcast.SubscribeRaw()
 	if !ok {
 		_ = wsConn.Close()
 		h.releaseIP(ip)
@@ -257,7 +250,9 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	h.conns[conn.id] = conn
 	h.mu.Unlock()
 
-	// Write pump: forwards broadcaster events to the WebSocket
+	// Write pump: forwards broadcaster events to the WebSocket as JSON
+	// envelopes. Raw Event objects are marshalled directly — no SSE parsing
+	// or conversion needed.
 	go func() {
 		defer func() {
 			cancel()
@@ -283,29 +278,39 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 		default:
 		}
 
-		// Read from broadcaster events, convert SSE format to WebSocket JSON
-		// envelope, and forward to the WebSocket connection — filtered by
-		// the client's channel subscriptions (if any).
+		// Read raw broadcaster events and forward to WebSocket.
+		// Subscription filtering is applied per-event-type so clients
+		// only receive events matching their subscribed channels.
 		for {
 			select {
-			case msg, ok := <-ch:
+			case ev, ok := <-eventCh:
 				if !ok {
 					return
 				}
-				// Extract the event type from the SSE string so we can check
-				// subscription filters before unmarshalling the full payload.
-				eventType := extractSSEEventType(msg)
-				if eventType != "" && !conn.isSubscribedToEvent(eventType) {
-					continue // skip — client not subscribed to this event type
+				// Skip expensive marshalling when no subscription matches.
+				// The isSubscribedToEvent method does its own coarse pre-check
+				// under a single lock — we just call it directly now.
+				payload, err := json.Marshal(ev.Data)
+				if err != nil {
+					continue
 				}
-				// Convert SSE-formatted event ("event: TYPE\ndata: JSON\n\n")
-				// to WebSocket JSON envelope ({"type":"TYPE","data":JSON}).
-				if wsMsg := sseToWSMessage(msg); wsMsg != nil {
-					select {
-					case conn.send <- wsMsg:
-					default:
-						// Slow client — drop
-					}
+				// Filter by client's channel subscriptions (with per-entity
+				// scoping when payload is available).
+				if !conn.isSubscribedToEvent(string(ev.Type), payload) {
+					continue
+				}
+				env := Message{
+					Type: MessageType(ev.Type),
+					Data: json.RawMessage(payload),
+				}
+				msg, err := json.Marshal(env)
+				if err != nil {
+					continue
+				}
+				select {
+				case conn.send <- msg:
+				default:
+					// Slow client — drop
 				}
 			case <-conn.done:
 				return
@@ -407,45 +412,6 @@ func sameOriginHost(a, b string) bool {
 	return strings.EqualFold(strings.TrimSuffix(a, "."), strings.TrimSuffix(b, "."))
 }
 
-// sseToWSMessage converts an SSE-formatted broadcaster event to a WebSocket JSON
-// envelope. SSE format: "event: TYPE\ndata: JSON\n\n"
-// WS format: {"type":"TYPE","data":JSON}
-// Returns nil when the SSE string cannot be parsed.
-func sseToWSMessage(sse string) []byte {
-	// Split on \n — at most 3 lines expected: event line, data line, blank
-	// Handle both LF and CRLF.
-	var eventType, dataRaw string
-	for _, line := range splitLines(sse) {
-		line = strings.TrimSpace(line)
-		switch {
-		case strings.HasPrefix(line, "event:"):
-			eventType = strings.TrimSpace(line[6:])
-		case strings.HasPrefix(line, "data:"):
-			dataRaw = strings.TrimSpace(line[5:])
-		}
-	}
-	if eventType == "" && dataRaw == "" {
-		return nil
-	}
-
-	env := Message{
-		Type: MessageType(eventType),
-		Data: json.RawMessage(dataRaw),
-	}
-	out, err := json.Marshal(env)
-	if err != nil {
-		return nil
-	}
-	return out
-}
-
-// splitLines splits s on \n, handling both LF and CRLF.
-func splitLines(s string) []string {
-	// Normalize CRLF → LF first
-	s = strings.ReplaceAll(s, "\r\n", "\n")
-	return strings.Split(s, "\n")
-}
-
 // authenticate extracts the wallet address from the JWT cookie, if present.
 // Returns "" for unauthenticated connections (still allowed for public data).
 func (h *Handler) authenticate(c *fiber.Ctx) string {
@@ -529,7 +495,7 @@ func (h *Handler) releaseIP(ip string) {
 // the action name. Actions are lightweight requests that don't need on-chain
 // wallet signatures — they fetch current state, manage subscriptions, etc.
 func (h *Handler) dispatchAction(c *Connection, act ActionData) {
-	if h.q == nil {
+	if h.client == nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "server not ready"})})
 		return
 	}
@@ -552,26 +518,28 @@ func (h *Handler) dispatchAction(c *Connection, act ActionData) {
 }
 
 // handleGetListing fetches a listing by collection + token ID and sends the
-// result via WebSocket. Expected params: {"collection":"0x...","token_id":"1"}
-type getListingParams struct {
-	Collection string `json:"collection"`
-	TokenID    string `json:"token_id"`
-}
-
+// result via WebSocket via the Connect-RPC MarketplaceService client.
 func (h *Handler) handleGetListing(c *Connection, raw json.RawMessage) {
-	var p getListingParams
-	if err := json.Unmarshal(raw, &p); err != nil || p.Collection == "" || p.TokenID == "" {
+	var params struct {
+		Collection string `json:"collection"`
+		TokenID    string `json:"token_id"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || params.Collection == "" || params.TokenID == "" {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid get_listing params: need collection + token_id"})})
 		return
 	}
 	ctx, cancel := c.ctxOrBackground()
 	defer cancel()
-	row, err := h.q.GetListing(ctx, p.Collection, p.TokenID)
+	req := connect.NewRequest(&marketplacev1.GetListingRequest{
+		Collection: params.Collection,
+		TokenId:    params.TokenID,
+	})
+	resp, err := h.client.GetListing(ctx, req)
 	if err != nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "not found"})})
 		return
 	}
-	c.writeJSON(Message{Type: MsgState, Data: mustJSON(row)})
+	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp.Msg)})
 }
 
 // ctxOrBackground returns a context with a 5-second timeout so a slow/hanging
@@ -581,90 +549,75 @@ func (*Connection) ctxOrBackground() (context.Context, context.CancelFunc) {
 	return context.WithTimeout(context.Background(), 5*time.Second)
 }
 
-// handleGetAuction fetches an auction by ID and sends the result via WebSocket.
-// Expected params: {"auction_id":123}
-type getAuctionParams struct {
-	AuctionID int64 `json:"auction_id"`
-}
-
+// handleGetAuction fetches an auction by ID and sends the result via WebSocket
+// via the Connect-RPC MarketplaceService client.
 func (h *Handler) handleGetAuction(c *Connection, raw json.RawMessage) {
-	var p getAuctionParams
-	if err := json.Unmarshal(raw, &p); err != nil || p.AuctionID <= 0 {
+	var params struct {
+		AuctionID int64 `json:"auction_id"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || params.AuctionID <= 0 {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid get_auction params: need auction_id"})})
 		return
 	}
 	ctx, cancel := c.ctxOrBackground()
 	defer cancel()
-	row, err := h.q.GetAuction(ctx, p.AuctionID)
+	req := connect.NewRequest(&marketplacev1.GetAuctionRequest{
+		AuctionId: params.AuctionID,
+	})
+	resp, err := h.client.GetAuction(ctx, req)
 	if err != nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "not found"})})
 		return
 	}
-	c.writeJSON(Message{Type: MsgState, Data: mustJSON(row)})
+	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp.Msg)})
 }
 
-// handleGetOffer fetches an offer by ID and sends the result via WebSocket.
-// Expected params: {"offer_id":"123"}
-type getOfferParams struct {
-	OfferID string `json:"offer_id"`
-}
-
+// handleGetOffer fetches an offer by ID and sends the result via WebSocket
+// via the Connect-RPC MarketplaceService client.
 func (h *Handler) handleGetOffer(c *Connection, raw json.RawMessage) {
-	var p getOfferParams
-	if err := json.Unmarshal(raw, &p); err != nil || p.OfferID == "" {
+	var params struct {
+		OfferID string `json:"offer_id"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || params.OfferID == "" {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid get_offer params: need offer_id"})})
 		return
 	}
 	ctx, cancel := c.ctxOrBackground()
 	defer cancel()
-	row, err := h.q.GetOffer(ctx, p.OfferID)
+	req := connect.NewRequest(&marketplacev1.GetOfferRequest{
+		OfferId: params.OfferID,
+	})
+	resp, err := h.client.GetOffer(ctx, req)
 	if err != nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "not found"})})
 		return
 	}
-	c.writeJSON(Message{Type: MsgState, Data: mustJSON(row)})
+	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp.Msg)})
 }
 
-// handleGetToken fetches token metadata and sends the result via WebSocket.
-// Expected params: {"collection":"0x...","token_id":"1"}
-type getTokenParams struct {
-	Collection string `json:"collection"`
-	TokenID    string `json:"token_id"`
-}
-
+// handleGetToken fetches token metadata and sends the result via WebSocket
+// via the Connect-RPC MarketplaceService client.
 func (h *Handler) handleGetToken(c *Connection, raw json.RawMessage) {
-	var p getTokenParams
-	if err := json.Unmarshal(raw, &p); err != nil || p.Collection == "" || p.TokenID == "" {
+	var params struct {
+		Collection string `json:"collection"`
+		TokenID    string `json:"token_id"`
+	}
+	if err := json.Unmarshal(raw, &params); err != nil || params.Collection == "" || params.TokenID == "" {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid get_token params: need collection + token_id"})})
 		return
 	}
 	ctx, cancel := c.ctxOrBackground()
 	defer cancel()
-	name, desc, imageURI, animURI, metaURI, fetchedAt, err := h.q.GetTokenFullMetadata(ctx, p.Collection, p.TokenID)
+	req := connect.NewRequest(&marketplacev1.GetTokenRequest{
+		Collection: params.Collection,
+		TokenId:    params.TokenID,
+	})
+	resp, err := h.client.GetToken(ctx, req)
 	if err != nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "not found"})})
 		return
 	}
-	resp := struct {
-		Collection   string `json:"collection"`
-		TokenID      string `json:"token_id"`
-		Name         string `json:"name"`
-		Description  string `json:"description"`
-		ImageURI     string `json:"image_uri"`
-		AnimationURI string `json:"animation_uri"`
-		MetadataURI  string `json:"metadata_uri"`
-		FetchedAt    string `json:"fetched_at"`
-	}{
-		Collection:   p.Collection,
-		TokenID:      p.TokenID,
-		Name:         name,
-		Description:  desc,
-		ImageURI:     imageURI,
-		AnimationURI: animURI,
-		MetadataURI:  metaURI,
-		FetchedAt:    fetchedAt.Format(time.RFC3339Nano),
-	}
-	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp)})
+	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp.Msg)})
 }
 
 // ── Subscription management ───────────────────────────────────────────────────
@@ -674,12 +627,9 @@ func (h *Handler) handleGetToken(c *Connection, raw json.RawMessage) {
 // cannot subscribe to another wallet's notification events. Unauthenticated
 // connections (addr == "") are rejected for user: channels entirely.
 //
-// v1 filter granularity: channelMatchesEventType only checks the channel
-// prefix (token:/collection:/user:), not the full encoded address/ID. This
-// means a subscription to "token:0xAAA:1" will receive ALL token events
-// across every collection/token, not just 0xAAA:1. Per-entity scoping would
-// require peeking into SSE payload bodies; this coarse category-level filter
-// is the intentional v1 trade-off.
+// Per-entity scoping (W5): channelMatchesEvent now parses entity IDs from
+// the channel and matches against the event payload's collection/token/address
+// fields. A subscription to "token:0xAAA:1" only receives events for token 0xAAA:1.
 func (c *Connection) subscribe(channels []string) {
 	c.subMu.Lock()
 	if c.subscriptions == nil {
@@ -719,16 +669,42 @@ func (c *Connection) unsubscribe(channels []string) {
 }
 
 // isSubscribedToEvent checks whether this connection's subscriptions match
-// a given SSE event type. When the connection has no subscriptions, it
-// receives all events (backward-compatible default).
-func (c *Connection) isSubscribedToEvent(eventType string) bool {
+// a given event. When the connection has no subscriptions, it receives all
+// events (backward-compatible default).
+//
+// Does a lightweight coarse prefix check first (no JSON parsing), then parses
+// the payload once for per-entity scoping (W5). Both checks happen under a
+// single lock acquisition.
+func (c *Connection) isSubscribedToEvent(eventType string, payloadBytes []byte) bool {
 	c.subMu.RLock()
 	defer c.subMu.RUnlock()
 	if len(c.subscriptions) == 0 {
 		return true // no subscriptions → receive all
 	}
+	// Coarse prefix pre-check: does any channel match this event category?
+	// Skip expensive JSON parsing if no channel would match.
+	hasAnyMatch := false
 	for ch := range c.subscriptions {
-		if channelMatchesEventType(ch, eventType) {
+		if channelMatchesPrefix(ch, eventType) {
+			hasAnyMatch = true
+			break
+		}
+	}
+	if !hasAnyMatch {
+		return false
+	}
+	// Parse the event payload once (not per-channel) for efficiency.
+	// If parsing fails (malformed), err on the side of delivery.
+	var ev *eventPayload
+	if len(payloadBytes) > 0 {
+		var parsed eventPayload
+		if err := json.Unmarshal(payloadBytes, &parsed); err != nil {
+			return true // malformed payload → deliver
+		}
+		ev = &parsed
+	}
+	for ch := range c.subscriptions {
+		if channelMatchesEvent(ch, eventType, ev) {
 			return true
 		}
 	}
@@ -737,12 +713,10 @@ func (c *Connection) isSubscribedToEvent(eventType string) bool {
 
 // ── BroadcastTo (direct push) ────────────────────────────────────────────────
 
-// BroadcastTo sends an event to ALL connected WebSocket clients (no subscription
-// filtering). It is used for direct server-side pushes that bypass the SSE
-// broadcaster. Clients with no active subscriptions receive all events;
-// clients with active subscriptions also receive all BroadcastTo events
-// (subscription filtering only applies to the SSE bridge goroutine, which
-// reads from the broadcaster's shared event channel).
+// BroadcastTo sends an event to WebSocket clients, respecting per-connection
+// subscription filters. Clients with no active subscriptions receive all
+// events (backward-compatible default). Clients with subscriptions only
+// receive events matching their subscribed channels.
 // Uses the WebSocket JSON envelope format ({"type":"...","data":...})
 // instead of SSE line format, so ws.js clients can parse directly.
 func (h *Handler) BroadcastTo(ev sse.Event) {
@@ -763,6 +737,11 @@ func (h *Handler) BroadcastTo(ev sse.Event) {
 	defer h.mu.RUnlock()
 
 	for _, conn := range h.conns {
+		// Respect per-connection subscription filters (same logic as the
+		// broadcaster event pump goroutine).
+		if !conn.isSubscribedToEvent(string(ev.Type), payload) {
+			continue
+		}
 		select {
 		case conn.send <- msg:
 		default:

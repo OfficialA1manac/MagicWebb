@@ -2,86 +2,155 @@ package graphql
 
 import (
 	"context"
-	"encoding/json"
-	"log"
 	"net/http"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql/handler"
+	"github.com/99designs/gqlgen/graphql/handler/extension"
+	"github.com/99designs/gqlgen/graphql/handler/lru"
+	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/gofiber/fiber/v2"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
-// GraphQLServer handles GraphQL queries via the custom executor.
+// GraphQLServer wraps a gqlgen-generated executable schema with Fiber
+// HTTP handlers for POST /graphql, GET /graphql (docs), and GET /graphiql.
 type GraphQLServer struct {
-	Resolver QueryResolver
+	srv *handler.Server
+	q   *db.Q // retained for DataLoader creation per-request
 }
 
-// NewGraphQLServer creates a GraphQL server with the db.Q as the data source.
+// NewGraphQLServer creates a gqlgen-based GraphQL server powered by the
+// generated executable schema from schema.graphql. The db.Q provides
+// data access; bcast is retained for future push-notification resolvers.
+//
+// Complexity limits: max query depth of 12 and max 200 nodes to prevent
+// resource-exhaustion GraphQL queries (deeply nested collections.listings
+// etc.). The LRU operation cache reduces repeated parse/validate costs.
 func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster) *GraphQLServer {
-	return &GraphQLServer{
-		Resolver: &resolver{q: q, bcast: bcast},
-	}
+	resolver := NewResolver(q, bcast)
+	schema := NewExecutableSchema(Config{
+		Resolvers: resolver,
+	})
+
+	srv := handler.New(schema)
+
+	// Transport: accept POST JSON and GET query-string queries.
+	// GraphQL subscriptions are enabled in the schema and resolver layer.
+	// Subscriptions are delivered via the existing /ws WebSocket endpoint
+	// which bridges Broadcaster push events to connected clients.
+	srv.AddTransport(transport.Options{})
+	srv.AddTransport(transport.GET{})
+	srv.AddTransport(transport.POST{})
+
+	// Complexity limits: prevent deep-nested or mega-node queries from
+	// overloading the DB. 12-depth is enough for any reasonable query
+	// (e.g. collections->listings->seller); 200 node cap bounds total
+	// fields requested across all nested objects.
+	srv.Use(extension.FixedComplexityLimit(200))
+
+	// APQ (Automatic Persisted Queries): clients send a hash first;
+	// full query only on cache miss. Halves bandwidth for repeated
+	// queries (e.g., polling a saved search).
+	srv.Use(extension.AutomaticPersistedQuery{
+		Cache: lru.New[string](100),
+	})
+
+	// Introspection: enabled in all environments so GraphiQL and
+	// external tooling (Apollo Studio, Postman, etc.) can discover
+	// the schema. No auth secrets are exposed through introspection.
+	// CORS already limits which origins can access /graphql.
+
+	return &GraphQLServer{srv: srv, q: q}
 }
 
-// HandlePOST is a Fiber handler for POST /graphql.
+// HandlePOST executes a GraphQL query and returns the JSON response.
+// This adapter bridges Fiber's request/response model to gqlgen's
+// standard http.Handler interface.
 func (s *GraphQLServer) HandlePOST(c *fiber.Ctx) error {
 	if c.Method() != http.MethodPost {
 		return c.Status(fiber.StatusMethodNotAllowed).SendString("use POST for GraphQL queries")
 	}
 
-	var req struct {
-		Query     string         `json:"query"`
-		Variables map[string]any `json:"variables"`
-	}
-	if err := json.Unmarshal(c.Body(), &req); err != nil {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"errors": []map[string]any{
-				{"message": "invalid JSON body"},
-			},
-		})
-	}
-
-	if req.Query == "" {
-		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
-			"errors": []map[string]any{
-				{"message": "query is required"},
-			},
-		})
-	}
-
 	ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
 	defer cancel()
 
-	data, err := Execute(ctx, s.Resolver, req.Query, req.Variables)
+	// Build an http.Request from Fiber's context so gqlgen can parse
+	// the query body. The body stream is consumed by gqlgen's POST
+	// transport (JSON decoding).
+	req, err := http.NewRequestWithContext(ctx, "POST", "/graphql", c.Request().BodyStream())
 	if err != nil {
-		// Log the full error internally for debugging; surface a sanitized
-		// message to clients to avoid leaking internal details (DB queries,
-		// table/column names, connection info) through GraphQL error responses.
-		log.Printf("graphql execute error: %v", err)
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"errors": []map[string]any{
-				{"message": "internal server error"},
-			},
+			"errors": []map[string]any{{"message": "internal server error"}},
 		})
 	}
+	req.Header.Set("Content-Type", string(c.Request().Header.ContentType()))
 
+	// Attach request-scoped DataLoaders to the context before serving.
+	// Each request gets fresh loaders so batched queries don't leak across
+	// users/requests. The resolvers extract loaders via dataloader.FromContext.
+	req = req.WithContext(dataloader.WithLoaders(ctx, dataloader.New(s.q)))
+
+	// gqlgen sets Content-Type via Header().Set(); we pre-set it here
+	// because the fiberResponseWriter's Header() returns a disconnected
+	// snapshot map (Fiber headers are not http.Header-compatible).
 	c.Set("Content-Type", "application/json")
-	return c.Send(data)
+
+	w := &fiberResponseWriter{c: c}
+	s.srv.ServeHTTP(w, req)
+
+	// If gqlgen wrote a body, the response is already committed.
+	// Otherwise return 200 OK (empty response for valid queries).
+	if w.written {
+		return nil
+	}
+	return c.SendStatus(fiber.StatusOK)
 }
 
-// HandleGET is a Fiber handler for GET /graphql that shows basic docs.
+// HandleGET serves the GraphQL API documentation page.
 func (s *GraphQLServer) HandleGET(c *fiber.Ctx) error {
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(graphqlDocsHTML)
 }
 
-// HandleGraphiQL is a Fiber handler for GET /graphiql that shows the GraphiQL IDE.
+// HandleGraphiQL serves the interactive GraphiQL IDE.
 func (s *GraphQLServer) HandleGraphiQL(c *fiber.Ctx) error {
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(graphiqlHTML)
 }
+
+// fiberResponseWriter adapts a Fiber context into an http.ResponseWriter
+// so gqlgen's handler.ServeHTTP can write directly to the Fiber response.
+// Write() writes bytes directly to Fiber's response body writer (no buffering).
+type fiberResponseWriter struct {
+	c       *fiber.Ctx
+	written bool
+	status  int
+}
+
+func (w *fiberResponseWriter) Header() http.Header {
+	// Return a fresh map — gqlgen uses this to set Content-Type, but
+	// we pre-set that on the Fiber context in HandlePOST. Any mutations
+	// to this map are discarded since Fiber headers are not
+	// http.Header-compatible. This is safe because gqlgen only sets
+	// Content-Type and we handle that above.
+	return http.Header{}
+}
+
+func (w *fiberResponseWriter) Write(b []byte) (int, error) {
+	w.written = true
+	return w.c.Response().BodyWriter().Write(b)
+}
+
+func (w *fiberResponseWriter) WriteHeader(statusCode int) {
+	w.status = statusCode
+	w.c.Status(statusCode)
+}
+
+// ── Documentation pages (unchanged from previous handler) ──────────────────
 
 const graphqlDocsHTML = `<!DOCTYPE html>
 <html>

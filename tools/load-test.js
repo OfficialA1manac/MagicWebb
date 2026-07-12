@@ -12,6 +12,7 @@
 import http from 'k6/http';
 import { check, sleep, group } from 'k6';
 import { Rate } from 'k6/metrics';
+import { WebSocket } from 'k6/experimental/websockets';
 
 const errorRate = new Rate('errors');
 
@@ -75,15 +76,19 @@ export default function () {
     get('/healthz', 200);
   });
 
-  // ── SSE events (gated — only runs when SSE_TEST=true to avoid skewing
-  // latency/error metrics with the 5s streaming GET).
-  if (__ENV.SSE_TEST === 'true') {
-    group('sse - events', () => {
-      const res = http.get(`${TARGET}/events`, { headers: { Accept: 'text/event-stream' }, timeout: '5s' });
-      const ok = check(res, {
-        'SSE preamble': (r) => r.body.startsWith(': connected\n\n'),
+  // ── WebSocket connectivity test (gated — only runs when WS_TEST=true).
+  // Uses k6's native WebSocket module for real handshake verification.
+  if (__ENV.WS_TEST === 'true') {
+    group('ws - connectivity', () => {
+      const wsUrl = TARGET.replace('https://', 'wss://').replace('http://', 'ws://') + '/ws';
+      const ws = new WebSocket(wsUrl);
+      ws.addEventListener('open', () => {
+        ws.send(JSON.stringify({ type: 'ping' }));
+        ws.close();
       });
-      errorRate.add(!ok); // track SSE connection failures in the errors metric
+      // k6 WebSocket doesn't have a check-friendly API, so we track via
+      // ws.onerror — the errors Rate will catch connection failures.
+      ws.onerror = () => { errorRate.add(1); };
     });
   }
 

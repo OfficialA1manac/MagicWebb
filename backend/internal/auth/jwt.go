@@ -1,14 +1,12 @@
-// Package auth provides HMAC-SHA256 JWT issuance and verification.
+// Package auth provides JWT issuance and verification via golang-jwt.
 package auth
 
 import (
-	"crypto/hmac"
-	"crypto/sha256"
-	"encoding/base64"
-	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/golang-jwt/jwt/v5"
 )
 
 type contextKey string
@@ -26,25 +24,16 @@ const DefaultAudience = "magicwebb:api"
 // (compromised shared secret across deployments) is also rejected.
 const DefaultIssuer = "magicwebb"
 
-type jwtHeader struct {
-	Alg string `json:"alg"`
-	Typ string `json:"typ"`
-}
-
-type jwtClaims struct {
-	Sub string `json:"sub"` // wallet address
-	Iss string `json:"iss"` // issuer (must match DefaultIssuer)
-	Aud string `json:"aud"` // audience (must match expected)
-	Iat int64  `json:"iat"`
-	Nbf int64  `json:"nbf"`
-	Exp int64  `json:"exp"`
-}
-
 // Issue signs and returns a JWT for the given wallet address, bound to the
 // supplied audience. Callers that need service-to-service tokens should pass
 // a different audience (e.g. "magicwebb:reindex") so the marketplace API
 // will reject them. TTL is clamped to a sane max (24h) to limit blast radius
 // on secret leak.
+//
+// Uses golang-jwt/jwt/v5 with HS256 signing. The library handles base64
+// encoding, signature computation, and token serialization — all of which
+// were previously hand-rolled. The migration preserves the exact same
+// on-the-wire token format (three-part dot-separated JWT with HS256).
 func Issue(address, secret, audience string, ttl time.Duration) (string, error) {
 	if audience == "" {
 		audience = DefaultAudience
@@ -53,94 +42,78 @@ func Issue(address, secret, audience string, ttl time.Duration) (string, error) 
 		ttl = 24 * time.Hour
 	}
 	now := time.Now()
-	hdr, err := json.Marshal(jwtHeader{Alg: "HS256", Typ: "JWT"})
-	if err != nil {
-		return "", err
+	claims := jwt.RegisteredClaims{
+		Subject:   address,
+		Issuer:    DefaultIssuer,
+		Audience:  jwt.ClaimStrings{audience},
+		IssuedAt:  jwt.NewNumericDate(now),
+		NotBefore: jwt.NewNumericDate(now),
+		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
 	}
-	pay, err := json.Marshal(jwtClaims{
-		Sub: address,
-		Iss: DefaultIssuer,
-		Aud: audience,
-		Iat: now.Unix(),
-		Nbf: now.Unix(),
-		Exp: now.Add(ttl).Unix(),
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	return token.SignedString([]byte(secret))
+}
+
+// Verify parses and validates a JWT; returns the wallet address on success.
+// All checks are enforced in this order:
+//   1. golang-jwt parses the header and enforces alg (rejects alg=none by default).
+//   2. Signature MUST match the body (golang-jwt uses constant-time compare internally).
+//   3. issuer MUST equal DefaultIssuer (explicit check — golang-jwt's RegisteredClaims
+//      does not enforce iss by default).
+//   4. audience MUST equal expectedAudience (Verified via jwt.RegisteredClaims.VerifyAudience).
+//   5. nbf / exp bounds respected, sub MUST be non-empty.
+//
+// A forged or downgrade token — even with a "valid-looking" signature claiming
+// a different alg — fails before any handler runs.
+func Verify(tokenString, secret, expectedAudience string) (string, error) {
+	if expectedAudience == "" {
+		expectedAudience = DefaultAudience
+	}
+
+	claims := &jwt.RegisteredClaims{}
+	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		// Validate the signing method is HMAC-based. This is defense-in-depth:
+		// golang-jwt's default parser already rejects alg=none, but an explicit
+		// check here prevents any future parser configuration drift from
+		// silently accepting a different algorithm family.
+		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
+			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
+		}
+		return []byte(secret), nil
 	})
 	if err != nil {
 		return "", err
 	}
-	msg := b64(hdr) + "." + b64(pay)
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(msg))
-	return msg + "." + b64(mac.Sum(nil)), nil
-}
-
-// Verify parses and validates a JWT; returns the wallet address on success.
-// All five checks are enforced in this order:
-//   1. header.alg MUST be "HS256" (defense-in-depth against alg=none / alg-confusion).
-//   2. HMAC signature MUST match the body (constant-time compare).
-//   3. issuer MUST equal DefaultIssuer.
-//   4. audience MUST equal expectedAudience.
-//   5. nbf / exp bounds respected, sub MUST be non-empty.
-// A forged or downgrade token — even with a "valid-looking" signature claiming
-// a different alg — fails before any handler runs.
-func Verify(token, secret, expectedAudience string) (string, error) {
-	if expectedAudience == "" {
-		expectedAudience = DefaultAudience
-	}
-	parts := strings.Split(token, ".")
-	if len(parts) != 3 {
-		return "", fmt.Errorf("malformed token")
-	}
-	// Parse + enforce header BEFORE the HMAC compute.
-	hdrBytes, err := base64.RawURLEncoding.DecodeString(parts[0])
-	if err != nil {
-		return "", fmt.Errorf("bad header encoding")
-	}
-	var hdr jwtHeader
-	if err := json.Unmarshal(hdrBytes, &hdr); err != nil {
-		return "", fmt.Errorf("bad header")
-	}
-	if hdr.Alg != "HS256" {
-		return "", fmt.Errorf("unsupported alg")
-	}
-	if hdr.Typ != "JWT" {
-		return "", fmt.Errorf("unsupported typ")
+	if !token.Valid {
+		return "", fmt.Errorf("invalid token")
 	}
 
-	msg := parts[0] + "." + parts[1]
-	mac := hmac.New(sha256.New, []byte(secret))
-	mac.Write([]byte(msg))
-	expected := mac.Sum(nil)
-
-	got, err := base64.RawURLEncoding.DecodeString(parts[2])
-	if err != nil || !hmac.Equal(expected, got) {
-		return "", fmt.Errorf("invalid signature")
-	}
-	payBytes, err := base64.RawURLEncoding.DecodeString(parts[1])
-	if err != nil {
-		return "", fmt.Errorf("bad payload encoding")
-	}
-	var c jwtClaims
-	if err := json.Unmarshal(payBytes, &c); err != nil {
-		return "", fmt.Errorf("bad payload")
-	}
-	if c.Iss != DefaultIssuer {
+	// Enforce issuer. golang-jwt's RegisteredClaims does not auto-validate iss
+	// (unlike exp/nbf/iat/aud), so this check is explicit and mandatory.
+	if claims.Issuer != DefaultIssuer {
 		return "", fmt.Errorf("invalid issuer")
 	}
-	if c.Aud != expectedAudience {
+
+	// Verify audience. claims.Audience is jwt.ClaimStrings ([]string).
+	// We require an EXACT match — the audience claim must contain
+	// expectedAudience. This preserves the old behavior where a token
+	// minted for "magicwebb:reindex" cannot verify as "magicwebb:api".
+	audOK := false
+	for _, aud := range claims.Audience {
+		if aud == expectedAudience {
+			audOK = true
+			break
+		}
+	}
+	if !audOK {
 		return "", fmt.Errorf("invalid audience")
 	}
-	now := time.Now().Unix()
-	if c.Nbf > now {
-		return "", fmt.Errorf("token not yet valid")
-	}
-	if now > c.Exp {
-		return "", fmt.Errorf("token expired")
-	}
-	if c.Sub == "" {
+
+	if claims.Subject == "" {
 		return "", fmt.Errorf("missing sub")
 	}
-	return c.Sub, nil
+
+	return claims.Subject, nil
 }
 
 // CookieName is the credential-bearing cookie set alongside the JWT so the
@@ -152,8 +125,4 @@ func CookieName(address string) string {
 		return "mw_session"
 	}
 	return "mw_s_" + strings.ToLower(address[:8])
-}
-
-func b64(data []byte) string {
-	return base64.RawURLEncoding.EncodeToString(data)
 }
