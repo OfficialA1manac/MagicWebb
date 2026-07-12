@@ -66,7 +66,7 @@
        hx-swap="outerHTML" on the entire tab bar + list region combined.
        The Alpine x-data tab state is preserved on the outer div (above)
        so the active-tab selection survives the inner swap. -->
-  <div id="offers-tab-bar"        hx-get="/partials/offers?addr={{.Addr}}"        hx-trigger="{{if .Addr}}offer-updated, listing-updated, every 300s [!document.hidden]{{end}}"
+  <div id="offers-tab-bar"        hx-get="/partials/offers?addr={{.Addr}}"        hx-trigger="{{if .Addr}}offer-updated, listing-updated{{end}}"
        hx-swap="outerHTML"
        hx-target="#offers-tab-bar"
        hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">

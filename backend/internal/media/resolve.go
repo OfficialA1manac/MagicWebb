@@ -412,9 +412,19 @@ func isTestNet(addr netip.Addr) bool {
 // share this rule so we never advertise a non-image MIME for an image/served
 // endpoint.
 //
+// When built with `-tags zigmedia`, the detection is delegated to the
+// Zig-accelerated sniffer (zignsniff_zigmedia.go) which processes the blob
+// in a single pass with zero heap allocation. The default build uses the
+// Go-native magic-byte chain below.
+//
 // Kept in the media package so the indexer worker can call it without
 // importing api (which would be a dependency-direction violation).
 func SniffImage(body []byte) (mime string, ok bool) {
+	// When the zigmedia tag is active, sniffer() is the Zig-accelerated
+	// version; otherwise it delegates to the Go fallback below.
+	if mime, ok := sniffer(body); ok {
+		return mime, true
+	}
 	switch {
 	case len(body) >= 8 &&
 		body[0] == 0x89 && body[1] == 'P' && body[2] == 'N' && body[3] == 'G' &&

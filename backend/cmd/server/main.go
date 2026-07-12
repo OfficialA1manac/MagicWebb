@@ -37,6 +37,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/keeper"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -167,13 +168,48 @@ func main() {
 	// results even when the wallet legitimately holds NFTs.
 	seedTracked(ctx, q)
 
-	// Start indexer in background. Keepers gate on a Postgres advisory lock
-	// (dedicated connection — not through the shared pool) so only one instance
-	// broadcasts settle/refund txs; the returned lockCtx stops them the moment
-	// ownership is lost.
+	// ── gRPC Keeper Election ──────────────────────────────────────────────
+	// Replaces the Postgres advisory lock (db.WaitKeeperLock) with a
+	// peer-to-peer gRPC heartbeat protocol. The election runs on the same
+	// gRPC server as the event bridge so all inter-instance communication
+	// shares one port and one set of peer connections.
+	//
+	// When no gRPC bridge is configured (standalone/single-instance mode),
+	// the keeper election falls through to the old local-only behaviour:
+	// the instance becomes leader immediately without any lock acquisition.
+	var keeperElection *keeper.Election
+	if grpcSrv := bcast.GRPCServer(); grpcSrv != nil && len(config.C.GRPCPeers) > 0 {
+		// Determine this instance's address from GRPC_PEERS by finding our
+		// own port. In multi-instance deployments, each instance knows its
+		// own address so it can filter itself from the peer list.
+		myAddr := fmt.Sprintf("localhost:%d", config.C.GRPCPort)
+		keeperElection = keeper.New(grpcSrv, config.C.GRPCPeers, myAddr,
+			keeper.WithEthClient(eth),
+			keeper.WithMaxDegraded(3),
+		)
+		log.Info().Int("port", config.C.GRPCPort).Int("peers", len(config.C.GRPCPeers)).
+			Msg("keeper: gRPC election enabled")
+	} else {
+		log.Info().Msg("keeper: gRPC election disabled (no peers), running local-only")
+	}
+
+	// Start indexer in background. Keepers gate on the gRPC election (when
+	// multi-instance) or run immediately (single-instance). The KeeperGate
+	// abstraction means runner.go doesn't need to change — it calls the gate
+	// function, gets back a lockCtx, and cancels it when leadership is lost.
 	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
 		WithKeeperGate(func(c context.Context) (context.Context, func(), error) {
-			return db.WaitKeeperLock(c, config.C.PostgresURL)
+			if keeperElection == nil {
+				// Single-instance: no gate needed, keepers run immediately.
+				return c, func() {}, nil
+			}
+			// Start (or restart) the election loop.
+			if err := keeperElection.Run(c); err != nil {
+				return nil, nil, err
+			}
+			return keeperElection.LockCtx(), func() {
+				keeperElection.Release()
+			}, nil
 		})
 	indexerDone := make(chan struct{})
 	go func() {

@@ -278,7 +278,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(api)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
-	NewMetricsService(q, activityCache).RegisterRoutes(api)
+	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
 	// Image-by-hash route: registered at app level (NOT under the rate-limited

@@ -150,6 +150,72 @@
 {{end}}
 {{end}}
 
+<!-- WebSocket Health Dashboard -->
+<div class="bg-ink-900/80 backdrop-blur rounded-2xl p-6 border border-white/10 mb-10">
+  <h3 class="text-sm font-extrabold text-white/60 uppercase tracking-wider mb-5 flex items-center gap-2">
+    <span class="w-5 h-5 rounded bg-emerald-500/20 flex items-center justify-center text-emerald-300 text-[10px]">⌬</span>
+    WebSocket Health
+  </h3>
+  <div class="grid grid-cols-2 md:grid-cols-4 gap-4">
+    <div class="bg-ink-800/60 rounded-xl p-4 border border-emerald-400/20 hover:border-emerald-300/40 transition group">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2 flex items-center gap-1.5">
+        <span class="w-2 h-2 rounded-full"
+              id="ws-conn-dot"
+              {{if gt .Metrics.ws_connections 0}}style="background:#34d399;box-shadow:0 0 6px rgba(52,211,153,0.5);"{{else}}style="background:#f87171;box-shadow:0 0 6px rgba(248,113,113,0.5);"{{end}}></span>
+        Active Connections
+      </p>
+      <p class="text-3xl font-black text-white tracking-tight" id="metric-ws-conns">{{.Metrics.ws_connections}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-emerald-400 to-emerald-500 transition-all duration-500"
+             id="ws-conn-bar"
+             {{if gt .Metrics.ws_connections 0}}style="width:{{percent .Metrics.ws_connections 1000}}%"{{else}}style="width:0%"{{end}}></div>
+      </div>
+    </div>
+    <div class="bg-ink-800/60 rounded-xl p-4 border border-sky-400/20 hover:border-sky-300/40 transition group">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2">Channel Subscriptions</p>
+      <p class="text-3xl font-black text-sky-200 tracking-tight" id="metric-ws-subs">{{.Metrics.ws_subscriptions}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-sky-400 to-sky-500 transition-all duration-500"
+             id="ws-sub-bar"
+             {{if gt .Metrics.ws_subscriptions 0}}style="width:{{percent .Metrics.ws_subscriptions 2000}}%"{{else}}style="width:0%"{{end}}></div>
+      </div>
+    </div>
+    <div class="bg-ink-800/60 rounded-xl p-4 border border-violet-400/20 hover:border-violet-300/40 transition group">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2">Events Sent (lifetime)</p>
+      <p class="text-3xl font-black text-violet-200 tracking-tight" id="metric-ws-events">{{shortNumber .Metrics.ws_events_sent}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-violet-400 to-violet-500 transition-all duration-500"
+             id="ws-events-bar"
+             {{if gt .Metrics.ws_events_sent 0}}style="width:{{percent .Metrics.ws_events_sent 100000}}%"{{else}}style="width:0%"{{end}}></div>
+      </div>
+    </div>
+    <div class="bg-ink-800/60 rounded-xl p-4 border border-gold-400/20 hover:border-gold-300/40 transition group">
+      <p class="text-[10px] text-white/40 uppercase tracking-wider font-bold mb-2">Total Conns (lifetime)</p>
+      <p class="text-3xl font-black text-gold-200 tracking-tight" id="metric-ws-total">{{shortNumber .Metrics.ws_total_conns}}</p>
+      <div class="mt-2 h-1.5 rounded-full bg-ink-700 overflow-hidden">
+        <div class="h-full rounded-full bg-gradient-to-r from-gold-400 to-gold-500 transition-all duration-500"
+             id="ws-total-bar"
+             {{if gt .Metrics.ws_total_conns 0}}style="width:{{percent .Metrics.ws_total_conns 5000}}%"{{else}}style="width:0%"{{end}}></div>
+      </div>
+    </div>
+  </div>
+  <!-- Annotated connection health legend -->
+  <div class="mt-4 flex flex-wrap gap-4 text-[11px] text-white/40">
+    <span class="flex items-center gap-1.5">
+      <span class="w-1.5 h-1.5 rounded-full bg-emerald-400"></span>
+      Active: <strong id="ws-conn-num" class="text-white font-bold">{{.Metrics.ws_connections}}</strong>
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="w-1.5 h-1.5 rounded-full bg-white/30"></span>
+      Peak: <strong id="ws-peak" class="text-white font-bold">—</strong>
+    </span>
+    <span class="flex items-center gap-1.5">
+      <span class="w-1.5 h-1.5 rounded-full bg-sky-400"></span>
+      Subs/Conn: <strong id="ws-subs-per-conn" class="text-white font-bold">{{if gt .Metrics.ws_connections 0}}{{div .Metrics.ws_subscriptions .Metrics.ws_connections}}{{else}}0{{end}}</strong>
+    </span>
+  </div>
+</div>
+
 <!-- Recent Activity feed — styled with 5-color palette -->
 <h2 class="text-xl font-extrabold text-white flex items-center gap-2 mb-4">
   <span class="w-9 h-9 rounded-xl btn-violet flex items-center justify-center text-white glow-violet text-sm">↗</span>

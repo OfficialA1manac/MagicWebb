@@ -23,7 +23,7 @@
 <!-- Live grid: WS event OR every 30s while tab visible. -->
 <div id="auctions-grid"
      class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
-     hx-get="/partials/auctions"      hx-trigger="auction-updated, every 300s [!document.hidden]"
+     hx-get="/partials/auctions"      hx-trigger="auction-updated"
      hx-swap="innerHTML">
   {{template "partials/auction_cards.html" .}}
 </div>

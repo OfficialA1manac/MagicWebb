@@ -24,15 +24,25 @@ import (
 // and reattachSlice ([]any) share the same boundary without inner duplicates.
 const mantissaBound = 1 << 53
 
+// WSStatsProvider is the interface the WS handler exposes for metrics collection.
+// Decouples api.MetricsService from the ws package to avoid circular imports.
+type WSStatsProvider interface {
+	ActiveConns() int
+	TotalSubscriptions() int
+	EventsSent() int64
+	TotalConns() int64
+}
+
 // MetricsService handles marketplace metrics, recent activity, and SSE counters.
 type MetricsService struct {
 	q     *db.Q
 	cache *cache.Cache
+	ws    WSStatsProvider // optional — nil when WS handler is not wired
 }
 
 // NewMetricsService creates a MetricsService.
-func NewMetricsService(q *db.Q, c *cache.Cache) *MetricsService {
-	return &MetricsService{q: q, cache: c}
+func NewMetricsService(q *db.Q, c *cache.Cache, ws WSStatsProvider) *MetricsService {
+	return &MetricsService{q: q, cache: c, ws: ws}
 }
 
 // RegisterRoutes registers metrics and activity routes under the given router group.
@@ -205,6 +215,16 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 	out := fiber.Map{
 		"sse_dropped_total":     sse.DroppedTotal.Load(),
 		"sse_saturation_streak": sse.SaturationStreak.Load(),
+	}
+	out["ws_connections"]   = int64(0)
+	out["ws_subscriptions"] = 0
+	out["ws_events_sent"]   = int64(0)
+	out["ws_total_conns"]   = int64(0)
+	if s.ws != nil {
+		out["ws_connections"]   = int64(s.ws.ActiveConns())
+		out["ws_subscriptions"] = s.ws.TotalSubscriptions()
+		out["ws_events_sent"]   = s.ws.EventsSent()
+		out["ws_total_conns"]   = s.ws.TotalConns()
 	}
 	const unavailableMsg = "metrics temporarily unavailable"
 

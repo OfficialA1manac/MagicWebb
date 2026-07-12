@@ -197,7 +197,7 @@
 
   <!-- Live region: image + bid lists + summary. innerHTML swap so the
        outer x-data + bid amount + countdown survive the refresh. -->
-  <div class="lg:col-span-3"        hx-get="/partials/auction/{{.AuctionID}}"        hx-trigger="auction-updated, every 300s [!document.hidden]"
+  <div class="lg:col-span-3"        hx-get="/partials/auction/{{.AuctionID}}"        hx-trigger="auction-updated"
        hx-swap="innerHTML"
        hx-on:htmx:after-swap="Alpine.initTree(event.detail.target)">
     {{template "partials/auction_live.html" .}}

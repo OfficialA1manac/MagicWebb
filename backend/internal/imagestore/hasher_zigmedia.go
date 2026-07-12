@@ -27,11 +27,8 @@ import (
 // Go SHA-256 interface so callers are interchangeable regardless of build tag.
 func hashBytes(body []byte) [sha256.Size]byte {
 	var out [sha256.Size]byte
-	if len(body) == 0 {
-		return out
-	}
 	C.zig_sha256(
-		(*C.uint8_t)(unsafe.Pointer(&body[0])),
+		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(body))),
 		C.size_t(len(body)),
 		(*C.uint8_t)(unsafe.Pointer(&out[0])),
 	)

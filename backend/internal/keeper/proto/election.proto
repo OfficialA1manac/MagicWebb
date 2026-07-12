@@ -1,0 +1,35 @@
+syntax = "proto3";
+
+package keeper;
+
+option go_package = "github.com/OfficialA1manac/MagicWebb/backend/internal/keeper/proto";
+
+// HeartbeatRequest is sent by the leader to all peers every 1s to prove
+// liveness. Followers also send heartbeats to announce their own presence
+// so the leader knows about all instances. When is_leader is true, this is
+// a leader heartbeat; false means a follower announcing presence.
+message HeartbeatRequest {
+  string instance_id = 1;  // unique instance identifier (UUID)
+  int64  timestamp   = 2;  // unix millis — used for ordering / clock skew
+  bool   is_leader   = 3;  // true when the sender believes it is leader
+  string leader_id   = 4;  // the instance_id this sender believes is leader
+}
+
+// HeartbeatResponse acknowledges receipt and tells the sender who the
+// responder believes the current leader is. If the sender and responder
+// disagree on leadership, the instance with the lexicographically lower
+// instance_id wins (deterministic tiebreaker).
+message HeartbeatResponse {
+  string leader_id = 1;  // who THIS instance believes is the current leader
+  int64  timestamp = 2;  // responder's time (unix millis) for clock skew estimation
+  string error     = 3;  // non-empty when the responder has a conflict
+}
+
+// KeeperElection is a unary RPC service for cluster-wide leader election.
+// Every instance in the cluster registers a server and connects a client
+// to every peer. The lowest-addressed instance (lexicographic on address)
+// is the initial leader. Leader sends heartbeats every 1s; any follower
+// that misses 3 consecutive heartbeats declares itself leader.
+service KeeperElection {
+  rpc Heartbeat(HeartbeatRequest) returns (HeartbeatResponse);
+}

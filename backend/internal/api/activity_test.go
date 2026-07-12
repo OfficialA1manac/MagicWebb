@@ -31,7 +31,7 @@ var activityCols = []string{"type", "collection", "token_id", "amount_wei", "at"
 func newActivityApp(t *testing.T, mock pgxmock.PgxPoolIface) *fiber.App {
 	t.Helper()
 	app := fiber.New(fiber.Config{DisableStartupMessage: true})
-	svc := NewMetricsService(db.New(mock), cache.New(0))
+	svc := NewMetricsService(db.New(mock), cache.New(0), nil)
 	app.Get("/api/v1/activity", ValidateQuery(QuerySchema{
 		{Name: "limit", Type: ParamInt},
 		{Name: "address", Type: ParamAddress},

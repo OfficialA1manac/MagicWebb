@@ -122,7 +122,7 @@
      with 100 req/s. -->
 <div id="listings-grid"
      class="grid grid-cols-2 md:grid-cols-3 lg:grid-cols-4 gap-4"
-     hx-get="/partials/listings"      hx-trigger="listing-updated, every 300s [!document.hidden]"
+     hx-get="/partials/listings"      hx-trigger="listing-updated"
      hx-swap="innerHTML">
   {{template "partials/listing_cards.html" .}}
 </div>

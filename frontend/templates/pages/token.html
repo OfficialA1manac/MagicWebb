@@ -58,7 +58,7 @@
   <!-- ── Left column: live data region. Image + traits + details + offers.
        All Alpine directives on elements INSIDE this region are re-init'd
        on every swap via hx-on:htmx:after-swap → Alpine.initTree. ── -->
-  <div class="lg:col-span-3 space-y-6"        hx-get="/partials/token/{{.Contract}}/{{.TokenID}}"        hx-trigger="listing-updated, auction-updated, offer-updated, every 300s [!document.hidden]"
+  <div class="lg:col-span-3 space-y-6"        hx-get="/partials/token/{{.Contract}}/{{.TokenID}}"        hx-trigger="listing-updated, auction-updated, offer-updated"
        hx-swap="innerHTML"
        @htmx:after-swap="
          let state = $event.detail.target.querySelector('#token-state')?.dataset;

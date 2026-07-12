@@ -157,14 +157,16 @@ func mustJSON(v any) json.RawMessage {
 
 // Handler manages WebSocket connections and bridges them with the SSE broadcaster.
 type Handler struct {
-	cfg        *config.Config
-	bcast      *sse.Broadcaster
-	q          *db.Q
-	client     marketplacev1connect.MarketplaceServiceClient
-	serverTime func() int64
-	mu         sync.RWMutex
-	conns      map[string]*Connection // id → Connection
-	ipCounters map[string]*int64      // ip → atomic counter
+	cfg         *config.Config
+	bcast       *sse.Broadcaster
+	q           *db.Q
+	client      marketplacev1connect.MarketplaceServiceClient
+	serverTime  func() int64
+	mu          sync.RWMutex
+	conns       map[string]*Connection // id → Connection
+	ipCounters  map[string]*int64      // ip → atomic counter
+	eventsSent  atomic.Int64           // total events pushed to all WS clients
+	connCount   atomic.Int64           // total connections established (lifetime)
 }
 
 // NewHandler creates a WebSocket Handler.
@@ -249,6 +251,7 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	h.mu.Lock()
 	h.conns[conn.id] = conn
 	h.mu.Unlock()
+	h.connCount.Add(1)
 
 	// Write pump: forwards broadcaster events to the WebSocket as JSON
 	// envelopes. Raw Event objects are marshalled directly — no SSE parsing
@@ -309,8 +312,10 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 				}
 				select {
 				case conn.send <- msg:
+					h.eventsSent.Add(1)
 				default:
 					// Slow client — drop
+					// We do NOT increment eventsSent — the event was dropped
 				}
 			case <-conn.done:
 				return
@@ -754,4 +759,30 @@ func (h *Handler) ActiveConns() int {
 	h.mu.RLock()
 	defer h.mu.RUnlock()
 	return len(h.conns)
+}
+
+// TotalSubscriptions returns the total number of channel subscriptions across
+// all connected clients. Used by the metrics dashboard to show subscription load.
+func (h *Handler) TotalSubscriptions() int {
+	h.mu.RLock()
+	defer h.mu.RUnlock()
+	total := 0
+	for _, conn := range h.conns {
+		conn.subMu.RLock()
+		total += len(conn.subscriptions)
+		conn.subMu.RUnlock()
+	}
+	return total
+}
+
+// EventsSent returns the total number of push events delivered to all WS
+// clients since the process started. Monotonic counter (never resets).
+func (h *Handler) EventsSent() int64 {
+	return h.eventsSent.Load()
+}
+
+// TotalConns returns the total number of WebSocket connections established
+// since the process started (including those that have since disconnected).
+func (h *Handler) TotalConns() int64 {
+	return h.connCount.Load()
 }
