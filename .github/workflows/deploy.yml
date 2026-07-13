@@ -85,6 +85,7 @@ jobs:
           cache-dependency-path: backend/go.sum
       - name: Install Zig
         run: |
+          sudo apt-get update -qq && sudo apt-get install -y -qq xz-utils
           curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz
           sudo tar -xJf /tmp/zig.tar.xz -C /usr/local --strip-components=1
           zig version
@@ -119,7 +120,7 @@ jobs:
           cache-dependency-path: app/package-lock.json
       - name: Install dependencies
         working-directory: app
-        run: npm ci
+        run: npm ci --legacy-peer-deps
       - name: Astro check (typecheck)
         working-directory: app
         run: npx astro check
