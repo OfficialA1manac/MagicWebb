@@ -16,7 +16,7 @@
     "astro": "astro"
   },
   "dependencies": {
-    "@astrojs/react": "^4.0.0",
+    "@astrojs/react": "^6.0.1",
     "@astrojs/svelte": "^9.0.1",
     "@reown/appkit": "^1.6.0",
     "@reown/appkit-adapter-ethers": "^1.6.0",
