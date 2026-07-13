@@ -14,11 +14,14 @@ import (
 // CollectionsService handles collection-related API operations.
 type CollectionsService struct {
 	q     *db.Q
-	cache *cache.Cache
+	cache cache.CacheInterface
 }
 
-// NewCollectionsService creates a CollectionsService.
-func NewCollectionsService(q *db.Q, c *cache.Cache) *CollectionsService {
+// NewCollectionsService creates a CollectionsService. The cache backend
+// can be either in-memory (*cache.Cache) or Redis-backed (*cache.RedisCache)
+// — both implement cache.CacheInterface so the service doesn't care which
+// backend is in use at runtime (CACHE-1).
+func NewCollectionsService(q *db.Q, c cache.CacheInterface) *CollectionsService {
 	return &CollectionsService{q: q, cache: c}
 }
 
@@ -54,6 +57,17 @@ func (s *CollectionsService) handleList(c *fiber.Ctx) error {
 
 func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	address := strings.ToLower(c.Params("address"))
+
+	// CACHE-3: Collection stats (floor, volume, listed count) change at most
+	// every few minutes. Cache the computed detail for 30s to avoid
+	// 3 DB round-trips (GetCollection + GetFloorPrice + Get24hVolume +
+	// GetListedCount) on every listing page load. Cache misses fall
+	// through to the full DB path; cache hits return immediately.
+	ckey := fmt.Sprintf("col:%s", address)
+	if cached, ok := s.cache.Get(ckey); ok {
+		return c.JSON(cached)
+	}
+
 	col, err := s.q.GetCollection(c.Context(), address)
 	if err != nil {
 		if isNotFound(err) {
@@ -77,6 +91,9 @@ func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	if vol != nil {
 		detail.Volume24hWei = vol.String()
 	}
+
+	// Cache the computed detail for subsequent requests.
+	s.cache.Set(ckey, detail)
 	return c.JSON(detail)
 }
 

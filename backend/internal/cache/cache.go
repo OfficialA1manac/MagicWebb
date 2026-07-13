@@ -11,6 +11,7 @@ package cache
 
 import (
 	"sync"
+	"sync/atomic"
 	"time"
 )
 
@@ -26,6 +27,12 @@ type Cache struct {
 	mu    sync.RWMutex
 	items map[string]*entry
 	ttl   time.Duration
+
+	// Prometheus-compatible metrics (atomic counters — no lock contention).
+	Hits   atomic.Int64
+	Misses atomic.Int64
+	Sets   atomic.Int64
+	Evictions atomic.Int64
 }
 
 // New creates a cache where every entry lives for ttl before becoming
@@ -43,6 +50,7 @@ func (c *Cache) Get(key string) (any, bool) {
 	e, ok := c.items[key]
 	c.mu.RUnlock()
 	if !ok {
+		c.Misses.Add(1)
 		return nil, false
 	}
 	if time.Now().After(e.expiresAt) {
@@ -51,8 +59,11 @@ func (c *Cache) Get(key string) (any, bool) {
 		c.mu.Lock()
 		delete(c.items, key)
 		c.mu.Unlock()
+		c.Misses.Add(1)
+		c.Evictions.Add(1)
 		return nil, false
 	}
+	c.Hits.Add(1)
 	return e.data, true
 }
 
@@ -62,6 +73,7 @@ func (c *Cache) Set(key string, data any) {
 	c.mu.Lock()
 	c.items[key] = &entry{data: data, expiresAt: time.Now().Add(c.ttl)}
 	c.mu.Unlock()
+	c.Sets.Add(1)
 }
 
 // Clear removes all entries from the cache. Useful in tests or when
@@ -78,4 +90,15 @@ func (c *Cache) Count() int {
 	c.mu.RLock()
 	defer c.mu.RUnlock()
 	return len(c.items)
+}
+
+// Warm fills the cache with pre-computed values. Called on startup to
+// prevent cold-start latency spikes for frequently-accessed keys.
+func (c *Cache) Warm(items map[string]any) {
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	expiry := time.Now().Add(c.ttl)
+	for k, v := range items {
+		c.items[k] = &entry{data: v, expiresAt: expiry}
+	}
 }

@@ -12,9 +12,7 @@ import (
 // Store is a single-use, TTL'd nonce store keyed by address.
 // The only write entry point is SetIfFree — callers that need SIWE
 // should always use it to prevent one party from clobbering another's
-// pending nonce. The deprecated Set() method has been removed from
-// the interface; any code that calls Set instead of SetIfFree on a
-// Store-typed variable will not compile.
+// pending nonce.
 type Store interface {
 	SetIfFree(address, nonce string, ttl time.Duration) bool
 	GetDel(address string) (string, bool)

@@ -167,8 +167,8 @@ func (b *Broadcaster) SubscribeRaw() (<-chan Event, func(), bool) {
 func (b *Broadcaster) loop() {
 	for ev := range b.events {
 		// Raw Event delivery for all subscribers (WebSocket and any future
-		// consumers). Legacy SSE-formatted string delivery was removed when
-		// the /events endpoint was deprecated.
+		// consumers). The legacy /events SSE endpoint was removed in favor of
+		// WebSocket push.
 		rawClientsMu.RLock()
 		for _, rc := range rawClients {
 			select {

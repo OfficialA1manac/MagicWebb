@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 	"sync/atomic"
 	"time"
@@ -22,8 +23,10 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	connectv1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
 	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 
+	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect" // gRPC server reflection for grpcurl discovery
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -130,7 +133,7 @@ var MWServerBuildSHA = "unknown"
 // Mount registers all REST + SSE + WebSocket routes on the Fiber app.
 // serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
 // endpoint reads it under the rate-limited api group.
-func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64) {
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger) {
 	app.Use(securityHeaders())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL, cfg.Env),
@@ -208,7 +211,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// GET /graphiql — interactive GraphQL IDE.
 	// Rate-limited at the same tier as /api/v1 to prevent arbitrary-depth
 	// queries from becoming a DB DoS vector.
-	gql := graphql.NewGraphQLServer(q, bcast)
+	//
+	// GraphQL resolvers delegate to Connect-RPC when a gRPC client is
+	// provided, decoupling presentation from storage. The client points
+	// to the local Fiber server (which also mounts the Connect-RPC handler).
+	gql := graphql.NewGraphQLServer(q, bcast, wsClient)
 	gqlLimiter := rateLimitMiddleware(rl)
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
@@ -225,8 +232,21 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// work over HTTP/1.1, HTTP/2, or any gRPC-compatible transport.
 	// Not rate-limited — each RPC is a simple DB query comparable to the
 	// equivalent REST endpoint.
-	connectSrv := connectv1.NewServer(q)
-	connectPath, connectHandler := marketplacev1connect.NewMarketplaceServiceHandler(connectSrv)
+	connectSrv := connectv1.NewServer(q, bcast)
+
+	// ── gRPC interceptors: metrics, tiered rate limiting, auth, deadlines ────
+	// Applied to every Connect-RPC handler. Order matters:
+	//  1. Metrics — outermost: records latency even on rate-limit rejections
+	//  2. Tiered rate limit — per-procedure limits (list:120/min, search:30/min)
+	//  3. Auth — extracts JWT caller for audit (public-read, not enforced)
+	//  4. Deadline — applies 30s default timeout when none set
+	grpcInterceptors := connect.WithInterceptors(
+		interceptors.MetricsInterceptor(),
+		interceptors.TieredRateLimitInterceptor(rl, interceptors.DefaultRateLimits()),
+		interceptors.AuthInterceptorWithAPIKeys(cfg.JWTSecret, false, apiKeyStore, auditLog), // public-read + API key support (AUTH-3)
+		interceptors.DeadlineInterceptor(30*time.Second),
+	)
+	connectPath, connectHandler := marketplacev1connect.NewMarketplaceServiceHandler(connectSrv, grpcInterceptors)
 	// Adapt the net/http Connect-RPC handler for Fiber's fasthttp.
 	app.All(connectPath+"*", func(c *fiber.Ctx) error {
 		fasthttpadaptor.NewFastHTTPHandler(connectHandler)(c.Context())
@@ -259,11 +279,26 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	api := app.Group("/api/v1", rateLimitMiddleware(rl))
 
-	// ── In-memory caches for read-heavy endpoints ───────────────────────
+	// RL-1: Tiered rate-limit groups for expensive/privileged endpoints.
+	// Separate groups at /api/v1 prefix (not nested) because each service
+	// registers its own path segments (e.g. SearchService registers /search).
+	// Non-overlapping path sets prevent Fiber route conflicts.
+	//
+	// Key prefixes ("search", "admin", "api") scoped per-tier prevent
+	// cross-tier bucket interference — a search at 30/min uses a different
+	// bucket from a listing at 60/min even for the same client IP.
+	apiSearch := app.Group("/api/v1", tieredRateLimitMiddleware(rl, "search", 30, time.Minute))
+	apiAdmin := app.Group("/api/v1", tieredRateLimitMiddleware(rl, "admin", 10, time.Minute))
+
+	// ── CACHE-1: Distributed-ready caches for read-heavy endpoints ──────
+	// When REDIS_URL is configured and the go-redis dependency is compiled
+	// in, these caches are Redis-backed (shared across all instances).
+	// Without Redis, they degrade to in-memory (per-instance) automatically.
+	//
 	// 30s TTL for trending (scores recomputed periodically, stale is fine)
-	trendingCache := cache.New(30 * time.Second)
+	trendingCache := cache.NewRedisOrMemory(cfg.RedisURL, 30*time.Second)
 	// 10s TTL for activity (more real-time, but DB query is the expensive part)
-	activityCache := cache.New(10 * time.Second)
+	activityCache := cache.NewRedisOrMemory(cfg.RedisURL, 10*time.Second)
 
 	// Domain-specific route registrations.
 	NewListingsService(q, eth).RegisterRoutes(api)
@@ -275,8 +310,8 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewWalletService(q).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
 	NewProfilesService(q).RegisterRoutes(api, cfg)
-	NewAdminService(q, cfg).RegisterRoutes(api, cfg)
-	NewSearchService(q).RegisterRoutes(api)
+	NewAdminService(q, cfg).RegisterRoutes(apiAdmin, cfg)
+	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
@@ -317,7 +352,7 @@ func JwtMiddleware(cfg *config.Config) fiber.Handler {
 func jwtMiddleware(cfg *config.Config) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		verify := func(token string) string {
-			a, err := auth.Verify(token, cfg.JWTSecret, auth.DefaultAudience)
+			a, err := auth.VerifyAccessToken(token, cfg.JWTSecret)
 			if err != nil {
 				return ""
 			}
@@ -345,7 +380,7 @@ func jwtMiddleware(cfg *config.Config) fiber.Handler {
 	}
 }
 
-// sessionCookieNames scans cookie headers for any mw_s_<addr-prefix> name.
+// sessionCookieNames scans cookie headers for mw_s_ / mw_a_ / mw_r_ cookie names.
 // Multiple entries are commonly present (one per previously-connected wallet);
 // the middleware validates each in turn. Returns nil when no candidate.
 func sessionCookieNames(c *fiber.Ctx) []string {
@@ -357,7 +392,7 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 	var out []string
 	for _, part := range strings.Split(hdr, ";") {
 		p := strings.TrimSpace(part)
-		if !strings.HasPrefix(p, "mw_s_") {
+		if !strings.HasPrefix(p, "mw_s_") && !strings.HasPrefix(p, "mw_a_") {
 			continue
 		}
 		eq := strings.IndexByte(p, '=')
@@ -375,8 +410,22 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 }
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
+	return tieredRateLimitMiddleware(rl, "api", 60, time.Minute)
+}
+
+// tieredRateLimitMiddleware returns a rate-limit middleware with a custom
+// limit, window, and key prefix (RL-1: per-endpoint tiered rate limits).
+// The keyPrefix scopes each tier's bucket independently — without it, a
+// search request at 30/min would share the same IP bucket as a listing
+// request at 60/min, causing cross-tier interference.
+func tieredRateLimitMiddleware(rl *ratelimit.Limiter, keyPrefix string, limit int, window time.Duration) fiber.Handler {
 	return func(c *fiber.Ctx) error {
-		if !rl.Allow(ClientIP(c), 60, time.Minute) {
+		key := keyPrefix + "|" + ClientIP(c)
+		if !rl.Allow(key, limit, window) {
+			c.Set("Retry-After", strconv.Itoa(int(window.Seconds())))
+			c.Set("X-RateLimit-Limit", strconv.Itoa(limit))
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(window).Unix(), 10))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
 		return c.Next()
@@ -588,4 +637,19 @@ func handleReindexCollection(runner *indexer.Runner, cfg *config.Config) fiber.H
 func MountReindexRoute(app *fiber.App, runner *indexer.Runner, cfg *config.Config) {
 	app.Post("/api/v1/admin/indexer/reindex-collection", JwtMiddleware(cfg),
 		handleReindexCollection(runner, cfg))
+}
+
+// MountAPIKeyRoutes registers the API key management endpoints on the admin
+// rate-limited group (AUTH-3). Called from main.go after the API key store
+// and audit logger are created. Uses the same rate limiter instance as Mount()
+// and registers on the same admin tier (10/min) with JWT middleware.
+func MountAPIKeyRoutes(app *fiber.App, q *db.Q, cfg *config.Config, rl *ratelimit.Limiter, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger) {
+	adminSvc := NewAdminService(q, cfg).WithAPIKeyStore(apiKeyStore, auditLog)
+	// Create an admin-tier sub-group at /api/v1/admin/apikeys with 10/min rate limit.
+	// Uses a distinct sub-path (/apikeys) to avoid conflicting with the
+	// existing /api/v1/admin/* routes registered by AdminService.RegisterRoutes.
+	apikeyGroup := app.Group("/api/v1/admin/apikeys", tieredRateLimitMiddleware(rl, "admin", 10, time.Minute))
+	apikeyGroup.Post("/", JwtMiddleware(cfg), adminSvc.handleCreateAPIKey)
+	apikeyGroup.Get("/", JwtMiddleware(cfg), adminSvc.handleListAPIKeys)
+	apikeyGroup.Delete("/:id", JwtMiddleware(cfg), adminSvc.handleRevokeAPIKey)
 }

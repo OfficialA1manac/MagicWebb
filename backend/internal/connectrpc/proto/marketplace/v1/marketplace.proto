@@ -21,6 +21,46 @@ service MarketplaceService {
 
   // GetToken returns full on-chain metadata for a token.
   rpc GetToken(GetTokenRequest) returns (GetTokenResponse);
+
+  // ── New Phase 1 RPCs ────────────────────────────────────────────────
+
+  // ListCollections streams all tracked collections (server-streaming).
+  // Each Collection is sent as it's fetched from the DB — the first
+  // result arrives sooner than waiting for the complete array.
+  rpc ListCollections(ListCollectionsRequest) returns (stream Collection);
+
+  // GetCollection returns a single collection by contract address.
+  rpc GetCollection(GetCollectionRequest) returns (GetCollectionResponse);
+
+  // ListListings streams active listings with optional filters.
+  // Server-streaming: each Listing is sent individually, reducing
+  // time-to-first-byte for large result sets.
+  rpc ListListings(ListListingsRequest) returns (stream Listing);
+
+  // ListAuctions streams auctions with optional filters.
+  // Server-streaming: each Auction is sent as it's mapped from DB rows.
+  rpc ListAuctions(ListAuctionsRequest) returns (stream Auction);
+
+  // ── Phase 2 P1 RPCs ───────────────────────────────────────────────────
+
+  // GetActivity returns recent marketplace activity with optional filters.
+  rpc GetActivity(GetActivityRequest) returns (GetActivityResponse);
+
+  // ListOffers streams offer positions with optional filters.
+  // Server-streaming: each Offer is sent individually to the client.
+  rpc ListOffers(ListOffersRequest) returns (stream Offer);
+
+  // GetWalletNFTs returns NFTs owned by a wallet.
+  rpc GetWalletNFTs(GetWalletNFTsRequest) returns (GetWalletNFTsResponse);
+
+  // GetProfile returns a user/creator profile.
+  rpc GetProfile(GetProfileRequest) returns (GetProfileResponse);
+
+  // Search performs full-text search across NFTs and collections.
+  rpc Search(SearchRequest) returns (SearchResponse);
+
+  // GetMetrics returns aggregate market metrics.
+  rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
 }
 
 // ── GetListing ────────────────────────────────────────────────────────────────
@@ -42,6 +82,7 @@ message GetListingResponse {
   string tx_hash = 9;
   string name = 10;      // denormalised from nft_metadata / nft_tokens
   string image_uri = 11; // denormalised metadata
+  bool collection_verified = 12;
 }
 
 // ── GetAuction ────────────────────────────────────────────────────────────────
@@ -105,4 +146,230 @@ message GetTokenResponse {
   string animation_uri = 6;
   string metadata_uri = 7;
   int64 fetched_at_ms = 8;
+}
+
+// ── ListCollections ───────────────────────────────────────────────────────────
+
+message ListCollectionsRequest {
+  int32 limit = 1; // max results (1-200, default 50)
+}
+
+message ListCollectionsResponse {
+  repeated Collection collection = 1;
+}
+
+message Collection {
+  string address = 1;
+  string name = 2;
+  string symbol = 3;
+  string standard = 4;    // "erc721" | "erc1155"
+  int64 deploy_block = 5;
+  bool verified = 6;
+  string floor_price_wei = 7;
+  string volume_24h_wei = 8;
+  int32 listed_count = 9;
+}
+
+// ── GetCollection ─────────────────────────────────────────────────────────────
+
+message GetCollectionRequest {
+  string address = 1; // hex-encoded contract address
+}
+
+message GetCollectionResponse {
+  string address = 1;
+  string name = 2;
+  string symbol = 3;
+  string standard = 4;
+  int64 deploy_block = 5;
+  bool verified = 6;
+  string floor_price_wei = 7;
+  string volume_24h_wei = 8;
+  int32 listed_count = 9;
+}
+
+// ── ListListings ──────────────────────────────────────────────────────────────
+
+message ListListingsRequest {
+  string collection = 1;  // optional filter
+  string seller = 2;      // optional filter
+  string sort = 3;        // "recent" | "price_asc" | "price_desc" (default "recent")
+  int32 limit = 4;        // 1-100, default 50
+  string min_price_wei = 5;
+  string max_price_wei = 6;
+  string traits = 7;      // "trait_type:value,trait_type:value"
+}
+
+message ListListingsResponse {
+  repeated Listing listings = 1;
+}
+
+message Listing {
+  string collection = 1;
+  string token_id = 2;
+  string seller = 3;
+  string price_wei = 4;
+  int64 amount = 5;
+  string standard = 6;
+  int64 expires_at_ms = 7;
+  int64 listed_at_ms = 8;
+  string tx_hash = 9;
+  string name = 10;
+  string image_uri = 11;
+  bool collection_verified = 12;
+}
+
+// ── ListAuctions ──────────────────────────────────────────────────────────────
+
+message ListAuctionsRequest {
+  string collection = 1;  // optional filter
+  string seller = 2;      // optional filter
+  string status = 3;      // "active" | "settled" | "cancelled"
+  int32 limit = 4;        // 1-200, default 50
+  string min_price_wei = 5;
+  string max_price_wei = 6;
+}
+
+message ListAuctionsResponse {
+  repeated Auction auctions = 1;
+}
+
+message Auction {
+  int64 auction_id = 1;
+  string collection = 2;
+  string token_id = 3;
+  string seller = 4;
+  string standard = 5;
+  string reserve_price_wei = 6;
+  string highest_bid_wei = 7;
+  string highest_bidder = 8;
+  int32 min_increment_bps = 9;
+  int64 starts_at_ms = 10;
+  int64 ends_at_ms = 11;
+  string status = 12;
+  string create_tx = 13;
+  string name = 14;
+  string image_uri = 15;
+}
+
+// ── GetActivity ────────────────────────────────────────────────────────────────
+
+message GetActivityRequest {
+  int32 limit = 1;         // 1-200, default 50
+  string address = 2;      // optional address filter
+  string collection = 3;   // optional collection filter (requires token_id)
+  string token_id = 4;     // optional token ID filter (requires collection)
+}
+
+message ActivityEvent {
+  string type = 1;          // "Listed" | "Bought" | "BidPlaced" | etc.
+  string collection = 2;
+  string token_id = 3;
+  string amount_wei = 4;
+  int64 timestamp_ms = 5;
+  string tx_hash = 6;
+  string from_addr = 7;
+  string to_addr = 8;
+}
+
+message GetActivityResponse {
+  repeated ActivityEvent events = 1;
+}
+
+// ── ListOffers ─────────────────────────────────────────────────────────────────
+
+message ListOffersRequest {
+  string collection = 1;  // optional filter
+  string token_id = 2;    // optional filter
+  string bidder = 3;      // optional filter
+  string owner = 4;       // optional filter
+  string status = 5;      // "pending" | "accepted" | "cancelled" | "expired"
+  int32 limit = 6;        // 1-100, default 50
+}
+
+message Offer {
+  string offer_id = 1;
+  string bidder = 2;
+  string collection = 3;
+  string token_id = 4;
+  string amount_wei = 5;
+  string fee_wei = 6;
+  int64 units = 7;
+  string standard = 8;
+  int64 expires_at_ms = 9;
+  string status = 10;
+  string make_tx = 11;
+  int64 created_at_ms = 12;
+}
+
+message ListOffersResponse {
+  repeated Offer offers = 1;
+}
+
+// ── GetWalletNFTs ─────────────────────────────────────────────────────────────
+
+message GetWalletNFTsRequest {
+  string owner = 1;  // hex-encoded wallet address
+}
+
+message OwnedNFT {
+  string collection = 1;
+  string token_id = 2;
+  string units = 3;
+  string standard = 4;
+  string name = 5;
+  string image_uri = 6;
+}
+
+message GetWalletNFTsResponse {
+  repeated OwnedNFT nfts = 1;
+}
+
+// ── GetProfile ────────────────────────────────────────────────────────────────
+
+message GetProfileRequest {
+  string address = 1;
+}
+
+message GetProfileResponse {
+  string address = 1;
+  string display_name = 2;
+  string bio = 3;
+  string avatar_uri = 4;
+  string banner_uri = 5;
+  string twitter = 6;
+  string website = 7;
+  bool verified = 8;
+}
+
+// ── Search ─────────────────────────────────────────────────────────────────────
+
+message SearchRequest {
+  string query = 1;    // full-text search query (min 2 chars)
+  int32 limit = 2;     // 1-50, default 20
+}
+
+message SearchResult {
+  string kind = 1;        // "nft" | "collection"
+  string collection = 2;
+  string token_id = 3;
+  string name = 4;
+  string image_uri = 5;
+}
+
+message SearchResponse {
+  repeated SearchResult results = 1;
+}
+
+// ── GetMetrics ────────────────────────────────────────────────────────────────
+
+message GetMetricsRequest {}
+
+message GetMetricsResponse {
+  int32 total_active_listings = 1;
+  int32 total_sales = 2;
+  string gross_volume_wei = 3;
+  int32 total_auctions = 4;
+  int32 total_bids = 5;
+  int32 total_offers = 6;
 }

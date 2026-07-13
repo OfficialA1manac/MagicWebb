@@ -47,20 +47,36 @@ jobs:
           go-version: "1.25"
           cache: true
           cache-dependency-path: backend/go.sum
-      - name: Build
+      - name: Install Zig
+        run: |
+          curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz
+          sudo tar -xJf /tmp/zig.tar.xz -C /usr/local --strip-components=1
+          zig version
+      - name: Compile Zig libraries (zigmedia)
+        run: |
+          cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig
+          cd ../zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
+          cd ../zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
+      - name: Test Zig libraries (ZIG-4)
+        run: |
+          cd backend/zigsha256 && zig test zigsha256.zig
+          cd ../zigcrypto && zig test zigcrypto.zig
+          cd ../zigsniff && zig test zignsniff.zig
+          echo "All Zig tests passed"
+      - name: Build (zigmedia)
         working-directory: backend
-        run: go build ./...
-      - name: Vet
+        run: CGO_ENABLED=1 go build -tags zigmedia ./...
+      - name: Vet (zigmedia)
         working-directory: backend
-        run: go vet ./...
+        run: CGO_ENABLED=1 go vet -tags zigmedia ./...
       - name: Vulncheck (Go dependency CVEs)
         working-directory: backend
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
-      - name: Test
+      - name: Test (zigmedia)
         working-directory: backend
-        run: go test ./...
+        run: CGO_ENABLED=1 go test -tags zigmedia ./...
 
   contracts:
     name: Contracts (Foundry)

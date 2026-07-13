@@ -45,6 +45,36 @@ const (
 	// MarketplaceServiceGetTokenProcedure is the fully-qualified name of the MarketplaceService's
 	// GetToken RPC.
 	MarketplaceServiceGetTokenProcedure = "/marketplace.v1.MarketplaceService/GetToken"
+	// MarketplaceServiceListCollectionsProcedure is the fully-qualified name of the
+	// MarketplaceService's ListCollections RPC.
+	MarketplaceServiceListCollectionsProcedure = "/marketplace.v1.MarketplaceService/ListCollections"
+	// MarketplaceServiceGetCollectionProcedure is the fully-qualified name of the MarketplaceService's
+	// GetCollection RPC.
+	MarketplaceServiceGetCollectionProcedure = "/marketplace.v1.MarketplaceService/GetCollection"
+	// MarketplaceServiceListListingsProcedure is the fully-qualified name of the MarketplaceService's
+	// ListListings RPC.
+	MarketplaceServiceListListingsProcedure = "/marketplace.v1.MarketplaceService/ListListings"
+	// MarketplaceServiceListAuctionsProcedure is the fully-qualified name of the MarketplaceService's
+	// ListAuctions RPC.
+	MarketplaceServiceListAuctionsProcedure = "/marketplace.v1.MarketplaceService/ListAuctions"
+	// MarketplaceServiceGetActivityProcedure is the fully-qualified name of the MarketplaceService's
+	// GetActivity RPC.
+	MarketplaceServiceGetActivityProcedure = "/marketplace.v1.MarketplaceService/GetActivity"
+	// MarketplaceServiceListOffersProcedure is the fully-qualified name of the MarketplaceService's
+	// ListOffers RPC.
+	MarketplaceServiceListOffersProcedure = "/marketplace.v1.MarketplaceService/ListOffers"
+	// MarketplaceServiceGetWalletNFTsProcedure is the fully-qualified name of the MarketplaceService's
+	// GetWalletNFTs RPC.
+	MarketplaceServiceGetWalletNFTsProcedure = "/marketplace.v1.MarketplaceService/GetWalletNFTs"
+	// MarketplaceServiceGetProfileProcedure is the fully-qualified name of the MarketplaceService's
+	// GetProfile RPC.
+	MarketplaceServiceGetProfileProcedure = "/marketplace.v1.MarketplaceService/GetProfile"
+	// MarketplaceServiceSearchProcedure is the fully-qualified name of the MarketplaceService's Search
+	// RPC.
+	MarketplaceServiceSearchProcedure = "/marketplace.v1.MarketplaceService/Search"
+	// MarketplaceServiceGetMetricsProcedure is the fully-qualified name of the MarketplaceService's
+	// GetMetrics RPC.
+	MarketplaceServiceGetMetricsProcedure = "/marketplace.v1.MarketplaceService/GetMetrics"
 )
 
 // MarketplaceServiceClient is a client for the marketplace.v1.MarketplaceService service.
@@ -57,6 +87,26 @@ type MarketplaceServiceClient interface {
 	GetOffer(context.Context, *connect.Request[marketplacev1.GetOfferRequest]) (*connect.Response[marketplacev1.GetOfferResponse], error)
 	// GetToken returns full on-chain metadata for a token.
 	GetToken(context.Context, *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error)
+	// ListCollections streams all tracked collections (server-streaming).
+	ListCollections(context.Context, *connect.Request[marketplacev1.ListCollectionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Collection], error)
+	// GetCollection returns a single collection by contract address.
+	GetCollection(context.Context, *connect.Request[marketplacev1.GetCollectionRequest]) (*connect.Response[marketplacev1.GetCollectionResponse], error)
+	// ListListings streams active listings with optional filters.
+	ListListings(context.Context, *connect.Request[marketplacev1.ListListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.Listing], error)
+	// ListAuctions streams auctions with optional filters.
+	ListAuctions(context.Context, *connect.Request[marketplacev1.ListAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Auction], error)
+	// GetActivity returns recent marketplace activity with optional filters.
+	GetActivity(context.Context, *connect.Request[marketplacev1.GetActivityRequest]) (*connect.Response[marketplacev1.GetActivityResponse], error)
+	// ListOffers streams offer positions with optional filters.
+	ListOffers(context.Context, *connect.Request[marketplacev1.ListOffersRequest]) (*connect.ServerStreamForClient[marketplacev1.Offer], error)
+	// GetWalletNFTs returns NFTs owned by a wallet.
+	GetWalletNFTs(context.Context, *connect.Request[marketplacev1.GetWalletNFTsRequest]) (*connect.Response[marketplacev1.GetWalletNFTsResponse], error)
+	// GetProfile returns a user/creator profile.
+	GetProfile(context.Context, *connect.Request[marketplacev1.GetProfileRequest]) (*connect.Response[marketplacev1.GetProfileResponse], error)
+	// Search performs full-text search across NFTs and collections.
+	Search(context.Context, *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error)
+	// GetMetrics returns aggregate market metrics.
+	GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error)
 }
 
 // NewMarketplaceServiceClient constructs a client for the marketplace.v1.MarketplaceService
@@ -94,15 +144,85 @@ func NewMarketplaceServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(marketplaceServiceMethods.ByName("GetToken")),
 			connect.WithClientOptions(opts...),
 		),
+		listCollections: connect.NewClient[marketplacev1.ListCollectionsRequest, marketplacev1.Collection](
+			httpClient,
+			baseURL+MarketplaceServiceListCollectionsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("ListCollections")),
+			connect.WithClientOptions(opts...),
+		),
+		getCollection: connect.NewClient[marketplacev1.GetCollectionRequest, marketplacev1.GetCollectionResponse](
+			httpClient,
+			baseURL+MarketplaceServiceGetCollectionProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("GetCollection")),
+			connect.WithClientOptions(opts...),
+		),
+		listListings: connect.NewClient[marketplacev1.ListListingsRequest, marketplacev1.Listing](
+			httpClient,
+			baseURL+MarketplaceServiceListListingsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("ListListings")),
+			connect.WithClientOptions(opts...),
+		),
+		listAuctions: connect.NewClient[marketplacev1.ListAuctionsRequest, marketplacev1.Auction](
+			httpClient,
+			baseURL+MarketplaceServiceListAuctionsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("ListAuctions")),
+			connect.WithClientOptions(opts...),
+		),
+		getActivity: connect.NewClient[marketplacev1.GetActivityRequest, marketplacev1.GetActivityResponse](
+			httpClient,
+			baseURL+MarketplaceServiceGetActivityProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("GetActivity")),
+			connect.WithClientOptions(opts...),
+		),
+		listOffers: connect.NewClient[marketplacev1.ListOffersRequest, marketplacev1.Offer](
+			httpClient,
+			baseURL+MarketplaceServiceListOffersProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("ListOffers")),
+			connect.WithClientOptions(opts...),
+		),
+		getWalletNFTs: connect.NewClient[marketplacev1.GetWalletNFTsRequest, marketplacev1.GetWalletNFTsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceGetWalletNFTsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("GetWalletNFTs")),
+			connect.WithClientOptions(opts...),
+		),
+		getProfile: connect.NewClient[marketplacev1.GetProfileRequest, marketplacev1.GetProfileResponse](
+			httpClient,
+			baseURL+MarketplaceServiceGetProfileProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("GetProfile")),
+			connect.WithClientOptions(opts...),
+		),
+		search: connect.NewClient[marketplacev1.SearchRequest, marketplacev1.SearchResponse](
+			httpClient,
+			baseURL+MarketplaceServiceSearchProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("Search")),
+			connect.WithClientOptions(opts...),
+		),
+		getMetrics: connect.NewClient[marketplacev1.GetMetricsRequest, marketplacev1.GetMetricsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceGetMetricsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("GetMetrics")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // marketplaceServiceClient implements MarketplaceServiceClient.
 type marketplaceServiceClient struct {
-	getListing *connect.Client[marketplacev1.GetListingRequest, marketplacev1.GetListingResponse]
-	getAuction *connect.Client[marketplacev1.GetAuctionRequest, marketplacev1.GetAuctionResponse]
-	getOffer   *connect.Client[marketplacev1.GetOfferRequest, marketplacev1.GetOfferResponse]
-	getToken   *connect.Client[marketplacev1.GetTokenRequest, marketplacev1.GetTokenResponse]
+	getListing      *connect.Client[marketplacev1.GetListingRequest, marketplacev1.GetListingResponse]
+	getAuction      *connect.Client[marketplacev1.GetAuctionRequest, marketplacev1.GetAuctionResponse]
+	getOffer        *connect.Client[marketplacev1.GetOfferRequest, marketplacev1.GetOfferResponse]
+	getToken        *connect.Client[marketplacev1.GetTokenRequest, marketplacev1.GetTokenResponse]
+	listCollections *connect.Client[marketplacev1.ListCollectionsRequest, marketplacev1.Collection]
+	getCollection   *connect.Client[marketplacev1.GetCollectionRequest, marketplacev1.GetCollectionResponse]
+	listListings    *connect.Client[marketplacev1.ListListingsRequest, marketplacev1.Listing]
+	listAuctions    *connect.Client[marketplacev1.ListAuctionsRequest, marketplacev1.Auction]
+	getActivity     *connect.Client[marketplacev1.GetActivityRequest, marketplacev1.GetActivityResponse]
+	listOffers      *connect.Client[marketplacev1.ListOffersRequest, marketplacev1.Offer]
+	getWalletNFTs   *connect.Client[marketplacev1.GetWalletNFTsRequest, marketplacev1.GetWalletNFTsResponse]
+	getProfile      *connect.Client[marketplacev1.GetProfileRequest, marketplacev1.GetProfileResponse]
+	search          *connect.Client[marketplacev1.SearchRequest, marketplacev1.SearchResponse]
+	getMetrics      *connect.Client[marketplacev1.GetMetricsRequest, marketplacev1.GetMetricsResponse]
 }
 
 // GetListing calls marketplace.v1.MarketplaceService.GetListing.
@@ -125,6 +245,56 @@ func (c *marketplaceServiceClient) GetToken(ctx context.Context, req *connect.Re
 	return c.getToken.CallUnary(ctx, req)
 }
 
+// ListCollections calls marketplace.v1.MarketplaceService.ListCollections.
+func (c *marketplaceServiceClient) ListCollections(ctx context.Context, req *connect.Request[marketplacev1.ListCollectionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Collection], error) {
+	return c.listCollections.CallServerStream(ctx, req)
+}
+
+// GetCollection calls marketplace.v1.MarketplaceService.GetCollection.
+func (c *marketplaceServiceClient) GetCollection(ctx context.Context, req *connect.Request[marketplacev1.GetCollectionRequest]) (*connect.Response[marketplacev1.GetCollectionResponse], error) {
+	return c.getCollection.CallUnary(ctx, req)
+}
+
+// ListListings calls marketplace.v1.MarketplaceService.ListListings.
+func (c *marketplaceServiceClient) ListListings(ctx context.Context, req *connect.Request[marketplacev1.ListListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.Listing], error) {
+	return c.listListings.CallServerStream(ctx, req)
+}
+
+// ListAuctions calls marketplace.v1.MarketplaceService.ListAuctions.
+func (c *marketplaceServiceClient) ListAuctions(ctx context.Context, req *connect.Request[marketplacev1.ListAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Auction], error) {
+	return c.listAuctions.CallServerStream(ctx, req)
+}
+
+// GetActivity calls marketplace.v1.MarketplaceService.GetActivity.
+func (c *marketplaceServiceClient) GetActivity(ctx context.Context, req *connect.Request[marketplacev1.GetActivityRequest]) (*connect.Response[marketplacev1.GetActivityResponse], error) {
+	return c.getActivity.CallUnary(ctx, req)
+}
+
+// ListOffers calls marketplace.v1.MarketplaceService.ListOffers.
+func (c *marketplaceServiceClient) ListOffers(ctx context.Context, req *connect.Request[marketplacev1.ListOffersRequest]) (*connect.ServerStreamForClient[marketplacev1.Offer], error) {
+	return c.listOffers.CallServerStream(ctx, req)
+}
+
+// GetWalletNFTs calls marketplace.v1.MarketplaceService.GetWalletNFTs.
+func (c *marketplaceServiceClient) GetWalletNFTs(ctx context.Context, req *connect.Request[marketplacev1.GetWalletNFTsRequest]) (*connect.Response[marketplacev1.GetWalletNFTsResponse], error) {
+	return c.getWalletNFTs.CallUnary(ctx, req)
+}
+
+// GetProfile calls marketplace.v1.MarketplaceService.GetProfile.
+func (c *marketplaceServiceClient) GetProfile(ctx context.Context, req *connect.Request[marketplacev1.GetProfileRequest]) (*connect.Response[marketplacev1.GetProfileResponse], error) {
+	return c.getProfile.CallUnary(ctx, req)
+}
+
+// Search calls marketplace.v1.MarketplaceService.Search.
+func (c *marketplaceServiceClient) Search(ctx context.Context, req *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error) {
+	return c.search.CallUnary(ctx, req)
+}
+
+// GetMetrics calls marketplace.v1.MarketplaceService.GetMetrics.
+func (c *marketplaceServiceClient) GetMetrics(ctx context.Context, req *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error) {
+	return c.getMetrics.CallUnary(ctx, req)
+}
+
 // MarketplaceServiceHandler is an implementation of the marketplace.v1.MarketplaceService service.
 type MarketplaceServiceHandler interface {
 	// GetListing returns the current active listing for a token.
@@ -135,6 +305,27 @@ type MarketplaceServiceHandler interface {
 	GetOffer(context.Context, *connect.Request[marketplacev1.GetOfferRequest]) (*connect.Response[marketplacev1.GetOfferResponse], error)
 	// GetToken returns full on-chain metadata for a token.
 	GetToken(context.Context, *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error)
+	// ListCollections streams all tracked collections (server-streaming).
+	// GRPC-1: Each Collection is sent via stream.Send() as it's fetched from DB.
+	ListCollections(context.Context, *connect.Request[marketplacev1.ListCollectionsRequest], *connect.ServerStream[marketplacev1.Collection]) error
+	// GetCollection returns a single collection by contract address.
+	GetCollection(context.Context, *connect.Request[marketplacev1.GetCollectionRequest]) (*connect.Response[marketplacev1.GetCollectionResponse], error)
+	// ListListings streams active listings with optional filters.
+	ListListings(context.Context, *connect.Request[marketplacev1.ListListingsRequest], *connect.ServerStream[marketplacev1.Listing]) error
+	// ListAuctions streams auctions with optional filters.
+	ListAuctions(context.Context, *connect.Request[marketplacev1.ListAuctionsRequest], *connect.ServerStream[marketplacev1.Auction]) error
+	// GetActivity returns recent marketplace activity with optional filters.
+	GetActivity(context.Context, *connect.Request[marketplacev1.GetActivityRequest]) (*connect.Response[marketplacev1.GetActivityResponse], error)
+	// ListOffers streams offer positions with optional filters.
+	ListOffers(context.Context, *connect.Request[marketplacev1.ListOffersRequest], *connect.ServerStream[marketplacev1.Offer]) error
+	// GetWalletNFTs returns NFTs owned by a wallet.
+	GetWalletNFTs(context.Context, *connect.Request[marketplacev1.GetWalletNFTsRequest]) (*connect.Response[marketplacev1.GetWalletNFTsResponse], error)
+	// GetProfile returns a user/creator profile.
+	GetProfile(context.Context, *connect.Request[marketplacev1.GetProfileRequest]) (*connect.Response[marketplacev1.GetProfileResponse], error)
+	// Search performs full-text search across NFTs and collections.
+	Search(context.Context, *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error)
+	// GetMetrics returns aggregate market metrics.
+	GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error)
 }
 
 // NewMarketplaceServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -168,6 +359,66 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 		connect.WithSchema(marketplaceServiceMethods.ByName("GetToken")),
 		connect.WithHandlerOptions(opts...),
 	)
+	marketplaceServiceListCollectionsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceListCollectionsProcedure,
+		svc.ListCollections,
+		connect.WithSchema(marketplaceServiceMethods.ByName("ListCollections")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceGetCollectionHandler := connect.NewUnaryHandler(
+		MarketplaceServiceGetCollectionProcedure,
+		svc.GetCollection,
+		connect.WithSchema(marketplaceServiceMethods.ByName("GetCollection")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceListListingsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceListListingsProcedure,
+		svc.ListListings,
+		connect.WithSchema(marketplaceServiceMethods.ByName("ListListings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceListAuctionsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceListAuctionsProcedure,
+		svc.ListAuctions,
+		connect.WithSchema(marketplaceServiceMethods.ByName("ListAuctions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceGetActivityHandler := connect.NewUnaryHandler(
+		MarketplaceServiceGetActivityProcedure,
+		svc.GetActivity,
+		connect.WithSchema(marketplaceServiceMethods.ByName("GetActivity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceListOffersHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceListOffersProcedure,
+		svc.ListOffers,
+		connect.WithSchema(marketplaceServiceMethods.ByName("ListOffers")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceGetWalletNFTsHandler := connect.NewUnaryHandler(
+		MarketplaceServiceGetWalletNFTsProcedure,
+		svc.GetWalletNFTs,
+		connect.WithSchema(marketplaceServiceMethods.ByName("GetWalletNFTs")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceGetProfileHandler := connect.NewUnaryHandler(
+		MarketplaceServiceGetProfileProcedure,
+		svc.GetProfile,
+		connect.WithSchema(marketplaceServiceMethods.ByName("GetProfile")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceSearchHandler := connect.NewUnaryHandler(
+		MarketplaceServiceSearchProcedure,
+		svc.Search,
+		connect.WithSchema(marketplaceServiceMethods.ByName("Search")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceGetMetricsHandler := connect.NewUnaryHandler(
+		MarketplaceServiceGetMetricsProcedure,
+		svc.GetMetrics,
+		connect.WithSchema(marketplaceServiceMethods.ByName("GetMetrics")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/marketplace.v1.MarketplaceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MarketplaceServiceGetListingProcedure:
@@ -178,6 +429,26 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 			marketplaceServiceGetOfferHandler.ServeHTTP(w, r)
 		case MarketplaceServiceGetTokenProcedure:
 			marketplaceServiceGetTokenHandler.ServeHTTP(w, r)
+		case MarketplaceServiceListCollectionsProcedure:
+			marketplaceServiceListCollectionsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceGetCollectionProcedure:
+			marketplaceServiceGetCollectionHandler.ServeHTTP(w, r)
+		case MarketplaceServiceListListingsProcedure:
+			marketplaceServiceListListingsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceListAuctionsProcedure:
+			marketplaceServiceListAuctionsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceGetActivityProcedure:
+			marketplaceServiceGetActivityHandler.ServeHTTP(w, r)
+		case MarketplaceServiceListOffersProcedure:
+			marketplaceServiceListOffersHandler.ServeHTTP(w, r)
+		case MarketplaceServiceGetWalletNFTsProcedure:
+			marketplaceServiceGetWalletNFTsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceGetProfileProcedure:
+			marketplaceServiceGetProfileHandler.ServeHTTP(w, r)
+		case MarketplaceServiceSearchProcedure:
+			marketplaceServiceSearchHandler.ServeHTTP(w, r)
+		case MarketplaceServiceGetMetricsProcedure:
+			marketplaceServiceGetMetricsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -201,4 +472,44 @@ func (UnimplementedMarketplaceServiceHandler) GetOffer(context.Context, *connect
 
 func (UnimplementedMarketplaceServiceHandler) GetToken(context.Context, *connect.Request[marketplacev1.GetTokenRequest]) (*connect.Response[marketplacev1.GetTokenResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetToken is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) ListCollections(context.Context, *connect.Request[marketplacev1.ListCollectionsRequest], *connect.ServerStream[marketplacev1.Collection]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.ListCollections is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) GetCollection(context.Context, *connect.Request[marketplacev1.GetCollectionRequest]) (*connect.Response[marketplacev1.GetCollectionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetCollection is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) ListListings(context.Context, *connect.Request[marketplacev1.ListListingsRequest], *connect.ServerStream[marketplacev1.Listing]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.ListListings is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) ListAuctions(context.Context, *connect.Request[marketplacev1.ListAuctionsRequest], *connect.ServerStream[marketplacev1.Auction]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.ListAuctions is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) GetActivity(context.Context, *connect.Request[marketplacev1.GetActivityRequest]) (*connect.Response[marketplacev1.GetActivityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetActivity is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) ListOffers(context.Context, *connect.Request[marketplacev1.ListOffersRequest], *connect.ServerStream[marketplacev1.Offer]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.ListOffers is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) GetWalletNFTs(context.Context, *connect.Request[marketplacev1.GetWalletNFTsRequest]) (*connect.Response[marketplacev1.GetWalletNFTsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetWalletNFTs is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) GetProfile(context.Context, *connect.Request[marketplacev1.GetProfileRequest]) (*connect.Response[marketplacev1.GetProfileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetProfile is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) Search(context.Context, *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.Search is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetMetrics is not implemented"))
 }

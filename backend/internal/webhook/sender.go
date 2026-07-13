@@ -1,12 +1,21 @@
 // Package webhook provides HTTP POST senders for several webhook formats:
 //   - Discord/Slack: accepts a Payload with content + embeds
 //   - Prometheus Alertmanager: sends Alertmanager-compatible alert payloads
+//
+// Retry policy: senders automatically retry on transient errors (5xx, network
+// timeout, DNS resolution failure) with exponential backoff: 3 attempts,
+// delays 5s → 30s → 120s. Non-retryable errors (4xx client errors) are
+// returned immediately. The webhook HMAC secret, when configured, signs every
+// outgoing payload with HMAC-SHA256 so receivers can verify the origin.
 package webhook
 
 import (
 	"bytes"
 	"context"
+	"crypto/hmac"
+	"crypto/sha256"
 	"crypto/tls"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net"
@@ -15,6 +24,22 @@ import (
 	"strings"
 	"time"
 )
+
+// DefaultRetryConfig is the standard exponential backoff for webhook sends.
+var DefaultRetryConfig = RetryConfig{
+	MaxAttempts: 3,
+	Delays:      []time.Duration{5 * time.Second, 30 * time.Second, 120 * time.Second},
+}
+
+// RetryConfig controls automatic retry behavior for HTTP webhook sends.
+type RetryConfig struct {
+	MaxAttempts int
+	Delays      []time.Duration // must have len >= MaxAttempts-1
+}
+
+// HMACSecret, when non-empty, signs every JSON payload with HMAC-SHA256.
+// Receivers can verify the X-Webhook-Signature header to authenticate origin.
+var HMACSecret string
 
 // ── Discord/Slack format ────────────────────────────────────────────────
 
@@ -385,22 +410,70 @@ func stripHTML(html string) string {
 // sendJSON POSTs any JSON-marshalable value to a URL with a 10-second timeout.
 // Non-2xx responses are returned as errors with the response body truncated
 // to 256 characters for safe logging.
+//
+// When DefaultRetryConfig has retries configured and HMACSecret is set, the
+// payload is signed and retried on transient failures with exponential backoff.
 func sendJSON(ctx context.Context, url string, v any) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("webhook marshal: %w", err)
 	}
 
+	// Sign the payload with HMAC-SHA256 when a secret is configured.
+	// Receivers verify X-Webhook-Signature against the same secret.
+	var signature string
+	if HMACSecret != "" {
+		mac := hmac.New(sha256.New, []byte(HMACSecret))
+		mac.Write(body)
+		signature = "sha256=" + hex.EncodeToString(mac.Sum(nil))
+	}
+
+	// Retry loop with exponential backoff.
+	var lastErr error
+	for attempt := 0; attempt < DefaultRetryConfig.MaxAttempts; attempt++ {
+		if attempt > 0 {
+			// Apply backoff delay between retries.
+			delayIdx := attempt - 1
+			if delayIdx >= len(DefaultRetryConfig.Delays) {
+				delayIdx = len(DefaultRetryConfig.Delays) - 1
+			}
+			select {
+			case <-ctx.Done():
+				return ctx.Err()
+			case <-time.After(DefaultRetryConfig.Delays[delayIdx]):
+			}
+		}
+
+		lastErr = sendSingle(ctx, url, body, signature)
+		if lastErr == nil {
+			return nil
+		}
+
+		// Only retry on transient errors (5xx, network issues).
+		// 4xx errors are permanent — retrying won't help.
+		if !isRetryable(lastErr) {
+			return lastErr
+		}
+	}
+
+	return fmt.Errorf("webhook: all %d attempts failed: %w", DefaultRetryConfig.MaxAttempts, lastErr)
+}
+
+// sendSingle performs a single HTTP POST without retries.
+func sendSingle(ctx context.Context, url string, body []byte, signature string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("webhook request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
+	if signature != "" {
+		req.Header.Set("X-Webhook-Signature", signature)
+	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
-		return fmt.Errorf("webhook post: %w", err)
+		return &retryableError{err}
 	}
 	defer resp.Body.Close()
 
@@ -411,8 +484,21 @@ func sendJSON(ctx context.Context, url string, v any) error {
 		if n > 0 {
 			bodySnippet = string(buf[:n])
 		}
-		return fmt.Errorf("webhook returned %d: %s", resp.StatusCode, bodySnippet)
+		err := fmt.Errorf("webhook returned %d: %s", resp.StatusCode, bodySnippet)
+		// 5xx = retryable, 4xx = not
+		if resp.StatusCode >= 500 {
+			return &retryableError{err}
+		}
+		return err
 	}
 
 	return nil
+}
+
+// retryableError wraps an error that should be retried.
+type retryableError struct{ error }
+
+func isRetryable(err error) bool {
+	_, ok := err.(*retryableError)
+	return ok
 }

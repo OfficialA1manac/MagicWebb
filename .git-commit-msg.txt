@@ -1,0 +1,26 @@
+feat: W2 completion — WS push, health dashboard, Zig pipeline, keeper election
+
+- Remove 5-min HTMX polling fallback from 6 HTML templates
+  (WS push events from ws.js + htmx.trigger() now drive all updates)
+- Add WebSocket health dashboard panel to /metrics page
+  (active connections, subs/conn ratio, events sent, lifetime conns)
+- Add WSStatsProvider interface + wire ws.Handler metrics into BuildResponse()
+- Fix metrics.go: h.ws -> s.ws, zero-value defaults for template safety
+- Fix handler.go: remove bogus ws/metrics import
+- Fix activity_test.go: pass nil 3rd arg to NewMetricsService
+
+- Complete Zig build toolchain: 3 libraries (sha256, keccak256, image sniffing)
+- Add Makefile targets: zigmedia-build, zigcrypto-lib, zignsniff-lib, zigmedia-test
+- Create CGO bridges: zignsniff_zigmedia.go, zigcrypto_default.go, zignsniff_default.go
+- Fix zigcrypto.go: remove empty-input early return (zeros vs correct hash)
+- Fix hasher_zigmedia.go: use unsafe.SliceData instead of &body[0]
+- Wire SniffImage -> sniffer() for Zig-accelerated image MIME detection
+
+- Implement G5 gRPC keeper election (election.go + protobuf)
+- Shared gRPC port via bcast.GRPCServer() — no extra port needed
+- Deterministic leader selection (lowest UUID wins)
+- 1s heartbeat / 3s failover, voluntary yield on degraded RPC
+
+- Add Prometheus /metrics route (SSE saturation, head lag, build info)
+- Add Sentry error reporting + OTEL tracing middleware
+- Wire all monitoring into main.go startup/shutdown lifecycle

@@ -102,6 +102,71 @@ func (q *Q) ListTrackedCollections(ctx context.Context) ([]string, error) {
 	return out, rows.Err()
 }
 
+// ── IDX-2: Per-collection indexer checkpoints ────────────────────────────────
+
+// TrackedCollection holds one tracked collection with its indexer checkpoint.
+type TrackedCollection struct {
+	Address          string
+	LastScannedBlock uint64
+}
+
+// ListTrackedCollectionsWithCheckpoints returns every tracked collection with
+// its last_scanned_block. Used by the indexer to determine per-collection
+// catch-up ranges. Collections with last_scanned_block=0 need full backfill.
+func (q *Q) ListTrackedCollectionsWithCheckpoints(ctx context.Context) ([]TrackedCollection, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT address, COALESCE(last_scanned_block, 0)
+		   FROM tracked_collections WHERE tracked = true
+		 ORDER BY last_scanned_block ASC`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []TrackedCollection
+	for rows.Next() {
+		var tc TrackedCollection
+		if err := rows.Scan(&tc.Address, &tc.LastScannedBlock); err != nil {
+			return nil, err
+		}
+		out = append(out, tc)
+	}
+	return out, rows.Err()
+}
+
+// GetMinCollectionCheckpoint returns the minimum last_scanned_block across all
+// tracked collections. Used on indexer restart to determine the safe starting
+// block — the indexer must re-scan from the earliest collection's checkpoint
+// so no Transfer events are missed.
+func (q *Q) GetMinCollectionCheckpoint(ctx context.Context) (uint64, error) {
+	var block uint64
+	err := q.reader().QueryRow(ctx,
+		`SELECT COALESCE(MIN(last_scanned_block), 0)
+		   FROM tracked_collections WHERE tracked = true`).Scan(&block)
+	return block, err
+}
+
+// SetCollectionCheckpoint updates the last_scanned_block for a single tracked
+// collection. Called after processTransfers successfully indexes a block range
+// for a specific collection.
+func (q *Q) SetCollectionCheckpoint(ctx context.Context, address string, block uint64) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE tracked_collections
+		   SET last_scanned_block = $2, updated_at = now()
+		 WHERE address = $1`, address, block)
+	return err
+}
+
+// SetCollectionCheckpointsBatch updates last_scanned_block for all tracked
+// collections in one query. Called after a full processTransfers range
+// completes successfully — all collections advance to the same block.
+func (q *Q) SetCollectionCheckpointsBatch(ctx context.Context, block uint64) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE tracked_collections
+		   SET last_scanned_block = $1, updated_at = now()
+		 WHERE tracked = true`, block)
+	return err
+}
+
 // ── Ownership + orphaning (from Transfer events) ───────────────────────────
 
 func (q *Q) GetTokenOwner(ctx context.Context, collection, tokenID string) (string, error) {

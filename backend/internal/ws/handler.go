@@ -30,6 +30,14 @@ import (
 const wsPerIPLimit = 20
 const wsGlobalLimit = 5_000
 
+// Per-connection rate limiting: max messages per second from a single client.
+// Token bucket: 20 tokens, refilled at 10/sec — allows bursts of up to 20
+// messages then settles at 10 msg/s steady state. A malicious client spamming
+// MsgAction with malformed params would otherwise force JSON-unmarshal on
+// every message without any backpressure.
+const wsConnMsgLimit = 20   // burst capacity
+const wsConnMsgRefill = 10  // tokens per second
+
 // Connection represents a single authenticated WebSocket connection.
 type Connection struct {
 	id            string
@@ -41,6 +49,11 @@ type Connection struct {
 	once          sync.Once
 	subscriptions map[string]struct{} // set of subscribed channels (guarded by subMu)
 	subMu         sync.RWMutex        // guards subscriptions against concurrent read/write
+
+	// Per-connection token bucket for client message rate limiting.
+	// tokens available for immediate consumption (atomic; consumed by readPump).
+	// Refilled by a background goroutine at wsConnMsgRefill/sec up to wsConnMsgLimit.
+	msgTokens   int64
 }
 
 // writePump sends messages from the broadcaster to the WebSocket connection.
@@ -80,7 +93,13 @@ func (c *Connection) readPump(h *Handler) {
 		c.once.Do(func() { close(c.done) })
 	}()
 
-	c.conn.SetReadLimit(4096) // 4 KB max per message
+	// Start per-connection token bucket refill. A dedicated goroutine adds
+	// wsConnMsgRefill tokens per second up to wsConnMsgLimit cap. The refill
+	// stops when the connection closes (done channel closes).
+	c.msgTokens = wsConnMsgLimit // start with a full bucket
+	go c.refillTokens()
+
+	c.conn.SetReadLimit(16384) // 16 KB max per message (was 4096 — too small for state payloads)
 	c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
 	c.conn.SetPongHandler(func(string) error {
 		_ = c.conn.SetReadDeadline(time.Now().Add(60 * time.Second))
@@ -91,6 +110,15 @@ func (c *Connection) readPump(h *Handler) {
 		_, raw, err := c.conn.ReadMessage()
 		if err != nil {
 			break
+		}
+
+		// Per-connection rate limiting: token bucket gates ALL client→server
+		// messages. 20 msg burst, 10 msg/s steady state. A malicious client
+		// spamming MsgAction with malformed params used to force JSON-unmarshal
+		// on every message without backpressure.
+		if !c.consumeMsgToken() {
+			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "rate limit exceeded"})})
+			continue
 		}
 
 		var msg Message
@@ -145,6 +173,44 @@ func (c *Connection) writeJSON(msg Message) {
 	case c.send <- data:
 	default:
 		// Slow client — drop the message
+	}
+}
+
+// consumeMsgToken attempts to consume one token from the per-connection
+// token bucket. Returns false when the bucket is empty (rate limit exceeded).
+func (c *Connection) consumeMsgToken() bool {
+	for {
+		current := atomic.LoadInt64(&c.msgTokens)
+		if current <= 0 {
+			return false
+		}
+		if atomic.CompareAndSwapInt64(&c.msgTokens, current, current-1) {
+			return true
+		}
+	}
+}
+
+// refillTokens adds wsConnMsgRefill tokens per second to the bucket up to
+// wsConnMsgLimit. Runs until the connection closes (done channel fired).
+func (c *Connection) refillTokens() {
+	ticker := time.NewTicker(time.Second)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-c.done:
+			return
+		case <-ticker.C:
+			for {
+				current := atomic.LoadInt64(&c.msgTokens)
+				next := current + wsConnMsgRefill
+				if next > wsConnMsgLimit {
+					next = wsConnMsgLimit
+				}
+				if atomic.CompareAndSwapInt64(&c.msgTokens, current, next) {
+					break
+				}
+			}
+		}
 	}
 }
 
@@ -420,17 +486,17 @@ func sameOriginHost(a, b string) bool {
 // authenticate extracts the wallet address from the JWT cookie, if present.
 // Returns "" for unauthenticated connections (still allowed for public data).
 func (h *Handler) authenticate(c *fiber.Ctx) string {
-	// Try session cookies first
+	// Try session cookies first (both legacy mw_s_ and new mw_a_ access tokens)
 	for _, name := range sessionCookieNames(c) {
 		if v := c.Cookies(name); v != "" {
-			if a, err := auth.Verify(v, h.cfg.JWTSecret, auth.DefaultAudience); err == nil {
+			if a, err := auth.VerifyAccessToken(v, h.cfg.JWTSecret); err == nil {
 				return a
 			}
 		}
 	}
 	// Try Authorization header
 	if hdr := c.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
-		if a, err := auth.Verify(strings.TrimPrefix(hdr, "Bearer "), h.cfg.JWTSecret, auth.DefaultAudience); err == nil {
+		if a, err := auth.VerifyAccessToken(strings.TrimPrefix(hdr, "Bearer "), h.cfg.JWTSecret); err == nil {
 			return a
 		}
 	}
@@ -448,7 +514,7 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 	var out []string
 	for _, part := range strings.Split(hdr, ";") {
 		p := strings.TrimSpace(part)
-		if !strings.HasPrefix(p, "mw_s_") {
+		if !strings.HasPrefix(p, "mw_s_") && !strings.HasPrefix(p, "mw_a_") {
 			continue
 		}
 		eq := strings.IndexByte(p, '=')

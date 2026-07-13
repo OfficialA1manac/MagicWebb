@@ -14,6 +14,8 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+
+	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 )
 
 // GraphQLServer wraps a gqlgen-generated executable schema with Fiber
@@ -25,15 +27,21 @@ type GraphQLServer struct {
 
 // NewGraphQLServer creates a gqlgen-based GraphQL server powered by the
 // generated executable schema from schema.graphql. The db.Q provides
-// data access; bcast is retained for future push-notification resolvers.
+// data access; bcast provides SSE push for subscription resolvers; grpc
+// provides a typed, decoupled data path via Connect-RPC — resolvers that
+// have a gRPC equivalent (listings, auctions, collections, tokens) delegate
+// to the gRPC client instead of hitting the DB directly.
+//
+// When grpc is nil, resolvers fall back to direct DB access (legacy path).
 //
 // Complexity limits: max query depth of 12 and max 200 nodes to prevent
 // resource-exhaustion GraphQL queries (deeply nested collections.listings
 // etc.). The LRU operation cache reduces repeated parse/validate costs.
-func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster) *GraphQLServer {
-	resolver := NewResolver(q, bcast)
+func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect.MarketplaceServiceClient) *GraphQLServer {
+	resolver := NewResolver(q, bcast, grpc)
 	schema := NewExecutableSchema(Config{
-		Resolvers: resolver,
+		Resolvers:  resolver,
+		Complexity: ComplexityConfig(), // GQL-5: field-level cost weights
 	})
 
 	srv := handler.New(schema)
@@ -46,11 +54,11 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster) *GraphQLServer {
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})
 
-	// Complexity limits: prevent deep-nested or mega-node queries from
-	// overloading the DB. 12-depth is enough for any reasonable query
-	// (e.g. collections->listings->seller); 200 node cap bounds total
-	// fields requested across all nested objects.
-	srv.Use(extension.FixedComplexityLimit(200))
+	// ── GQL-5: Field-level query cost analysis ────────────────────────
+	// The ComplexityRoot (set in NewExecutableSchema Config) assigns
+	// per-field cost weights: scalars=1, list resolvers=10+child×limit.
+	// Max total cost per query: 1000.
+	srv.Use(extension.FixedComplexityLimit(MaxQueryCost))
 
 	// APQ (Automatic Persisted Queries): clients send a hash first;
 	// full query only on cache miss. Halves bandwidth for repeated
@@ -58,6 +66,12 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster) *GraphQLServer {
 	srv.Use(extension.AutomaticPersistedQuery{
 		Cache: lru.New[string](100),
 	})
+
+	// ── GQL-2: Response cache ────────────────────────────────────────
+	// Caches complete JSON responses for deterministic read-heavy queries
+	// (collection, metrics) with 30s TTL. On cache hit, the DB and all
+	// resolvers are skipped entirely — reducing latency to near-zero.
+	srv.Use(NewResponseCacheExtension())
 
 	// Introspection: enabled in all environments so GraphiQL and
 	// external tooling (Apollo Studio, Postman, etc.) can discover

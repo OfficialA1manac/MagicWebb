@@ -1,4 +1,14 @@
 // Package auth provides JWT issuance and verification via golang-jwt.
+// Supports short-lived access tokens (15min) and long-lived refresh tokens (7d)
+// with family-based rotation to limit the blast radius of token theft.
+//
+// Token types:
+//   - access:  Short-lived (15min), used for API authorization. Stored in an
+//             HttpOnly cookie (mw_a_<addr>) or Authorization: Bearer header.
+//   - refresh: Long-lived (7d), used ONLY at /auth/refresh to obtain new
+//             access+refresh pairs. Stored in an HttpOnly cookie (mw_r_<addr>).
+//             Rotation: each use invalidates the previous refresh token,
+//             making stolen refresh tokens detectable (reuse → whole family revoked).
 package auth
 
 import (
@@ -15,89 +25,105 @@ type contextKey string
 const CallerKey contextKey = "caller"
 
 // DefaultAudience is the JWT audience claim identifying the marketplace API.
-// Tokens minted for any other service (e.g. an indexer/reindex tool) MUST
-// use a different aud so they cannot be replayed here.
 const DefaultAudience = "magicwebb:api"
 
-// DefaultIssuer identifies the marketplace token origin. The verify path
-// requires iss == DefaultIssuer so a token signed by any other JWT_SECRET
-// (compromised shared secret across deployments) is also rejected.
+// RefreshAudience is used for refresh tokens so they cannot be used as
+// access tokens on API endpoints.
+const RefreshAudience = "magicwebb:refresh"
+
+// DefaultIssuer identifies the marketplace token origin.
 const DefaultIssuer = "magicwebb"
 
-// Issue signs and returns a JWT for the given wallet address, bound to the
-// supplied audience. Callers that need service-to-service tokens should pass
-// a different audience (e.g. "magicwebb:reindex") so the marketplace API
-// will reject them. TTL is clamped to a sane max (24h) to limit blast radius
-// on secret leak.
-//
-// Uses golang-jwt/jwt/v5 with HS256 signing. The library handles base64
-// encoding, signature computation, and token serialization — all of which
-// were previously hand-rolled. The migration preserves the exact same
-// on-the-wire token format (three-part dot-separated JWT with HS256).
-func Issue(address, secret, audience string, ttl time.Duration) (string, error) {
-	if audience == "" {
-		audience = DefaultAudience
-	}
-	if ttl <= 0 || ttl > 24*time.Hour {
-		ttl = 24 * time.Hour
-	}
+// Token lifetimes (as per optimization matrix AUTH-1):
+//   Access:  15 minutes — limits blast radius of token theft
+//   Refresh:  7 days   — balances UX (no daily re-auth) with security
+const AccessTokenTTL  = 15 * time.Minute
+const RefreshTokenTTL = 7 * 24 * time.Hour
+
+// TokenType is embedded in custom JWT claims so middleware can distinguish
+// access tokens from refresh tokens without a DB lookup.
+type TokenType string
+
+const (
+	TokenAccess  TokenType = "access"
+	TokenRefresh TokenType = "refresh"
+)
+
+// Claims extends the standard JWT claims with token_type and family_id fields.
+// Refresh tokens carry a family_id (UUID) for family-based rotation and
+// use the standard jti claim as the per-token identifier for rotation tracking.
+type Claims struct {
+	jwt.RegisteredClaims
+	TokenType string `json:"token_type,omitempty"` // "access" | "refresh"
+	FamilyID  string `json:"family_id,omitempty"`  // UUID identifying the refresh family
+}
+
+// IssueAccessToken signs and returns a short-lived access JWT.
+func IssueAccessToken(address, secret string) (string, error) {
+	return issueWithFamily(address, secret, DefaultAudience, AccessTokenTTL, TokenAccess, "", "")
+}
+
+// IssueRefreshTokenWithFamily signs a refresh JWT with family_id and jti
+// embedded. The family_id links all tokens in a rotation chain; the jti
+// (token_id) identifies this specific token for rotation tracking.
+func IssueRefreshTokenWithFamily(address, secret, familyID, tokenID string) (string, error) {
+	return issueWithFamily(address, secret, RefreshAudience, RefreshTokenTTL, TokenRefresh, familyID, tokenID)
+}
+
+func issueWithFamily(address, secret, audience string, ttl time.Duration, tokType TokenType, familyID, tokenID string) (string, error) {
 	now := time.Now()
-	claims := jwt.RegisteredClaims{
-		Subject:   address,
-		Issuer:    DefaultIssuer,
-		Audience:  jwt.ClaimStrings{audience},
-		IssuedAt:  jwt.NewNumericDate(now),
-		NotBefore: jwt.NewNumericDate(now),
-		ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+	claims := Claims{
+		RegisteredClaims: jwt.RegisteredClaims{
+			Subject:   address,
+			Issuer:    DefaultIssuer,
+			Audience:  jwt.ClaimStrings{audience},
+			IssuedAt:  jwt.NewNumericDate(now),
+			NotBefore: jwt.NewNumericDate(now),
+			ExpiresAt: jwt.NewNumericDate(now.Add(ttl)),
+			ID:        tokenID,
+		},
+		TokenType: string(tokType),
+		FamilyID:  familyID,
 	}
 	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
 	return token.SignedString([]byte(secret))
 }
 
-// Verify parses and validates a JWT; returns the wallet address on success.
-// All checks are enforced in this order:
-//   1. golang-jwt parses the header and enforces alg (rejects alg=none by default).
-//   2. Signature MUST match the body (golang-jwt uses constant-time compare internally).
-//   3. issuer MUST equal DefaultIssuer (explicit check — golang-jwt's RegisteredClaims
-//      does not enforce iss by default).
-//   4. audience MUST equal expectedAudience (Verified via jwt.RegisteredClaims.VerifyAudience).
-//   5. nbf / exp bounds respected, sub MUST be non-empty.
+// Verify parses and validates a JWT; returns the wallet address and token type.
+// Access tokens (token_type=access or empty/legacy) verify against DefaultAudience.
+// Refresh tokens (token_type=refresh) verify against RefreshAudience.
 //
-// A forged or downgrade token — even with a "valid-looking" signature claiming
-// a different alg — fails before any handler runs.
-func Verify(tokenString, secret, expectedAudience string) (string, error) {
+// All standard JWT checks are enforced:
+//   1. golang-jwt parses the header and enforces alg (rejects alg=none).
+//   2. Signature MUST match the body (constant-time compare).
+//   3. Issuer MUST equal DefaultIssuer.
+//   4. Audience MUST equal expectedAudience.
+//   5. nbf / exp bounds respected, sub MUST be non-empty.
+func Verify(tokenString, secret, expectedAudience string) (address string, tokType TokenType, err error) {
 	if expectedAudience == "" {
 		expectedAudience = DefaultAudience
 	}
 
-	claims := &jwt.RegisteredClaims{}
+	claims := &Claims{}
 	token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
-		// Validate the signing method is HMAC-based. This is defense-in-depth:
-		// golang-jwt's default parser already rejects alg=none, but an explicit
-		// check here prevents any future parser configuration drift from
-		// silently accepting a different algorithm family.
 		if _, ok := token.Method.(*jwt.SigningMethodHMAC); !ok {
 			return nil, fmt.Errorf("unexpected signing method: %v", token.Header["alg"])
 		}
 		return []byte(secret), nil
 	})
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	if !token.Valid {
-		return "", fmt.Errorf("invalid token")
+		return "", "", fmt.Errorf("invalid token")
 	}
 
-	// Enforce issuer. golang-jwt's RegisteredClaims does not auto-validate iss
-	// (unlike exp/nbf/iat/aud), so this check is explicit and mandatory.
+	// Enforce issuer.
 	if claims.Issuer != DefaultIssuer {
-		return "", fmt.Errorf("invalid issuer")
+		return "", "", fmt.Errorf("invalid issuer")
 	}
 
-	// Verify audience. claims.Audience is jwt.ClaimStrings ([]string).
-	// We require an EXACT match — the audience claim must contain
-	// expectedAudience. This preserves the old behavior where a token
-	// minted for "magicwebb:reindex" cannot verify as "magicwebb:api".
+	// Verify audience.
 	audOK := false
 	for _, aud := range claims.Audience {
 		if aud == expectedAudience {
@@ -106,23 +132,83 @@ func Verify(tokenString, secret, expectedAudience string) (string, error) {
 		}
 	}
 	if !audOK {
-		return "", fmt.Errorf("invalid audience")
+		return "", "", fmt.Errorf("invalid audience")
 	}
 
 	if claims.Subject == "" {
-		return "", fmt.Errorf("missing sub")
+		return "", "", fmt.Errorf("missing sub")
 	}
 
-	return claims.Subject, nil
+	return claims.Subject, TokenType(claims.TokenType), nil
 }
 
-// CookieName is the credential-bearing cookie set alongside the JWT so the
-// browser can authenticate SSE + cross-page loads without exposing the
-// token to JS (mitigates XSS exfiltration). Address-bound to prevent reuse
-// across wallets in the same browser profile.
+// VerifyAccessToken verifies that a token is a valid access token (not a refresh
+// token). Used by API middleware to reject refresh tokens on data endpoints.
+func VerifyAccessToken(tokenString, secret string) (string, error) {
+	addr, tokType, err := Verify(tokenString, secret, DefaultAudience)
+	if err != nil {
+		return "", err
+	}
+	// Reject refresh tokens on API endpoints — they should only be used
+	// at /auth/refresh. Tokens with an empty token_type (issued before the
+	// token-type migration) are treated as access tokens for backward
+	// compatibility with existing sessions.
+	if tokType == TokenRefresh {
+		return "", fmt.Errorf("refresh token cannot be used as access token")
+	}
+	return addr, nil
+}
+
+// VerifyRefreshToken verifies that a token is a valid refresh token.
+func VerifyRefreshToken(tokenString, secret string) (string, error) {
+	addr, _, err := Verify(tokenString, secret, RefreshAudience)
+	return addr, err
+}
+
+// ParseRefreshClaims extracts the family_id and jti (token ID) from a
+// refresh JWT without full validation. Use after VerifyRefreshToken has
+// already confirmed the token is valid.
+func ParseRefreshClaims(tokenString, secret string) (familyID, tokenID string) {
+	claims := &Claims{}
+	parser := jwt.NewParser()
+	_, err := parser.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+		return []byte(secret), nil
+	})
+	if err != nil {
+		return "", ""
+	}
+	return claims.FamilyID, claims.ID
+}
+
+// CookieNameAccess returns the access-token cookie name for a wallet.
+// Pattern: mw_a_<addr-prefix>
+func CookieNameAccess(address string) string {
+	if len(address) < 8 {
+		return "mw_access"
+	}
+	return "mw_a_" + strings.ToLower(address[:8])
+}
+
+// CookieNameRefresh returns the refresh-token cookie name for a wallet.
+// Pattern: mw_r_<addr-prefix>
+func CookieNameRefresh(address string) string {
+	if len(address) < 8 {
+		return "mw_refresh"
+	}
+	return "mw_r_" + strings.ToLower(address[:8])
+}
+
+// CookieName is the legacy session cookie name (backward compatible).
 func CookieName(address string) string {
 	if len(address) < 8 {
 		return "mw_session"
 	}
 	return "mw_s_" + strings.ToLower(address[:8])
+}
+
+// ScanCookieNames returns both legacy and new cookie name patterns for a wallet.
+// Used by middleware to check all possible cookie names when authenticating.
+func ScanCookieNames(address string) []string {
+	names := []string{CookieName(address), CookieNameAccess(address)}
+	return names
 }

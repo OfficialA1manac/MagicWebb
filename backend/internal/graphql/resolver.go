@@ -6,21 +6,49 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"time"
+
+	"connectrpc.com/connect"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+
+	marketplacev1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
+	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 )
 
 // Resolver holds shared dependencies injected by NewGraphQLServer.
+// When grpc is non-nil, data-fetching resolvers delegate to the typed
+// Connect-RPC service instead of querying the DB directly. This decouples
+// the presentation layer from storage and enables future schema stitching.
+// All resolvers have been migrated to use grpc (Activity, Offers, WalletNFTs,
+// Profile, Search, Metrics) with a DB fallback when grpc is nil.
 type Resolver struct {
 	q     *db.Q
 	bcast *sse.Broadcaster
+	grpc  marketplacev1connect.MarketplaceServiceClient
 }
 
-// NewResolver creates a resolver with DB and broadcaster access.
-func NewResolver(q *db.Q, bcast *sse.Broadcaster) *Resolver {
-	return &Resolver{q: q, bcast: bcast}
+// NewResolver creates a resolver with DB, broadcaster, and optional gRPC client.
+func NewResolver(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect.MarketplaceServiceClient) *Resolver {
+	return &Resolver{q: q, bcast: bcast, grpc: grpc}
+}
+
+// drainServerStream reads all items from a server stream and returns them as a
+// slice. Used by GraphQL resolvers that delegate to Connect-RPC streaming RPCs
+// (GRPC-1). The GraphQL protocol requires complete result sets, so we drain the
+// stream before returning.
+func drainServerStream[T any](stream *connect.ServerStreamForClient[T]) ([]*T, error) {
+	defer stream.Close()
+	var out []*T
+	for stream.Receive() {
+		out = append(out, stream.Msg())
+	}
+	if err := stream.Err(); err != nil {
+		return nil, err
+	}
+	return out, nil
 }
 
 // ── Auction sub-resolver ────────────────────────────────────────────────────
@@ -137,9 +165,34 @@ func (r *collectionResolver) Auctions(ctx context.Context, obj *Collection, limi
 
 type queryResolver struct{ *Resolver }
 
+// grpcOrDefault returns the gRPC client when available; nil means the caller
+// falls back to direct DB access (for migrations not yet complete).
+func (r *Resolver) grpcOrDefault() marketplacev1connect.MarketplaceServiceClient {
+	return r.grpc
+}
+
 // Collection fetches a single collection by address.
 func (r *queryResolver) Collection(ctx context.Context, address string) (*Collection, error) {
-	row, err := r.q.GetCollection(ctx, strings.ToLower(address))
+	addr := strings.ToLower(address)
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetCollection(ctx, connect.NewRequest(&marketplacev1.GetCollectionRequest{Address: addr}))
+		if err != nil {
+			return nil, err
+		}
+		c := resp.Msg
+		return &Collection{
+			Address:     c.Address,
+			Name:        c.Name,
+			Symbol:      c.Symbol,
+			Standard:    c.Standard,
+			DeployBlock: int(c.DeployBlock),
+			Verified:    c.Verified,
+		}, nil
+	}
+
+	// Fallback to direct DB access.
+	row, err := r.q.GetCollection(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -155,11 +208,33 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 
 // Collections lists tracked collections.
 func (r *queryResolver) Collections(ctx context.Context, limit *int) ([]*Collection, error) {
-	l := 50
+	l := int32(50)
 	if limit != nil && *limit > 0 && *limit <= 200 {
-		l = *limit
+		l = int32(*limit)
 	}
-	rows, err := r.q.ListCollections(ctx, l)
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		stream, err := grpc.ListCollections(ctx, connect.NewRequest(&marketplacev1.ListCollectionsRequest{Limit: l}))
+		if err != nil {
+			return nil, err
+		}
+		items, err := drainServerStream(stream)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*Collection, 0, len(items))
+		for _, c := range items {
+			out = append(out, collectionFromProto(c))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
+	fallbackLimit := 50
+	if limit != nil && *limit > 0 && *limit <= 200 {
+		fallbackLimit = *limit
+	}
+	rows, err := r.q.ListCollections(ctx, fallbackLimit)
 	if err != nil {
 		return nil, err
 	}
@@ -176,7 +251,18 @@ func (r *queryResolver) Collections(ctx context.Context, limit *int) ([]*Collect
 
 // Listing fetches a single listing by collection+tokenID.
 func (r *queryResolver) Listing(ctx context.Context, collection string, tokenID string) (*Listing, error) {
-	row, err := r.q.GetListing(ctx, strings.ToLower(collection), tokenID)
+	coll := strings.ToLower(collection)
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetListing(ctx, connect.NewRequest(&marketplacev1.GetListingRequest{Collection: coll, TokenId: tokenID}))
+		if err != nil {
+			return nil, err
+		}
+		return listingFromGetResponse(resp.Msg), nil
+	}
+
+	// Fallback to direct DB access.
+	row, err := r.q.GetListing(ctx, coll, tokenID)
 	if err != nil {
 		return nil, err
 	}
@@ -185,37 +271,66 @@ func (r *queryResolver) Listing(ctx context.Context, collection string, tokenID 
 
 // Listings returns active listings with optional filters.
 func (r *queryResolver) Listings(ctx context.Context, collection *string, seller *string, sort *string, limit *int, minPrice *string, maxPrice *string, traits *string) ([]*Listing, error) {
-	f := db.ListingsFilter{}
+	req := &marketplacev1.ListListingsRequest{}
 	if collection != nil {
-		f.Collection = strings.ToLower(*collection)
+		req.Collection = strings.ToLower(*collection)
 	}
 	if seller != nil {
-		f.Seller = strings.ToLower(*seller)
+		req.Seller = strings.ToLower(*seller)
 	}
 	if sort != nil {
-		f.Sort = *sort
+		req.Sort = *sort
 	} else {
-		f.Sort = "recent"
+		req.Sort = "recent"
 	}
 	if minPrice != nil {
-		f.MinPriceWei = *minPrice
+		req.MinPriceWei = *minPrice
 	}
 	if maxPrice != nil {
-		f.MaxPriceWei = *maxPrice
+		req.MaxPriceWei = *maxPrice
 	}
-	if traits != nil && *traits != "" {
+	if traits != nil {
+		req.Traits = *traits
+	}
+	if limit != nil && *limit > 0 && *limit <= 100 {
+		req.Limit = int32(*limit)
+	} else {
+		req.Limit = 50
+	}
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		stream, err := grpc.ListListings(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		items, err := drainServerStream(stream)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*Listing, 0, len(items))
+		for _, l := range items {
+			out = append(out, listingFromProto(l))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
+	f := db.ListingsFilter{
+		Collection:  req.Collection,
+		Seller:      req.Seller,
+		Sort:        req.Sort,
+		MinPriceWei: req.MinPriceWei,
+		MaxPriceWei: req.MaxPriceWei,
+		Limit:       int(req.Limit),
+	}
+	if req.Traits != "" {
 		f.Traits = make(map[string]string)
-		for _, pair := range strings.Split(*traits, ",") {
+		for _, pair := range strings.Split(req.Traits, ",") {
 			parts := strings.SplitN(pair, ":", 2)
 			if len(parts) == 2 {
 				f.Traits[parts[0]] = parts[1]
 			}
 		}
-	}
-	if limit != nil && *limit > 0 {
-		f.Limit = *limit
-	} else {
-		f.Limit = 50
 	}
 	rows, err := r.q.ListActiveListings(ctx, f)
 	if err != nil {
@@ -230,6 +345,15 @@ func (r *queryResolver) Listings(ctx context.Context, collection *string, seller
 
 // Auction fetches a single auction by ID.
 func (r *queryResolver) Auction(ctx context.Context, id int) (*Auction, error) {
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetAuction(ctx, connect.NewRequest(&marketplacev1.GetAuctionRequest{AuctionId: int64(id)}))
+		if err != nil {
+			return nil, err
+		}
+		return auctionFromGetResponse(resp.Msg), nil
+	}
+
+	// Fallback to direct DB access.
 	row, err := r.q.GetAuction(ctx, int64(id))
 	if err != nil {
 		return nil, err
@@ -239,26 +363,52 @@ func (r *queryResolver) Auction(ctx context.Context, id int) (*Auction, error) {
 
 // Auctions returns auctions with optional filters.
 func (r *queryResolver) Auctions(ctx context.Context, collection *string, seller *string, status *string, limit *int, minPrice *string, maxPrice *string) ([]*Auction, error) {
-	f := db.AuctionsFilter{}
+	req := &marketplacev1.ListAuctionsRequest{}
 	if collection != nil {
-		f.Collection = strings.ToLower(*collection)
+		req.Collection = strings.ToLower(*collection)
 	}
 	if seller != nil {
-		f.Seller = strings.ToLower(*seller)
+		req.Seller = strings.ToLower(*seller)
 	}
 	if status != nil {
-		f.Status = *status
+		req.Status = *status
 	}
 	if minPrice != nil {
-		f.MinPriceWei = *minPrice
+		req.MinPriceWei = *minPrice
 	}
 	if maxPrice != nil {
-		f.MaxPriceWei = *maxPrice
+		req.MaxPriceWei = *maxPrice
 	}
-	if limit != nil && *limit > 0 {
-		f.Limit = *limit
+	if limit != nil && *limit > 0 && *limit <= 200 {
+		req.Limit = int32(*limit)
 	} else {
-		f.Limit = 50
+		req.Limit = 50
+	}
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		stream, err := grpc.ListAuctions(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		items, err := drainServerStream(stream)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*Auction, 0, len(items))
+		for _, a := range items {
+			out = append(out, auctionFromProto(a))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
+	f := db.AuctionsFilter{
+		Collection:  req.Collection,
+		Seller:      req.Seller,
+		Status:      req.Status,
+		MinPriceWei: req.MinPriceWei,
+		MaxPriceWei: req.MaxPriceWei,
+		Limit:       int(req.Limit),
 	}
 	rows, err := r.q.ListAuctions(ctx, f)
 	if err != nil {
@@ -273,6 +423,44 @@ func (r *queryResolver) Auctions(ctx context.Context, collection *string, seller
 
 // Offers returns offers with optional filters.
 func (r *queryResolver) Offers(ctx context.Context, collection *string, tokenID *string, bidder *string, owner *string, status *string, limit *int) ([]*Offer, error) {
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		req := &marketplacev1.ListOffersRequest{}
+		if collection != nil {
+			req.Collection = strings.ToLower(*collection)
+		}
+		if tokenID != nil {
+			req.TokenId = *tokenID
+		}
+		if bidder != nil {
+			req.Bidder = strings.ToLower(*bidder)
+		}
+		if owner != nil {
+			req.Owner = strings.ToLower(*owner)
+		}
+		if status != nil {
+			req.Status = *status
+		}
+		if limit != nil && *limit > 0 && *limit <= 100 {
+			req.Limit = int32(*limit)
+		} else {
+			req.Limit = 50
+		}
+		stream, err := grpc.ListOffers(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		items, err := drainServerStream(stream)
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*Offer, 0, len(items))
+		for _, o := range items {
+			out = append(out, offerFromProto(o))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
 	f := db.OffersFilter{}
 	if collection != nil {
 		f.Collection = strings.ToLower(*collection)
@@ -388,10 +576,34 @@ func (r *queryResolver) TokenActivity(ctx context.Context, collection string, to
 
 // Activity returns the marketplace activity feed.
 func (r *queryResolver) Activity(ctx context.Context, limit *int, address *string, collection *string, tokenID *string) ([]*Activity, error) {
-	l := 50
+	l := int32(50)
 	if limit != nil && *limit > 0 {
-		l = *limit
+		l = int32(*limit)
 	}
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		req := &marketplacev1.GetActivityRequest{Limit: l}
+		if address != nil && *address != "" {
+			req.Address = strings.ToLower(*address)
+		}
+		if collection != nil && *collection != "" {
+			req.Collection = strings.ToLower(*collection)
+		}
+		if tokenID != nil && *tokenID != "" {
+			req.TokenId = *tokenID
+		}
+		resp, err := grpc.GetActivity(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*Activity, 0, len(resp.Msg.Events))
+		for _, e := range resp.Msg.Events {
+			out = append(out, activityFromProto(e))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
 	var rows []db.ActivityRow
 	var err error
 
@@ -401,21 +613,21 @@ func (r *queryResolver) Activity(ctx context.Context, limit *int, address *strin
 
 	switch {
 	case hasAddr && hasColl && hasTok:
-		tokenRows, terr := r.q.GetTokenActivityByAddress(ctx, strings.ToLower(*collection), *tokenID, strings.ToLower(*address), l)
+		tokenRows, terr := r.q.GetTokenActivityByAddress(ctx, strings.ToLower(*collection), *tokenID, strings.ToLower(*address), int(l))
 		if terr != nil {
 			return nil, terr
 		}
 		rows = tokenActivityToActivity(tokenRows, *collection, *tokenID)
 	case hasColl && hasTok:
-		tokenRows, terr := r.q.GetTokenActivity(ctx, strings.ToLower(*collection), *tokenID, l)
+		tokenRows, terr := r.q.GetTokenActivity(ctx, strings.ToLower(*collection), *tokenID, int(l))
 		if terr != nil {
 			return nil, terr
 		}
 		rows = tokenActivityToActivity(tokenRows, *collection, *tokenID)
 	case hasAddr:
-		rows, err = r.q.GetRecentTransactionsByAddress(ctx, strings.ToLower(*address), l)
+		rows, err = r.q.GetRecentTransactionsByAddress(ctx, strings.ToLower(*address), int(l))
 	default:
-		rows, err = r.q.GetRecentTransactions(ctx, l)
+		rows, err = r.q.GetRecentTransactions(ctx, int(l))
 	}
 	if err != nil {
 		return nil, err
@@ -433,7 +645,18 @@ func (r *queryResolver) Activity(ctx context.Context, limit *int, address *strin
 
 // Profile fetches a user profile.
 func (r *queryResolver) Profile(ctx context.Context, address string) (*Profile, error) {
-	row, err := r.q.GetProfile(ctx, strings.ToLower(address))
+	addr := strings.ToLower(address)
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetProfile(ctx, connect.NewRequest(&marketplacev1.GetProfileRequest{Address: addr}))
+		if err != nil {
+			return nil, err
+		}
+		return profileFromProto(resp.Msg), nil
+	}
+
+	// Fallback to direct DB access.
+	row, err := r.q.GetProfile(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -467,7 +690,22 @@ func (r *queryResolver) Notifications(ctx context.Context, address string, limit
 
 // WalletNFTs returns NFTs owned by a wallet.
 func (r *queryResolver) WalletNFTs(ctx context.Context, owner string) ([]*OwnedNFT, error) {
-	rows, err := r.q.WalletNFTs(ctx, strings.ToLower(owner))
+	addr := strings.ToLower(owner)
+
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetWalletNFTs(ctx, connect.NewRequest(&marketplacev1.GetWalletNFTsRequest{Owner: addr}))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*OwnedNFT, 0, len(resp.Msg.Nfts))
+		for _, n := range resp.Msg.Nfts {
+			out = append(out, ownedNFTFromProto(n))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
+	rows, err := r.q.WalletNFTs(ctx, addr)
 	if err != nil {
 		return nil, err
 	}
@@ -484,6 +722,25 @@ func (r *queryResolver) WalletNFTs(ctx context.Context, owner string) ([]*OwnedN
 
 // Search performs full-text search across NFTs and collections.
 func (r *queryResolver) Search(ctx context.Context, query string, limit *int) ([]*SearchResult, error) {
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		req := &marketplacev1.SearchRequest{Query: query}
+		if limit != nil && *limit > 0 && *limit <= 50 {
+			req.Limit = int32(*limit)
+		} else {
+			req.Limit = 20
+		}
+		resp, err := grpc.Search(ctx, connect.NewRequest(req))
+		if err != nil {
+			return nil, err
+		}
+		out := make([]*SearchResult, 0, len(resp.Msg.Results))
+		for _, s := range resp.Msg.Results {
+			out = append(out, searchResultFromProto(s))
+		}
+		return out, nil
+	}
+
+	// Fallback to direct DB access.
 	l := 20
 	if limit != nil && *limit > 0 {
 		l = *limit
@@ -505,9 +762,21 @@ func (r *queryResolver) Search(ctx context.Context, query string, limit *int) ([
 
 // Metrics returns aggregate market metrics.
 func (r *queryResolver) Metrics(ctx context.Context) (*MarketMetrics, error) {
+	if grpc := r.grpcOrDefault(); grpc != nil {
+		resp, err := grpc.GetMetrics(ctx, connect.NewRequest(&marketplacev1.GetMetricsRequest{}))
+		if err != nil {
+			return nil, err
+		}
+		return metricsFromProto(resp.Msg), nil
+	}
+
+	// Fallback to direct DB access.
 	m, err := r.q.GetMarketMetrics(ctx)
 	if err != nil {
 		return nil, err
+	}
+	if m == nil {
+		m = &db.MarketMetrics{}
 	}
 	return &MarketMetrics{
 		TotalActiveListings: int(m.TotalActiveListings),
@@ -815,6 +1084,221 @@ func (r *subscriptionResolver) NotificationUpdated(ctx context.Context) (<-chan 
 	}()
 
 	return ch, nil
+}
+
+// ── Proto-to-GraphQL mapping ───────────────────────────────────────────────
+// These functions convert from protobuf message types (returned by Connect-RPC)
+// to the GraphQL model types defined in models_gen.go. They are the bridge
+// between the typed service layer and the presentation layer.
+//
+// Note: proto messages like GetListingResponse and Listing are structurally
+// identical but separate Go types, so each response type needs a dedicated
+// mapper.
+
+// listingFromProto maps a proto Listing (returned by ListListings) to a
+// GraphQL Listing.
+func listingFromProto(l *marketplacev1.Listing) *Listing {
+	out := &Listing{
+		Collection:         l.Collection,
+		TokenID:            l.TokenId,
+		Seller:             l.Seller,
+		PriceWei:           l.PriceWei,
+		Amount:             int(l.Amount),
+		Standard:           l.Standard,
+		TxHash:             l.TxHash,
+		Name:               l.Name,
+		ImageURI:           l.ImageUri,
+		CollectionVerified: l.CollectionVerified,
+	}
+	if l.ExpiresAtMs != 0 {
+		out.ExpiresAt = time.UnixMilli(l.ExpiresAtMs)
+	}
+	if l.ListedAtMs != 0 {
+		out.ListedAt = time.UnixMilli(l.ListedAtMs)
+	}
+	return out
+}
+
+// listingFromGetResponse maps a proto GetListingResponse (returned by
+// GetListing) to a GraphQL Listing.
+func listingFromGetResponse(l *marketplacev1.GetListingResponse) *Listing {
+	out := &Listing{
+		Collection:         l.Collection,
+		TokenID:            l.TokenId,
+		Seller:             l.Seller,
+		PriceWei:           l.PriceWei,
+		Amount:             int(l.Amount),
+		Standard:           l.Standard,
+		TxHash:             l.TxHash,
+		Name:               l.Name,
+		ImageURI:           l.ImageUri,
+		CollectionVerified: l.CollectionVerified,
+	}
+	if l.ExpiresAtMs != 0 {
+		out.ExpiresAt = time.UnixMilli(l.ExpiresAtMs)
+	}
+	if l.ListedAtMs != 0 {
+		out.ListedAt = time.UnixMilli(l.ListedAtMs)
+	}
+	return out
+}
+
+// auctionFromProto maps a proto Auction (returned by ListAuctions) to a
+// GraphQL Auction.
+func auctionFromProto(a *marketplacev1.Auction) *Auction {
+	out := &Auction{
+		AuctionID:       a.AuctionId,
+		Collection:      a.Collection,
+		TokenID:         a.TokenId,
+		Seller:          a.Seller,
+		Standard:        a.Standard,
+		ReservePriceWei: a.ReservePriceWei,
+		HighestBidWei:   a.HighestBidWei,
+		HighestBidder:   a.HighestBidder,
+		MinIncrementBps: int(a.MinIncrementBps),
+		Status:          a.Status,
+		CreateTx:        a.CreateTx,
+		Name:            a.Name,
+		ImageURI:        a.ImageUri,
+	}
+	if a.StartsAtMs != 0 {
+		out.StartsAt = time.UnixMilli(a.StartsAtMs)
+	}
+	if a.EndsAtMs != 0 {
+		out.EndsAt = time.UnixMilli(a.EndsAtMs)
+	}
+	return out
+}
+
+// auctionFromGetResponse maps a proto GetAuctionResponse (returned by
+// GetAuction) to a GraphQL Auction.
+func auctionFromGetResponse(a *marketplacev1.GetAuctionResponse) *Auction {
+	out := &Auction{
+		AuctionID:       a.AuctionId,
+		Collection:      a.Collection,
+		TokenID:         a.TokenId,
+		Seller:          a.Seller,
+		Standard:        a.Standard,
+		ReservePriceWei: a.ReservePriceWei,
+		HighestBidWei:   a.HighestBidWei,
+		HighestBidder:   a.HighestBidder,
+		MinIncrementBps: int(a.MinIncrementBps),
+		Status:          a.Status,
+		CreateTx:        a.CreateTx,
+		Name:            a.Name,
+		ImageURI:        a.ImageUri,
+	}
+	if a.StartsAtMs != 0 {
+		out.StartsAt = time.UnixMilli(a.StartsAtMs)
+	}
+	if a.EndsAtMs != 0 {
+		out.EndsAt = time.UnixMilli(a.EndsAtMs)
+	}
+	return out
+}
+
+// collectionFromProto maps a proto Collection (returned by ListCollections
+// response) to a GraphQL Collection. Stats fields are left unset because
+// the CollectionResolver resolves them via DataLoader.
+func collectionFromProto(c *marketplacev1.Collection) *Collection {
+	return &Collection{
+		Address:     c.Address,
+		Name:        c.Name,
+		Symbol:      c.Symbol,
+		Standard:    c.Standard,
+		DeployBlock: int(c.DeployBlock),
+		Verified:    c.Verified,
+	}
+}
+
+// activityFromProto maps a proto ActivityEvent (returned by GetActivity) to
+// a GraphQL Activity.
+func activityFromProto(e *marketplacev1.ActivityEvent) *Activity {
+	return &Activity{
+		Type:       e.Type,
+		Collection: e.Collection,
+		TokenID:    e.TokenId,
+		AmountWei:  e.AmountWei,
+		Timestamp:  time.UnixMilli(e.TimestampMs),
+		TxHash:     e.TxHash,
+	}
+}
+
+// offerFromProto maps a proto Offer (returned by ListOffers) to a GraphQL
+// Offer.
+func offerFromProto(o *marketplacev1.Offer) *Offer {
+	out := &Offer{
+		OfferID:    o.OfferId,
+		Bidder:     o.Bidder,
+		Collection: o.Collection,
+		TokenID:    o.TokenId,
+		AmountWei:  o.AmountWei,
+		FeeWei:     o.FeeWei,
+		Units:      int(o.Units),
+		Standard:   o.Standard,
+		Status:     o.Status,
+		MakeTx:     o.MakeTx,
+	}
+	if o.ExpiresAtMs != 0 {
+		out.ExpiresAt = time.UnixMilli(o.ExpiresAtMs)
+	}
+	if o.CreatedAtMs != 0 {
+		out.CreatedAt = time.UnixMilli(o.CreatedAtMs)
+	}
+	return out
+}
+
+// ownedNFTFromProto maps a proto OwnedNFT (returned by GetWalletNFTs) to a
+// GraphQL OwnedNFT.
+func ownedNFTFromProto(n *marketplacev1.OwnedNFT) *OwnedNFT {
+	return &OwnedNFT{
+		Collection: n.Collection,
+		TokenID:    n.TokenId,
+		Units:      n.Units,
+		Standard:   n.Standard,
+		Name:       n.Name,
+		ImageURI:   n.ImageUri,
+	}
+}
+
+// profileFromProto maps a proto GetProfileResponse (returned by GetProfile)
+// to a GraphQL Profile.
+func profileFromProto(p *marketplacev1.GetProfileResponse) *Profile {
+	return &Profile{
+		Address:     p.Address,
+		DisplayName: p.DisplayName,
+		Bio:         p.Bio,
+		AvatarURI:   p.AvatarUri,
+		BannerURI:   p.BannerUri,
+		Twitter:     p.Twitter,
+		Website:     p.Website,
+		Verified:    p.Verified,
+	}
+}
+
+// searchResultFromProto maps a proto SearchResult (returned by Search) to a
+// GraphQL SearchResult.
+func searchResultFromProto(s *marketplacev1.SearchResult) *SearchResult {
+	return &SearchResult{
+		Kind:       s.Kind,
+		Collection: s.Collection,
+		TokenID:    s.TokenId,
+		Name:       s.Name,
+		ImageURI:   s.ImageUri,
+	}
+}
+
+// metricsFromProto maps a proto GetMetricsResponse (returned by GetMetrics)
+// to a GraphQL MarketMetrics.
+func metricsFromProto(m *marketplacev1.GetMetricsResponse) *MarketMetrics {
+	return &MarketMetrics{
+		TotalActiveListings: int(m.TotalActiveListings),
+		TotalSales:          int(m.TotalSales),
+		GrossVolumeWei:      m.GrossVolumeWei,
+		TotalAuctions:       int(m.TotalAuctions),
+		TotalBids:           int(m.TotalBids),
+		TotalOffers:         int(m.TotalOffers),
+	}
 }
 
 // ── Type-assertion helpers ──────────────────────────────────────────────────

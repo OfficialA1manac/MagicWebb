@@ -36,12 +36,14 @@ type WSStatsProvider interface {
 // MetricsService handles marketplace metrics, recent activity, and SSE counters.
 type MetricsService struct {
 	q     *db.Q
-	cache *cache.Cache
+	cache cache.CacheInterface
 	ws    WSStatsProvider // optional — nil when WS handler is not wired
 }
 
-// NewMetricsService creates a MetricsService.
-func NewMetricsService(q *db.Q, c *cache.Cache, ws WSStatsProvider) *MetricsService {
+// NewMetricsService creates a MetricsService. The cache backend can be
+// either in-memory (*cache.Cache) or Redis-backed (*cache.RedisCache) —
+// both implement cache.CacheInterface (CACHE-1).
+func NewMetricsService(q *db.Q, c cache.CacheInterface, ws WSStatsProvider) *MetricsService {
 	return &MetricsService{q: q, cache: c, ws: ws}
 }
 

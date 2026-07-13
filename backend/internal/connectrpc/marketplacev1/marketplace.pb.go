@@ -74,20 +74,21 @@ func (x *GetListingRequest) GetTokenId() string {
 }
 
 type GetListingResponse struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
-	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
-	Seller        string                 `protobuf:"bytes,3,opt,name=seller,proto3" json:"seller,omitempty"`
-	PriceWei      string                 `protobuf:"bytes,4,opt,name=price_wei,json=priceWei,proto3" json:"price_wei,omitempty"`
-	Amount        int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
-	Standard      string                 `protobuf:"bytes,6,opt,name=standard,proto3" json:"standard,omitempty"` // "erc721" | "erc1155"
-	ExpiresAtMs   int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
-	ListedAtMs    int64                  `protobuf:"varint,8,opt,name=listed_at_ms,json=listedAtMs,proto3" json:"listed_at_ms,omitempty"`
-	TxHash        string                 `protobuf:"bytes,9,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
-	Name          string                 `protobuf:"bytes,10,opt,name=name,proto3" json:"name,omitempty"`                         // denormalised from nft_metadata / nft_tokens
-	ImageUri      string                 `protobuf:"bytes,11,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"` // denormalised metadata
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Collection         string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId            string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Seller             string                 `protobuf:"bytes,3,opt,name=seller,proto3" json:"seller,omitempty"`
+	PriceWei           string                 `protobuf:"bytes,4,opt,name=price_wei,json=priceWei,proto3" json:"price_wei,omitempty"`
+	Amount             int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	Standard           string                 `protobuf:"bytes,6,opt,name=standard,proto3" json:"standard,omitempty"` // "erc721" | "erc1155"
+	ExpiresAtMs        int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
+	ListedAtMs         int64                  `protobuf:"varint,8,opt,name=listed_at_ms,json=listedAtMs,proto3" json:"listed_at_ms,omitempty"`
+	TxHash             string                 `protobuf:"bytes,9,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
+	Name               string                 `protobuf:"bytes,10,opt,name=name,proto3" json:"name,omitempty"`                         // denormalised from nft_metadata / nft_tokens
+	ImageUri           string                 `protobuf:"bytes,11,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"` // denormalised metadata
+	CollectionVerified bool                   `protobuf:"varint,12,opt,name=collection_verified,json=collectionVerified,proto3" json:"collection_verified,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
 }
 
 func (x *GetListingResponse) Reset() {
@@ -195,6 +196,13 @@ func (x *GetListingResponse) GetImageUri() string {
 		return x.ImageUri
 	}
 	return ""
+}
+
+func (x *GetListingResponse) GetCollectionVerified() bool {
+	if x != nil {
+		return x.CollectionVerified
+	}
+	return false
 }
 
 type GetAuctionRequest struct {
@@ -725,6 +733,1986 @@ func (x *GetTokenResponse) GetFetchedAtMs() int64 {
 	return 0
 }
 
+type ListCollectionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"` // max results (1-200, default 50)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCollectionsRequest) Reset() {
+	*x = ListCollectionsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[8]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCollectionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCollectionsRequest) ProtoMessage() {}
+
+func (x *ListCollectionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[8]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCollectionsRequest.ProtoReflect.Descriptor instead.
+func (*ListCollectionsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{8}
+}
+
+func (x *ListCollectionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type ListCollectionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    []*Collection          `protobuf:"bytes,1,rep,name=collection,proto3" json:"collection,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListCollectionsResponse) Reset() {
+	*x = ListCollectionsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[9]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListCollectionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListCollectionsResponse) ProtoMessage() {}
+
+func (x *ListCollectionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[9]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListCollectionsResponse.ProtoReflect.Descriptor instead.
+func (*ListCollectionsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{9}
+}
+
+func (x *ListCollectionsResponse) GetCollection() []*Collection {
+	if x != nil {
+		return x.Collection
+	}
+	return nil
+}
+
+type Collection struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Symbol        string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Standard      string                 `protobuf:"bytes,4,opt,name=standard,proto3" json:"standard,omitempty"` // "erc721" | "erc1155"
+	DeployBlock   int64                  `protobuf:"varint,5,opt,name=deploy_block,json=deployBlock,proto3" json:"deploy_block,omitempty"`
+	Verified      bool                   `protobuf:"varint,6,opt,name=verified,proto3" json:"verified,omitempty"`
+	FloorPriceWei string                 `protobuf:"bytes,7,opt,name=floor_price_wei,json=floorPriceWei,proto3" json:"floor_price_wei,omitempty"`
+	Volume_24HWei string                 `protobuf:"bytes,8,opt,name=volume_24h_wei,json=volume24hWei,proto3" json:"volume_24h_wei,omitempty"`
+	ListedCount   int32                  `protobuf:"varint,9,opt,name=listed_count,json=listedCount,proto3" json:"listed_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Collection) Reset() {
+	*x = Collection{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[10]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Collection) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Collection) ProtoMessage() {}
+
+func (x *Collection) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[10]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Collection.ProtoReflect.Descriptor instead.
+func (*Collection) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{10}
+}
+
+func (x *Collection) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *Collection) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Collection) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *Collection) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *Collection) GetDeployBlock() int64 {
+	if x != nil {
+		return x.DeployBlock
+	}
+	return 0
+}
+
+func (x *Collection) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
+}
+
+func (x *Collection) GetFloorPriceWei() string {
+	if x != nil {
+		return x.FloorPriceWei
+	}
+	return ""
+}
+
+func (x *Collection) GetVolume_24HWei() string {
+	if x != nil {
+		return x.Volume_24HWei
+	}
+	return ""
+}
+
+func (x *Collection) GetListedCount() int32 {
+	if x != nil {
+		return x.ListedCount
+	}
+	return 0
+}
+
+type GetCollectionRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // hex-encoded contract address
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCollectionRequest) Reset() {
+	*x = GetCollectionRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[11]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCollectionRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCollectionRequest) ProtoMessage() {}
+
+func (x *GetCollectionRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[11]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCollectionRequest.ProtoReflect.Descriptor instead.
+func (*GetCollectionRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{11}
+}
+
+func (x *GetCollectionRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type GetCollectionResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	Name          string                 `protobuf:"bytes,2,opt,name=name,proto3" json:"name,omitempty"`
+	Symbol        string                 `protobuf:"bytes,3,opt,name=symbol,proto3" json:"symbol,omitempty"`
+	Standard      string                 `protobuf:"bytes,4,opt,name=standard,proto3" json:"standard,omitempty"`
+	DeployBlock   int64                  `protobuf:"varint,5,opt,name=deploy_block,json=deployBlock,proto3" json:"deploy_block,omitempty"`
+	Verified      bool                   `protobuf:"varint,6,opt,name=verified,proto3" json:"verified,omitempty"`
+	FloorPriceWei string                 `protobuf:"bytes,7,opt,name=floor_price_wei,json=floorPriceWei,proto3" json:"floor_price_wei,omitempty"`
+	Volume_24HWei string                 `protobuf:"bytes,8,opt,name=volume_24h_wei,json=volume24hWei,proto3" json:"volume_24h_wei,omitempty"`
+	ListedCount   int32                  `protobuf:"varint,9,opt,name=listed_count,json=listedCount,proto3" json:"listed_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetCollectionResponse) Reset() {
+	*x = GetCollectionResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[12]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetCollectionResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetCollectionResponse) ProtoMessage() {}
+
+func (x *GetCollectionResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[12]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetCollectionResponse.ProtoReflect.Descriptor instead.
+func (*GetCollectionResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{12}
+}
+
+func (x *GetCollectionResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetSymbol() string {
+	if x != nil {
+		return x.Symbol
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetDeployBlock() int64 {
+	if x != nil {
+		return x.DeployBlock
+	}
+	return 0
+}
+
+func (x *GetCollectionResponse) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
+}
+
+func (x *GetCollectionResponse) GetFloorPriceWei() string {
+	if x != nil {
+		return x.FloorPriceWei
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetVolume_24HWei() string {
+	if x != nil {
+		return x.Volume_24HWei
+	}
+	return ""
+}
+
+func (x *GetCollectionResponse) GetListedCount() int32 {
+	if x != nil {
+		return x.ListedCount
+	}
+	return 0
+}
+
+type ListListingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"` // optional filter
+	Seller        string                 `protobuf:"bytes,2,opt,name=seller,proto3" json:"seller,omitempty"`         // optional filter
+	Sort          string                 `protobuf:"bytes,3,opt,name=sort,proto3" json:"sort,omitempty"`             // "recent" | "price_asc" | "price_desc" (default "recent")
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`          // 1-100, default 50
+	MinPriceWei   string                 `protobuf:"bytes,5,opt,name=min_price_wei,json=minPriceWei,proto3" json:"min_price_wei,omitempty"`
+	MaxPriceWei   string                 `protobuf:"bytes,6,opt,name=max_price_wei,json=maxPriceWei,proto3" json:"max_price_wei,omitempty"`
+	Traits        string                 `protobuf:"bytes,7,opt,name=traits,proto3" json:"traits,omitempty"` // "trait_type:value,trait_type:value"
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListListingsRequest) Reset() {
+	*x = ListListingsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[13]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListListingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListListingsRequest) ProtoMessage() {}
+
+func (x *ListListingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[13]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListListingsRequest.ProtoReflect.Descriptor instead.
+func (*ListListingsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{13}
+}
+
+func (x *ListListingsRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *ListListingsRequest) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *ListListingsRequest) GetSort() string {
+	if x != nil {
+		return x.Sort
+	}
+	return ""
+}
+
+func (x *ListListingsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListListingsRequest) GetMinPriceWei() string {
+	if x != nil {
+		return x.MinPriceWei
+	}
+	return ""
+}
+
+func (x *ListListingsRequest) GetMaxPriceWei() string {
+	if x != nil {
+		return x.MaxPriceWei
+	}
+	return ""
+}
+
+func (x *ListListingsRequest) GetTraits() string {
+	if x != nil {
+		return x.Traits
+	}
+	return ""
+}
+
+type ListListingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Listings      []*Listing             `protobuf:"bytes,1,rep,name=listings,proto3" json:"listings,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListListingsResponse) Reset() {
+	*x = ListListingsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[14]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListListingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListListingsResponse) ProtoMessage() {}
+
+func (x *ListListingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[14]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListListingsResponse.ProtoReflect.Descriptor instead.
+func (*ListListingsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{14}
+}
+
+func (x *ListListingsResponse) GetListings() []*Listing {
+	if x != nil {
+		return x.Listings
+	}
+	return nil
+}
+
+type Listing struct {
+	state              protoimpl.MessageState `protogen:"open.v1"`
+	Collection         string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId            string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Seller             string                 `protobuf:"bytes,3,opt,name=seller,proto3" json:"seller,omitempty"`
+	PriceWei           string                 `protobuf:"bytes,4,opt,name=price_wei,json=priceWei,proto3" json:"price_wei,omitempty"`
+	Amount             int64                  `protobuf:"varint,5,opt,name=amount,proto3" json:"amount,omitempty"`
+	Standard           string                 `protobuf:"bytes,6,opt,name=standard,proto3" json:"standard,omitempty"`
+	ExpiresAtMs        int64                  `protobuf:"varint,7,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
+	ListedAtMs         int64                  `protobuf:"varint,8,opt,name=listed_at_ms,json=listedAtMs,proto3" json:"listed_at_ms,omitempty"`
+	TxHash             string                 `protobuf:"bytes,9,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
+	Name               string                 `protobuf:"bytes,10,opt,name=name,proto3" json:"name,omitempty"`
+	ImageUri           string                 `protobuf:"bytes,11,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
+	CollectionVerified bool                   `protobuf:"varint,12,opt,name=collection_verified,json=collectionVerified,proto3" json:"collection_verified,omitempty"`
+	unknownFields      protoimpl.UnknownFields
+	sizeCache          protoimpl.SizeCache
+}
+
+func (x *Listing) Reset() {
+	*x = Listing{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[15]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Listing) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Listing) ProtoMessage() {}
+
+func (x *Listing) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[15]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Listing.ProtoReflect.Descriptor instead.
+func (*Listing) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{15}
+}
+
+func (x *Listing) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *Listing) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *Listing) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *Listing) GetPriceWei() string {
+	if x != nil {
+		return x.PriceWei
+	}
+	return ""
+}
+
+func (x *Listing) GetAmount() int64 {
+	if x != nil {
+		return x.Amount
+	}
+	return 0
+}
+
+func (x *Listing) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *Listing) GetExpiresAtMs() int64 {
+	if x != nil {
+		return x.ExpiresAtMs
+	}
+	return 0
+}
+
+func (x *Listing) GetListedAtMs() int64 {
+	if x != nil {
+		return x.ListedAtMs
+	}
+	return 0
+}
+
+func (x *Listing) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
+func (x *Listing) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Listing) GetImageUri() string {
+	if x != nil {
+		return x.ImageUri
+	}
+	return ""
+}
+
+func (x *Listing) GetCollectionVerified() bool {
+	if x != nil {
+		return x.CollectionVerified
+	}
+	return false
+}
+
+type ListAuctionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"` // optional filter
+	Seller        string                 `protobuf:"bytes,2,opt,name=seller,proto3" json:"seller,omitempty"`         // optional filter
+	Status        string                 `protobuf:"bytes,3,opt,name=status,proto3" json:"status,omitempty"`         // "active" | "settled" | "cancelled"
+	Limit         int32                  `protobuf:"varint,4,opt,name=limit,proto3" json:"limit,omitempty"`          // 1-200, default 50
+	MinPriceWei   string                 `protobuf:"bytes,5,opt,name=min_price_wei,json=minPriceWei,proto3" json:"min_price_wei,omitempty"`
+	MaxPriceWei   string                 `protobuf:"bytes,6,opt,name=max_price_wei,json=maxPriceWei,proto3" json:"max_price_wei,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAuctionsRequest) Reset() {
+	*x = ListAuctionsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[16]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAuctionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAuctionsRequest) ProtoMessage() {}
+
+func (x *ListAuctionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[16]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAuctionsRequest.ProtoReflect.Descriptor instead.
+func (*ListAuctionsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{16}
+}
+
+func (x *ListAuctionsRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *ListAuctionsRequest) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *ListAuctionsRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ListAuctionsRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *ListAuctionsRequest) GetMinPriceWei() string {
+	if x != nil {
+		return x.MinPriceWei
+	}
+	return ""
+}
+
+func (x *ListAuctionsRequest) GetMaxPriceWei() string {
+	if x != nil {
+		return x.MaxPriceWei
+	}
+	return ""
+}
+
+type ListAuctionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Auctions      []*Auction             `protobuf:"bytes,1,rep,name=auctions,proto3" json:"auctions,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListAuctionsResponse) Reset() {
+	*x = ListAuctionsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[17]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListAuctionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListAuctionsResponse) ProtoMessage() {}
+
+func (x *ListAuctionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[17]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListAuctionsResponse.ProtoReflect.Descriptor instead.
+func (*ListAuctionsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{17}
+}
+
+func (x *ListAuctionsResponse) GetAuctions() []*Auction {
+	if x != nil {
+		return x.Auctions
+	}
+	return nil
+}
+
+type Auction struct {
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AuctionId       int64                  `protobuf:"varint,1,opt,name=auction_id,json=auctionId,proto3" json:"auction_id,omitempty"`
+	Collection      string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId         string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Seller          string                 `protobuf:"bytes,4,opt,name=seller,proto3" json:"seller,omitempty"`
+	Standard        string                 `protobuf:"bytes,5,opt,name=standard,proto3" json:"standard,omitempty"`
+	ReservePriceWei string                 `protobuf:"bytes,6,opt,name=reserve_price_wei,json=reservePriceWei,proto3" json:"reserve_price_wei,omitempty"`
+	HighestBidWei   string                 `protobuf:"bytes,7,opt,name=highest_bid_wei,json=highestBidWei,proto3" json:"highest_bid_wei,omitempty"`
+	HighestBidder   string                 `protobuf:"bytes,8,opt,name=highest_bidder,json=highestBidder,proto3" json:"highest_bidder,omitempty"`
+	MinIncrementBps int32                  `protobuf:"varint,9,opt,name=min_increment_bps,json=minIncrementBps,proto3" json:"min_increment_bps,omitempty"`
+	StartsAtMs      int64                  `protobuf:"varint,10,opt,name=starts_at_ms,json=startsAtMs,proto3" json:"starts_at_ms,omitempty"`
+	EndsAtMs        int64                  `protobuf:"varint,11,opt,name=ends_at_ms,json=endsAtMs,proto3" json:"ends_at_ms,omitempty"`
+	Status          string                 `protobuf:"bytes,12,opt,name=status,proto3" json:"status,omitempty"`
+	CreateTx        string                 `protobuf:"bytes,13,opt,name=create_tx,json=createTx,proto3" json:"create_tx,omitempty"`
+	Name            string                 `protobuf:"bytes,14,opt,name=name,proto3" json:"name,omitempty"`
+	ImageUri        string                 `protobuf:"bytes,15,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
+}
+
+func (x *Auction) Reset() {
+	*x = Auction{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[18]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Auction) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Auction) ProtoMessage() {}
+
+func (x *Auction) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[18]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Auction.ProtoReflect.Descriptor instead.
+func (*Auction) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{18}
+}
+
+func (x *Auction) GetAuctionId() int64 {
+	if x != nil {
+		return x.AuctionId
+	}
+	return 0
+}
+
+func (x *Auction) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *Auction) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *Auction) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *Auction) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *Auction) GetReservePriceWei() string {
+	if x != nil {
+		return x.ReservePriceWei
+	}
+	return ""
+}
+
+func (x *Auction) GetHighestBidWei() string {
+	if x != nil {
+		return x.HighestBidWei
+	}
+	return ""
+}
+
+func (x *Auction) GetHighestBidder() string {
+	if x != nil {
+		return x.HighestBidder
+	}
+	return ""
+}
+
+func (x *Auction) GetMinIncrementBps() int32 {
+	if x != nil {
+		return x.MinIncrementBps
+	}
+	return 0
+}
+
+func (x *Auction) GetStartsAtMs() int64 {
+	if x != nil {
+		return x.StartsAtMs
+	}
+	return 0
+}
+
+func (x *Auction) GetEndsAtMs() int64 {
+	if x != nil {
+		return x.EndsAtMs
+	}
+	return 0
+}
+
+func (x *Auction) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *Auction) GetCreateTx() string {
+	if x != nil {
+		return x.CreateTx
+	}
+	return ""
+}
+
+func (x *Auction) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *Auction) GetImageUri() string {
+	if x != nil {
+		return x.ImageUri
+	}
+	return ""
+}
+
+type GetActivityRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Limit         int32                  `protobuf:"varint,1,opt,name=limit,proto3" json:"limit,omitempty"`                   // 1-200, default 50
+	Address       string                 `protobuf:"bytes,2,opt,name=address,proto3" json:"address,omitempty"`                // optional address filter
+	Collection    string                 `protobuf:"bytes,3,opt,name=collection,proto3" json:"collection,omitempty"`          // optional collection filter (requires token_id)
+	TokenId       string                 `protobuf:"bytes,4,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"` // optional token ID filter (requires collection)
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetActivityRequest) Reset() {
+	*x = GetActivityRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[19]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActivityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActivityRequest) ProtoMessage() {}
+
+func (x *GetActivityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[19]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActivityRequest.ProtoReflect.Descriptor instead.
+func (*GetActivityRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{19}
+}
+
+func (x *GetActivityRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+func (x *GetActivityRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *GetActivityRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *GetActivityRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+type ActivityEvent struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Type          string                 `protobuf:"bytes,1,opt,name=type,proto3" json:"type,omitempty"` // "Listed" | "Bought" | "BidPlaced" | etc.
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	AmountWei     string                 `protobuf:"bytes,4,opt,name=amount_wei,json=amountWei,proto3" json:"amount_wei,omitempty"`
+	TimestampMs   int64                  `protobuf:"varint,5,opt,name=timestamp_ms,json=timestampMs,proto3" json:"timestamp_ms,omitempty"`
+	TxHash        string                 `protobuf:"bytes,6,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
+	FromAddr      string                 `protobuf:"bytes,7,opt,name=from_addr,json=fromAddr,proto3" json:"from_addr,omitempty"`
+	ToAddr        string                 `protobuf:"bytes,8,opt,name=to_addr,json=toAddr,proto3" json:"to_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ActivityEvent) Reset() {
+	*x = ActivityEvent{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[20]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ActivityEvent) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ActivityEvent) ProtoMessage() {}
+
+func (x *ActivityEvent) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[20]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ActivityEvent.ProtoReflect.Descriptor instead.
+func (*ActivityEvent) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{20}
+}
+
+func (x *ActivityEvent) GetType() string {
+	if x != nil {
+		return x.Type
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetAmountWei() string {
+	if x != nil {
+		return x.AmountWei
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetTimestampMs() int64 {
+	if x != nil {
+		return x.TimestampMs
+	}
+	return 0
+}
+
+func (x *ActivityEvent) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetFromAddr() string {
+	if x != nil {
+		return x.FromAddr
+	}
+	return ""
+}
+
+func (x *ActivityEvent) GetToAddr() string {
+	if x != nil {
+		return x.ToAddr
+	}
+	return ""
+}
+
+type GetActivityResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Events        []*ActivityEvent       `protobuf:"bytes,1,rep,name=events,proto3" json:"events,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetActivityResponse) Reset() {
+	*x = GetActivityResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[21]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetActivityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetActivityResponse) ProtoMessage() {}
+
+func (x *GetActivityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[21]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetActivityResponse.ProtoReflect.Descriptor instead.
+func (*GetActivityResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{21}
+}
+
+func (x *GetActivityResponse) GetEvents() []*ActivityEvent {
+	if x != nil {
+		return x.Events
+	}
+	return nil
+}
+
+type ListOffersRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`          // optional filter
+	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"` // optional filter
+	Bidder        string                 `protobuf:"bytes,3,opt,name=bidder,proto3" json:"bidder,omitempty"`                  // optional filter
+	Owner         string                 `protobuf:"bytes,4,opt,name=owner,proto3" json:"owner,omitempty"`                    // optional filter
+	Status        string                 `protobuf:"bytes,5,opt,name=status,proto3" json:"status,omitempty"`                  // "pending" | "accepted" | "cancelled" | "expired"
+	Limit         int32                  `protobuf:"varint,6,opt,name=limit,proto3" json:"limit,omitempty"`                   // 1-100, default 50
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListOffersRequest) Reset() {
+	*x = ListOffersRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[22]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListOffersRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListOffersRequest) ProtoMessage() {}
+
+func (x *ListOffersRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[22]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListOffersRequest.ProtoReflect.Descriptor instead.
+func (*ListOffersRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{22}
+}
+
+func (x *ListOffersRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *ListOffersRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *ListOffersRequest) GetBidder() string {
+	if x != nil {
+		return x.Bidder
+	}
+	return ""
+}
+
+func (x *ListOffersRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+func (x *ListOffersRequest) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *ListOffersRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type Offer struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OfferId       string                 `protobuf:"bytes,1,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
+	Bidder        string                 `protobuf:"bytes,2,opt,name=bidder,proto3" json:"bidder,omitempty"`
+	Collection    string                 `protobuf:"bytes,3,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,4,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	AmountWei     string                 `protobuf:"bytes,5,opt,name=amount_wei,json=amountWei,proto3" json:"amount_wei,omitempty"`
+	FeeWei        string                 `protobuf:"bytes,6,opt,name=fee_wei,json=feeWei,proto3" json:"fee_wei,omitempty"`
+	Units         int64                  `protobuf:"varint,7,opt,name=units,proto3" json:"units,omitempty"`
+	Standard      string                 `protobuf:"bytes,8,opt,name=standard,proto3" json:"standard,omitempty"`
+	ExpiresAtMs   int64                  `protobuf:"varint,9,opt,name=expires_at_ms,json=expiresAtMs,proto3" json:"expires_at_ms,omitempty"`
+	Status        string                 `protobuf:"bytes,10,opt,name=status,proto3" json:"status,omitempty"`
+	MakeTx        string                 `protobuf:"bytes,11,opt,name=make_tx,json=makeTx,proto3" json:"make_tx,omitempty"`
+	CreatedAtMs   int64                  `protobuf:"varint,12,opt,name=created_at_ms,json=createdAtMs,proto3" json:"created_at_ms,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Offer) Reset() {
+	*x = Offer{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[23]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Offer) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Offer) ProtoMessage() {}
+
+func (x *Offer) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[23]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Offer.ProtoReflect.Descriptor instead.
+func (*Offer) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{23}
+}
+
+func (x *Offer) GetOfferId() string {
+	if x != nil {
+		return x.OfferId
+	}
+	return ""
+}
+
+func (x *Offer) GetBidder() string {
+	if x != nil {
+		return x.Bidder
+	}
+	return ""
+}
+
+func (x *Offer) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *Offer) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *Offer) GetAmountWei() string {
+	if x != nil {
+		return x.AmountWei
+	}
+	return ""
+}
+
+func (x *Offer) GetFeeWei() string {
+	if x != nil {
+		return x.FeeWei
+	}
+	return ""
+}
+
+func (x *Offer) GetUnits() int64 {
+	if x != nil {
+		return x.Units
+	}
+	return 0
+}
+
+func (x *Offer) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *Offer) GetExpiresAtMs() int64 {
+	if x != nil {
+		return x.ExpiresAtMs
+	}
+	return 0
+}
+
+func (x *Offer) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *Offer) GetMakeTx() string {
+	if x != nil {
+		return x.MakeTx
+	}
+	return ""
+}
+
+func (x *Offer) GetCreatedAtMs() int64 {
+	if x != nil {
+		return x.CreatedAtMs
+	}
+	return 0
+}
+
+type ListOffersResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Offers        []*Offer               `protobuf:"bytes,1,rep,name=offers,proto3" json:"offers,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListOffersResponse) Reset() {
+	*x = ListOffersResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[24]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListOffersResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListOffersResponse) ProtoMessage() {}
+
+func (x *ListOffersResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[24]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListOffersResponse.ProtoReflect.Descriptor instead.
+func (*ListOffersResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{24}
+}
+
+func (x *ListOffersResponse) GetOffers() []*Offer {
+	if x != nil {
+		return x.Offers
+	}
+	return nil
+}
+
+type GetWalletNFTsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Owner         string                 `protobuf:"bytes,1,opt,name=owner,proto3" json:"owner,omitempty"` // hex-encoded wallet address
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetWalletNFTsRequest) Reset() {
+	*x = GetWalletNFTsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[25]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetWalletNFTsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWalletNFTsRequest) ProtoMessage() {}
+
+func (x *GetWalletNFTsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[25]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWalletNFTsRequest.ProtoReflect.Descriptor instead.
+func (*GetWalletNFTsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{25}
+}
+
+func (x *GetWalletNFTsRequest) GetOwner() string {
+	if x != nil {
+		return x.Owner
+	}
+	return ""
+}
+
+type OwnedNFT struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Units         string                 `protobuf:"bytes,3,opt,name=units,proto3" json:"units,omitempty"`
+	Standard      string                 `protobuf:"bytes,4,opt,name=standard,proto3" json:"standard,omitempty"`
+	Name          string                 `protobuf:"bytes,5,opt,name=name,proto3" json:"name,omitempty"`
+	ImageUri      string                 `protobuf:"bytes,6,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OwnedNFT) Reset() {
+	*x = OwnedNFT{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[26]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OwnedNFT) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OwnedNFT) ProtoMessage() {}
+
+func (x *OwnedNFT) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[26]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OwnedNFT.ProtoReflect.Descriptor instead.
+func (*OwnedNFT) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{26}
+}
+
+func (x *OwnedNFT) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *OwnedNFT) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *OwnedNFT) GetUnits() string {
+	if x != nil {
+		return x.Units
+	}
+	return ""
+}
+
+func (x *OwnedNFT) GetStandard() string {
+	if x != nil {
+		return x.Standard
+	}
+	return ""
+}
+
+func (x *OwnedNFT) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *OwnedNFT) GetImageUri() string {
+	if x != nil {
+		return x.ImageUri
+	}
+	return ""
+}
+
+type GetWalletNFTsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Nfts          []*OwnedNFT            `protobuf:"bytes,1,rep,name=nfts,proto3" json:"nfts,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetWalletNFTsResponse) Reset() {
+	*x = GetWalletNFTsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[27]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetWalletNFTsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetWalletNFTsResponse) ProtoMessage() {}
+
+func (x *GetWalletNFTsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[27]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetWalletNFTsResponse.ProtoReflect.Descriptor instead.
+func (*GetWalletNFTsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{27}
+}
+
+func (x *GetWalletNFTsResponse) GetNfts() []*OwnedNFT {
+	if x != nil {
+		return x.Nfts
+	}
+	return nil
+}
+
+type GetProfileRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProfileRequest) Reset() {
+	*x = GetProfileRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[28]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileRequest) ProtoMessage() {}
+
+func (x *GetProfileRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[28]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileRequest.ProtoReflect.Descriptor instead.
+func (*GetProfileRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{28}
+}
+
+func (x *GetProfileRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type GetProfileResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`
+	DisplayName   string                 `protobuf:"bytes,2,opt,name=display_name,json=displayName,proto3" json:"display_name,omitempty"`
+	Bio           string                 `protobuf:"bytes,3,opt,name=bio,proto3" json:"bio,omitempty"`
+	AvatarUri     string                 `protobuf:"bytes,4,opt,name=avatar_uri,json=avatarUri,proto3" json:"avatar_uri,omitempty"`
+	BannerUri     string                 `protobuf:"bytes,5,opt,name=banner_uri,json=bannerUri,proto3" json:"banner_uri,omitempty"`
+	Twitter       string                 `protobuf:"bytes,6,opt,name=twitter,proto3" json:"twitter,omitempty"`
+	Website       string                 `protobuf:"bytes,7,opt,name=website,proto3" json:"website,omitempty"`
+	Verified      bool                   `protobuf:"varint,8,opt,name=verified,proto3" json:"verified,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetProfileResponse) Reset() {
+	*x = GetProfileResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[29]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetProfileResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetProfileResponse) ProtoMessage() {}
+
+func (x *GetProfileResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[29]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetProfileResponse.ProtoReflect.Descriptor instead.
+func (*GetProfileResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{29}
+}
+
+func (x *GetProfileResponse) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetDisplayName() string {
+	if x != nil {
+		return x.DisplayName
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetBio() string {
+	if x != nil {
+		return x.Bio
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetAvatarUri() string {
+	if x != nil {
+		return x.AvatarUri
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetBannerUri() string {
+	if x != nil {
+		return x.BannerUri
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetTwitter() string {
+	if x != nil {
+		return x.Twitter
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetWebsite() string {
+	if x != nil {
+		return x.Website
+	}
+	return ""
+}
+
+func (x *GetProfileResponse) GetVerified() bool {
+	if x != nil {
+		return x.Verified
+	}
+	return false
+}
+
+type SearchRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Query         string                 `protobuf:"bytes,1,opt,name=query,proto3" json:"query,omitempty"`  // full-text search query (min 2 chars)
+	Limit         int32                  `protobuf:"varint,2,opt,name=limit,proto3" json:"limit,omitempty"` // 1-50, default 20
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchRequest) Reset() {
+	*x = SearchRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[30]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchRequest) ProtoMessage() {}
+
+func (x *SearchRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[30]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchRequest.ProtoReflect.Descriptor instead.
+func (*SearchRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{30}
+}
+
+func (x *SearchRequest) GetQuery() string {
+	if x != nil {
+		return x.Query
+	}
+	return ""
+}
+
+func (x *SearchRequest) GetLimit() int32 {
+	if x != nil {
+		return x.Limit
+	}
+	return 0
+}
+
+type SearchResult struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Kind          string                 `protobuf:"bytes,1,opt,name=kind,proto3" json:"kind,omitempty"` // "nft" | "collection"
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Name          string                 `protobuf:"bytes,4,opt,name=name,proto3" json:"name,omitempty"`
+	ImageUri      string                 `protobuf:"bytes,5,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchResult) Reset() {
+	*x = SearchResult{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[31]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchResult) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchResult) ProtoMessage() {}
+
+func (x *SearchResult) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[31]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchResult.ProtoReflect.Descriptor instead.
+func (*SearchResult) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{31}
+}
+
+func (x *SearchResult) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *SearchResult) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *SearchResult) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *SearchResult) GetName() string {
+	if x != nil {
+		return x.Name
+	}
+	return ""
+}
+
+func (x *SearchResult) GetImageUri() string {
+	if x != nil {
+		return x.ImageUri
+	}
+	return ""
+}
+
+type SearchResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Results       []*SearchResult        `protobuf:"bytes,1,rep,name=results,proto3" json:"results,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SearchResponse) Reset() {
+	*x = SearchResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[32]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SearchResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SearchResponse) ProtoMessage() {}
+
+func (x *SearchResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[32]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SearchResponse.ProtoReflect.Descriptor instead.
+func (*SearchResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{32}
+}
+
+func (x *SearchResponse) GetResults() []*SearchResult {
+	if x != nil {
+		return x.Results
+	}
+	return nil
+}
+
+type GetMetricsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *GetMetricsRequest) Reset() {
+	*x = GetMetricsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMetricsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMetricsRequest) ProtoMessage() {}
+
+func (x *GetMetricsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMetricsRequest.ProtoReflect.Descriptor instead.
+func (*GetMetricsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{33}
+}
+
+type GetMetricsResponse struct {
+	state               protoimpl.MessageState `protogen:"open.v1"`
+	TotalActiveListings int32                  `protobuf:"varint,1,opt,name=total_active_listings,json=totalActiveListings,proto3" json:"total_active_listings,omitempty"`
+	TotalSales          int32                  `protobuf:"varint,2,opt,name=total_sales,json=totalSales,proto3" json:"total_sales,omitempty"`
+	GrossVolumeWei      string                 `protobuf:"bytes,3,opt,name=gross_volume_wei,json=grossVolumeWei,proto3" json:"gross_volume_wei,omitempty"`
+	TotalAuctions       int32                  `protobuf:"varint,4,opt,name=total_auctions,json=totalAuctions,proto3" json:"total_auctions,omitempty"`
+	TotalBids           int32                  `protobuf:"varint,5,opt,name=total_bids,json=totalBids,proto3" json:"total_bids,omitempty"`
+	TotalOffers         int32                  `protobuf:"varint,6,opt,name=total_offers,json=totalOffers,proto3" json:"total_offers,omitempty"`
+	unknownFields       protoimpl.UnknownFields
+	sizeCache           protoimpl.SizeCache
+}
+
+func (x *GetMetricsResponse) Reset() {
+	*x = GetMetricsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *GetMetricsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*GetMetricsResponse) ProtoMessage() {}
+
+func (x *GetMetricsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use GetMetricsResponse.ProtoReflect.Descriptor instead.
+func (*GetMetricsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *GetMetricsResponse) GetTotalActiveListings() int32 {
+	if x != nil {
+		return x.TotalActiveListings
+	}
+	return 0
+}
+
+func (x *GetMetricsResponse) GetTotalSales() int32 {
+	if x != nil {
+		return x.TotalSales
+	}
+	return 0
+}
+
+func (x *GetMetricsResponse) GetGrossVolumeWei() string {
+	if x != nil {
+		return x.GrossVolumeWei
+	}
+	return ""
+}
+
+func (x *GetMetricsResponse) GetTotalAuctions() int32 {
+	if x != nil {
+		return x.TotalAuctions
+	}
+	return 0
+}
+
+func (x *GetMetricsResponse) GetTotalBids() int32 {
+	if x != nil {
+		return x.TotalBids
+	}
+	return 0
+}
+
+func (x *GetMetricsResponse) GetTotalOffers() int32 {
+	if x != nil {
+		return x.TotalOffers
+	}
+	return 0
+}
+
 var File_marketplace_v1_marketplace_proto protoreflect.FileDescriptor
 
 const file_marketplace_v1_marketplace_proto_rawDesc = "" +
@@ -734,7 +2722,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
 	"collection\x12\x19\n" +
-	"\btoken_id\x18\x02 \x01(\tR\atokenId\"\xc8\x02\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\"\xf9\x02\n" +
 	"\x12GetListingResponse\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
@@ -750,7 +2738,8 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\atx_hash\x18\t \x01(\tR\x06txHash\x12\x12\n" +
 	"\x04name\x18\n" +
 	" \x01(\tR\x04name\x12\x1b\n" +
-	"\timage_uri\x18\v \x01(\tR\bimageUri\"2\n" +
+	"\timage_uri\x18\v \x01(\tR\bimageUri\x12/\n" +
+	"\x13collection_verified\x18\f \x01(\bR\x12collectionVerified\"2\n" +
 	"\x11GetAuctionRequest\x12\x1d\n" +
 	"\n" +
 	"auction_id\x18\x01 \x01(\x03R\tauctionId\"\xef\x03\n" +
@@ -810,14 +2799,216 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\timage_uri\x18\x05 \x01(\tR\bimageUri\x12#\n" +
 	"\ranimation_uri\x18\x06 \x01(\tR\fanimationUri\x12!\n" +
 	"\fmetadata_uri\x18\a \x01(\tR\vmetadataUri\x12\"\n" +
-	"\rfetched_at_ms\x18\b \x01(\x03R\vfetchedAtMs2\xdc\x02\n" +
+	"\rfetched_at_ms\x18\b \x01(\x03R\vfetchedAtMs\".\n" +
+	"\x16ListCollectionsRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\"U\n" +
+	"\x17ListCollectionsResponse\x12:\n" +
+	"\n" +
+	"collection\x18\x01 \x03(\v2\x1a.marketplace.v1.CollectionR\n" +
+	"collection\"\x9e\x02\n" +
+	"\n" +
+	"Collection\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bstandard\x18\x04 \x01(\tR\bstandard\x12!\n" +
+	"\fdeploy_block\x18\x05 \x01(\x03R\vdeployBlock\x12\x1a\n" +
+	"\bverified\x18\x06 \x01(\bR\bverified\x12&\n" +
+	"\x0ffloor_price_wei\x18\a \x01(\tR\rfloorPriceWei\x12$\n" +
+	"\x0evolume_24h_wei\x18\b \x01(\tR\fvolume24hWei\x12!\n" +
+	"\flisted_count\x18\t \x01(\x05R\vlistedCount\"0\n" +
+	"\x14GetCollectionRequest\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xa9\x02\n" +
+	"\x15GetCollectionResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
+	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
+	"\x06symbol\x18\x03 \x01(\tR\x06symbol\x12\x1a\n" +
+	"\bstandard\x18\x04 \x01(\tR\bstandard\x12!\n" +
+	"\fdeploy_block\x18\x05 \x01(\x03R\vdeployBlock\x12\x1a\n" +
+	"\bverified\x18\x06 \x01(\bR\bverified\x12&\n" +
+	"\x0ffloor_price_wei\x18\a \x01(\tR\rfloorPriceWei\x12$\n" +
+	"\x0evolume_24h_wei\x18\b \x01(\tR\fvolume24hWei\x12!\n" +
+	"\flisted_count\x18\t \x01(\x05R\vlistedCount\"\xd7\x01\n" +
+	"\x13ListListingsRequest\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x16\n" +
+	"\x06seller\x18\x02 \x01(\tR\x06seller\x12\x12\n" +
+	"\x04sort\x18\x03 \x01(\tR\x04sort\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\"\n" +
+	"\rmin_price_wei\x18\x05 \x01(\tR\vminPriceWei\x12\"\n" +
+	"\rmax_price_wei\x18\x06 \x01(\tR\vmaxPriceWei\x12\x16\n" +
+	"\x06traits\x18\a \x01(\tR\x06traits\"K\n" +
+	"\x14ListListingsResponse\x123\n" +
+	"\blistings\x18\x01 \x03(\v2\x17.marketplace.v1.ListingR\blistings\"\xee\x02\n" +
+	"\aListing\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06seller\x18\x03 \x01(\tR\x06seller\x12\x1b\n" +
+	"\tprice_wei\x18\x04 \x01(\tR\bpriceWei\x12\x16\n" +
+	"\x06amount\x18\x05 \x01(\x03R\x06amount\x12\x1a\n" +
+	"\bstandard\x18\x06 \x01(\tR\bstandard\x12\"\n" +
+	"\rexpires_at_ms\x18\a \x01(\x03R\vexpiresAtMs\x12 \n" +
+	"\flisted_at_ms\x18\b \x01(\x03R\n" +
+	"listedAtMs\x12\x17\n" +
+	"\atx_hash\x18\t \x01(\tR\x06txHash\x12\x12\n" +
+	"\x04name\x18\n" +
+	" \x01(\tR\x04name\x12\x1b\n" +
+	"\timage_uri\x18\v \x01(\tR\bimageUri\x12/\n" +
+	"\x13collection_verified\x18\f \x01(\bR\x12collectionVerified\"\xc3\x01\n" +
+	"\x13ListAuctionsRequest\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x16\n" +
+	"\x06seller\x18\x02 \x01(\tR\x06seller\x12\x16\n" +
+	"\x06status\x18\x03 \x01(\tR\x06status\x12\x14\n" +
+	"\x05limit\x18\x04 \x01(\x05R\x05limit\x12\"\n" +
+	"\rmin_price_wei\x18\x05 \x01(\tR\vminPriceWei\x12\"\n" +
+	"\rmax_price_wei\x18\x06 \x01(\tR\vmaxPriceWei\"K\n" +
+	"\x14ListAuctionsResponse\x123\n" +
+	"\bauctions\x18\x01 \x03(\v2\x17.marketplace.v1.AuctionR\bauctions\"\xe4\x03\n" +
+	"\aAuction\x12\x1d\n" +
+	"\n" +
+	"auction_id\x18\x01 \x01(\x03R\tauctionId\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06seller\x18\x04 \x01(\tR\x06seller\x12\x1a\n" +
+	"\bstandard\x18\x05 \x01(\tR\bstandard\x12*\n" +
+	"\x11reserve_price_wei\x18\x06 \x01(\tR\x0freservePriceWei\x12&\n" +
+	"\x0fhighest_bid_wei\x18\a \x01(\tR\rhighestBidWei\x12%\n" +
+	"\x0ehighest_bidder\x18\b \x01(\tR\rhighestBidder\x12*\n" +
+	"\x11min_increment_bps\x18\t \x01(\x05R\x0fminIncrementBps\x12 \n" +
+	"\fstarts_at_ms\x18\n" +
+	" \x01(\x03R\n" +
+	"startsAtMs\x12\x1c\n" +
+	"\n" +
+	"ends_at_ms\x18\v \x01(\x03R\bendsAtMs\x12\x16\n" +
+	"\x06status\x18\f \x01(\tR\x06status\x12\x1b\n" +
+	"\tcreate_tx\x18\r \x01(\tR\bcreateTx\x12\x12\n" +
+	"\x04name\x18\x0e \x01(\tR\x04name\x12\x1b\n" +
+	"\timage_uri\x18\x0f \x01(\tR\bimageUri\"\x7f\n" +
+	"\x12GetActivityRequest\x12\x14\n" +
+	"\x05limit\x18\x01 \x01(\x05R\x05limit\x12\x18\n" +
+	"\aaddress\x18\x02 \x01(\tR\aaddress\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x03 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x04 \x01(\tR\atokenId\"\xef\x01\n" +
+	"\rActivityEvent\x12\x12\n" +
+	"\x04type\x18\x01 \x01(\tR\x04type\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x1d\n" +
+	"\n" +
+	"amount_wei\x18\x04 \x01(\tR\tamountWei\x12!\n" +
+	"\ftimestamp_ms\x18\x05 \x01(\x03R\vtimestampMs\x12\x17\n" +
+	"\atx_hash\x18\x06 \x01(\tR\x06txHash\x12\x1b\n" +
+	"\tfrom_addr\x18\a \x01(\tR\bfromAddr\x12\x17\n" +
+	"\ato_addr\x18\b \x01(\tR\x06toAddr\"L\n" +
+	"\x13GetActivityResponse\x125\n" +
+	"\x06events\x18\x01 \x03(\v2\x1d.marketplace.v1.ActivityEventR\x06events\"\xaa\x01\n" +
+	"\x11ListOffersRequest\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06bidder\x18\x03 \x01(\tR\x06bidder\x12\x14\n" +
+	"\x05owner\x18\x04 \x01(\tR\x05owner\x12\x16\n" +
+	"\x06status\x18\x05 \x01(\tR\x06status\x12\x14\n" +
+	"\x05limit\x18\x06 \x01(\x05R\x05limit\"\xd8\x02\n" +
+	"\x05Offer\x12\x19\n" +
+	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12\x16\n" +
+	"\x06bidder\x18\x02 \x01(\tR\x06bidder\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x03 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x04 \x01(\tR\atokenId\x12\x1d\n" +
+	"\n" +
+	"amount_wei\x18\x05 \x01(\tR\tamountWei\x12\x17\n" +
+	"\afee_wei\x18\x06 \x01(\tR\x06feeWei\x12\x14\n" +
+	"\x05units\x18\a \x01(\x03R\x05units\x12\x1a\n" +
+	"\bstandard\x18\b \x01(\tR\bstandard\x12\"\n" +
+	"\rexpires_at_ms\x18\t \x01(\x03R\vexpiresAtMs\x12\x16\n" +
+	"\x06status\x18\n" +
+	" \x01(\tR\x06status\x12\x17\n" +
+	"\amake_tx\x18\v \x01(\tR\x06makeTx\x12\"\n" +
+	"\rcreated_at_ms\x18\f \x01(\x03R\vcreatedAtMs\"C\n" +
+	"\x12ListOffersResponse\x12-\n" +
+	"\x06offers\x18\x01 \x03(\v2\x15.marketplace.v1.OfferR\x06offers\",\n" +
+	"\x14GetWalletNFTsRequest\x12\x14\n" +
+	"\x05owner\x18\x01 \x01(\tR\x05owner\"\xa8\x01\n" +
+	"\bOwnedNFT\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\x12\x14\n" +
+	"\x05units\x18\x03 \x01(\tR\x05units\x12\x1a\n" +
+	"\bstandard\x18\x04 \x01(\tR\bstandard\x12\x12\n" +
+	"\x04name\x18\x05 \x01(\tR\x04name\x12\x1b\n" +
+	"\timage_uri\x18\x06 \x01(\tR\bimageUri\"E\n" +
+	"\x15GetWalletNFTsResponse\x12,\n" +
+	"\x04nfts\x18\x01 \x03(\v2\x18.marketplace.v1.OwnedNFTR\x04nfts\"-\n" +
+	"\x11GetProfileRequest\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xf1\x01\n" +
+	"\x12GetProfileResponse\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12!\n" +
+	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x10\n" +
+	"\x03bio\x18\x03 \x01(\tR\x03bio\x12\x1d\n" +
+	"\n" +
+	"avatar_uri\x18\x04 \x01(\tR\tavatarUri\x12\x1d\n" +
+	"\n" +
+	"banner_uri\x18\x05 \x01(\tR\tbannerUri\x12\x18\n" +
+	"\atwitter\x18\x06 \x01(\tR\atwitter\x12\x18\n" +
+	"\awebsite\x18\a \x01(\tR\awebsite\x12\x1a\n" +
+	"\bverified\x18\b \x01(\bR\bverified\";\n" +
+	"\rSearchRequest\x12\x14\n" +
+	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
+	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\x8e\x01\n" +
+	"\fSearchResult\x12\x12\n" +
+	"\x04kind\x18\x01 \x01(\tR\x04kind\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x12\n" +
+	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1b\n" +
+	"\timage_uri\x18\x05 \x01(\tR\bimageUri\"H\n" +
+	"\x0eSearchResponse\x126\n" +
+	"\aresults\x18\x01 \x03(\v2\x1c.marketplace.v1.SearchResultR\aresults\"\x13\n" +
+	"\x11GetMetricsRequest\"\xfc\x01\n" +
+	"\x12GetMetricsResponse\x122\n" +
+	"\x15total_active_listings\x18\x01 \x01(\x05R\x13totalActiveListings\x12\x1f\n" +
+	"\vtotal_sales\x18\x02 \x01(\x05R\n" +
+	"totalSales\x12(\n" +
+	"\x10gross_volume_wei\x18\x03 \x01(\tR\x0egrossVolumeWei\x12%\n" +
+	"\x0etotal_auctions\x18\x04 \x01(\x05R\rtotalAuctions\x12\x1d\n" +
+	"\n" +
+	"total_bids\x18\x05 \x01(\x05R\ttotalBids\x12!\n" +
+	"\ftotal_offers\x18\x06 \x01(\x05R\vtotalOffers2\xd2\t\n" +
 	"\x12MarketplaceService\x12S\n" +
 	"\n" +
 	"GetListing\x12!.marketplace.v1.GetListingRequest\x1a\".marketplace.v1.GetListingResponse\x12S\n" +
 	"\n" +
 	"GetAuction\x12!.marketplace.v1.GetAuctionRequest\x1a\".marketplace.v1.GetAuctionResponse\x12M\n" +
 	"\bGetOffer\x12\x1f.marketplace.v1.GetOfferRequest\x1a .marketplace.v1.GetOfferResponse\x12M\n" +
-	"\bGetToken\x12\x1f.marketplace.v1.GetTokenRequest\x1a .marketplace.v1.GetTokenResponseBPZNgithub.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1b\x06proto3"
+	"\bGetToken\x12\x1f.marketplace.v1.GetTokenRequest\x1a .marketplace.v1.GetTokenResponse\x12b\n" +
+	"\x0fListCollections\x12&.marketplace.v1.ListCollectionsRequest\x1a'.marketplace.v1.ListCollectionsResponse\x12\\\n" +
+	"\rGetCollection\x12$.marketplace.v1.GetCollectionRequest\x1a%.marketplace.v1.GetCollectionResponse\x12Y\n" +
+	"\fListListings\x12#.marketplace.v1.ListListingsRequest\x1a$.marketplace.v1.ListListingsResponse\x12Y\n" +
+	"\fListAuctions\x12#.marketplace.v1.ListAuctionsRequest\x1a$.marketplace.v1.ListAuctionsResponse\x12V\n" +
+	"\vGetActivity\x12\".marketplace.v1.GetActivityRequest\x1a#.marketplace.v1.GetActivityResponse\x12S\n" +
+	"\n" +
+	"ListOffers\x12!.marketplace.v1.ListOffersRequest\x1a\".marketplace.v1.ListOffersResponse\x12\\\n" +
+	"\rGetWalletNFTs\x12$.marketplace.v1.GetWalletNFTsRequest\x1a%.marketplace.v1.GetWalletNFTsResponse\x12S\n" +
+	"\n" +
+	"GetProfile\x12!.marketplace.v1.GetProfileRequest\x1a\".marketplace.v1.GetProfileResponse\x12G\n" +
+	"\x06Search\x12\x1d.marketplace.v1.SearchRequest\x1a\x1e.marketplace.v1.SearchResponse\x12S\n" +
+	"\n" +
+	"GetMetrics\x12!.marketplace.v1.GetMetricsRequest\x1a\".marketplace.v1.GetMetricsResponseBPZNgithub.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1b\x06proto3"
 
 var (
 	file_marketplace_v1_marketplace_proto_rawDescOnce sync.Once
@@ -831,31 +3022,85 @@ func file_marketplace_v1_marketplace_proto_rawDescGZIP() []byte {
 	return file_marketplace_v1_marketplace_proto_rawDescData
 }
 
-var file_marketplace_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 8)
+var file_marketplace_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
 var file_marketplace_v1_marketplace_proto_goTypes = []any{
-	(*GetListingRequest)(nil),  // 0: marketplace.v1.GetListingRequest
-	(*GetListingResponse)(nil), // 1: marketplace.v1.GetListingResponse
-	(*GetAuctionRequest)(nil),  // 2: marketplace.v1.GetAuctionRequest
-	(*GetAuctionResponse)(nil), // 3: marketplace.v1.GetAuctionResponse
-	(*GetOfferRequest)(nil),    // 4: marketplace.v1.GetOfferRequest
-	(*GetOfferResponse)(nil),   // 5: marketplace.v1.GetOfferResponse
-	(*GetTokenRequest)(nil),    // 6: marketplace.v1.GetTokenRequest
-	(*GetTokenResponse)(nil),   // 7: marketplace.v1.GetTokenResponse
+	(*GetListingRequest)(nil),       // 0: marketplace.v1.GetListingRequest
+	(*GetListingResponse)(nil),      // 1: marketplace.v1.GetListingResponse
+	(*GetAuctionRequest)(nil),       // 2: marketplace.v1.GetAuctionRequest
+	(*GetAuctionResponse)(nil),      // 3: marketplace.v1.GetAuctionResponse
+	(*GetOfferRequest)(nil),         // 4: marketplace.v1.GetOfferRequest
+	(*GetOfferResponse)(nil),        // 5: marketplace.v1.GetOfferResponse
+	(*GetTokenRequest)(nil),         // 6: marketplace.v1.GetTokenRequest
+	(*GetTokenResponse)(nil),        // 7: marketplace.v1.GetTokenResponse
+	(*ListCollectionsRequest)(nil),  // 8: marketplace.v1.ListCollectionsRequest
+	(*ListCollectionsResponse)(nil), // 9: marketplace.v1.ListCollectionsResponse
+	(*Collection)(nil),              // 10: marketplace.v1.Collection
+	(*GetCollectionRequest)(nil),    // 11: marketplace.v1.GetCollectionRequest
+	(*GetCollectionResponse)(nil),   // 12: marketplace.v1.GetCollectionResponse
+	(*ListListingsRequest)(nil),     // 13: marketplace.v1.ListListingsRequest
+	(*ListListingsResponse)(nil),    // 14: marketplace.v1.ListListingsResponse
+	(*Listing)(nil),                 // 15: marketplace.v1.Listing
+	(*ListAuctionsRequest)(nil),     // 16: marketplace.v1.ListAuctionsRequest
+	(*ListAuctionsResponse)(nil),    // 17: marketplace.v1.ListAuctionsResponse
+	(*Auction)(nil),                 // 18: marketplace.v1.Auction
+	(*GetActivityRequest)(nil),      // 19: marketplace.v1.GetActivityRequest
+	(*ActivityEvent)(nil),           // 20: marketplace.v1.ActivityEvent
+	(*GetActivityResponse)(nil),     // 21: marketplace.v1.GetActivityResponse
+	(*ListOffersRequest)(nil),       // 22: marketplace.v1.ListOffersRequest
+	(*Offer)(nil),                   // 23: marketplace.v1.Offer
+	(*ListOffersResponse)(nil),      // 24: marketplace.v1.ListOffersResponse
+	(*GetWalletNFTsRequest)(nil),    // 25: marketplace.v1.GetWalletNFTsRequest
+	(*OwnedNFT)(nil),                // 26: marketplace.v1.OwnedNFT
+	(*GetWalletNFTsResponse)(nil),   // 27: marketplace.v1.GetWalletNFTsResponse
+	(*GetProfileRequest)(nil),       // 28: marketplace.v1.GetProfileRequest
+	(*GetProfileResponse)(nil),      // 29: marketplace.v1.GetProfileResponse
+	(*SearchRequest)(nil),           // 30: marketplace.v1.SearchRequest
+	(*SearchResult)(nil),            // 31: marketplace.v1.SearchResult
+	(*SearchResponse)(nil),          // 32: marketplace.v1.SearchResponse
+	(*GetMetricsRequest)(nil),       // 33: marketplace.v1.GetMetricsRequest
+	(*GetMetricsResponse)(nil),      // 34: marketplace.v1.GetMetricsResponse
 }
 var file_marketplace_v1_marketplace_proto_depIdxs = []int32{
-	0, // 0: marketplace.v1.MarketplaceService.GetListing:input_type -> marketplace.v1.GetListingRequest
-	2, // 1: marketplace.v1.MarketplaceService.GetAuction:input_type -> marketplace.v1.GetAuctionRequest
-	4, // 2: marketplace.v1.MarketplaceService.GetOffer:input_type -> marketplace.v1.GetOfferRequest
-	6, // 3: marketplace.v1.MarketplaceService.GetToken:input_type -> marketplace.v1.GetTokenRequest
-	1, // 4: marketplace.v1.MarketplaceService.GetListing:output_type -> marketplace.v1.GetListingResponse
-	3, // 5: marketplace.v1.MarketplaceService.GetAuction:output_type -> marketplace.v1.GetAuctionResponse
-	5, // 6: marketplace.v1.MarketplaceService.GetOffer:output_type -> marketplace.v1.GetOfferResponse
-	7, // 7: marketplace.v1.MarketplaceService.GetToken:output_type -> marketplace.v1.GetTokenResponse
-	4, // [4:8] is the sub-list for method output_type
-	0, // [0:4] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	10, // 0: marketplace.v1.ListCollectionsResponse.collection:type_name -> marketplace.v1.Collection
+	15, // 1: marketplace.v1.ListListingsResponse.listings:type_name -> marketplace.v1.Listing
+	18, // 2: marketplace.v1.ListAuctionsResponse.auctions:type_name -> marketplace.v1.Auction
+	20, // 3: marketplace.v1.GetActivityResponse.events:type_name -> marketplace.v1.ActivityEvent
+	23, // 4: marketplace.v1.ListOffersResponse.offers:type_name -> marketplace.v1.Offer
+	26, // 5: marketplace.v1.GetWalletNFTsResponse.nfts:type_name -> marketplace.v1.OwnedNFT
+	31, // 6: marketplace.v1.SearchResponse.results:type_name -> marketplace.v1.SearchResult
+	0,  // 7: marketplace.v1.MarketplaceService.GetListing:input_type -> marketplace.v1.GetListingRequest
+	2,  // 8: marketplace.v1.MarketplaceService.GetAuction:input_type -> marketplace.v1.GetAuctionRequest
+	4,  // 9: marketplace.v1.MarketplaceService.GetOffer:input_type -> marketplace.v1.GetOfferRequest
+	6,  // 10: marketplace.v1.MarketplaceService.GetToken:input_type -> marketplace.v1.GetTokenRequest
+	8,  // 11: marketplace.v1.MarketplaceService.ListCollections:input_type -> marketplace.v1.ListCollectionsRequest
+	11, // 12: marketplace.v1.MarketplaceService.GetCollection:input_type -> marketplace.v1.GetCollectionRequest
+	13, // 13: marketplace.v1.MarketplaceService.ListListings:input_type -> marketplace.v1.ListListingsRequest
+	16, // 14: marketplace.v1.MarketplaceService.ListAuctions:input_type -> marketplace.v1.ListAuctionsRequest
+	19, // 15: marketplace.v1.MarketplaceService.GetActivity:input_type -> marketplace.v1.GetActivityRequest
+	22, // 16: marketplace.v1.MarketplaceService.ListOffers:input_type -> marketplace.v1.ListOffersRequest
+	25, // 17: marketplace.v1.MarketplaceService.GetWalletNFTs:input_type -> marketplace.v1.GetWalletNFTsRequest
+	28, // 18: marketplace.v1.MarketplaceService.GetProfile:input_type -> marketplace.v1.GetProfileRequest
+	30, // 19: marketplace.v1.MarketplaceService.Search:input_type -> marketplace.v1.SearchRequest
+	33, // 20: marketplace.v1.MarketplaceService.GetMetrics:input_type -> marketplace.v1.GetMetricsRequest
+	1,  // 21: marketplace.v1.MarketplaceService.GetListing:output_type -> marketplace.v1.GetListingResponse
+	3,  // 22: marketplace.v1.MarketplaceService.GetAuction:output_type -> marketplace.v1.GetAuctionResponse
+	5,  // 23: marketplace.v1.MarketplaceService.GetOffer:output_type -> marketplace.v1.GetOfferResponse
+	7,  // 24: marketplace.v1.MarketplaceService.GetToken:output_type -> marketplace.v1.GetTokenResponse
+	9,  // 25: marketplace.v1.MarketplaceService.ListCollections:output_type -> marketplace.v1.ListCollectionsResponse
+	12, // 26: marketplace.v1.MarketplaceService.GetCollection:output_type -> marketplace.v1.GetCollectionResponse
+	14, // 27: marketplace.v1.MarketplaceService.ListListings:output_type -> marketplace.v1.ListListingsResponse
+	17, // 28: marketplace.v1.MarketplaceService.ListAuctions:output_type -> marketplace.v1.ListAuctionsResponse
+	21, // 29: marketplace.v1.MarketplaceService.GetActivity:output_type -> marketplace.v1.GetActivityResponse
+	24, // 30: marketplace.v1.MarketplaceService.ListOffers:output_type -> marketplace.v1.ListOffersResponse
+	27, // 31: marketplace.v1.MarketplaceService.GetWalletNFTs:output_type -> marketplace.v1.GetWalletNFTsResponse
+	29, // 32: marketplace.v1.MarketplaceService.GetProfile:output_type -> marketplace.v1.GetProfileResponse
+	32, // 33: marketplace.v1.MarketplaceService.Search:output_type -> marketplace.v1.SearchResponse
+	34, // 34: marketplace.v1.MarketplaceService.GetMetrics:output_type -> marketplace.v1.GetMetricsResponse
+	21, // [21:35] is the sub-list for method output_type
+	7,  // [7:21] is the sub-list for method input_type
+	7,  // [7:7] is the sub-list for extension type_name
+	7,  // [7:7] is the sub-list for extension extendee
+	0,  // [0:7] is the sub-list for field type_name
 }
 
 func init() { file_marketplace_v1_marketplace_proto_init() }
@@ -869,7 +3114,7 @@ func file_marketplace_v1_marketplace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_marketplace_v1_marketplace_proto_rawDesc), len(file_marketplace_v1_marketplace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   8,
+			NumMessages:   35,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

@@ -172,19 +172,10 @@
         });
       } catch (_) { /* $watch not available — fallback to polling */ }
 
-      // Re-check highest offer + prev bid every 3s while the tab is
-      // visible so the floor guard doesn't go stale mid-page. The live
-      // partial on the left column re-renders the data region but the
-      // outer x-data (this) survives, so it needs explicit refresh.
-      setInterval(() => {
-        if (document.hidden) return;
-        this.refreshHighestOffer();
-        this.refreshPrevBid();
-      }, 3000);
       // WebSocket push: refresh on BOTH auction-updated (bid/extend events) AND
       // offer-updated (new offer on the same NFT). The OfferBook contract
-      // emits offer-updated, not auction-updated, so without this the
-      // offer floor would lag by up to 3s on a new bid landing.
+      // emits offer-updated, not auction-updated, so WS listener gives
+      // instant refresh — no polling needed.
       window.addEventListener('mw-ws-event', function (e) {
         var detail = e.detail || {};
         if (detail.type === 'auction-updated' || detail.type === 'offer-updated') {

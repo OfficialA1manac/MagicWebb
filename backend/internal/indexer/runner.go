@@ -73,6 +73,17 @@ type Runner struct {
 	// A value > 15 indicates the indexer is falling behind (≈ 30 seconds
 	// at 2s block time on Flare/Coston2).
 	headLagBlocks int64
+
+	// KPR-2: cached gas price to avoid repeated SuggestGasPrice RPC calls.
+	// Only the leader refreshes this; followers reuse the cached value.
+	gasPriceMu        sync.Mutex
+	cachedGasPrice    *big.Int
+	lastGasPriceAt    time.Time
+
+	// KPR-3: tracks the last nonce sent per keeper address to avoid
+	// re-submitting identical transactions that are already pending.
+	lastNonceMu sync.Mutex
+	lastNonce   map[common.Address]uint64
 }
 
 // HeadLagBlocks returns the current head lag in blocks (chain head minus last
@@ -93,6 +104,7 @@ func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, ser
 		eth:          eth,
 		h:            &handlers{q: q, bcast: bcast},
 		serverTimeMs: serverTimeMs,
+		lastNonce:    make(map[common.Address]uint64),
 	}
 }
 
@@ -296,6 +308,26 @@ func (r *Runner) runWatcher(ctx context.Context) {
 	if err != nil {
 		log.Error().Err(err).Msg("watcher: get indexed block")
 	}
+
+	// ── IDX-2: Per-collection checkpoint recovery ────────────────────────
+	// The global indexed_block tracks marketplace events (listings, auctions,
+	// bids, sales). Transfer events are tracked per-collection via
+	// tracked_collections.last_scanned_block. On restart, we must use the
+	// MINIMUM of both so no Transfer events are missed for any collection.
+	// A collection that was added after initial deploy will have
+	// last_scanned_block=0, so the indexer will backfill from the global
+	// fromBlock (which ensures marketplace events for that collection are
+	// also indexed).
+	if minCheckpoint, err := r.q.GetMinCollectionCheckpoint(ctx); err == nil && minCheckpoint > 0 && minCheckpoint < fromBlock {
+		log.Info().
+			Uint64("global_cursor", fromBlock).
+			Uint64("min_collection_checkpoint", minCheckpoint).
+			Msg("watcher: per-collection checkpoint behind global cursor; rewinding to min checkpoint")
+		fromBlock = minCheckpoint
+	} else if err != nil {
+		log.Warn().Err(err).Msg("watcher: failed to read collection checkpoints; using global cursor")
+	}
+
 	if r.cfg.IndexFromBlock > fromBlock {
 		fromBlock = r.cfg.IndexFromBlock
 	}
@@ -514,15 +546,29 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 	return nil
 }
 
+// maxTransferWorkers is the concurrency cap for parallel Transfer event
+// dispatch (IDX-1). Each collection's Transfer logs are dispatched to a
+// separate goroutine, bounded by this semaphore so a deployment with
+// hundreds of tracked collections doesn't exhaust DB connections.
+const maxTransferWorkers = 4
+
 // processTransfers watches NFT Transfer events on every tracked collection in the
 // block range, maintaining ownership and orphaning listings whose seller moved out.
 //
-// Header policy mirrors processRange: per-RPC 2s timeout, on failure log+skip
-// (never fall back to wall-clock — chain drift would put sort-by-blockTime
-// queries out of order). The previous implementation zeroed blockTimes[blk]
-// to time.Now() when missing; flagged in Priority Stack as
-// `processTransfersWallClock` at 🟠 P1 (DoS-with-recoverable-state: the next
-// watcher tick re-indexes the log when HeaderByNumber recovers).
+// IDX-1: Transfer logs are bucketed by collection and dispatched in parallel
+// goroutines via a bounded semaphore. A collection with zero Transfer events
+// in this range completes instantly; collections with many events are processed
+// concurrently so slow DB writes (ApplyTransfer721/1155 with tx commits) don't
+// block fast collections.
+//
+// IDX-2: After all collection buckets are dispatched successfully, every tracked
+// collection's last_scanned_block is advanced to `to` in a single bulk update.
+// This makes crash recovery O(1) — on restart, the indexer resumes from the
+// minimum checkpoint across all collections rather than re-scanning from the
+// deploy block.
+//
+// Header policy mirrors processRange: per-RPC 2s timeout, on failure abort
+// the chunk so the cursor doesn't advance past unindexed events.
 func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTimes map[uint64]uint64) error {
 	tracked, err := r.q.ListTrackedCollections(ctx)
 	if err != nil {
@@ -535,6 +581,8 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 	for i, a := range tracked {
 		addrs[i] = common.HexToAddress(a)
 	}
+
+	// Single FilterLogs for all collections — efficient RPC usage.
 	logs, err := r.eth.FilterLogs(ctx, ethereum.FilterQuery{
 		FromBlock: big.NewInt(int64(from)),
 		ToBlock:   big.NewInt(int64(to)),
@@ -544,33 +592,103 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 	if err != nil {
 		return fmt.Errorf("transfer logs [%d..%d]: %w", from, to, err)
 	}
+
+	// Resolve block timestamps for all transfer logs (same pass as before).
 	for _, l := range logs {
 		bt, ok := blockTimes[l.BlockNumber]
 		if !ok {
 			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
 			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
 			hcancel()
-			// v29 audit F-02: mirror processRange's abort-on-miss policy.
-			// The previous `continue` skipped the log AND let the chunk's
-			// SetIndexedBlock advance past the unindexed block — orphaned
-			// ownership events leaked into the next chain pull. Aborting
-			// the chunk keeps the cursor stalled until the RPC recovers;
-			// idempotent upserts replay on the next tick.
 			if herr != nil {
 				log.Error().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
 					Msg("transfer: header lookup failed; aborting chunk for retry on next tick")
 				return fmt.Errorf("transfer: header lookup failed for block %d: %w", l.BlockNumber, herr)
 			}
 			bt = h.Time
-			// Memoise so the next Transfer log in the same block
-			// within this chunk reuses the cached timestamp without
-			// another HeaderByNumber round-trip.
 			blockTimes[l.BlockNumber] = bt
 		}
-		if err := r.h.dispatch(ctx, l, bt); err != nil {
-			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: transfer dispatch")
-		}
 	}
+
+	// ── IDX-1: Bucket logs by collection for parallel dispatch ────────────
+	// Group Transfer logs by their emitting contract address so each
+	// collection's ownership updates can be processed concurrently.
+	// The semaphore (buffered channel) bounds goroutine count to
+	// maxTransferWorkers, preventing DB connection exhaustion.
+	type bucket struct {
+		addr common.Address
+		logs []types.Log
+	}
+	buckets := make(map[common.Address]*bucket, len(tracked))
+	for i := range logs {
+		addr := logs[i].Address
+		b, ok := buckets[addr]
+		if !ok {
+			b = &bucket{addr: addr}
+			buckets[addr] = b
+		}
+		b.logs = append(b.logs, logs[i])
+	}
+
+	if len(buckets) == 0 {
+		// No Transfer events in this range — all collections are still
+		// caught up. Advance their checkpoints anyway so a restart
+		// doesn't re-scan this empty range.
+		if err := r.q.SetCollectionCheckpointsBatch(ctx, to); err != nil {
+			log.Warn().Err(err).Uint64("block", to).Msg("transfer: bulk checkpoint update failed (non-fatal)")
+		}
+		return nil
+	}
+
+	// Parallel dispatch with bounded concurrency.
+	sem := make(chan struct{}, maxTransferWorkers)
+	var wg sync.WaitGroup
+	var dispatchErr atomic.Value // first non-nil error
+
+	for _, b := range buckets {
+		wg.Add(1)
+		go func(b *bucket) {
+			defer wg.Done()
+
+			// Fast-fail BEFORE acquiring the semaphore: if another
+			// goroutine already errored, don't waste a worker slot.
+			if dispatchErr.Load() != nil {
+				return
+			}
+
+			sem <- struct{}{}        // acquire
+			defer func() { <-sem }() // release
+
+			for _, l := range b.logs {
+				if dispatchErr.Load() != nil {
+					return
+				}
+				if err := r.h.dispatch(ctx, l, blockTimes[l.BlockNumber]); err != nil {
+					dispatchErr.Store(err)
+					log.Error().Err(err).Str("tx", l.TxHash.Hex()).Str("collection", b.addr.Hex()).
+						Msg("watcher: transfer dispatch failed")
+					return
+				}
+			}
+		}(b)
+	}
+	wg.Wait()
+
+	if firstErr := dispatchErr.Load(); firstErr != nil {
+		return fmt.Errorf("transfer dispatch: %w", firstErr.(error))
+	}
+
+	// ── IDX-2: Persist per-collection checkpoints ────────────────────────
+	// All collections are now caught up to block `to`. Bulk-update so
+	// crash recovery (restart) uses the minimum checkpoint across all
+	// tracked collections instead of re-scanning from deploy block.
+	if err := r.q.SetCollectionCheckpointsBatch(ctx, to); err != nil {
+		// Non-fatal: the in-memory state is correct; the DB checkpoint
+		// will be retried on the next successful range.
+		log.Warn().Err(err).Uint64("block", to).
+			Msg("transfer: bulk checkpoint update failed (non-fatal)")
+	}
+
 	return nil
 }
 
@@ -846,6 +964,26 @@ func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, fr
 	return r.sendRaw(ctx, key, from, to, signer, chainID, data, 150_000)
 }
 
+// getGasPrice returns the current gas price, caching the result for 30 seconds
+// (KPR-2). Only the leader refreshes via RPC; followers and re-submissions
+// within the cache window reuse the cached value, reducing RPC load.
+func (r *Runner) getGasPrice(ctx context.Context) (*big.Int, error) {
+	r.gasPriceMu.Lock()
+	defer r.gasPriceMu.Unlock()
+
+	if r.cachedGasPrice != nil && time.Since(r.lastGasPriceAt) < 30*time.Second {
+		return new(big.Int).Set(r.cachedGasPrice), nil
+	}
+
+	price, err := r.eth.SuggestGasPrice(ctx)
+	if err != nil {
+		return nil, err
+	}
+	r.cachedGasPrice = new(big.Int).Set(price)
+	r.lastGasPriceAt = time.Now()
+	return price, nil
+}
+
 // sendRaw signs and broadcasts an arbitrary calldata tx from the keeper,
 // returning the tx hash for receipt confirmation.
 func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, data []byte, gas uint64) (common.Hash, error) {
@@ -853,15 +991,23 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	if err != nil {
 		return common.Hash{}, err
 	}
+
+	// KPR-3: skip re-submission if we already broadcast a tx with this nonce.
+	// When a previous sendRaw successfully sent (returned tx hash) but the
+	// caller hasn't seen it mined yet, re-submitting wastes RPC calls and
+	// produces "already known" noise.
+	r.lastNonceMu.Lock()
+	last, seen := r.lastNonce[from]
+	r.lastNonceMu.Unlock()
+	if seen && nonce == last {
+		return common.Hash{}, fmt.Errorf("keeper: tx with nonce %d already sent; skipping re-submission", nonce)
+	}
+
 	tipCap, err := r.eth.SuggestGasTipCap(ctx)
 	if err != nil {
-		// RPC failure on tip-cap query → tipCap stays nil and the very next
-		// line's `new(big.Int).Add(tipCap, ...)` would panic, taking down
-		// the keeper loop for the rest of the process lifetime. Bounce a
-		// clean error to the caller; the next tx build will retry.
 		return common.Hash{}, fmt.Errorf("suggest gas tip cap: %w", err)
 	}
-	gasPrice, err := r.eth.SuggestGasPrice(ctx)
+	gasPrice, err := r.getGasPrice(ctx)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -909,6 +1055,15 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	if err := r.eth.SendTransaction(ctx, signed); err != nil {
 		return common.Hash{}, err
 	}
+
+	// KPR-3: track nonce AFTER successful broadcast so future calls skip
+	// re-submitting the same tx. Recorded post-SendTransaction to avoid
+	// blocking retries when SendTransaction fails (network blip, mempool
+	// full, gas too low — all retriable).
+	r.lastNonceMu.Lock()
+	r.lastNonce[from] = nonce
+	r.lastNonceMu.Unlock()
+
 	return signed.Hash(), nil
 }
 

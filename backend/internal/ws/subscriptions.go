@@ -1,6 +1,7 @@
 package ws
 
 import (
+	"regexp"
 	"strings"
 )
 
@@ -17,14 +18,23 @@ const (
 	channelUser       = "user:"
 )
 
+// channelRE is a compiled regex that validates channel names at subscription
+// time (WS-4). Previously isValidChannel used ad-hoc string manipulation with
+// strings.Contains(rest, ":") which could accept malformed channels.
+//
+// Valid channels:
+//   token:<0x-addr>:<id>      e.g. token:0xabc...:42
+//   collection:<0x-addr>      e.g. collection:0xabc...
+//   user:<0x-addr>            e.g. user:0xabc...
+var channelRE = regexp.MustCompile(
+	`^(token:[^:]+:[^:]+|collection:[^:]+|user:.+)$`,
+)
+
 // isValidChannel reports whether a channel name follows our naming convention.
+// Uses a compiled regex (WS-4) for fast single-pass validation instead of
+// multiple strings.HasPrefix/Contains calls.
 func isValidChannel(ch string) bool {
-	if len(ch) > len(channelToken) && strings.HasPrefix(ch, channelToken) {
-		rest := ch[len(channelToken):]
-		return strings.Contains(rest, ":")
-	}
-	return (len(ch) > len(channelCollection) && strings.HasPrefix(ch, channelCollection)) ||
-		(len(ch) > len(channelUser) && strings.HasPrefix(ch, channelUser))
+	return channelRE.MatchString(ch)
 }
 
 // eventPayload is the JSON shape extracted from sse.Event.Data for per-entity

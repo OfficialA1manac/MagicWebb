@@ -575,7 +575,7 @@ func uiProfileRedirect(c *fiber.Ctx) error {
 		if raw == "" {
 			continue
 		}
-		addr, err := auth.Verify(raw, config.C.JWTSecret, auth.DefaultAudience)
+		addr, _, err := auth.Verify(raw, config.C.JWTSecret, auth.DefaultAudience)
 		if err != nil || !isEthAddr(addr) {
 			continue
 		}

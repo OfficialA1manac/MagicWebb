@@ -5,7 +5,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
-	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/pashagolub/pgxmock/v4"
@@ -24,7 +23,7 @@ const (
 // issueTestToken issues a JWT for the given address using a fixed test secret.
 func issueTestToken(t *testing.T, addr string) string {
 	t.Helper()
-	tok, err := auth.Issue(addr, testJWTSecret, auth.DefaultAudience, 1*time.Hour)
+	tok, err := auth.IssueAccessToken(addr, testJWTSecret)
 	if err != nil {
 		t.Fatalf("failed to issue test JWT: %v", err)
 	}

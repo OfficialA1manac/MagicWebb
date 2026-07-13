@@ -40,6 +40,7 @@ type Config struct {
 	// Database
 	PostgresURL  string // primary (read-write) connection
 	ReadPoolURL  string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
+	RedisURL     string // optional Redis URL for distributed cache; empty = in-memory only (CACHE-1)
 
 	// Servers
 	HTTPAddr  string
@@ -179,6 +180,7 @@ func Load() {
 
 		PostgresURL: required("POSTGRES_URL"),
 		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
+		RedisURL:    envOrDefault("REDIS_URL", ""),
 
 		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
 		GRPCPort: optInt("GRPC_PORT", 0),

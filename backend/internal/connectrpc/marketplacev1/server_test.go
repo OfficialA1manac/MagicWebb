@@ -36,7 +36,7 @@ func TestGetListing_Success(t *testing.T) {
 			"MyToken", "https://example.com/img.png",
 		))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetListingRequest{
 		Collection: "0xabc",
 		TokenId:    "1",
@@ -96,7 +96,7 @@ func TestGetListing_NotFound(t *testing.T) {
 		WithArgs("0xabc", "1").
 		WillReturnError(pgx.ErrNoRows)
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetListingRequest{
 		Collection: "0xabc",
 		TokenId:    "1",
@@ -128,7 +128,7 @@ func TestGetListing_DBError(t *testing.T) {
 		WithArgs("0xabc", "1").
 		WillReturnError(errors.New("connection refused")) // arbitrary non-not-found error
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetListingRequest{
 		Collection: "0xabc",
 		TokenId:    "1",
@@ -168,7 +168,7 @@ func TestGetAuction_Success(t *testing.T) {
 			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "",
 		))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetAuctionRequest{
 		AuctionId: 42,
 	})
@@ -233,7 +233,7 @@ func TestGetAuction_NotFound(t *testing.T) {
 		WithArgs(int64(99)).
 		WillReturnError(pgx.ErrNoRows)
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetAuctionRequest{
 		AuctionId: 99,
 	})
@@ -261,7 +261,7 @@ func TestGetAuction_DBError(t *testing.T) {
 		WithArgs(int64(42)).
 		WillReturnError(errors.New("connection refused"))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetAuctionRequest{
 		AuctionId: 42,
 	})
@@ -300,7 +300,7 @@ func TestGetOffer_Success(t *testing.T) {
 			now.Add(7*24*time.Hour), "pending", "0xmtx", now,
 		))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetOfferRequest{
 		OfferId: "42",
 	})
@@ -362,7 +362,7 @@ func TestGetOffer_NotFound(t *testing.T) {
 		WithArgs("nonexistent").
 		WillReturnError(pgx.ErrNoRows)
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetOfferRequest{
 		OfferId: "nonexistent",
 	})
@@ -390,7 +390,7 @@ func TestGetOffer_DBError(t *testing.T) {
 		WithArgs("42").
 		WillReturnError(errors.New("connection refused"))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetOfferRequest{
 		OfferId: "42",
 	})
@@ -425,7 +425,7 @@ func TestGetToken_Success(t *testing.T) {
 			"My Token", "A cool token", "https://img.com/1.png", "https://anim.com/1.mp4", "https://meta.com/1.json", now,
 		))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetTokenRequest{
 		Collection: "0xabc",
 		TokenId:    "1",
@@ -482,7 +482,7 @@ func TestGetToken_NotFound(t *testing.T) {
 		WithArgs("0xmissing", "999").
 		WillReturnError(pgx.ErrNoRows)
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetTokenRequest{
 		Collection: "0xmissing",
 		TokenId:    "999",
@@ -514,7 +514,7 @@ func TestGetToken_DBError(t *testing.T) {
 		WithArgs("0xabc", "1").
 		WillReturnError(errors.New("connection reset"))
 
-	srv := NewServer(db.New(mock))
+	srv := NewServer(db.New(mock), nil)
 	req := connect.NewRequest(&GetTokenRequest{
 		Collection: "0xabc",
 		TokenId:    "1",

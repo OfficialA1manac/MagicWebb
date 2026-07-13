@@ -15,7 +15,7 @@ func TestIssueVerifyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	got, err := Verify(tok, secret, DefaultAudience)
+	got, _, err := Verify(tok, secret, DefaultAudience)
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
@@ -34,7 +34,7 @@ func TestVerifyRejectsBadAudience(t *testing.T) {
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
-	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+	if _, _, err := Verify(tok, secret, DefaultAudience); err == nil {
 		t.Fatal("expected audience mismatch rejection")
 	}
 }
@@ -55,7 +55,7 @@ func TestVerifyRejectsExpired(t *testing.T) {
 		t.Fatalf("issue: %v", err)
 	}
 	time.Sleep(3000 * time.Millisecond)
-	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+	if _, _, err := Verify(tok, secret, DefaultAudience); err == nil {
 		t.Fatal("expected expired token to fail verification")
 	}
 }
@@ -66,7 +66,7 @@ func TestVerifyRejectsBadSignature(t *testing.T) {
 	const other = "ffffffffffffffffffffffffffffffff"
 	const address = "0xabc000000000000000000000000000000000dead"
 	tok, _ := Issue(address, secret, DefaultAudience, time.Hour)
-	if _, err := Verify(tok, other, DefaultAudience); err == nil {
+	if _, _, err := Verify(tok, other, DefaultAudience); err == nil {
 		t.Fatal("expected signature mismatch rejection")
 	}
 }
@@ -98,7 +98,7 @@ func TestIssueClampsExcessiveTTL(t *testing.T) {
 		if err != nil {
 			t.Fatalf("issue %v: %v", in, err)
 		}
-		if _, err := Verify(tok, secret, DefaultAudience); err != nil {
+		if _, _, err := Verify(tok, secret, DefaultAudience); err != nil {
 			t.Fatalf("verify %v: %v", in, err)
 		}
 	}
@@ -115,7 +115,7 @@ func TestVerifyRejectsAlgNoneForgery(t *testing.T) {
 	pay := base64.RawURLEncoding.EncodeToString([]byte(
 		`{"sub":"` + address + `","iss":"magicwebb","aud":"magicwebb:api","iat":1,"nbf":1,"exp":9999999999}`))
 	tok := hdr + "." + pay + "."
-	if _, err := Verify(tok, secret, DefaultAudience); err == nil {
+	if _, _, err := Verify(tok, secret, DefaultAudience); err == nil {
 		t.Fatal("expected alg=none forgery to be rejected")
 	}
 }
@@ -136,7 +136,7 @@ func TestVerifyRejectsTamperedClaims(t *testing.T) {
 		base64.RawURLEncoding.EncodeToString([]byte(
 			`{"sub":"`+address+`","iss":"magicwebb","aud":"magicwebb:reindex","iat":1,"nbf":1,"exp":9999999999}`)) +
 		"." + parts[2]
-	if _, err := Verify(tampered, secret, DefaultAudience); err == nil {
+	if _, _, err := Verify(tampered, secret, DefaultAudience); err == nil {
 		t.Fatal("expected tampered claims to be rejected")
 	}
 }

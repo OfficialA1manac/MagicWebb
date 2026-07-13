@@ -113,6 +113,9 @@ func main() {
 	// SIWE nonces hold across instances.
 	rl := ratelimit.NewPg(pool)
 	ns := nonce.NewPg(pool)
+	rs := auth.NewPgRefreshStore(pool) // refresh token family rotation
+	al := auth.NewPgAuditLogger(pool)  // async auth audit log
+	aks := auth.NewPgAPIKeyStore(pool) // AUTH-3: API key store for machine-to-machine auth
 
 	// ── OpenTelemetry tracing (optional — disabled when endpoint is empty) ──
 	var tp *sdktrace.TracerProvider
@@ -257,7 +260,10 @@ func main() {
 	}
 
 	// Mount all REST + SSE routes
-	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs)
+	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al)
+
+	// AUTH-3: API key management endpoints (admin-only, admin tier rate limit).
+	api.MountAPIKeyRoutes(app, q, &config.C, rl, aks, al)
 
 	// ── gRPC health service (standard grpc.health.v1.Health) ──────────────
 	// Registered on the event bridge's gRPC server so Fly.io can probe this
@@ -285,7 +291,8 @@ func main() {
 
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))
-	app.Post("/auth/verify", verifyHandler(ns, rl))
+	app.Post("/auth/verify", verifyHandler(ns, rl, rs, al))
+	app.Post("/auth/refresh", refreshHandler(rs, al))
 
 	// Serve HTMX templates + static files
 	mountUI(app, q, &serverTimeMs)
@@ -323,6 +330,7 @@ func main() {
 			log.Warn().Err(err).Msg("otel: shutdown failed")
 		}
 	}
+	al.Close() // drain audit log queue before exit
 
 	cancel()
 	select {
@@ -542,9 +550,10 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	}
 }
 
-func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
+func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter, rs auth.RefreshStore, al auth.AuditLogger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := api.ClientIP(c)
+		ua := c.Get("User-Agent")
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
@@ -583,6 +592,7 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		// doesn't follow EIP-4361 format (legacy compatibility).
 		if d := config.C.SIWEDomain; d != "" {
 			if !siweDomainMatches(req.Message, d) {
+				auth.AuditLoginFailed(al, addr, ip, ua, "domain_mismatch", map[string]string{"domain": d})
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "domain mismatch"})
 			}
 		}
@@ -604,49 +614,62 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		// (legacy compatibility).
 		if want := config.C.ChainID; want != 0 {
 			if !siweChainIDMatches(req.Message, want) {
+				auth.AuditLoginFailed(al, addr, ip, ua, "chain_id_mismatch", map[string]string{"expected": fmt.Sprintf("%d", want)})
 				return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "chain id mismatch"})
 			}
 		}
 		ok, err := verifyEIP191(req.Message, req.Signature, req.Address)
 		if err != nil || !ok {
+			auth.AuditLoginFailed(al, addr, ip, ua, "invalid_signature", nil)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "signature verification failed"})
 		}
 
 		// All validations passed — NOW consume the nonce (single-use).
 		n, found := ns.GetDel(addr)
 		if !found {
-			// Nonce was already consumed (race with another verify call)
-			// or expired. The caller must request a fresh nonce.
+			auth.AuditLoginFailed(al, addr, ip, ua, "nonce_consumed", nil)
 			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce already consumed or expired, request a new one"})
 		}
 		if !strings.Contains(req.Message, n) {
-			// Nonce found but message doesn't contain it — security
-			// invariant violation (should be unreachable if the client
-			// uses the nonce we issued, but we don't consume the nonce
-			// here because the attacker could force consumption without
-			// valid signature).
+			auth.AuditLoginFailed(al, addr, ip, ua, "nonce_mismatch", nil)
 			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "nonce mismatch"})
 		}
 
-		token, err := auth.Issue(addr, config.C.JWTSecret, auth.DefaultAudience, 24*time.Hour)
+		// AUTH-1: issue short-lived access token (15min) + long-lived refresh
+		// token (7d) with family-based rotation. The refresh token's jti claim
+		// maps to the token_id in refresh_token_families, enabling atomic
+		// rotation and replay detection on every /auth/refresh call.
+		familyID, tokenID, err := rs.IssueRefreshFamily(c.Context(), addr, auth.RefreshTokenTTL)
+		if err != nil {
+			log.Error().Err(err).Str("addr", addr).Msg("refresh family creation failed")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "session creation failed"})
+		}
+
+		accessToken, err := auth.IssueAccessToken(addr, config.C.JWTSecret)
 		if err != nil {
 			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
 		}
-		// Set an HttpOnly, address-bound, SameSite=Strict session cookie so
-		// the SPA can authenticate via cookie (XSS exfiltration safe). The
-		// cookie name is `mw_s_<addr-prefix>` so a wallet switch forces
-		// re-auth and a stolen cookie can't be replayed against a different
-		// user's session.
-		setSessionCookie(c, addr, token)
-		return c.JSON(tokenResp{Token: token, Address: addr})
+
+		refreshToken, err := auth.IssueRefreshTokenWithFamily(addr, config.C.JWTSecret, familyID, tokenID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
+		}
+
+		// Set both cookies: access (15min) + refresh (7d). The refresh cookie
+		// is Path=/auth only so it's never sent on data endpoints, reducing
+		// exposure. The access cookie is Path=/ for API authorization.
+		setSessionCookie(c, addr, accessToken)
+		setRefreshCookie(c, addr, refreshToken)
+		auth.AuditLoginSuccess(al, addr, ip, ua)
+		return c.JSON(tokenResp{Token: accessToken, Address: addr})
 	}
 }
 
-// setSessionCookie writes the auth cookie with hardening defaults:
+// setSessionCookie writes the access-token auth cookie with hardening defaults:
 // HttpOnly (no JS access), Secure (always-on in production; in dev, only if
 // the request itself was HTTPS — fiber's c.Protocol() is forwarded-scheme-
-// aware), SameSite=Strict (no cross-site send), Path=/, Max-Age=24h
-// (matches JWT TTL). The cookie name itself encodes the wallet so multiple
+// aware), SameSite=Lax (no cross-site mutating requests), Path=/, Max-Age=15min
+// (matches AccessTokenTTL). The cookie name encodes the wallet so multiple
 // wallets coexisting in one browser resolve cleanly.
 //
 // The previous implementation keyed Secure on `c.Protocol() != "http"`,
@@ -669,7 +692,124 @@ func setSessionCookie(c *fiber.Ctx, address, token string) {
 		// on every mutating endpoint is the real defence. SameSite=Lax is
 		// the explicit web standard for session cookies.
 		SameSite: "Lax",
-		MaxAge:   int((24 * time.Hour).Seconds()),
+		MaxAge:   int((15 * time.Minute).Seconds()), // AUTH-1: 15min access token TTL
+	})
+}
+
+// setRefreshCookie writes the refresh-token cookie with stricter scope:
+// Path=/auth so the browser never sends the long-lived refresh token on
+// data endpoints, minimising exposure to XSS and CSRF. Other defaults
+// (HttpOnly, Secure, SameSite=Lax) mirror setSessionCookie.
+// MaxAge=7d matches RefreshTokenTTL.
+func setRefreshCookie(c *fiber.Ctx, address, token string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     auth.CookieNameRefresh(address),
+		Value:    token,
+		Path:     "/auth",
+		HTTPOnly: true,
+		Secure:   config.C.Env == "production" || c.Protocol() == "https",
+		SameSite: "Lax",
+		MaxAge:   int((7 * 24 * time.Hour).Seconds()),
+	})
+}
+
+// ── Refresh token handler ────────────────────────────────────────────────
+
+// refreshHandler implements POST /auth/refresh with family-based rotation.
+// It reads the refresh cookie (mw_r_<addr>), verifies the JWT, extracts
+// family_id and jti from claims, atomically rotates the token, and issues
+// a new access+refresh pair. On replay (reused old token), the entire
+// family is revoked — forcing re-authentication.
+func refreshHandler(rs auth.RefreshStore, al auth.AuditLogger) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		ip := api.ClientIP(c)
+		ua := c.Get("User-Agent")
+
+		// Scan the Cookie header for mw_r_* (refresh cookie).
+		// c.Cookies() returns the raw header string; parse manually.
+		var refreshToken string
+		for _, cookie := range strings.Split(c.Get("Cookie"), ";") {
+			cookie = strings.TrimSpace(cookie)
+			if strings.HasPrefix(strings.ToLower(cookie), "mw_r_") {
+				if idx := strings.IndexByte(cookie, '='); idx > 0 {
+					refreshToken = cookie[idx+1:]
+					break
+				}
+			}
+		}
+
+		// Also check Authorization header for Bearer refresh tokens
+		if refreshToken == "" {
+			if hdr := c.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
+				refreshToken = strings.TrimPrefix(hdr, "Bearer ")
+			}
+		}
+
+		if refreshToken == "" {
+			// Cannot determine wallet address without parsing the token —
+			// log with empty addr so IP+UA still help identify patterns.
+			auth.AuditRefreshFailed(al, "", ip, ua, "no_token", nil)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "no refresh token"})
+		}
+
+		// Verify the refresh JWT (audience: magicwebb:refresh, token_type: refresh).
+		addr, _, err := auth.Verify(refreshToken, config.C.JWTSecret, auth.RefreshAudience)
+		if err != nil {
+			auth.AuditRefreshFailed(al, "", ip, ua, "invalid_token", nil)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "invalid refresh token"})
+		}
+
+		// Extract family_id and jti from claims for rotation tracking.
+		familyID, tokenID := auth.ParseRefreshClaims(refreshToken, config.C.JWTSecret)
+		if familyID == "" || tokenID == "" {
+			auth.AuditRefreshFailed(al, addr, ip, ua, "malformed_claims", nil)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "malformed refresh token"})
+		}
+
+		// Atomically rotate: revoke old token_id, issue new one in same family.
+		newTokenID, err := rs.RotateRefreshToken(c.Context(), familyID, tokenID, auth.RefreshTokenTTL)
+		if err != nil {
+			log.Warn().Err(err).Str("addr", addr).Str("family", familyID).Msg("refresh rotation failed")
+			auth.AuditRefreshFailed(al, addr, ip, ua, "rotation_rejected", map[string]string{"error": err.Error()})
+			// Clear both cookies so the client knows to re-authenticate.
+			clearAuthCookies(c, addr)
+			return c.Status(fiber.StatusUnauthorized).JSON(fiber.Map{"error": "refresh token rejected — re-authenticate"})
+		}
+
+		// Issue new access + refresh tokens.
+		accessToken, err := auth.IssueAccessToken(addr, config.C.JWTSecret)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
+		}
+
+		newRefreshToken, err := auth.IssueRefreshTokenWithFamily(addr, config.C.JWTSecret, familyID, newTokenID)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{"error": "token issuance failed"})
+		}
+
+		setSessionCookie(c, addr, accessToken)
+		setRefreshCookie(c, addr, newRefreshToken)
+		auth.AuditRefreshSuccess(al, addr, ip, ua)
+		return c.JSON(tokenResp{Token: accessToken, Address: addr})
+	}
+}
+
+// clearAuthCookies removes both access and refresh cookies to force
+// re-authentication (used on rotation failure / replay detection).
+func clearAuthCookies(c *fiber.Ctx, address string) {
+	c.Cookie(&fiber.Cookie{
+		Name:     auth.CookieName(address),
+		Value:    "",
+		Path:     "/",
+		HTTPOnly: true,
+		MaxAge:   -1,
+	})
+	c.Cookie(&fiber.Cookie{
+		Name:     auth.CookieNameRefresh(address),
+		Value:    "",
+		Path:     "/auth",
+		HTTPOnly: true,
+		MaxAge:   -1,
 	})
 }
 

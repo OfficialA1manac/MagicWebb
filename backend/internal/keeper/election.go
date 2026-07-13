@@ -272,6 +272,78 @@ func (e *Election) Shutdown() {
 	}()
 }
 
+// ── Observability metrics ────────────────────────────────────────────────
+
+// LeaderID returns the instance ID of the current leader (empty when unknown).
+func (e *Election) LeaderID() string {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	return e.leaderID
+}
+
+// DegradedCount returns the number of consecutive RPC failures detected
+// by the leader (for degraded-yield monitoring).
+func (e *Election) DegradedCount() int64 {
+	return e.degradedCnt.Load()
+}
+
+// HeartbeatAge returns the time since the last received heartbeat from the
+// leader. When this instance is the leader, returns 0.
+func (e *Election) HeartbeatAge() time.Duration {
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.state == StateLeader {
+		return 0
+	}
+	if e.lastHeartbeat.IsZero() {
+		return -1 // no heartbeat ever received
+	}
+	return time.Since(e.lastHeartbeat)
+}
+
+// ── Prometheus-compatible metrics (KPR-1) ────────────────────────────────────
+//
+// These methods return raw metric values that a Prometheus metrics endpoint
+// can marshal into the text exposition format. No external Prometheus client
+// dependency required — the /api/v1/metrics handler reads these at scrape time.
+//
+// keeper_is_leader: 1 when this instance is the elected leader, 0 otherwise.
+// keeper_heartbeat_age_ms: milliseconds since last leader heartbeat (0 = leader, -1 = never received).
+// keeper_election_state: 0=follower, 1=leader, 2=candidate.
+// keeper_degraded_rpc_count: consecutive RPC failures detected by leader.
+
+// IsLeaderGauge returns 1 when this instance is the leader (for keeper_is_leader gauge).
+func (e *Election) IsLeaderGauge() int {
+	if e.IsLeader() {
+		return 1
+	}
+	return 0
+}
+
+// HeartbeatAgeMs returns the heartbeat age in milliseconds.
+// 0 = this instance is the leader.
+// -1 = no heartbeat ever received from any leader.
+func (e *Election) HeartbeatAgeMs() int64 {
+	age := e.HeartbeatAge()
+	if age < 0 {
+		return -1
+	}
+	if age == 0 {
+		return 0
+	}
+	return age.Milliseconds()
+}
+
+// StateGauge returns the election state as an integer for keeper_election_state gauge.
+func (e *Election) StateGauge() int {
+	return int(e.State())
+}
+
+// DegradedRPCGauge returns consecutive RPC failure count for keeper_degraded_rpc_count gauge.
+func (e *Election) DegradedRPCGauge() int64 {
+	return e.DegradedCount()
+}
+
 // ── gRPC server handler ───────────────────────────────────────────────────
 
 // Heartbeat implements proto.KeeperElectionServer. It receives heartbeats

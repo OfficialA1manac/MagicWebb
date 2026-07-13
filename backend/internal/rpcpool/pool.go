@@ -12,6 +12,7 @@ import (
 	"fmt"
 	"math/big"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -44,11 +45,23 @@ const DefaultTimeout = 3 * time.Second
 // heavyTimeout bounds log-range queries, which public RPCs serve slowly.
 const heavyTimeout = 15 * time.Second
 
+// rateLimitBackoff is how long an endpoint is skipped after receiving a 429.
+const rateLimitBackoff = 30 * time.Second
+
 // Pool fans calls out across endpoints with sticky selection and failover.
+// RPC-3: tracks per-endpoint rate-limit state so endpoints returning HTTP 429
+// are temporarily skipped during failover.
 type Pool struct {
 	nodes   []ethNode
 	cur     atomic.Uint64
 	timeout time.Duration
+
+	// RPC-3: per-endpoint rate-limit tracking. When an endpoint returns a 429
+	// (detected via error string), it's marked as rate-limited and skipped for
+	// rateLimitBackoff. This prevents the pool from hammering an already-throttled
+	// endpoint while other endpoints are available.
+	mu          sync.RWMutex
+	rateLimited map[int]time.Time // endpoint index → when backoff expires
 }
 
 // New dials every URL (deduped, order preserved) and returns a Pool. ethclient
@@ -90,20 +103,16 @@ func New(ctx context.Context, urls []string, timeout time.Duration) (*Pool, erro
 	}
 	log.Info().Int("endpoints", len(nodes)).Int("healthy", len(healthy)).Msg("rpcpool: ready")
 	p := newPoolWithNodes(nodes, timeout)
-	// Start a periodic background health re-check so recovered preferred
-	// nodes are reconsidered for the sticky cursor. Without this, a node
-	// that fails once and recovers later is never promoted back to the
-	// preferred slot — the cursor stays pinned to whichever endpoint
-	// happened to work after the failure. Every 5 minutes we probe every
-	// node with a lightweight BlockNumber call and, if the first healthy
-	// node differs from the current cursor, CAS the cursor to the
-	// promoted node.
 	go p.healthLoop()
 	return p, nil
 }
 
 func newPoolWithNodes(nodes []ethNode, timeout time.Duration) *Pool {
-	return &Pool{nodes: nodes, timeout: timeout}
+	return &Pool{
+		nodes:       nodes,
+		timeout:     timeout,
+		rateLimited: make(map[int]time.Time),
+	}
 }
 
 // healthLoop periodically probes every node and promotes the first healthy
@@ -121,9 +130,6 @@ func (p *Pool) healthLoop() {
 			if err == nil {
 				cur := p.cur.Load()
 				if uint64(idx) != cur {
-					// Found a healthy endpoint that's ahead of the current
-					// cursor. CAS it into place so subsequent RPC calls
-					// prefer the earlier (usually closest / preferred) node.
 					if p.cur.CompareAndSwap(cur, uint64(idx)) {
 						log.Info().Uint64("cursor", uint64(idx)).Msg("rpcpool: health check promoted endpoint")
 					}
@@ -138,6 +144,59 @@ func (p *Pool) healthLoop() {
 	}
 }
 
+// isRateLimited returns true if the endpoint at index idx is currently
+// in the rate-limit backoff window (RPC-3).
+func (p *Pool) isRateLimited(idx uint64) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	until, ok := p.rateLimited[int(idx)]
+	return ok && time.Now().Before(until)
+}
+
+// allRateLimited returns true if every endpoint is currently in backoff.
+func (p *Pool) allRateLimited(n uint64) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+	for i := uint64(0); i < n; i++ {
+		until, ok := p.rateLimited[int(i)]
+		if !ok || time.Now().After(until) {
+			return false
+		}
+	}
+	return true
+}
+
+// clearRateLimits removes all rate-limit backoff markers (fail-open).
+func (p *Pool) clearRateLimits() {
+	p.mu.Lock()
+	clear(p.rateLimited)
+	p.mu.Unlock()
+}
+
+// markRateLimited records that an endpoint returned a 429 and should be
+// skipped for rateLimitBackoff (RPC-3).
+func (p *Pool) markRateLimited(idx uint64) {
+	p.mu.Lock()
+	p.rateLimited[int(idx)] = time.Now().Add(rateLimitBackoff)
+	p.mu.Unlock()
+	log.Warn().Uint64("endpoint", idx).Dur("backoff", rateLimitBackoff).
+		Msg("rpcpool: endpoint rate-limited, skipping for backoff period")
+}
+
+// isRateLimitError detects HTTP 429 or rate-limit messages from RPC errors.
+// ethclient wraps errors from the HTTP transport; public RPC providers
+// return 429 with a body like "limit exceeded" or "too many requests".
+func isRateLimitError(err error) bool {
+	if err == nil {
+		return false
+	}
+	s := err.Error()
+	return strings.Contains(s, "429") ||
+		strings.Contains(s, "rate limit") ||
+		strings.Contains(s, "too many requests") ||
+		strings.Contains(s, "limit exceeded")
+}
+
 // Close releases every underlying client transport.
 func (p *Pool) Close() {
 	for _, n := range p.nodes {
@@ -148,6 +207,10 @@ func (p *Pool) Close() {
 // call runs fn against the current sticky endpoint, failing over (and moving
 // the sticky cursor) on error or timeout until one succeeds or all are
 // exhausted. perCall of 0 uses the pool default.
+//
+// RPC-3: endpoints that returned a 429 are temporarily skipped during
+// failover. When all endpoints are rate-limited, the pool falls back to
+// using them anyway (fail-open) after logging a warning.
 func call[T any](p *Pool, ctx context.Context, op string, perCall time.Duration, fn func(context.Context, ethNode) (T, error)) (T, error) {
 	var zero T
 	if perCall <= 0 {
@@ -156,11 +219,27 @@ func call[T any](p *Pool, ctx context.Context, op string, perCall time.Duration,
 	var lastErr error
 	start := p.cur.Load()
 	n := uint64(len(p.nodes))
+
+	// RPC-3: when ALL endpoints are rate-limited, clear backoffs and
+	// fail-open rather than returning an error without trying any endpoint.
+	if p.allRateLimited(n) {
+		log.Warn().Str("op", op).Msg("rpcpool: all endpoints rate-limited, failing open")
+		p.clearRateLimits()
+	}
+
 	for i := uint64(0); i < n; i++ {
 		if err := ctx.Err(); err != nil {
 			return zero, err
 		}
 		idx := (start + i) % n
+
+		// RPC-3: skip rate-limited endpoints to avoid hammering an
+		// already-throttled provider. If all were rate-limited, the
+		// upfront check above already cleared the backoffs.
+		if p.isRateLimited(idx) {
+			continue
+		}
+
 		cctx, cancel := context.WithTimeout(ctx, perCall)
 		v, err := fn(cctx, p.nodes[idx])
 		cancel()
@@ -175,6 +254,12 @@ func call[T any](p *Pool, ctx context.Context, op string, perCall time.Duration,
 			}
 			return v, nil
 		}
+
+		// RPC-3: detect rate-limit responses and apply backoff.
+		if isRateLimitError(err) {
+			p.markRateLimited(idx)
+		}
+
 		lastErr = err
 		log.Warn().Err(err).Str("op", op).Uint64("endpoint", idx).
 			Msg("rpcpool: call failed, failing over")
