@@ -274,6 +274,24 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 	}
 
 	out["metrics_unavailable"] = ""
+
+	// CACHE-4: surface cache hit/miss counters in the JSON metrics response.
+	if GlobalCaches.Trending != nil {
+		for k, v := range GlobalCaches.Trending.Stats() {
+			out[k] = v
+		}
+	}
+	if GlobalCaches.Activity != nil {
+		for k, v := range GlobalCaches.Activity.Stats() {
+			// Aggregate: add activity cache counters on top of trending.
+			if existing, ok := out[k].(int64); ok {
+				out[k] = existing + v
+			} else {
+				out[k] = v
+			}
+		}
+	}
+
 	return out
 }
 

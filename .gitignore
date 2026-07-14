@@ -85,3 +85,4 @@ docs/REVIEW_PRODUCTION_HARDENING.md
 
 # ── Tools ───────────────────────────────────────────────────────────────────
 tools/seed-testnet/seed-testnet
+tools/seed-testnet/*.exe

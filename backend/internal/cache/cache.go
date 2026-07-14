@@ -102,3 +102,17 @@ func (c *Cache) Warm(items map[string]any) {
 		c.items[k] = &entry{data: v, expiresAt: expiry}
 	}
 }
+
+// Stats returns Prometheus-compatible metric values for cache observability.
+// Hits, misses, sets, and evictions are monotonic counters reset on process
+// restart (in-memory cache only). The /api/v1/metrics JSON endpoint and the
+// Prometheus /metrics text endpoint both consume this map.
+// CACHE-4: cache hit/miss observability — previously invisible.
+func (c *Cache) Stats() map[string]int64 {
+	return map[string]int64{
+		"cache_hits":      c.Hits.Load(),
+		"cache_misses":    c.Misses.Load(),
+		"cache_sets":      c.Sets.Load(),
+		"cache_evictions": c.Evictions.Load(),
+	}
+}

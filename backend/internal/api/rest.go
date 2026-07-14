@@ -130,6 +130,16 @@ func securityHeaders() fiber.Handler {
 // Docker layer cache pinned the previous binary's static assets.
 var MWServerBuildSHA = "unknown"
 
+// GlobalCaches holds references to the application-level caches created in
+// Mount(). Exposed as package-level vars (not exported, but accessible within
+// the api package) so registerMetricsRoute in main.go and BuildResponse in
+// metrics.go can surface cache hit/miss/set/eviction counters to Prometheus
+// and the /api/v1/metrics JSON endpoint (CACHE-4).
+var GlobalCaches struct {
+	Trending cache.CacheInterface
+	Activity cache.CacheInterface
+}
+
 // Mount registers all REST + SSE + WebSocket routes on the Fiber app.
 // serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
 // endpoint reads it under the rate-limited api group.
@@ -299,6 +309,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	trendingCache := cache.NewRedisOrMemory(cfg.RedisURL, 30*time.Second)
 	// 10s TTL for activity (more real-time, but DB query is the expensive part)
 	activityCache := cache.NewRedisOrMemory(cfg.RedisURL, 10*time.Second)
+
+	// CACHE-4: store cache references so the Prometheus /metrics endpoint and
+	// the /api/v1/metrics JSON handler can surface cache hit/miss counters.
+	GlobalCaches.Trending = trendingCache
+	GlobalCaches.Activity = activityCache
 
 	// Domain-specific route registrations.
 	NewListingsService(q, eth).RegisterRoutes(api)

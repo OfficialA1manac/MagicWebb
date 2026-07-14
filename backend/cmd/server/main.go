@@ -376,6 +376,23 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
 		// We surface build info and the key operational metrics that don't
 		// require a DB round-trip.
 
+		// CACHE-4: cache hit/miss/set/eviction counters.
+		var cacheHits, cacheMisses, cacheSets, cacheEvictions int64
+		if api.GlobalCaches.Trending != nil {
+			ts := api.GlobalCaches.Trending.Stats()
+			cacheHits += ts["cache_hits"]
+			cacheMisses += ts["cache_misses"]
+			cacheSets += ts["cache_sets"]
+			cacheEvictions += ts["cache_evictions"]
+		}
+		if api.GlobalCaches.Activity != nil {
+			as := api.GlobalCaches.Activity.Stats()
+			cacheHits += as["cache_hits"]
+			cacheMisses += as["cache_misses"]
+			cacheSets += as["cache_sets"]
+			cacheEvictions += as["cache_evictions"]
+		}
+
 		return c.SendString(fmt.Sprintf(
 			"# HELP magicwebb_sse_dropped_total Total SSE events dropped due to fan-out saturation.\n"+
 				"# TYPE magicwebb_sse_dropped_total counter\n"+
@@ -386,10 +403,23 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
 				"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
 				"# TYPE magicwebb_head_lag_blocks gauge\n"+
 				"magicwebb_head_lag_blocks %d\n"+
+				"# HELP magicwebb_cache_hits_total Total cache hits across all caches.\n"+
+				"# TYPE magicwebb_cache_hits_total counter\n"+
+				"magicwebb_cache_hits_total %d\n"+
+				"# HELP magicwebb_cache_misses_total Total cache misses across all caches.\n"+
+				"# TYPE magicwebb_cache_misses_total counter\n"+
+				"magicwebb_cache_misses_total %d\n"+
+				"# HELP magicwebb_cache_sets_total Total cache sets across all caches.\n"+
+				"# TYPE magicwebb_cache_sets_total counter\n"+
+				"magicwebb_cache_sets_total %d\n"+
+				"# HELP magicwebb_cache_evictions_total Total cache evictions (lazy TTL expiry).\n"+
+				"# TYPE magicwebb_cache_evictions_total counter\n"+
+				"magicwebb_cache_evictions_total %d\n"+
 				"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
 				"# TYPE magicwebb_build_info gauge\n"+
 				"magicwebb_build_info{sha=\"%s\",env=\"%s\"} 1\n",
-			dropped, streak, lag, api.MWServerBuildSHA, config.C.Env,
+			dropped, streak, lag, cacheHits, cacheMisses, cacheSets, cacheEvictions,
+			api.MWServerBuildSHA, config.C.Env,
 		))
 	})
 }

@@ -35,6 +35,7 @@ type CacheInterface interface {
 	Set(key string, data any)
 	Clear()
 	Count() int
+	Stats() map[string]int64 // CACHE-4: prometheus-compatible hit/miss/set/eviction counters
 }
 
 // RedisCache wraps a Redis client with the same TTL semantics as the
@@ -198,6 +199,12 @@ func (rc *RedisCache) Count() int {
 		return rc.local.Count()
 	}
 	return rc.local.Count() // approximation: return local count
+}
+
+// Stats returns Prometheus-compatible metric values for cache observability
+// (CACHE-4). Delegates to the local fallback cache's counters.
+func (rc *RedisCache) Stats() map[string]int64 {
+	return rc.local.Stats()
 }
 
 // Close shuts down the health loop and the Redis client. After Close,
