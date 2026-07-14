@@ -116,11 +116,12 @@ func extractAPIKey(req connect.AnyRequest) string {
 }
 
 // extractSessionCookie pulls the JWT from wallet-bound session cookies.
+// Scans for both mw_a_ (current access token) and mw_s_ (legacy access token).
 // Mirrors the cookie-scanning logic in api/rest.go and ws/handler.go.
 func extractSessionCookie(cookieHeader string) string {
 	for _, part := range strings.Split(cookieHeader, ";") {
 		p := strings.TrimSpace(part)
-		if !strings.HasPrefix(p, "mw_s_") {
+		if !strings.HasPrefix(p, "mw_s_") && !strings.HasPrefix(p, "mw_a_") {
 			continue
 		}
 		eq := strings.IndexByte(p, '=')

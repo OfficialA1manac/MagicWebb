@@ -198,17 +198,13 @@ func CookieNameRefresh(address string) string {
 	return "mw_r_" + strings.ToLower(address[:8])
 }
 
-// CookieName is the legacy session cookie name (backward compatible).
+// CookieName is the legacy session cookie name (mw_s_<prefix>).
+// Superseded by CookieNameAccess (mw_a_<prefix>) as of AUTH-1.
+// Retained for backward compatibility in cookie scanners and
+// for clearing old sessions created before the migration.
 func CookieName(address string) string {
 	if len(address) < 8 {
 		return "mw_session"
 	}
 	return "mw_s_" + strings.ToLower(address[:8])
-}
-
-// ScanCookieNames returns both legacy and new cookie name patterns for a wallet.
-// Used by middleware to check all possible cookie names when authenticating.
-func ScanCookieNames(address string) []string {
-	names := []string{CookieName(address), CookieNameAccess(address)}
-	return names
 }

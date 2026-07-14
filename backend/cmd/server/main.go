@@ -678,21 +678,13 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter, rs auth.RefreshStore, 
 // to plaintext auth is impossible even if the proxy is buggy.
 func setSessionCookie(c *fiber.Ctx, address, token string) {
 	c.Cookie(&fiber.Cookie{
-		Name:     auth.CookieName(address),
+		Name:     auth.CookieNameAccess(address),
 		Value:    token,
 		Path:     "/",
 		HTTPOnly: true,
 		Secure:   config.C.Env == "production" || c.Protocol() == "https",
-		// v22 audit: dropped from "Strict" to "Lax". Strict blocks the auth
-		// cookie on cross-origin top-level GET navigations — the user-visible
-		// symptom: anyone arriving from Twitter / Discord / Telegram is
-		// silently signed-out on first page load and has to reconnect. Lax
-		// still defends against CSRF on cross-origin state-changing POSTs
-		// (browser does NOT send Lax cookies on cross-site POSTs); JWT gate
-		// on every mutating endpoint is the real defence. SameSite=Lax is
-		// the explicit web standard for session cookies.
 		SameSite: "Lax",
-		MaxAge:   int((15 * time.Minute).Seconds()), // AUTH-1: 15min access token TTL
+		MaxAge:   int((15 * time.Minute).Seconds()),
 	})
 }
 
@@ -794,9 +786,20 @@ func refreshHandler(rs auth.RefreshStore, al auth.AuditLogger) fiber.Handler {
 	}
 }
 
-// clearAuthCookies removes both access and refresh cookies to force
+// clearAuthCookies removes access and refresh cookies to force
 // re-authentication (used on rotation failure / replay detection).
+// Clears both legacy (mw_s_) and current (mw_a_) access cookie names.
 func clearAuthCookies(c *fiber.Ctx, address string) {
+	// Current access cookie (mw_a_<prefix>).
+	c.Cookie(&fiber.Cookie{
+		Name:     auth.CookieNameAccess(address),
+		Value:    "",
+		Path:     "/",
+		HTTPOnly: true,
+		MaxAge:   -1,
+	})
+	// Legacy access cookie (mw_s_<prefix>) — clear for sessions created
+	// before the cookie name migration (AUTH-1).
 	c.Cookie(&fiber.Cookie{
 		Name:     auth.CookieName(address),
 		Value:    "",

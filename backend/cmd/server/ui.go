@@ -555,8 +555,7 @@ func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
 // has /profile/:addr (a specific user's page) but NOT /profile — a
 // user typing that in the address bar (or clicking any link that points
 // at the bare path) hits Fiber's 404. We rescue by:
-//  1. Walking every cookie on the request.
-//  2. Looking for any mw_s_<prefix> cookie (the SIWE session cookie).
+//  1. Walking every cookie on the request.	//  2. Looking for any mw_s_<prefix> or mw_a_<prefix> cookie (the SIWE session cookie).
 //  3. Verifying its JWT against JWT_SECRET + DefaultAudience.
 //  4. Returning a 302 to /profile/<sub> where sub = wallet address.
 //  5. Falling back to a 307 to /listings when no valid session cookie
@@ -568,7 +567,7 @@ func profilePageData(ctx context.Context, q *db.Q, addr string) fiber.Map {
 // profile they control. The cost is a single HMAC compute per session.
 func uiProfileRedirect(c *fiber.Ctx) error {
 	for _, name := range cookieNames(c) {
-		if !strings.HasPrefix(name, "mw_s_") {
+		if !strings.HasPrefix(name, "mw_s_") && !strings.HasPrefix(name, "mw_a_") {
 			continue
 		}
 		raw := c.Cookies(name)

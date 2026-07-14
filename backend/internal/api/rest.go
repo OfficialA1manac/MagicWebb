@@ -57,9 +57,9 @@ const (
 		// only the Alpine runtime parses expressions).
 		//
 		// 'unsafe-inline' is required so the server-rendered inline <script>
-		// blocks in templates/layout.html execute: the runtime-config inject
-		// (window.MW_MARKETPLACE = '{{.MarketplaceAddr}}') and the SSE bump
-		// IIFE. Both blocks contain only env-controlled values plus literal
+	// blocks in templates/layout.html execute: the runtime-config inject
+	// (window.MW_MARKETPLACE = '{{.MarketplaceAddr}}') and the inline wallet
+	// init IIFE. Both blocks contain only env-controlled values plus literal
 		// JS — Go's html/template auto-escapes the injected strings — so the
 		// 'unsafe-inline' tradeoff is the standard practical match for
 		// self-hosted Alpine + dynamic injection.
@@ -340,7 +340,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 // verify handler). The cookie path is what makes JWTs uninteresting to
 // XSS — even a successful script injection can't read HttpOnly storage.
 //
-// Multiple `mw_s_<addr-prefix>` cookies can be present after a wallet
+// Multiple mw_a_<addr-prefix> (and legacy mw_s_) cookies can be present after a wallet
 // switch (old cookie was set, new one issued). The middleware tries every
 // match and accepts the first one that verifies; tokens for other wallets
 // are simply ignored.
