@@ -7,11 +7,11 @@ import (
 	"time"
 )
 
-// TestIssueVerifyRoundtrip: address ↔ subject parity for valid tokens.
-func TestIssueVerifyRoundtrip(t *testing.T) {
+// TestIssueAccessTokenVerifyRoundtrip: address ↔ subject parity for access tokens.
+func TestIssueAccessTokenVerifyRoundtrip(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, err := Issue(address, secret, DefaultAudience, time.Hour)
+	tok, err := IssueAccessToken(address, secret)
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -30,7 +30,7 @@ func TestIssueVerifyRoundtrip(t *testing.T) {
 func TestVerifyRejectsBadAudience(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, err := Issue(address, secret, "magicwebb:reindex", time.Hour)
+	tok, err := issueWithFamily(address, secret, "magicwebb:reindex", time.Hour, TokenAccess, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -39,18 +39,14 @@ func TestVerifyRejectsBadAudience(t *testing.T) {
 	}
 }
 
-// TestVerifyRejectsExpired: TTL is honored after expiry. Issue() sets exp
-// via `.Unix()` which rounds DOWN — so a 2s TTL issued at the very END of a
-// Unix second has effective lifetime up to 2.999s, but issued at the START
-// has only 2.001s. We pass a 2s TTL and sleep 3000ms so we land AT LEAST one
-// full second past the worst-case exp floor, leaving generous headroom for
-// Go scheduler / linker preemption observed to flake test runs at the
-// boundary. The production clamp floors negative TTLs at 24h to defend
-// against signer callers that pass junk in, so we cannot issue with ttl<0.
+// TestVerifyRejectsExpired: TTL is honored after expiry. We use a 2s TTL
+// and sleep 3000ms so we land AT LEAST one full second past the worst-case
+// exp floor, leaving generous headroom for Go scheduler / linker preemption
+// observed to flake test runs at the boundary.
 func TestVerifyRejectsExpired(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, err := Issue(address, secret, DefaultAudience, 2*time.Second)
+	tok, err := issueWithFamily(address, secret, DefaultAudience, 2*time.Second, TokenAccess, "", "")
 	if err != nil {
 		t.Fatalf("issue: %v", err)
 	}
@@ -65,7 +61,7 @@ func TestVerifyRejectsBadSignature(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const other = "ffffffffffffffffffffffffffffffff"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, _ := Issue(address, secret, DefaultAudience, time.Hour)
+	tok, _ := IssueAccessToken(address, secret)
 	if _, _, err := Verify(tok, other, DefaultAudience); err == nil {
 		t.Fatal("expected signature mismatch rejection")
 	}
@@ -85,22 +81,21 @@ func TestCookieNameAddressBound(t *testing.T) {
 	}
 }
 
-// TestIssueClampsExcessiveTTL: a mishandled default-short TTL handler that
-// accidentally passes 0 or a week-long TTL is clamped to 24h so a single
-// leaked token never outlives a day. Negative TTL is also clamped — that's
-// intentional defense against a caller passing time.Duration(unix_ts - now)
-// which would otherwise mint a forever-valid token.
-func TestIssueClampsExcessiveTTL(t *testing.T) {
+// TestIssueAccessTokenTTL: access tokens must have a 15-minute TTL.
+func TestIssueAccessTokenTTL(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	for _, in := range []time.Duration{168 * time.Hour, -time.Second, 0} {
-		tok, err := Issue(address, secret, DefaultAudience, in)
-		if err != nil {
-			t.Fatalf("issue %v: %v", in, err)
-		}
-		if _, _, err := Verify(tok, secret, DefaultAudience); err != nil {
-			t.Fatalf("verify %v: %v", in, err)
-		}
+	tok, err := IssueAccessToken(address, secret)
+	if err != nil {
+		t.Fatalf("issue: %v", err)
+	}
+	// Verify the token is valid now.
+	if _, _, err := Verify(tok, secret, DefaultAudience); err != nil {
+		t.Fatalf("fresh access token should verify: %v", err)
+	}
+	// AccessTokenTTL should be 15 minutes.
+	if AccessTokenTTL != 15*time.Minute {
+		t.Fatalf("AccessTokenTTL = %v, want 15m", AccessTokenTTL)
 	}
 }
 
@@ -127,7 +122,7 @@ func TestVerifyRejectsAlgNoneForgery(t *testing.T) {
 func TestVerifyRejectsTamperedClaims(t *testing.T) {
 	const secret = "0123456789abcdef0123456789abcdef"
 	const address = "0xabc000000000000000000000000000000000dead"
-	tok, err := Issue(address, secret, DefaultAudience, time.Hour)
+	tok, err := IssueAccessToken(address, secret)
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -138,5 +133,19 @@ func TestVerifyRejectsTamperedClaims(t *testing.T) {
 		"." + parts[2]
 	if _, _, err := Verify(tampered, secret, DefaultAudience); err == nil {
 		t.Fatal("expected tampered claims to be rejected")
+	}
+}
+
+// TestVerifyRejectsRefreshTokenOnAPI: refresh tokens must be rejected by
+// VerifyAccessToken — they can only be used at /auth/refresh.
+func TestVerifyRejectsRefreshTokenOnAPI(t *testing.T) {
+	const secret = "0123456789abcdef0123456789abcdef"
+	const address = "0xabc000000000000000000000000000000000dead"
+	tok, err := IssueRefreshTokenWithFamily(address, secret, "fam-1", "tok-1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, err := VerifyAccessToken(tok, secret); err == nil {
+		t.Fatal("expected refresh token to be rejected by VerifyAccessToken")
 	}
 }
