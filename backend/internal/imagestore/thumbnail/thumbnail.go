@@ -18,6 +18,8 @@ import (
 	"image/jpeg"
 	"image/png"
 
+	_ "golang.org/x/image/webp" // register WebP decoder for image.Decode
+
 	"golang.org/x/image/draw"
 )
 
@@ -33,10 +35,11 @@ func AllSizes() []int {
 	return []int{Size128, Size256, Size512}
 }
 
-// CanResize reports whether the MIME type can be resized by this package.
-// Currently supports image/jpeg, image/png, image/gif. WEBP and AVIF are
-// not supported by Go's stdlib encoder — for these formats, the caller
-// should serve the full-size original.
+// CanResize reports whether the MIME type can be resized by this package
+// AND re-encoded to its original format. Supports JPEG, PNG, GIF.
+// WebP inputs CAN be decoded but cannot be re-encoded to WebP by Go stdlib -
+// use GenerateFormat with FormatWebP or FormatJPEG for WebP sources.
+// AVIF is not decodable in pure-Go.
 func CanResize(mime string) bool {
 	switch mime {
 	case "image/jpeg", "image/png", "image/gif":
@@ -98,6 +101,55 @@ func Generate(body []byte, mime string, targetWidth int) ([]byte, string, error)
 	}
 
 	return buf.Bytes(), mime, nil
+}
+
+// GenerateFormat creates a resized variant in the requested output format.
+// For same-format conversions (JPEG→JPEG, PNG→PNG), delegates to the
+// existing Generate function. For cross-format conversions (PNG→JPEG,
+// JPEG→WebP), uses format-specific encoders.
+//
+// Supported output formats:
+//   - "jpeg" — always available (Go stdlib)
+//   - "webp" — requires deepteams/webp (pure-Go, IMG-4 Option B)
+//   - "avif" — requires -tags vips (CGO/libvips, IMG-4 Option A)
+func GenerateFormat(body []byte, mime string, targetWidth int, outputFormat Format) ([]byte, string, error) {
+	// For WebP output, use the pure-Go encoder regardless of input format.
+	if outputFormat == FormatWebP {
+		return EncodeWebPFromBytes(body, targetWidth, WebPQuality)
+	}
+
+	// For JPEG output, use existing Generate for JPEG inputs (preserves
+	// quality, avoids decode/re-encode), and GenerateAsJPEG for everything else.
+	if outputFormat == FormatJPEG {
+		if mime == "image/jpeg" {
+			return Generate(body, mime, targetWidth)
+		}
+		return GenerateAsJPEG(body, targetWidth)
+	}
+
+	// AVIF not available in pure-Go build.
+	if outputFormat == FormatAVIF {
+		return nil, "", fmt.Errorf("thumbnail: avif not available (requires -tags vips)")
+	}
+
+	return nil, "", fmt.Errorf("thumbnail: unknown output format %s", outputFormat)
+}
+
+// GenerateAsJPEG decodes the input image, resizes to targetWidth, and
+// encodes as JPEG at quality 80. Uses the shared resizeDecoded helper.
+// Works with JPEG, PNG, GIF, and WebP input (WebP decoder provided by
+// golang.org/x/image/webp).
+func GenerateAsJPEG(body []byte, targetWidth int) ([]byte, string, error) {
+	resized, err := resizeDecoded(body, targetWidth)
+	if err != nil {
+		return nil, "", fmt.Errorf("thumbnail: %w", err)
+	}
+
+	var buf bytes.Buffer
+	if err := jpeg.Encode(&buf, resized, &jpeg.Options{Quality: 80}); err != nil {
+		return nil, "", fmt.Errorf("thumbnail: jpeg encode: %w", err)
+	}
+	return buf.Bytes(), "image/jpeg", nil
 }
 
 // QuickResize is a fast path that decodes, resizes, and re-encodes in a
