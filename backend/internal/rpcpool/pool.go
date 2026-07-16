@@ -156,19 +156,25 @@ func (p *Pool) healthLoop() {
 
 	for range ticker.C {
 		var promoted bool
-		healthyThisCycle := 0
 
+		// RPC-1: Two-pass health check. First pass probes all endpoints
+		// and computes the total healthy count. Second pass fires callbacks
+		// with the correct total (not a running partial count).
+		healthy := make([]bool, len(p.nodes))
+		healthyThisCycle := 0
 		for idx, n := range p.nodes {
 			probeCtx, probeCancel := context.WithTimeout(context.Background(), p.timeout)
 			_, err := n.BlockNumber(probeCtx)
 			probeCancel()
-
-			isHealthy := err == nil
-			if isHealthy {
+			healthy[idx] = err == nil
+			if healthy[idx] {
 				healthyThisCycle++
 			}
+		}
 
-			// RPC-1: detect health transitions and fire callback.
+		// Second pass: fire callbacks for transitions. All callbacks
+		// receive the same (correct) healthyThisCycle total.
+		for idx, isHealthy := range healthy {
 			wasHealthy := prevHealthy[idx]
 			prevHealthy[idx] = isHealthy
 			if isHealthy != wasHealthy {

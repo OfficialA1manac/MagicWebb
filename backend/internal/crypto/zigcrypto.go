@@ -40,6 +40,11 @@ func Keccak256Batch(inputs [][]byte) [][32]byte {
 	for i, data := range inputs {
 		if len(data) > 0 {
 			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(data)))
+		} else {
+			// Pass a valid non-nil pointer for zero-length inputs to avoid
+			// null pointer dereference in Zig (UB when creating a slice
+			// from a null pointer, even with length 0).
+			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(&[1]byte{}))
 		}
 		lens[i] = C.size_t(len(data))
 	}

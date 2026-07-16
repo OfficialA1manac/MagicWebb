@@ -52,14 +52,18 @@ type NotificationEvent struct {
 }
 
 // ActivityEvent carries the structured payload for activity events.
+// Field names match the proto Activity message:
+//   string event_type = 1  →  EventType
+//   string collection = 2  →  Collection
+//   ...
 type ActivityEvent struct {
-	ActivityType string `json:"activity_type"`
-	Collection   string `json:"collection"`
-	TokenID      string `json:"token_id"`
-	From         string `json:"from"`
-	To           string `json:"to"`
-	PriceWei     string `json:"price_wei"`
-	TxHash       string `json:"tx_hash"`
+	EventType  string `json:"event_type"`
+	Collection string `json:"collection"`
+	TokenID    string `json:"token_id"`
+	From       string `json:"from"`
+	To         string `json:"to"`
+	PriceWei   string `json:"price_wei"`
+	TxHash     string `json:"tx_hash"`
 }
 
 // RPCHealthEvent carries the structured payload for rpc-health events (RPC-1).

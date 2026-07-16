@@ -52,6 +52,38 @@ func (m *mockMarketplaceClient) GetToken(ctx context.Context, req *connect.Reque
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
 }
 
+// Stub implementations for interface methods not exercised by WS tests.
+func (m *mockMarketplaceClient) ListCollections(ctx context.Context, req *connect.Request[marketplacev1.ListCollectionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Collection], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) GetCollection(ctx context.Context, req *connect.Request[marketplacev1.GetCollectionRequest]) (*connect.Response[marketplacev1.GetCollectionResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) ListListings(ctx context.Context, req *connect.Request[marketplacev1.ListListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.Listing], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) ListAuctions(ctx context.Context, req *connect.Request[marketplacev1.ListAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.Auction], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) GetActivity(ctx context.Context, req *connect.Request[marketplacev1.GetActivityRequest]) (*connect.Response[marketplacev1.GetActivityResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) ListOffers(ctx context.Context, req *connect.Request[marketplacev1.ListOffersRequest]) (*connect.ServerStreamForClient[marketplacev1.Offer], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) GetWalletNFTs(ctx context.Context, req *connect.Request[marketplacev1.GetWalletNFTsRequest]) (*connect.Response[marketplacev1.GetWalletNFTsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) GetProfile(ctx context.Context, req *connect.Request[marketplacev1.GetProfileRequest]) (*connect.Response[marketplacev1.GetProfileResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) Search(ctx context.Context, req *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+func (m *mockMarketplaceClient) GetMetrics(ctx context.Context, req *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error) {
+	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("not implemented"))
+}
+
 // ── dispatchAction ──────────────────────────────────────────────────────────
 
 func TestDispatchAction_NilClient(t *testing.T) {

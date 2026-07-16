@@ -52,6 +52,10 @@ func hashBatch(bodies [][]byte) [][sha256.Size]byte {
 	for i, body := range bodies {
 		if len(body) > 0 {
 			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(body)))
+		} else {
+			// Pass a valid non-nil pointer for zero-length inputs to avoid
+			// null pointer dereference in Zig.
+			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(&[1]byte{}))
 		}
 		lens[i] = C.size_t(len(body))
 	}

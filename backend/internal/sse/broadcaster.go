@@ -221,7 +221,7 @@ type rawClient struct {
 }
 
 var rawClientsMu sync.RWMutex
-var rawClients = make(map[string]rawClient)
+var rawClients = make(map[string]*rawClient)
 
 // SubscribeRaw registers a subscriber that receives raw Event objects (no SSE
 // formatting). This is the WebSocket-native subscriber path.
@@ -242,7 +242,7 @@ func (b *Broadcaster) SubscribeRaw() (<-chan Event, func(), bool) {
 			<-c
 		}
 	}
-	rawClients[id] = rawClient{ch: c, cancel: cancel}
+	rawClients[id] = &rawClient{ch: c, cancel: cancel}
 	rawClientsMu.Unlock()
 	return c, cancel, true
 }
