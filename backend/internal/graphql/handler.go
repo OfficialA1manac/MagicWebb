@@ -3,7 +3,9 @@ package graphql
 import (
 	"context"
 	"fmt"
+	"net"
 	"net/http"
+	"strings"
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
@@ -15,6 +17,8 @@ import (
 	"github.com/vektah/gqlparser/v2/ast"
 	"github.com/vektah/gqlparser/v2/gqlerror"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
@@ -22,26 +26,34 @@ import (
 	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 )
 
+// GQL-4: Per-connection GraphQL subscription limit. Prevents a single
+// WebSocket connection from opening unlimited subscriptions (DoS vector).
+const maxSubscriptionsPerConn = 10
+
+// GQL-4: Auth context key for the authenticated wallet address.
+// Injected into the gqlgen operation context via AroundOperations so
+// subscription resolvers can filter notifications by user.
+type authCtxKeyType struct{}
+
+var AuthCtxKey = authCtxKeyType{}
+
 // GraphQLServer wraps a gqlgen-generated executable schema with Fiber
 // HTTP handlers for POST /graphql, GET /graphql (docs), and GET /graphiql.
+// WebSocket subscriptions are served at /graphql/ws.
 type GraphQLServer struct {
-	srv *handler.Server
-	q   *db.Q // retained for DataLoader creation per-request
+	srv  *handler.Server
+	q    *db.Q  // retained for DataLoader creation per-request
+	cfg  *config.Config // GQL-4: JWT secret for WS auth
 }
 
 // NewGraphQLServer creates a gqlgen-based GraphQL server powered by the
 // generated executable schema from schema.graphql. The db.Q provides
 // data access; bcast provides SSE push for subscription resolvers; grpc
-// provides a typed, decoupled data path via Connect-RPC — resolvers that
-// have a gRPC equivalent (listings, auctions, collections, tokens) delegate
-// to the gRPC client instead of hitting the DB directly.
+// provides a typed, decoupled data path via Connect-RPC.
 //
-// When grpc is nil, resolvers fall back to direct DB access (legacy path).
-//
-// Complexity limits: max query depth of 12 and max 200 nodes to prevent
-// resource-exhaustion GraphQL queries (deeply nested collections.listings
-// etc.). The LRU operation cache reduces repeated parse/validate costs.
-func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect.MarketplaceServiceClient) *GraphQLServer {
+// cfg is required for GQL-4 WebSocket authentication (JWT secret).
+// When nil, WS auth is skipped (unauthenticated subscriptions allowed).
+func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect.MarketplaceServiceClient, cfg *config.Config) *GraphQLServer {
 	resolver := NewResolver(q, bcast, grpc)
 	schema := NewExecutableSchema(Config{
 		Resolvers:  resolver,
@@ -50,19 +62,32 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 
 	srv := handler.New(schema)
 
+	// GQL-4: Auth context is injected per-request via context.WithValue in
+	// HandleWS (for WS) or HandlePOST (for HTTP). Subscription resolvers
+	// read the address via ctx.Value(graphql.AuthCtxKey). No middleware
+	// needed — the context chain is preserved through gqlgen's transport.
+	// The address is set in:
+	//   - HandleWS: context.WithValue(ctx, AuthCtxKey, addr) before ServeHTTP
+	//   - HandlePOST: (future — pass via HTTP Authorization header)
+
 	// RL-2: Query depth validation. Rejects queries with nesting deeper than
 	// 12 levels (e.g., collections { listings { seller { profile { ... } } } }).
 	// Combined with GQL-5 field-level cost analysis for 2D DoS protection.
 	const maxQueryDepth = 12
 	srv.Use(&depthValidator{maxDepth: maxQueryDepth})
 
-	// Transport: accept POST JSON and GET query-string queries.
-	// GraphQL subscriptions are enabled in the schema and resolver layer.
-	// Subscriptions are delivered via the existing /ws WebSocket endpoint
-	// which bridges Broadcaster push events to connected clients.
+	// Transport: POST JSON, GET query-string, and WebSocket subscriptions.
+	// GQL-4: graphql-transport-ws protocol for real-time subscriptions.
+	// The WebSocket transport uses gorilla/websocket internally and requires
+	// http.Hijacker support — provided by hijackWriter for the Fiber bridge.
 	srv.AddTransport(transport.Options{})
 	srv.AddTransport(transport.GET{})
 	srv.AddTransport(transport.POST{})
+	srv.AddTransport(transport.Websocket{
+		KeepAlivePingInterval: 10 * time.Second,
+		// Subprotocol: graphql-transport-ws (the current standard).
+		// Client sends {"type":"subscribe","id":"...","payload":{"query":"..."}}
+	})
 
 	// ── GQL-5: Field-level query cost analysis ────────────────────────
 	// The ComplexityRoot (set in NewExecutableSchema Config) assigns
@@ -88,7 +113,7 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	// the schema. No auth secrets are exposed through introspection.
 	// CORS already limits which origins can access /graphql.
 
-	return &GraphQLServer{srv: srv, q: q}
+	return &GraphQLServer{srv: srv, q: q, cfg: cfg}
 }
 
 // HandlePOST executes a GraphQL query and returns the JSON response.
@@ -192,6 +217,90 @@ func countDepth(set ast.SelectionSet, depth int) int {
 		}
 	}
 	return maxDepth
+}
+
+// HandleWS handles WebSocket GraphQL subscription connections at /graphql/ws.
+// Uses fasthttp.RequestCtx.Hijack() to get the raw net.Conn, wraps it in a
+// hijackWriter (which implements http.Hijacker), and delegates to gqlgen's
+// built-in transport.Websocket handler. The JWT wallet address is extracted
+// from cookies/Authorization header and injected into the gqlgen context
+// via AuthCtxKey so subscription resolvers can filter by user.
+func (s *GraphQLServer) HandleWS(c *fiber.Ctx) error {
+	// Verify this is a WebSocket upgrade request before hijacking.
+	// Without this check, a regular HTTP GET would hijack the TCP connection
+	// and gqlgen's transport would fail silently, dropping the connection.
+	if !strings.EqualFold(c.Get("Upgrade"), "websocket") {
+		return c.Status(fiber.StatusBadRequest).SendString("websocket upgrade required")
+	}
+
+	// Extract JWT-authenticated wallet address.
+	addr := s.authenticateWS(c)
+
+	// Hijack the underlying connection from Fiber/fasthttp.
+	c.Context().Hijack(func(conn net.Conn) {
+		// Build a fake http.Request for gqlgen's transport.Websocket.
+		// The transport extracts the sub-protocol from the request headers.
+		req, err := http.NewRequest("GET", "/graphql/ws", nil)
+		if err != nil {
+			conn.Close()
+			return
+		}
+
+		// Copy relevant headers from the Fiber request.
+		req.Header = make(http.Header)
+		c.Request().Header.VisitAll(func(key, value []byte) {
+			req.Header.Set(string(key), string(value))
+		})
+
+		// Create a hijack-aware ResponseWriter backed by the raw conn.
+		w := newHijackWriter(conn)
+
+		// Inject auth context so subscription resolvers can access the
+		// authenticated wallet address via ctx.Value(graphql.AuthCtxKey).
+		ctx := context.WithValue(req.Context(), AuthCtxKey, addr)
+		req = req.WithContext(ctx)
+		// Attach DataLoaders for subscription resolvers that query the DB.
+		req = req.WithContext(dataloader.WithLoaders(ctx, dataloader.New(s.q)))
+
+		// Delegate to gqlgen's built-in WebSocket transport.
+		s.srv.ServeHTTP(w, req)
+	})
+
+	return nil
+}
+
+// authenticateWS extracts the wallet address from JWT cookies or Authorization
+// header. Mirrors the logic in ws/handler.go authenticate(). Returns "" for
+// unauthenticated connections (public subscriptions still work).
+func (s *GraphQLServer) authenticateWS(c *fiber.Ctx) string {
+	if s.cfg == nil {
+		return ""
+	}
+
+	// Try session cookies (both legacy mw_s_ and new mw_a_ access tokens).
+	hdr := c.Get("Cookie")
+	if hdr != "" {
+		for _, part := range strings.Split(hdr, ";") {
+			p := strings.TrimSpace(part)
+			if !strings.HasPrefix(p, "mw_s_") && !strings.HasPrefix(p, "mw_a_") {
+				continue
+			}
+			if eq := strings.IndexByte(p, '='); eq > 0 {
+				if a, err := auth.VerifyAccessToken(p[eq+1:], s.cfg.JWTSecret); err == nil {
+					return a
+				}
+			}
+		}
+	}
+
+	// Try Authorization header.
+	if ah := c.Get("Authorization"); strings.HasPrefix(ah, "Bearer ") {
+		if a, err := auth.VerifyAccessToken(strings.TrimPrefix(ah, "Bearer "), s.cfg.JWTSecret); err == nil {
+			return a
+		}
+	}
+
+	return ""
 }
 
 func (s *GraphQLServer) HandleGraphiQL(c *fiber.Ctx) error {

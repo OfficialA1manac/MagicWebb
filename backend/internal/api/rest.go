@@ -225,11 +225,17 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// GraphQL resolvers delegate to Connect-RPC when a gRPC client is
 	// provided, decoupling presentation from storage. The client points
 	// to the local Fiber server (which also mounts the Connect-RPC handler).
-	gql := graphql.NewGraphQLServer(q, bcast, wsClient)
+	gql := graphql.NewGraphQLServer(q, bcast, wsClient, cfg)
 	gqlLimiter := rateLimitMiddleware(rl)
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
 	app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
+
+	// GQL-4: WebSocket subscription endpoint at /graphql/ws.
+	// Uses graphql-transport-ws protocol. JWT-authenticated subscriptions
+	// receive user-scoped notifications. Not rate-limited — subscription
+	// init is one-time per connection, not a recurring query.
+	app.Get("/graphql/ws", gql.HandleWS)
 
 	// ── Connect-RPC (gRPC-Web / gRPC / Connect protocol) ─────────────────
 	// Serves the MarketplaceService defined in marketplace.proto. Clients
@@ -328,6 +334,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewAdminService(q, cfg).RegisterRoutes(apiAdmin, cfg)
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
+	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)
 	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
