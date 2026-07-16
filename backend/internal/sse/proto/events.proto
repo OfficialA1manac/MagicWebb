@@ -8,11 +8,80 @@ option go_package = "github.com/OfficialA1manac/MagicWebb/backend/internal/sse/p
 // sse.wire struct but uses protobuf binary encoding instead of JSON, removing
 // the pg_notify 8KB payload limit and eliminating JSON marshal/unmarshal
 // overhead for cross-instance fan-out.
+//
+// SSE-4: Added typed event messages in a oneof alongside the legacy bytes data
+// field. The typed path eliminates JSON round-trips for known event types,
+// using protobuf binary encoding end-to-end. The bytes data field remains for
+// backward compatibility and for event types not yet in the oneof.
 message EventMessage {
   string origin = 1;  // instance UUID — skip self-originated events
   string type   = 2;  // e.g. "listing-updated", "auction-updated"
-  bytes  data   = 3;  // JSON-marshalled event payload (kept as bytes for zero-copy)
+  bytes  data   = 3;  // legacy: JSON-marshalled event payload (backward compat)
   uint64 seq    = 4;  // SSE-2: monotonic sequence number for gap detection + replay
+
+  // SSE-4: Typed event payloads — protobuf-native, no JSON round-trip.
+  oneof event {
+    ListingUpdated listing_updated = 10;
+    AuctionUpdated  auction_updated  = 11;
+    OfferUpdated    offer_updated    = 12;
+    Notification    notification     = 13;
+    Activity        activity         = 14;
+    RPCHealth       rpc_health       = 15;  // RPC-1: endpoint health transitions
+  }
+}
+
+// SSE-4: Typed event messages for zero-JSON event delivery.
+// When the bridge populates the oneof event field, receivers can unmarshal
+// directly into these protobuf types without JSON round-trips.
+
+message ListingUpdated {
+  string collection = 1;  // collection address
+  string token_id   = 2;
+  string seller     = 3;
+  string price_wei  = 4;
+}
+
+message AuctionUpdated {
+  int64  auction_id  = 1;
+  string collection  = 2;
+  string token_id    = 3;
+  string status      = 4;  // "active", "ended", "cancelled"
+  string highest_bid = 5;
+  string highest_bidder = 6;
+  int64  end_time_unix  = 7;
+}
+
+message OfferUpdated {
+  string offer_id    = 1;
+  string collection  = 2;
+  string token_id    = 3;
+  string bidder      = 4;
+  string amount_wei  = 5;
+  string status      = 6;  // "active", "accepted", "cancelled"
+}
+
+message Notification {
+  string user    = 1;  // target wallet address
+  string title   = 2;
+  string body    = 3;
+  string link    = 4;
+}
+
+message Activity {
+  string event_type  = 1;  // "sale", "bid", "list", "offer"
+  string collection  = 2;
+  string token_id    = 3;
+  string from        = 4;
+  string to          = 5;
+  string price_wei   = 6;
+  string tx_hash     = 7;
+}
+
+message RPCHealth {
+  int32  endpoint_index  = 1;
+  bool   healthy         = 2;
+  int32  endpoint_count  = 3;
+  int32  healthy_count   = 4;
 }
 
 // EventBridge is a bidirectional streaming RPC. Each instance opens a single

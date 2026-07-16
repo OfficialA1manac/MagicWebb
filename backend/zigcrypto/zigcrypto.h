@@ -11,6 +11,20 @@ void zig_keccak256(const uint8_t* data, size_t len, uint8_t* out);
 /// Returns the Keccak-256 digest size in bytes (always 32).
 unsigned int zig_keccak256_digest_size(void);
 
+// ── ZIG-1: SIMD batch hashing ────────────────────────────────────────────────
+
+/// Computes Keccak-256 for `count` inputs in parallel (instruction-level
+/// parallelism via independent hash states). `data_ptrs` is an array of
+/// `count` pointers; `data_lens` is an array of `count` lengths; `outs`
+/// is a contiguous buffer of `count * 32` bytes. All arrays must be
+/// pre-allocated by the caller.
+void zig_keccak256_batch(
+    const uint8_t* const* data_ptrs,
+    const size_t* data_lens,
+    size_t count,
+    uint8_t* outs
+);
+
 /// Verifies an ECDSA secp256k1 signature.
 /// Returns 1 on valid, 0 on invalid.
 /// hash: 32-byte keccak256 hash

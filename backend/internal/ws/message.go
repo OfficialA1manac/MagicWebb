@@ -36,6 +36,11 @@ const (
 	// the ring buffer, a MsgError with "stale_state" is returned instead.
 	MsgRetry           MessageType = "retry"
 	MsgReplayComplete  MessageType = "replay_complete"
+
+	// WS-2: Client requests binary frame upgrade. Server acknowledges with
+	// MsgAck {"status":"ok","message":"binary_upgrade"} and switches to
+	// websocket.BinaryMessage for all subsequent push events.
+	MsgBinaryUpgrade MessageType = "binary_upgrade"
 )
 
 // Message is the JSON envelope for all WebSocket communication.
@@ -91,3 +96,13 @@ type UnsubscribedData struct {
 type RetryData struct {
 	FromSeq uint64 `json:"from_seq"`
 }
+
+// ── WS-2: Binary frame negotiation ────────────────────────────────────────
+
+// BinaryUpgrade is a client-to-server message requesting binary frame mode.
+// When the server receives this as the first message after connect, it
+// switches the connection to binary frames (websocket.BinaryMessage) for
+// all subsequent push events. This reduces per-message overhead compared
+// to JSON-over-text frames. Clients that don't send BinaryUpgrade continue
+// to receive text frames (backward compatible).
+type BinaryUpgrade struct{}
