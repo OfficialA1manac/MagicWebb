@@ -9,6 +9,7 @@ import (
 	"github.com/jackc/pgx/v5"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 )
 
 const zeroAddr = "0x0000000000000000000000000000000000000000"
@@ -925,6 +926,105 @@ func (q *Q) InsertSavedSearch(ctx context.Context, addr, name, page, params stri
 func (q *Q) DeleteSavedSearch(ctx context.Context, id int64, addr string) (bool, error) {
 	tag, err := q.writer().Exec(ctx,
 		`DELETE FROM saved_searches WHERE id=$1 AND user_addr=$2`, id, strings.ToLower(addr))
+	if err != nil {
+		return false, err
+	}
+	return tag.RowsAffected() > 0, nil
+}
+
+// ── WH-3: Webhook configurations + delivery log ──────────────────────────────────
+
+// WebhookConfigRow mirrors the webhook_configs table and implements
+// webhook.ConfigStore for the dispatcher.
+type WebhookConfigRow struct {
+	ID       int64    `json:"id"`
+	UserAddr string   `json:"user_addr"`
+	URL      string   `json:"url"`
+	Secret   string   `json:"-"`
+	Events   []string `json:"events"`
+	Active   bool     `json:"active"`
+}
+
+// GetWebhookConfigsForEvent returns all active webhook configs subscribed to
+// the given event type. Used by the dispatcher on every SSE event fan-out.
+// Uses the GIN index on events[] for fast lookups.
+// Implements webhook.ConfigStore.
+func (q *Q) GetWebhookConfigsForEvent(ctx context.Context, eventType webhook.MarketplaceEventType) ([]webhook.WebhookConfig, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT id, user_addr, url, COALESCE(secret,''), events, active, created_at
+		   FROM webhook_configs
+		  WHERE active = true AND $1 = ANY(events)
+		  ORDER BY id`, eventType)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []webhook.WebhookConfig
+	for rows.Next() {
+		var r webhook.WebhookConfig
+		var events []string
+		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &events, &r.Active, &r.CreatedAt); err != nil {
+			return nil, err
+		}
+		// Convert string events to typed events.
+		for _, e := range events {
+			r.Events = append(r.Events, webhook.MarketplaceEventType(e))
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// LogDelivery records a webhook delivery attempt for audit/debugging.
+// Implements webhook.ConfigStore.
+func (q *Q) LogDelivery(ctx context.Context, configID int64, eventType webhook.MarketplaceEventType, statusCode int, errMsg string, attemptCount, durationMs int) error {
+	_, err := q.writer().Exec(ctx,
+		`INSERT INTO webhook_delivery_log(config_id, event_type, status_code, error_message, attempt_count, duration_ms)
+		 VALUES($1,$2,$3,NULLIF($4,''),$5,$6)`,
+		configID, eventType, statusCode, errMsg, attemptCount, durationMs)
+	return err
+}
+
+// CreateWebhookConfig inserts a new webhook config for a user. Returns the
+// inserted row ID. Enforces a per-user limit of 10 active configs.
+func (q *Q) CreateWebhookConfig(ctx context.Context, userAddr, urlStr, secret string, events []string) (int64, error) {
+	var id int64
+	err := q.writer().QueryRow(ctx,
+		`INSERT INTO webhook_configs(user_addr, url, secret, events, active)
+		 VALUES($1,$2,$3,$4,true)
+		 ON CONFLICT(user_addr, url) DO UPDATE
+		   SET secret = EXCLUDED.secret, events = EXCLUDED.events, active = true
+		 RETURNING id`, userAddr, urlStr, secret, events).Scan(&id)
+	return id, err
+}
+
+// ListWebhookConfigs returns all webhook configs for a user, newest first.
+func (q *Q) ListWebhookConfigs(ctx context.Context, userAddr string) ([]WebhookConfigRow, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT id, user_addr, url, COALESCE(secret,''), events, active
+		   FROM webhook_configs
+		  WHERE user_addr = $1
+		  ORDER BY created_at DESC`, userAddr)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []WebhookConfigRow
+	for rows.Next() {
+		var r WebhookConfigRow
+		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &r.Events, &r.Active); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// DeleteWebhookConfig removes a webhook config by ID for a specific user.
+// Returns false if no matching row was found.
+func (q *Q) DeleteWebhookConfig(ctx context.Context, id int64, userAddr string) (bool, error) {
+	tag, err := q.writer().Exec(ctx,
+		`DELETE FROM webhook_configs WHERE id = $1 AND user_addr = $2`, id, userAddr)
 	if err != nil {
 		return false, err
 	}

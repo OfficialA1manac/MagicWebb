@@ -411,9 +411,20 @@ func stripHTML(html string) string {
 // Non-2xx responses are returned as errors with the response body truncated
 // to 256 characters for safe logging.
 //
-// When DefaultRetryConfig has retries configured and HMACSecret is set, the
+// When DefaultRetryConfig has retries configured and hmacSecret is set, the
 // payload is signed and retried on transient failures with exponential backoff.
+// The hmacSecret is thread-local (passed as parameter) — callers using
+// per-config secrets MUST use sendJSONWithSecret instead of the package-level
+// HMACSecret variable which is NOT goroutine-safe.
 func sendJSON(ctx context.Context, url string, v any) error {
+	return sendJSONWithSecret(ctx, url, v, HMACSecret)
+}
+
+// sendJSONWithSecret is the goroutine-safe variant that accepts an explicit
+// HMAC secret. When hmacSecret is non-empty, the payload is signed with
+// HMAC-SHA256 and the signature is attached as X-Webhook-Signature.
+// Used by the webhook dispatcher for per-config secrets.
+func sendJSONWithSecret(ctx context.Context, url string, v any, hmacSecret string) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("webhook marshal: %w", err)
@@ -422,8 +433,8 @@ func sendJSON(ctx context.Context, url string, v any) error {
 	// Sign the payload with HMAC-SHA256 when a secret is configured.
 	// Receivers verify X-Webhook-Signature against the same secret.
 	var signature string
-	if HMACSecret != "" {
-		mac := hmac.New(sha256.New, []byte(HMACSecret))
+	if hmacSecret != "" {
+		mac := hmac.New(sha256.New, []byte(hmacSecret))
 		mac.Write(body)
 		signature = "sha256=" + hex.EncodeToString(mac.Sum(nil))
 	}

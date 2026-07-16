@@ -43,6 +43,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 	"github.com/OfficialA1manac/MagicWebb/frontend"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
@@ -272,6 +273,11 @@ func main() {
 	if tp != nil {
 		app.Use(otelTraceMiddleware())
 	}
+
+	// WH-3: Webhook event dispatcher — subscribes to the SSE Broadcaster and
+	// fans out marketplace events to registered webhook URLs.
+	whDispatcher := webhook.NewDispatcher(bcast, q, fmt.Sprintf("magicwebb:%d", config.C.GRPCPort))
+	go whDispatcher.Start(ctx)
 
 	// Mount all REST + SSE routes
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al)
