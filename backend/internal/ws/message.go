@@ -29,6 +29,13 @@ const (
 	MsgSubscribed   MessageType = "subscribed"
 	MsgUnsubscribed MessageType = "unsubscribed"
 	MsgState      MessageType = "state"
+
+	// SSE-2: Client requests replay of missed events by sequence number.
+	// Server responds with push-style messages (using the original event type)
+	// followed by a MsgReplayComplete ack. If events have been evicted from
+	// the ring buffer, a MsgError with "stale_state" is returned instead.
+	MsgRetry           MessageType = "retry"
+	MsgReplayComplete  MessageType = "replay_complete"
 )
 
 // Message is the JSON envelope for all WebSocket communication.
@@ -76,4 +83,11 @@ type SubscribedData struct {
 // UnsubscribedData is sent by the server confirming channel unsubscriptions.
 type UnsubscribedData struct {
 	Channels []string `json:"channels"`
+}
+
+// RetryData is sent by the client to request replay of missed events (SSE-2).
+// The client detected a gap in sequence numbers and requests all events
+// from from_seq (inclusive) to the current latest event.
+type RetryData struct {
+	FromSeq uint64 `json:"from_seq"`
 }

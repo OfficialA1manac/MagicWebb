@@ -2,14 +2,18 @@ package graphql
 
 import (
 	"context"
+	"fmt"
 	"net/http"
 	"time"
 
+	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/handler/extension"
 	"github.com/99designs/gqlgen/graphql/handler/lru"
 	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/gofiber/fiber/v2"
+	"github.com/vektah/gqlparser/v2/ast"
+	"github.com/vektah/gqlparser/v2/gqlerror"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -45,6 +49,12 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	})
 
 	srv := handler.New(schema)
+
+	// RL-2: Query depth validation. Rejects queries with nesting deeper than
+	// 12 levels (e.g., collections { listings { seller { profile { ... } } } }).
+	// Combined with GQL-5 field-level cost analysis for 2D DoS protection.
+	const maxQueryDepth = 12
+	srv.Use(&depthValidator{maxDepth: maxQueryDepth})
 
 	// Transport: accept POST JSON and GET query-string queries.
 	// GraphQL subscriptions are enabled in the schema and resolver layer.
@@ -131,6 +141,59 @@ func (s *GraphQLServer) HandleGET(c *fiber.Ctx) error {
 }
 
 // HandleGraphiQL serves the interactive GraphiQL IDE.
+// RL-2: depthValidator rejects queries exceeding maxDepth nesting levels.
+// Intercepts the gqlgen operation context before execution. Depth of 0 means
+// the root query; each nested selection adds 1. Fragments are inlined so
+// deeply-nested fragments count toward the total.
+type depthValidator struct {
+	maxDepth int
+}
+
+func (d *depthValidator) ExtensionName() string { return "DepthValidator" }
+func (d *depthValidator) Validate(schema graphql.ExecutableSchema) error { return nil }
+
+func (d *depthValidator) InterceptOperation(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
+	oc := graphql.GetOperationContext(ctx)
+	if oc == nil {
+		return next(ctx)
+	}
+	depth := countDepth(oc.Operation.SelectionSet, 0)
+	if depth > d.maxDepth {
+		return func(ctx context.Context) *graphql.Response {
+			return &graphql.Response{
+				Errors: gqlerror.List{{
+					Message: fmt.Sprintf("query depth %d exceeds max %d", depth, d.maxDepth),
+				}},
+			}
+		}
+	}
+	return next(ctx)
+}
+
+// countDepth recursively computes the nesting depth of a GraphQL selection set.
+func countDepth(set ast.SelectionSet, depth int) int {
+	maxDepth := depth
+	for _, sel := range set {
+		switch s := sel.(type) {
+		case *ast.Field:
+			if s.SelectionSet != nil && len(s.SelectionSet) > 0 {
+				d := countDepth(s.SelectionSet, depth+1)
+				if d > maxDepth {
+					maxDepth = d
+				}
+			}
+		case *ast.FragmentSpread:
+			// Inlined by gqlgen before execution; skip here.
+		case *ast.InlineFragment:
+			d := countDepth(s.SelectionSet, depth+1)
+			if d > maxDepth {
+				maxDepth = d
+			}
+		}
+	}
+	return maxDepth
+}
+
 func (s *GraphQLServer) HandleGraphiQL(c *fiber.Ctx) error {
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(graphiqlHTML)

@@ -146,6 +146,20 @@ func main() {
 		log.Fatal().Err(err).Msg("eth rpc pool init failed")
 	}
 
+	// RPC-1: Wire RPC pool health events to the SSE broadcaster so WebSocket
+	// clients see real-time endpoint health transitions (degraded/recovered).
+	eth.SetHealthCallback(func(endpointIdx int, healthy bool, total, healthyCount int) {
+		bcast.Publish(sse.Event{
+			Type: "rpc-health",
+			Data: map[string]any{
+				"endpoint":      endpointIdx,
+				"healthy":       healthy,
+				"total":         total,
+				"healthy_count": healthyCount,
+			},
+		})
+	})
+
 	// serverTimeMs is updated atomically by the indexer watcher
 	var serverTimeMs int64
 
@@ -280,9 +294,8 @@ func main() {
 	// runner.ReindexCollection).
 	api.MountReindexRoute(app, runner, &config.C)
 
-	// Prometheus /metrics endpoint — exposes gauges and counters in text
-	// format for scraping by Prometheus / Grafana / Datadog agents.
-	registerMetricsRoute(app, q, runner.HeadLagBlocks)
+	// Prometheus /metrics endpoint
+	registerMetricsRoute(app, q, runner.HeadLagBlocks, eth)
 
 	// Register SLO (Prometheus gauge) and healthz (DB + RPC + lag threshold) routes.
 	// Extracted into a function for unit testability — the getHeadLag callback
@@ -358,7 +371,7 @@ func main() {
 // The endpoint is NOT rate-limited — Prometheus scrapes typically run every
 // 15-60s and a rate limit would silently drop scrape intervals, creating gaps
 // in dashboards.
-func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
+func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth *rpcpool.Pool) {
 	app.Get("/metrics", func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/plain; charset=utf-8")
 
@@ -400,7 +413,13 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
 				"# HELP magicwebb_sse_saturation_streak Consecutive saturated Publish calls (0 when healthy).\n"+
 				"# TYPE magicwebb_sse_saturation_streak gauge\n"+
 				"magicwebb_sse_saturation_streak %d\n"+
-				"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
+				"# HELP magicwebb_sse_client_drops_total SSE-2: total events dropped due to slow WebSocket clients.\n"+
+				"# TYPE magicwebb_sse_client_drops_total counter\n"+
+			"magicwebb_sse_client_drops_total %d\n"+
+			"# HELP magicwebb_rpc_healthy_count RPC-1: current number of healthy RPC endpoints.\n"+
+			"# TYPE magicwebb_rpc_healthy_count gauge\n"+
+			"magicwebb_rpc_healthy_count %d\n"+
+			"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
 				"# TYPE magicwebb_head_lag_blocks gauge\n"+
 				"magicwebb_head_lag_blocks %d\n"+
 				"# HELP magicwebb_cache_hits_total Total cache hits across all caches.\n"+
@@ -418,7 +437,7 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64) {
 				"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
 				"# TYPE magicwebb_build_info gauge\n"+
 				"magicwebb_build_info{sha=\"%s\",env=\"%s\"} 1\n",
-			dropped, streak, lag, cacheHits, cacheMisses, cacheSets, cacheEvictions,
+			dropped, streak, sse.DroppedClientsGauge(), eth.HealthyCount(), lag, cacheHits, cacheMisses, cacheSets, cacheEvictions,
 			api.MWServerBuildSHA, config.C.Env,
 		))
 	})

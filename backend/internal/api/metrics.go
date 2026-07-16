@@ -215,8 +215,9 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 // than silently zero-rendered.
 func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 	out := fiber.Map{
-		"sse_dropped_total":     sse.DroppedTotal.Load(),
-		"sse_saturation_streak": sse.SaturationStreak.Load(),
+		"sse_dropped_total":      sse.DroppedTotal.Load(),
+		"sse_saturation_streak":  sse.SaturationStreak.Load(),
+		"sse_client_drops_total": sse.DroppedClientsGauge(), // SSE-2
 	}
 	out["ws_connections"]   = int64(0)
 	out["ws_subscriptions"] = 0

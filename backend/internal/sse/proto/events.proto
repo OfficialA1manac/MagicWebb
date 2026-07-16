@@ -12,6 +12,7 @@ message EventMessage {
   string origin = 1;  // instance UUID — skip self-originated events
   string type   = 2;  // e.g. "listing-updated", "auction-updated"
   bytes  data   = 3;  // JSON-marshalled event payload (kept as bytes for zero-copy)
+  uint64 seq    = 4;  // SSE-2: monotonic sequence number for gap detection + replay
 }
 
 // EventBridge is a bidirectional streaming RPC. Each instance opens a single

@@ -566,6 +566,14 @@ func (h *Handler) releaseIP(ip string) {
 // the action name. Actions are lightweight requests that don't need on-chain
 // wallet signatures — they fetch current state, manage subscriptions, etc.
 func (h *Handler) dispatchAction(c *Connection, act ActionData) {
+	// SSE-2 retry action only needs the broadcaster, not the Connect-RPC client.
+	// Handle it before the h.client == nil check so retry works even when the
+	// gRPC client isn't configured (e.g., during startup before client init).
+	if act.Action == "retry" {
+		h.handleRetry(c, act.Params)
+		return
+	}
+
 	if h.client == nil {
 		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "server not ready"})})
 		return
@@ -689,6 +697,45 @@ func (h *Handler) handleGetToken(c *Connection, raw json.RawMessage) {
 		return
 	}
 	c.writeJSON(Message{Type: MsgState, Data: mustJSON(resp.Msg)})
+}
+
+// handleRetry replays missed events from the SSE broadcaster's ring buffer
+// (SSE-2). When a client detects a gap in event sequence numbers, it sends
+// a retry action with from_seq. The server walks the ring buffer and replays
+// all events >= from_seq. If requested events have been evicted (too old),
+// a "stale_state" error is returned and the client should re-fetch state via REST.
+func (h *Handler) handleRetry(c *Connection, raw json.RawMessage) {
+	if h.bcast == nil {
+		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "broadcaster not available"})})
+		return
+	}
+
+	var params RetryData
+	if err := json.Unmarshal(raw, &params); err != nil || params.FromSeq == 0 {
+		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "invalid retry params: need from_seq"})})
+		return
+	}
+
+	events := h.bcast.Replay(params.FromSeq)
+	if events == nil {
+		// Ring buffer doesn't cover the requested range — events evicted.
+		c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{
+			Status:  "stale_state",
+			Message: "requested events evicted from replay buffer; perform full state refresh via REST",
+		})})
+		return
+	}
+
+	// Replay each missed event in the same format as live push events —
+	// Type set to the original event type, Data as raw JSON. The client
+	// already knows it requested replay via its from_seq context, so no
+	// envelope wrapping is needed. Consistent message shape means the
+	// client uses ONE parser for both live and replayed events.
+	for _, rev := range events {
+		c.writeJSON(Message{Type: MessageType(rev.Type), Data: mustJSON(rev.Data)})
+	}
+
+	c.writeJSON(Message{Type: MsgReplayComplete, Data: mustJSON(AckData{Status: "ok", Message: "replay complete"})})
 }
 
 // ── Subscription management ───────────────────────────────────────────────────

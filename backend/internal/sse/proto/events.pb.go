@@ -21,15 +21,15 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// EventMessage is the cross-instance event envelope. It mirrors the existing
-// sse.wire struct but uses protobuf binary encoding instead of JSON, removing
-// the pg_notify 8KB payload limit and eliminating JSON marshal/unmarshal
-// overhead for cross-instance fan-out.
+// EventMessage is the cross-instance event envelope.
+// SSE-2: Seq field (4) carries the monotonic sequence number through the
+// gRPC bridge so remote instances can replay events with correct ordering.
 type EventMessage struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
-	Origin        string                 `protobuf:"bytes,1,opt,name=origin,proto3" json:"origin,omitempty"` // instance UUID — skip self-originated events
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`     // e.g. "listing-updated", "auction-updated"
-	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`     // JSON-marshalled event payload (kept as bytes for zero-copy)
+	Origin        string                 `protobuf:"bytes,1,opt,name=origin,proto3" json:"origin,omitempty"`
+	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
+	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
+	Seq           uint64                 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"` // SSE-2: monotonic event sequence number
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -83,6 +83,14 @@ func (x *EventMessage) GetData() []byte {
 		return x.Data
 	}
 	return nil
+}
+
+// GetSeq returns the event sequence number (SSE-2).
+func (x *EventMessage) GetSeq() uint64 {
+	if x != nil {
+		return x.Seq
+	}
+	return 0
 }
 
 var File_events_proto protoreflect.FileDescriptor

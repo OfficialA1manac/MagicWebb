@@ -2,16 +2,20 @@ package sse
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"encoding/json"
 	"fmt"
 	"io"
 	"net"
+	"os"
 	"sync"
 	"sync/atomic"
 	"time"
 
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse/proto"
@@ -66,9 +70,13 @@ type bridgeHandler struct {
 //
 // port: the port this instance listens on for incoming peer connections.
 // peers: list of peer addresses (host:port) to connect to. Empty = standalone mode.
-// eventsCh: the Broadcaster's events channel — events received from peers are
-// published here for local fan-out.
+// eventsCh: the Broadcaster's events channel.
 // origin: this instance's UUID for filtering self-originated events.
+//
+// SSE-3: When GRPC_TLS_CERT and GRPC_TLS_KEY env vars are both set, the bridge
+// uses mutual TLS (mTLS) for peer connections. GRPC_TLS_CA_CERT optionally sets
+// a custom CA for client certificate verification. On Fly.io, private networking
+// already encrypts inter-instance traffic; mTLS provides defense-in-depth.
 func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, eventsCh chan<- Event, origin string) (*GrpcEventBridge, error) {
 	b := &GrpcEventBridge{
 		origin: origin,
@@ -76,9 +84,16 @@ func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, event
 		peers:  make(map[string]*peerConn),
 	}
 
+	// SSE-3: Optional mTLS for inter-instance bridge connections.
+	serverOpts := []grpc.ServerOption{}
+	if creds := loadTLSCredentials(); creds != nil {
+		serverOpts = append(serverOpts, grpc.Creds(creds))
+		log.Info().Msg("grpc: bridge server using mTLS")
+	}
+
 	// Start gRPC server.
 	b.handler = &bridgeHandler{bridge: b, eventsCh: eventsCh}
-	b.srv = grpc.NewServer()
+	b.srv = grpc.NewServer(serverOpts...)
 	proto.RegisterEventBridgeServer(b.srv, b.handler)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
@@ -115,6 +130,7 @@ func (b *GrpcEventBridge) Send(ev Event) {
 		Origin: b.origin,
 		Type:   ev.Type,
 		Data:   data,
+		Seq:    ev.Seq, // SSE-2: pass sequence number through bridge
 	}
 
 	b.mu.Lock()
@@ -218,9 +234,15 @@ func (b *GrpcEventBridge) dialPeer(ctx context.Context, peer string) (*peerConn,
 	dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 
-	conn, err := grpc.DialContext(dialCtx, peer,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-	)
+	// SSE-3: Use TLS when certificates are configured; fall back to insecure.
+	dialOpts := []grpc.DialOption{}
+	if creds := loadTLSCredentials(); creds != nil {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
+	} else {
+		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
+	}
+
+	conn, err := grpc.DialContext(dialCtx, peer, dialOpts...)
 	if err != nil {
 		return nil, err
 	}
@@ -260,6 +282,46 @@ func (b *GrpcEventBridge) drainOutbox(pc *peerConn, peer string) {
 	}
 }
 
+// loadTLSCredentials reads TLS certificate and key from GRPC_TLS_CERT and
+// GRPC_TLS_KEY env vars. When GRPC_TLS_CA_CERT is set, it configures mTLS
+// with client certificate verification (SSE-3). Returns nil when no cert
+// is configured — callers fall back to insecure credentials.
+func loadTLSCredentials() credentials.TransportCredentials {
+	certFile := os.Getenv("GRPC_TLS_CERT")
+	keyFile := os.Getenv("GRPC_TLS_KEY")
+	if certFile == "" || keyFile == "" {
+		return nil
+	}
+
+	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
+	if err != nil {
+		log.Warn().Err(err).Msg("grpc: TLS cert/key load failed, falling back to insecure")
+		return nil
+	}
+
+	tlsCfg := &tls.Config{
+		Certificates: []tls.Certificate{cert},
+		MinVersion:   tls.VersionTLS12,
+	}
+
+	// mTLS: verify client certificates when CA is configured.
+	if caFile := os.Getenv("GRPC_TLS_CA_CERT"); caFile != "" {
+		caPEM, err := os.ReadFile(caFile)
+		if err != nil {
+			log.Warn().Err(err).Msg("grpc: CA cert read failed, skipping mTLS")
+		} else {
+			caPool := x509.NewCertPool()
+			if caPool.AppendCertsFromPEM(caPEM) {
+				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+				tlsCfg.ClientCAs = caPool
+				log.Info().Msg("grpc: mTLS enabled with client certificate verification")
+			}
+		}
+	}
+
+	return credentials.NewTLS(tlsCfg)
+}
+
 func (b *GrpcEventBridge) sleep(ctx context.Context, backoff *time.Duration) {
 	t := time.NewTimer(*backoff)
 	defer t.Stop()
@@ -293,10 +355,13 @@ func (h *bridgeHandler) StreamEvents(stream proto.EventBridge_StreamEventsServer
 			continue
 		}
 		// Feed into the Broadcaster's events channel for local fan-out.
+		// SSE-2: preserve the origin instance's sequence number so clients
+		// see consistent ordering across instances.
 		select {
 		case h.eventsCh <- Event{
 			Type: msg.Type,
 			Data: json.RawMessage(msg.Data),
+			Seq:  msg.Seq,
 		}:
 		default:
 			log.Warn().Str("type", msg.Type).Msg("grpc: local fan-out saturated, dropping bridged event")

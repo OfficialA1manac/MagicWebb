@@ -1197,9 +1197,15 @@ func auctionFromGetResponse(a *marketplacev1.GetAuctionResponse) *Auction {
 	return out
 }
 
-// collectionFromProto maps a proto Collection (returned by ListCollections
-// response) to a GraphQL Collection. Stats fields are left unset because
-// the CollectionResolver resolves them via DataLoader.
+// collectionFromProto maps a proto Collection to a GraphQL Collection.
+// Stats (floor, volume, listed count) are resolved via the CollectionResolver
+// sub-resolver using DataLoader, which batches multiple collection stats
+// queries into one DB round-trip.
+//
+// GQL-3 note: the proto Collection already includes FloorPriceWei, Volume_24HWei,
+// and ListedCount fields populated by server.go. To eliminate the DataLoader
+// round-trip, the GraphQL Collection type needs these fields added to models.go
+// and schema.graphql, so collectionFromProto can populate them directly.
 func collectionFromProto(c *marketplacev1.Collection) *Collection {
 	return &Collection{
 		Address:     c.Address,
