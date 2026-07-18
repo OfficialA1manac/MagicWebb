@@ -780,6 +780,31 @@ func (q *Q) PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI
 	return tx.Commit(ctx)
 }
 
+// PutThumbnail stores a thumbnail variant linked to a parent full-size image
+// via parentHash. IMG-1: called by imagestore.StoreThumbnails after generating
+// 128/256/512px variants. Same dedup semantics as PutImage — identical
+// thumbnail bytes from different collections share one row via SHA-256.
+// Thumbnail rows have parent_hash set, so they are excluded from
+// CountBlobsForCollection (WHERE parent_hash IS NULL).
+func (q *Q) PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte) error {
+	tx, err := q.writer().Begin(ctx)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback(ctx)
+
+	if _, err = tx.Exec(ctx,
+		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body, collection, parent_hash)
+		 VALUES($1,$2,$3,$4,$5,$6,$7)
+		 ON CONFLICT(sha256) DO UPDATE
+		   SET refcount     = nft_image_blobs.refcount + 1,
+		       last_seen_at = now()`,
+		sha256hex, mime, len(body), sourceURI, body, collection, parentHash); err != nil {
+		return fmt.Errorf("put thumbnail: %w", err)
+	}
+	return tx.Commit(ctx)
+}
+
 // CountBlobsForCollection returns the number of distinct blobs first inserted
 // by this collection. Rows with an empty collection (migration 018 default,
 // legacy rows) are excluded from the count so grandfathered blobs do not

@@ -60,6 +60,12 @@ func (f *fakeStore) PutImage(_ context.Context, sha, mime, collection, src strin
 	return nil
 }
 
+// PutThumbnail mirrors PutImage — thumbnails share the same dedup model.
+// IMG-1: added when Store interface gained PutThumbnail.
+func (f *fakeStore) PutThumbnail(_ context.Context, sha, mime, parentHash, collection, src string, body []byte) error {
+	return f.PutImage(context.Background(), sha, mime, collection, src, body)
+}
+
 func (f *fakeStore) GetImage(_ context.Context, sha string) (Blob, error) {
 	r, ok := f.rows[sha]
 	if !ok {

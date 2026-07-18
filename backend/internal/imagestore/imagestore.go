@@ -122,6 +122,13 @@ type Store interface {
 	// the existing collection value is preserved.
 	PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI string, body []byte) error
 
+	// PutThumbnail stores a thumbnail variant linked to a parent full-size
+	// image via parentHash. IMG-1: called by StoreThumbnails after generating
+	// 128/256/512px variants. Same dedup semantics as PutImage — identical
+	// thumbnail bytes from different collections share one row via SHA-256.
+	// Thumbnail rows do NOT count toward per-collection blob quotas.
+	PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte) error
+
 	// GetImage returns the blob bytes + mime + source URI for a known hash.
 	// Returns (nil, "", "", pgx.ErrNoRows) when the hash is unknown.
 	GetImage(ctx context.Context, sha256hex string) (Blob, error)
@@ -308,3 +315,58 @@ func ExtractHash(uri string) string {
 // IsNoRows reports whether err is pgx.ErrNoRows. Convenience for callers
 // that don't want to import pgx directly.
 func IsNoRows(err error) bool { return errors.Is(err, pgx.ErrNoRows) }
+
+// ── IMG-1: Thumbnail generation + storage ───────────────────────────────
+
+// ThumbnailSizes are the standard thumbnail widths generated during ingest.
+var ThumbnailSizes = []int{128, 256, 512}
+
+// StoreThumbnails generates thumbnail variants for a full-size image and
+// stores them in the blob store linked to parentHash. Called after a
+// successful image ingest (Put() returns inserted/deduped).
+//
+// Generation is best-effort: if a particular size fails to generate (e.g.
+// corrupted image data), the remaining sizes still get stored. Returns the
+// count of successfully stored thumbnails.
+//
+// For WebP source images, thumbnails are transcoded to JPEG (WebP decode is
+// supported via golang.org/x/image/webp, but Go stdlib cannot re-encode to
+// WebP). JPEG-only sources are not affected.
+//
+// Thumbnail rows have parentHash set, so they:
+//   - Do NOT count toward per-collection blob quotas
+//   - Can be looked up via idx_nft_image_blobs_parent_hash for serving
+//   - Share the same sourceURI for audit trail
+func StoreThumbnails(ctx context.Context, s Store, fullSizeBody []byte, fullSizeMime, parentHash, collection, sourceURI string) int {
+	if parentHash == "" {
+		return 0
+	}
+
+	stored := 0
+	for _, size := range ThumbnailSizes {
+		thumbBytes, thumbMime, err := generateThumb(fullSizeBody, fullSizeMime, size)
+		if err != nil || len(thumbBytes) == 0 {
+			continue
+		}
+		thumbHash := Hash(thumbBytes)
+		if thumbHash == "" {
+			continue
+		}
+
+		// Check if thumbnail already exists (dedup across collections).
+		if exists, err := s.HasImage(ctx, thumbHash); err != nil {
+			// Transient DB error — skip this size, don't block ingest.
+			// The retry worker can regenerate on next cycle.
+			continue
+		} else if exists {
+			stored++
+			continue
+		}
+
+		if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes); err != nil {
+			continue
+		}
+		stored++
+	}
+	return stored
+}
