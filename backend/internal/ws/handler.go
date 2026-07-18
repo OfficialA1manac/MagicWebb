@@ -462,6 +462,21 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 				if err != nil {
 					continue
 				}
+				// Phase 3 RBAC: notification events carry a user_addr target.
+				// Unsubscribed connections receive all events by default, but
+				// notifications are private — they must match the authenticated
+				// wallet. This also double-checks subscribed connections: even
+				// if a subscriber's channel filter passes, the notification must
+				// still belong to them. Reuses eventPayload (from subscriptions.go)
+				// to avoid JSON tag drift; the extra field parsing is negligible.
+				if ev.Type == "notification" {
+					var notif eventPayload
+					if json.Unmarshal(payload, &notif) != nil ||
+						conn.addr == "" ||
+						!strings.EqualFold(notif.UserAddr, conn.addr) {
+						continue
+					}
+				}
 				// Filter by client's channel subscriptions (with per-entity
 				// scoping when payload is available).
 				if !conn.isSubscribedToEvent(string(ev.Type), payload) {

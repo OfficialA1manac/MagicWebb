@@ -50,6 +50,11 @@ type eventPayload struct {
 	Owner      string `json:"owner"`
 	FromAddr   string `json:"from_addr"`
 	ToAddr     string `json:"to_addr"`
+	// Phase 3 RBAC: notification events carry the target wallet address
+	// as "user_addr" (published by indexer/handlers.go::notify). This
+	// field is checked by channelMatchesUser to ensure a WS subscriber
+	// only receives notifications addressed to them.
+	UserAddr string `json:"user_addr"`
 }
 
 // channelMatchesEvent returns true if the channel matches the event, using
@@ -119,7 +124,10 @@ func channelMatchesCollection(channel string, ev *eventPayload) bool {
 
 func channelMatchesUser(channel string, ev *eventPayload) bool {
 	chanAddr := strings.TrimPrefix(channel, channelUser)
-	for _, a := range []string{ev.Address, ev.Seller, ev.Buyer, ev.Bidder, ev.Owner, ev.FromAddr, ev.ToAddr} {
+	// Phase 3 RBAC: UserAddr is the primary match for notification events.
+	// It's listed first so notification payloads ("user_addr": "0x...")
+	// short-circuit to a match before checking less-relevant fields.
+	for _, a := range []string{ev.UserAddr, ev.Address, ev.Seller, ev.Buyer, ev.Bidder, ev.Owner, ev.FromAddr, ev.ToAddr} {
 		if a != "" && strings.EqualFold(chanAddr, a) {
 			return true
 		}

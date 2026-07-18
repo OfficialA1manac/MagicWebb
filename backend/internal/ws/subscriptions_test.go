@@ -278,6 +278,51 @@ func TestIsSubscribedToEvent_MultipleSubscriptions(t *testing.T) {
 	}
 }
 
+// ── Phase 3 RBAC: notification user_addr matching ──────────────────────────
+
+func TestIsSubscribedToEvent_NotificationUserAddrMatch(t *testing.T) {
+	conn := newTestConn()
+	conn.subscriptions = map[string]struct{}{
+		"user:0xdef": {},
+	}
+
+	// Notification addressed to the subscribed user — should match.
+	payload, _ := json.Marshal(map[string]string{"user_addr": "0xDEF"})
+	if !conn.isSubscribedToEvent("notification", payload) {
+		t.Error("user:0xdef should match notification with user_addr=0xDEF")
+	}
+
+	// Notification addressed to a different user — should NOT match.
+	payload2, _ := json.Marshal(map[string]string{"user_addr": "0xABC"})
+	if conn.isSubscribedToEvent("notification", payload2) {
+		t.Error("user:0xdef should NOT match notification with user_addr=0xABC")
+	}
+
+	// Notification without user_addr — no address matches, so should not match.
+	payload3, _ := json.Marshal(map[string]string{"kind": "sold", "title": "test"})
+	if conn.isSubscribedToEvent("notification", payload3) {
+		t.Error("user:0xdef should NOT match notification with no user_addr")
+	}
+}
+
+func TestChannelMatchesUser_NotificationPayload(t *testing.T) {
+	ev := &eventPayload{UserAddr: "0xDEF"}
+
+	// Subscribed to own address — should match.
+	if !channelMatchesUser("user:0xDEF", ev) {
+		t.Error("channelMatchesUser should match user_addr=0xDEF")
+	}
+	// Subscribed to different address — should NOT match.
+	if channelMatchesUser("user:0xABC", ev) {
+		t.Error("channelMatchesUser should NOT match user_addr=0xDEF for channel user:0xABC")
+	}
+	// Empty user_addr — should NOT match.
+	ev2 := &eventPayload{}
+	if channelMatchesUser("user:0xDEF", ev2) {
+		t.Error("channelMatchesUser should NOT match empty payload")
+	}
+}
+
 // ── Concurrent safety smoke test ────────────────────────────────────────────
 
 func TestSubscribeUnsubscribeConcurrentSafe(t *testing.T) {
