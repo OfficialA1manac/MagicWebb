@@ -1041,12 +1041,20 @@ func (r *subscriptionResolver) ActivityUpdated(ctx context.Context) (<-chan *Act
 	return ch, nil
 }
 
-// NotificationUpdated returns a channel that receives notifications.
+// NotificationUpdated returns a channel that receives notifications for the
+// authenticated user only. Phase 3 RBAC: the authenticated wallet address is
+// extracted from ctx (injected by HandleWS via AuthCtxKey). Unauthenticated
+// connections receive no notifications.
 func (r *subscriptionResolver) NotificationUpdated(ctx context.Context) (<-chan *Notification, error) {
 	eventCh, cancel, ok := r.bcast.SubscribeRaw()
 	if !ok {
 		return nil, fmt.Errorf("too many subscribers")
 	}
+
+	// Phase 3 RBAC: extract authenticated user from context.
+	// Set by HandleWS (WebSocket) via context.WithValue(ctx, AuthCtxKey, addr).
+	// Unauthenticated connections get an empty string — they receive nothing.
+	authAddr, _ := ctx.Value(AuthCtxKey).(string)
 
 	ch := make(chan *Notification, 8)
 	go func() {
@@ -1069,6 +1077,11 @@ func (r *subscriptionResolver) NotificationUpdated(ctx context.Context) (<-chan 
 				}
 				var n db.NotificationRow
 				if err := json.Unmarshal(data, &n); err != nil {
+					continue
+				}
+				// Phase 3 RBAC: only forward notifications owned by this user.
+				// Unauthenticated connections (authAddr="") see nothing.
+				if authAddr == "" || !strings.EqualFold(n.UserAddr, authAddr) {
 					continue
 				}
 				notif := &Notification{

@@ -61,7 +61,9 @@ func (h *handlers) notify(ctx context.Context, addr, kind, title, body, link str
 		return
 	}
 	if err := h.q.InsertNotification(ctx, addr, kind, title, body, link); err == nil {
-		h.pub("notification", map[string]any{"to": addr, "kind": kind, "title": title})
+		// Phase 3 RBAC: include user_addr so the GraphQL subscription resolver
+		// can filter notifications to only the intended recipient.
+		h.pub("notification", map[string]any{"user_addr": addr, "kind": kind, "title": title, "body": body, "link": link})
 	}
 }
 

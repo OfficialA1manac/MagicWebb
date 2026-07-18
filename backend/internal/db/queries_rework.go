@@ -459,8 +459,13 @@ func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) (
 
 // ── Notifications ──────────────────────────────────────────────────────────
 
+// NotificationRow mirrors the notifications table. UserAddr is the target
+// wallet address this notification was created for — used by the GraphQL
+// subscription resolver (Phase 3 RBAC) to filter events per-user so a
+// subscriber only receives their own notifications.
 type NotificationRow struct {
 	ID        int64     `json:"id"`
+	UserAddr  string    `json:"user_addr"`
 	Kind      string    `json:"kind"`
 	Title     string    `json:"title"`
 	Body      string    `json:"body"`
@@ -482,7 +487,7 @@ func (q *Q) ListNotifications(ctx context.Context, addr string, limit int) ([]No
 		limit = 50
 	}
 	rows, err := q.reader().Query(ctx,
-		`SELECT id, kind::text, title, body, COALESCE(link,''), read, created_at
+		`SELECT id, user_addr, kind::text, title, body, COALESCE(link,''), read, created_at
 		 FROM notifications WHERE user_addr=$1
 		 ORDER BY created_at DESC LIMIT $2`, strings.ToLower(addr), limit)
 	if err != nil {
@@ -492,7 +497,7 @@ func (q *Q) ListNotifications(ctx context.Context, addr string, limit int) ([]No
 	var out []NotificationRow
 	for rows.Next() {
 		var n NotificationRow
-		if err := rows.Scan(&n.ID, &n.Kind, &n.Title, &n.Body, &n.Link, &n.Read, &n.CreatedAt); err != nil {
+		if err := rows.Scan(&n.ID, &n.UserAddr, &n.Kind, &n.Title, &n.Body, &n.Link, &n.Read, &n.CreatedAt); err != nil {
 			return nil, err
 		}
 		out = append(out, n)
