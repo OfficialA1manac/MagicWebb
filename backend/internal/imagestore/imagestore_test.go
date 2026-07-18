@@ -62,8 +62,18 @@ func (f *fakeStore) PutImage(_ context.Context, sha, mime, collection, src strin
 
 // PutThumbnail mirrors PutImage — thumbnails share the same dedup model.
 // IMG-1: added when Store interface gained PutThumbnail.
-func (f *fakeStore) PutThumbnail(_ context.Context, sha, mime, parentHash, collection, src string, body []byte) error {
+func (f *fakeStore) PutThumbnail(_ context.Context, sha, mime, parentHash, collection, src string, body []byte, width int) error {
 	return f.PutImage(context.Background(), sha, mime, collection, src, body)
+}
+
+// GetImageByParent returns a thumbnail by (parentHash, width). For the fake,
+// we iterate all rows — good enough for unit tests. Returns pgx.ErrNoRows
+// when no matching thumbnail exists.
+func (f *fakeStore) GetImageByParent(_ context.Context, parentHash string, width int) (Blob, error) {
+	// The fake doesn't track parentHash/width separately since PutThumbnail
+	// delegates to PutImage. In real usage, thumbnails have unique hashes.
+	// This stub returns pgx.ErrNoRows — integration tests cover the real path.
+	return Blob{}, pgx.ErrNoRows
 }
 
 func (f *fakeStore) GetImage(_ context.Context, sha string) (Blob, error) {

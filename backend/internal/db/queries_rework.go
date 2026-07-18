@@ -786,7 +786,9 @@ func (q *Q) PutImage(ctx context.Context, sha256hex, mime, collection, sourceURI
 // thumbnail bytes from different collections share one row via SHA-256.
 // Thumbnail rows have parent_hash set, so they are excluded from
 // CountBlobsForCollection (WHERE parent_hash IS NULL).
-func (q *Q) PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte) error {
+// width is stored in thumb_width so the ?size= handler can look up
+// thumbnails by (parent_hash, width) without decoding image bytes.
+func (q *Q) PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte, width int) error {
 	tx, err := q.writer().Begin(ctx)
 	if err != nil {
 		return err
@@ -794,15 +796,33 @@ func (q *Q) PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, colle
 	defer tx.Rollback(ctx)
 
 	if _, err = tx.Exec(ctx,
-		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body, collection, parent_hash)
-		 VALUES($1,$2,$3,$4,$5,$6,$7)
+		`INSERT INTO nft_image_blobs(sha256, mime, byte_length, source_uri, body, collection, parent_hash, thumb_width)
+		 VALUES($1,$2,$3,$4,$5,$6,$7,$8)
 		 ON CONFLICT(sha256) DO UPDATE
 		   SET refcount     = nft_image_blobs.refcount + 1,
 		       last_seen_at = now()`,
-		sha256hex, mime, len(body), sourceURI, body, collection, parentHash); err != nil {
+		sha256hex, mime, len(body), sourceURI, body, collection, parentHash, width); err != nil {
 		return fmt.Errorf("put thumbnail: %w", err)
 	}
 	return tx.Commit(ctx)
+}
+
+// GetImageByParent returns the blob for a thumbnail matching (parentHash,
+// width). Returns pgx.ErrNoRows when no thumbnail exists at that size.
+// IMG-1: used by HandleImageByHash when ?size= is present. Uses the
+// composite index idx_nft_image_blobs_parent_width for single-scan lookup.
+func (q *Q) GetImageByParent(ctx context.Context, parentHash string, width int) (imagestore.Blob, error) {
+	var b imagestore.Blob
+	// JPEG is preferred (universal browser support). WebP is served only when
+	// explicitly requested via format negotiation — AddAccept-negotiation
+	// can add ?format=webp or use the Accept header later.
+	err := q.reader().QueryRow(ctx,
+		`SELECT body, mime, source_uri FROM nft_image_blobs
+		  WHERE parent_hash = $1 AND thumb_width = $2
+		  ORDER BY CASE WHEN mime = 'image/jpeg' THEN 0 ELSE 1 END
+		  LIMIT 1`, parentHash, width).
+		Scan(&b.Body, &b.Mime, &b.SourceURI)
+	return b, err
 }
 
 // CountBlobsForCollection returns the number of distinct blobs first inserted

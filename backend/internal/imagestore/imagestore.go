@@ -127,7 +127,14 @@ type Store interface {
 	// 128/256/512px variants. Same dedup semantics as PutImage — identical
 	// thumbnail bytes from different collections share one row via SHA-256.
 	// Thumbnail rows do NOT count toward per-collection blob quotas.
-	PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte) error
+	// width is the target pixel width (128, 256, or 512) — stored in the
+	// thumb_width column so the ?size= handler can look up thumbnails.
+	PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, collection, sourceURI string, body []byte, width int) error
+
+	// GetImageByParent returns the blob for a thumbnail matching (parentHash,
+	// width). Returns pgx.ErrNoRows when no thumbnail exists at that size.
+	// IMG-1: used by HandleImageByHash when ?size= is present.
+	GetImageByParent(ctx context.Context, parentHash string, width int) (Blob, error)
 
 	// GetImage returns the blob bytes + mime + source URI for a known hash.
 	// Returns (nil, "", "", pgx.ErrNoRows) when the hash is unknown.
@@ -375,7 +382,7 @@ func StoreThumbnails(ctx context.Context, s Store, fullSizeBody []byte, fullSize
 				continue
 			}
 
-			if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes); err != nil {
+			if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes, size); err != nil {
 				continue
 			}
 			stored++

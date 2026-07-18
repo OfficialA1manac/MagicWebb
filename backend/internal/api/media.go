@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"strconv"
 	"strings"
 	"time"
 
@@ -136,6 +137,29 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 	if !imagestore.ValidateHash(sha) {
 		return writeErr(c, fiber.StatusBadRequest, "invalid sha256")
 	}
+
+	// IMG-1: ?size=128|256|512 requests a pre-generated thumbnail.
+	// When present, look up the thumbnail by (parent_hash, width) instead
+	// of serving the full-size blob directly. Falls back to the full-size
+	// image when no thumbnail exists at the requested size (best-effort).
+	if sizeStr := c.Query("size"); sizeStr != "" {
+		size, err := strconv.Atoi(sizeStr)
+		if err != nil || (size != 128 && size != 256 && size != 512) {
+			return writeErr(c, fiber.StatusBadRequest, "size must be 128, 256, or 512")
+		}
+		blob, err := s.q.GetImageByParent(c.Context(), sha, size)
+		if err != nil {
+			if imagestore.IsNoRows(err) {
+				// No thumbnail at this size — fall through to full-size.
+			} else {
+				return writeErr(c, fiber.StatusInternalServerError, "internal error")
+			}
+		} else {
+			return serveBlob(c, sha, blob)
+		}
+		// Fall through: no thumbnail found, serve full-size.
+	}
+
 	blob, err := s.q.GetImage(c.Context(), sha)
 	if err != nil {
 		if imagestore.IsNoRows(err) {
@@ -143,6 +167,12 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 		}
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
+	return serveBlob(c, sha, blob)
+}
+
+// serveBlob writes a blob response with correct Content-Type, cache headers,
+// and security headers. Shared by the full-size and thumbnail paths.
+func serveBlob(c *fiber.Ctx, sha string, blob imagestore.Blob) error {
 	if imgMime, isImg := media.SniffImage(blob.Body); isImg {
 		c.Set("Content-Type", imgMime)
 	} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
