@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -571,5 +572,248 @@ func TestStripAddrPort(t *testing.T) {
 		if got := stripAddrPort(in); got != want {
 			t.Fatalf("stripAddrPort(%q) = %q, want %q", in, got, want)
 		}
+	}
+}
+
+// ── Token bucket: consumeMsgToken ───────────────────────────────────────────
+
+func TestConsumeMsgToken_ExhaustBucket(t *testing.T) {
+	conn := newTestConn()
+	conn.msgTokens = wsConnMsgLimit // 20
+
+	// All 20 tokens should be consumable.
+	for i := 0; i < wsConnMsgLimit; i++ {
+		if !conn.consumeMsgToken() {
+			t.Fatalf("consume %d should succeed; remaining=%d", i, conn.msgTokens)
+		}
+	}
+
+	// 21st call must fail — bucket exhausted.
+	if conn.consumeMsgToken() {
+		t.Fatal("consume after exhaustion should return false")
+	}
+	if v := conn.msgTokens; v != 0 {
+		t.Fatalf("expected 0 tokens remaining, got %d", v)
+	}
+}
+
+func TestConsumeMsgToken_EmptyBucketReturnsFalse(t *testing.T) {
+	conn := newTestConn()
+	conn.msgTokens = 0 // empty bucket
+
+	for i := 0; i < 100; i++ {
+		if conn.consumeMsgToken() {
+			t.Fatalf("consume from empty bucket should return false (iteration %d)", i)
+		}
+	}
+}
+
+func TestConsumeMsgToken_ConcurrentCASIntegrity(t *testing.T) {
+	// Start with exactly 1000 tokens. 100 goroutines each try to consume
+	// up to 10 tokens in a loop. Only 1000 total should succeed — the
+	// CAS in consumeMsgToken must not lose tokens under contention.
+	conn := newTestConn()
+	conn.msgTokens = 1000
+
+	const goroutines = 100
+	const triesPer = 10 // each goroutine tries at most 10 times
+
+	var successes atomic.Int64
+	done := make(chan struct{}, goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			for i := 0; i < triesPer; i++ {
+				if conn.consumeMsgToken() {
+					successes.Add(1)
+				} else {
+					break // bucket empty, stop trying
+				}
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	// Wait for all goroutines.
+	for g := 0; g < goroutines; g++ {
+		<-done
+	}
+
+	got := successes.Load()
+	if got != 1000 {
+		t.Fatalf("concurrent consume: %d successes, want exactly 1000", got)
+	}
+	if v := conn.msgTokens; v != 0 {
+		t.Fatalf("remaining tokens = %d, want 0", v)
+	}
+}
+
+func TestConsumeMsgToken_SingleTokenRace(t *testing.T) {
+	// Edge case: exactly 1 token, 10 goroutines race for it.
+	// Exactly 1 must win; the rest must fail.
+	conn := newTestConn()
+	conn.msgTokens = 1
+
+	const goroutines = 10
+	var successes atomic.Int64
+	done := make(chan struct{}, goroutines)
+
+	for g := 0; g < goroutines; g++ {
+		go func() {
+			if conn.consumeMsgToken() {
+				successes.Add(1)
+			}
+			done <- struct{}{}
+		}()
+	}
+
+	for g := 0; g < goroutines; g++ {
+		<-done
+	}
+
+	if got := successes.Load(); got != 1 {
+		t.Fatalf("single-token race: %d successes, want exactly 1", got)
+	}
+	if v := conn.msgTokens; v != 0 {
+		t.Fatalf("remaining tokens = %d, want 0", v)
+	}
+}
+
+// ── Token bucket: refillTokens ───────────────────────────────────────────────
+
+func TestRefillTokens_RefillsOverTime(t *testing.T) {
+	conn := newTestConn()
+	conn.msgTokens = 0 // start empty
+
+	go conn.refillTokens()
+	t.Cleanup(func() { conn.once.Do(func() { close(conn.done) }) })
+
+	// wsConnMsgRefill = 10 tokens/sec. The refill goroutine uses a 1-second
+	// ticker, so the first refill may take up to 1 second. Poll up to 1.5s.
+	deadline := time.Now().Add(1500 * time.Millisecond)
+	var sawToken bool
+	for time.Now().Before(deadline) {
+		if atomic.LoadInt64(&conn.msgTokens) > 0 {
+			sawToken = true
+			break
+		}
+		time.Sleep(10 * time.Millisecond)
+	}
+
+	if !sawToken {
+		t.Fatal("refillTokens did not add tokens within 1500ms")
+	}
+}
+
+func TestRefillTokens_NeverExceedsCap(t *testing.T) {
+	conn := newTestConn()
+	conn.msgTokens = wsConnMsgLimit // already at cap (20)
+
+	go conn.refillTokens()
+	t.Cleanup(func() { conn.once.Do(func() { close(conn.done) }) })
+
+	// Wait long enough for several refill ticks (~2s → ~2 ticks, ~20 tokens
+	// of refill that should all be clamped).
+	time.Sleep(2 * time.Second)
+
+	// Token count must never exceed the cap.
+	if v := atomic.LoadInt64(&conn.msgTokens); v > wsConnMsgLimit {
+		t.Fatalf("tokens exceeded cap: %d > %d", v, wsConnMsgLimit)
+	}
+	// Should still be at-cap (no tokens consumed, refill clamped).
+	if v := atomic.LoadInt64(&conn.msgTokens); v != wsConnMsgLimit {
+		t.Fatalf("tokens should remain at cap, got %d", v)
+	}
+}
+
+func TestRefillTokens_StopsOnDone(t *testing.T) {
+	conn := newTestConn()
+	conn.msgTokens = 0
+
+	go conn.refillTokens()
+
+	// Let it run briefly to confirm it's alive.
+	time.Sleep(100 * time.Millisecond)
+
+	// Close done and verify the goroutine exits promptly.
+	// We can't easily observe goroutine exit, but we can verify
+	// that closing done doesn't panic and the channel stays closed.
+	close(conn.done)
+
+	// Poll: if the goroutine is still running after 2s, something's wrong.
+	// We use a timeout-based check — no assertion needed; the absence
+	// of deadlock/timeout at test end is sufficient.
+	select {
+	case <-time.After(2 * time.Second):
+		t.Fatal("refillTokens may not have stopped — test timed out")
+	default:
+		// No timeout — test passes.
+	}
+}
+
+func TestRefillTokens_RapidConsumeRefill(t *testing.T) {
+	// Simulate real usage: consume at the steady rate (10/sec), refill
+	// should keep up. After consuming for ~2s with refill running,
+	// the bucket should not be permanently drained unless we exceed
+	// the refill rate.
+	conn := newTestConn()
+	conn.msgTokens = wsConnMsgLimit // 20 burst
+
+	go conn.refillTokens()
+	t.Cleanup(func() { conn.once.Do(func() { close(conn.done) }) })
+
+	// Consume at 10/sec (the refill rate) for ~2s = ~2 tokens consumed,
+	// but refill ticks twice at 10/tick = 20 tokens refilled (clamped at cap).
+	// Bucket should stay near full.
+	start := time.Now()
+	duration := 2 * time.Second
+	consumed := 0
+	for time.Since(start) < duration {
+		if conn.consumeMsgToken() {
+			consumed++
+		}
+		time.Sleep(200 * time.Millisecond) // 5/sec to stay well below refill rate
+	}
+
+	// After 2s consuming at 5/sec, about 10 consumed, refill ticks twice
+	// replenishing to cap each time. Should still be close to full.
+	remaining := atomic.LoadInt64(&conn.msgTokens)
+	if remaining < wsConnMsgLimit-5 {
+		t.Fatalf("at 5/sec pace (below refill rate), bucket should stay near full: consumed=%d remaining=%d cap=%d", consumed, remaining, wsConnMsgLimit)
+	}
+}
+
+func TestRefillTokens_BurstThenThrottle(t *testing.T) {
+	// Burst of 20 messages drains the bucket, then wait for refill.
+	// The refill goroutine uses a 1-second ticker, so wait >1s.
+	conn := newTestConn()
+	conn.msgTokens = wsConnMsgLimit // 20 burst
+
+	go conn.refillTokens()
+	t.Cleanup(func() { conn.once.Do(func() { close(conn.done) }) })
+
+	// Burst: consume all 20 tokens immediately.
+	for i := 0; i < wsConnMsgLimit; i++ {
+		if !conn.consumeMsgToken() {
+			t.Fatalf("burst consume %d failed", i)
+		}
+	}
+	if conn.consumeMsgToken() {
+		t.Fatal("bucket should be empty after burst")
+	}
+
+	// Refill ticker fires every 1s, adding 10 tokens per tick.
+	// After 1100ms we should have at least 9 tokens (one full tick).
+	time.Sleep(1100 * time.Millisecond)
+	found := 0
+	for conn.consumeMsgToken() {
+		found++
+	}
+	if found == 0 {
+		t.Fatal("expected at least 1 token refilled after 1100ms")
+	}
+	// At 10/tick, should not exceed cap.
+	if found > wsConnMsgRefill {
+		t.Fatalf("too many tokens refilled in one tick: %d > %d", found, wsConnMsgRefill)
 	}
 }

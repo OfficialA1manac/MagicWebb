@@ -207,6 +207,7 @@ func (c *Connection) readPump(h *Handler) {
 		// spamming MsgAction with malformed params used to force JSON-unmarshal
 		// on every message without backpressure.
 		if !c.consumeMsgToken() {
+			h.msgRateLimited.Add(1)
 			c.writeJSON(Message{Type: MsgError, Data: mustJSON(AckData{Status: "error", Message: "rate limit exceeded"})})
 			continue
 		}
@@ -332,6 +333,12 @@ type Handler struct {
 	ipCounters  map[string]*int64      // ip → atomic counter
 	eventsSent  atomic.Int64           // total events pushed to all WS clients
 	connCount   atomic.Int64           // total connections established (lifetime)
+
+	// WS metrics: connection-level rate limiting + rejection counters.
+	// Exposed via Prometheus /metrics for Grafana dashboards.
+	msgRateLimited    atomic.Int64 // messages rejected by per-connection token bucket
+	connsRejectedIP   atomic.Int64 // connections rejected due to per-IP limit
+	connsRejectedGlobal atomic.Int64 // connections rejected due to global limit
 }
 
 // NewHandler creates a WebSocket Handler.
@@ -366,6 +373,7 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 
 	// Per-IP connection cap
 	if !h.acquireIP(ip) {
+		h.connsRejectedIP.Add(1)
 		return c.Status(fiber.StatusTooManyRequests).SendString("too many connections from this IP")
 	}
 
@@ -374,6 +382,7 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	globalCount := len(h.conns)
 	h.mu.RUnlock()
 	if globalCount >= wsGlobalLimit {
+		h.connsRejectedGlobal.Add(1)
 		h.releaseIP(ip)
 		return c.Status(fiber.StatusServiceUnavailable).SendString("too many subscribers")
 	}
@@ -1012,4 +1021,22 @@ func (h *Handler) EventsSent() int64 {
 // since the process started (including those that have since disconnected).
 func (h *Handler) TotalConns() int64 {
 	return h.connCount.Load()
+}
+
+// MsgRateLimited returns the total number of client messages rejected by the
+// per-connection token bucket rate limiter. Monotonic counter.
+func (h *Handler) MsgRateLimited() int64 {
+	return h.msgRateLimited.Load()
+}
+
+// ConnsRejectedIP returns the total number of connection attempts rejected
+// because the client IP exceeded the per-IP connection limit (wsPerIPLimit).
+func (h *Handler) ConnsRejectedIP() int64 {
+	return h.connsRejectedIP.Load()
+}
+
+// ConnsRejectedGlobal returns the total number of connection attempts rejected
+// because the global connection count exceeded wsGlobalLimit.
+func (h *Handler) ConnsRejectedGlobal() int64 {
+	return h.connsRejectedGlobal.Load()
 }

@@ -301,7 +301,7 @@ func main() {
 	api.MountReindexRoute(app, runner, &config.C)
 
 	// Prometheus /metrics endpoint
-	registerMetricsRoute(app, q, runner.HeadLagBlocks, eth)
+	registerMetricsRoute(app, q, runner.HeadLagBlocks, eth, api.GlobalWSStats)
 
 	// Register SLO (Prometheus gauge) and healthz (DB + RPC + lag threshold) routes.
 	// Extracted into a function for unit testability — the getHeadLag callback
@@ -377,7 +377,7 @@ func main() {
 // The endpoint is NOT rate-limited — Prometheus scrapes typically run every
 // 15-60s and a rate limit would silently drop scrape intervals, creating gaps
 // in dashboards.
-func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth *rpcpool.Pool) {
+func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth *rpcpool.Pool, wsStats api.WSStatsProvider) {
 	app.Get("/metrics", func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/plain; charset=utf-8")
 
@@ -412,6 +412,17 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 			cacheEvictions += as["cache_evictions"]
 		}
 
+		// WS metrics: active connections, lifetime connections, rate-limited messages,
+		// and connection rejections (per-IP and global).
+		var wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal int64
+		if wsStats != nil {
+			wsConns = int64(wsStats.ActiveConns())
+			wsTotalConns = wsStats.TotalConns()
+			wsMsgRateLimited = wsStats.MsgRateLimited()
+			wsRejectedIP = wsStats.ConnsRejectedIP()
+			wsRejectedGlobal = wsStats.ConnsRejectedGlobal()
+		}
+
 		return c.SendString(fmt.Sprintf(
 			"# HELP magicwebb_sse_dropped_total Total SSE events dropped due to fan-out saturation.\n"+
 				"# TYPE magicwebb_sse_dropped_total counter\n"+
@@ -440,10 +451,26 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 				"# HELP magicwebb_cache_evictions_total Total cache evictions (lazy TTL expiry).\n"+
 				"# TYPE magicwebb_cache_evictions_total counter\n"+
 				"magicwebb_cache_evictions_total %d\n"+
+				"# HELP magicwebb_ws_active_connections Current active WebSocket connections.\n"+
+				"# TYPE magicwebb_ws_active_connections gauge\n"+
+				"magicwebb_ws_active_connections %d\n"+
+				"# HELP magicwebb_ws_total_connections Lifetime WebSocket connections established.\n"+
+				"# TYPE magicwebb_ws_total_connections counter\n"+
+				"magicwebb_ws_total_connections %d\n"+
+				"# HELP magicwebb_ws_msg_rate_limited Total client messages rejected by per-connection token bucket.\n"+
+				"# TYPE magicwebb_ws_msg_rate_limited counter\n"+
+				"magicwebb_ws_msg_rate_limited %d\n"+
+				"# HELP magicwebb_ws_conns_rejected_ip Connection attempts rejected due to per-IP limit.\n"+
+				"# TYPE magicwebb_ws_conns_rejected_ip counter\n"+
+				"magicwebb_ws_conns_rejected_ip %d\n"+
+				"# HELP magicwebb_ws_conns_rejected_global Connection attempts rejected due to global connection cap.\n"+
+				"# TYPE magicwebb_ws_conns_rejected_global counter\n"+
+				"magicwebb_ws_conns_rejected_global %d\n"+
 				"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
 				"# TYPE magicwebb_build_info gauge\n"+
 				"magicwebb_build_info{sha=\"%s\",env=\"%s\"} 1\n",
 			dropped, streak, sse.DroppedClientsGauge(), eth.HealthyCount(), lag, cacheHits, cacheMisses, cacheSets, cacheEvictions,
+			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
 			api.MWServerBuildSHA, config.C.Env,
 		))
 	})

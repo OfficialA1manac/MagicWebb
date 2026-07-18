@@ -140,6 +140,12 @@ var GlobalCaches struct {
 	Activity cache.CacheInterface
 }
 
+// GlobalWSStats is the WebSocket handler's metrics provider. Set by Mount()
+// after wsHandler is created; read by registerMetricsRoute in main.go for
+// Prometheus gauges (active connections, rate-limited messages, rejections).
+// Nil when the WS handler is not wired (tests, single-purpose binaries).
+var GlobalWSStats WSStatsProvider
+
 // Mount registers all REST + SSE + WebSocket routes on the Fiber app.
 // serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
 // endpoint reads it under the rate-limited api group.
@@ -213,6 +219,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		"http://localhost"+cfg.HTTPAddr,
 	)
 	wsHandler := ws.NewHandler(cfg, bcast, q, wsClient, func() int64 { return atomic.LoadInt64(serverTimeMs) })
+	GlobalWSStats = wsHandler // WS metrics exposed via Prometheus /metrics endpoint
 	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	// GraphQL endpoint for rich data queries.

@@ -31,6 +31,10 @@ type WSStatsProvider interface {
 	TotalSubscriptions() int
 	EventsSent() int64
 	TotalConns() int64
+	// WS rate-limiting + rejection gauges for Prometheus dashboards.
+	MsgRateLimited() int64
+	ConnsRejectedIP() int64
+	ConnsRejectedGlobal() int64
 }
 
 // MetricsService handles marketplace metrics, recent activity, and SSE counters.
@@ -219,15 +223,21 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 		"sse_saturation_streak":  sse.SaturationStreak.Load(),
 		"sse_client_drops_total": sse.DroppedClientsGauge(), // SSE-2
 	}
-	out["ws_connections"]   = int64(0)
-	out["ws_subscriptions"] = 0
-	out["ws_events_sent"]   = int64(0)
-	out["ws_total_conns"]   = int64(0)
+	out["ws_connections"]        = int64(0)
+	out["ws_subscriptions"]      = 0
+	out["ws_events_sent"]        = int64(0)
+	out["ws_total_conns"]        = int64(0)
+	out["ws_msg_rate_limited"]   = int64(0)
+	out["ws_conns_rejected_ip"]  = int64(0)
+	out["ws_conns_rejected_global"] = int64(0)
 	if s.ws != nil {
-		out["ws_connections"]   = int64(s.ws.ActiveConns())
-		out["ws_subscriptions"] = s.ws.TotalSubscriptions()
-		out["ws_events_sent"]   = s.ws.EventsSent()
-		out["ws_total_conns"]   = s.ws.TotalConns()
+		out["ws_connections"]        = int64(s.ws.ActiveConns())
+		out["ws_subscriptions"]      = s.ws.TotalSubscriptions()
+		out["ws_events_sent"]        = s.ws.EventsSent()
+		out["ws_total_conns"]        = s.ws.TotalConns()
+		out["ws_msg_rate_limited"]   = s.ws.MsgRateLimited()
+		out["ws_conns_rejected_ip"]  = s.ws.ConnsRejectedIP()
+		out["ws_conns_rejected_global"] = s.ws.ConnsRejectedGlobal()
 	}
 	const unavailableMsg = "metrics temporarily unavailable"
 
