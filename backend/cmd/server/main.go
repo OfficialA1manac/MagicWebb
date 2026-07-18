@@ -34,6 +34,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
@@ -423,7 +424,47 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 			wsRejectedGlobal = wsStats.ConnsRejectedGlobal()
 		}
 
-		return c.SendString(fmt.Sprintf(
+		// gRPC per-RPC metrics: request counts by procedure, total requests,
+		// total errors, active requests, average latency.
+		gm := interceptors.Global()
+		grpcTotalReq := gm.TotalRequests.Load()
+		grpcTotalErr := gm.TotalErrors.Load()
+		grpcActive := gm.ActiveRequests.Load()
+		grpcAvgLat := gm.AvgLatencyUs()
+
+		// Build per-procedure counter lines. Each procedure gets its own
+		// # HELP / # TYPE block followed by a counter line with labels.
+		// Prometheus best practice: ONE HELP/TYPE per metric family, then
+		// per-procedure lines with procedure="..." label.
+		type procMetric struct {
+			name  string
+			value int64
+		}
+		procs := []procMetric{
+			{"GetListing", gm.GetListingRequests.Load()},
+			{"GetAuction", gm.GetAuctionRequests.Load()},
+			{"GetOffer", gm.GetOfferRequests.Load()},
+			{"GetToken", gm.GetTokenRequests.Load()},
+			{"ListCollections", gm.ListCollectionsRequests.Load()},
+			{"GetCollection", gm.GetCollectionRequests.Load()},
+			{"ListListings", gm.ListListingsRequests.Load()},
+			{"ListAuctions", gm.ListAuctionsRequests.Load()},
+			{"ListOffers", gm.ListOffersRequests.Load()},
+			{"GetActivity", gm.GetActivityRequests.Load()},
+			{"GetWalletNFTs", gm.GetWalletNFTsRequests.Load()},
+			{"GetProfile", gm.GetProfileRequests.Load()},
+			{"Search", gm.SearchRequests.Load()},
+			{"GetMetrics", gm.GetMetricsRequests.Load()},
+		}
+
+		// Build the complete response. We assemble per-procedure lines
+		// dynamically since Go's fmt.Sprintf doesn't support loops.
+		var b strings.Builder
+
+		// Stable ordered output so Prometheus diff-updates work correctly.
+		// The order mirrors the existing endpoint structure: SSE → RPC →
+		// head lag → cache → WS → gRPC → build info.
+		fmt.Fprintf(&b,
 			"# HELP magicwebb_sse_dropped_total Total SSE events dropped due to fan-out saturation.\n"+
 				"# TYPE magicwebb_sse_dropped_total counter\n"+
 				"magicwebb_sse_dropped_total %d\n"+
@@ -432,11 +473,11 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 				"magicwebb_sse_saturation_streak %d\n"+
 				"# HELP magicwebb_sse_client_drops_total SSE-2: total events dropped due to slow WebSocket clients.\n"+
 				"# TYPE magicwebb_sse_client_drops_total counter\n"+
-			"magicwebb_sse_client_drops_total %d\n"+
-			"# HELP magicwebb_rpc_healthy_count RPC-1: current number of healthy RPC endpoints.\n"+
-			"# TYPE magicwebb_rpc_healthy_count gauge\n"+
-			"magicwebb_rpc_healthy_count %d\n"+
-			"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
+				"magicwebb_sse_client_drops_total %d\n"+
+				"# HELP magicwebb_rpc_healthy_count RPC-1: current number of healthy RPC endpoints.\n"+
+				"# TYPE magicwebb_rpc_healthy_count gauge\n"+
+				"magicwebb_rpc_healthy_count %d\n"+
+				"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
 				"# TYPE magicwebb_head_lag_blocks gauge\n"+
 				"magicwebb_head_lag_blocks %d\n"+
 				"# HELP magicwebb_cache_hits_total Total cache hits across all caches.\n"+
@@ -465,14 +506,47 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 				"magicwebb_ws_conns_rejected_ip %d\n"+
 				"# HELP magicwebb_ws_conns_rejected_global Connection attempts rejected due to global connection cap.\n"+
 				"# TYPE magicwebb_ws_conns_rejected_global counter\n"+
-				"magicwebb_ws_conns_rejected_global %d\n"+
-				"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
+				"magicwebb_ws_conns_rejected_global %d\n",
+			dropped, streak, sse.DroppedClientsGauge(), eth.HealthyCount(), lag,
+			cacheHits, cacheMisses, cacheSets, cacheEvictions,
+			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
+		)
+
+		// ── gRPC per-RPC metrics ──────────────────────────────────────
+		// One counter per procedure with procedure="..." label.
+		// Prometheus uses these for rate() and irate() in dashboards.
+		fmt.Fprintf(&b,
+			"# HELP magicwebb_grpc_requests_total Total gRPC requests by procedure.\n"+
+				"# TYPE magicwebb_grpc_requests_total counter\n")
+		for _, p := range procs {
+			fmt.Fprintf(&b, "magicwebb_grpc_requests_total{procedure=\"%s\"} %d\n", p.name, p.value)
+		}
+
+		fmt.Fprintf(&b,
+			"# HELP magicwebb_grpc_requests_combined Combined total across all gRPC procedures.\n"+
+				"# TYPE magicwebb_grpc_requests_combined counter\n"+
+				"magicwebb_grpc_requests_combined %d\n"+
+				"# HELP magicwebb_grpc_errors_total Total gRPC errors across all procedures.\n"+
+				"# TYPE magicwebb_grpc_errors_total counter\n"+
+				"magicwebb_grpc_errors_total %d\n"+
+				"# HELP magicwebb_grpc_active_requests Currently in-flight gRPC requests.\n"+
+				"# TYPE magicwebb_grpc_active_requests gauge\n"+
+				"magicwebb_grpc_active_requests %d\n"+
+				"# HELP magicwebb_grpc_latency_us_avg Average gRPC request latency in microseconds.\n"+
+				"# TYPE magicwebb_grpc_latency_us_avg gauge\n"+
+				"magicwebb_grpc_latency_us_avg %d\n",
+			grpcTotalReq, grpcTotalErr, grpcActive, grpcAvgLat,
+		)
+
+		// Build info (must be last for stable output).
+		fmt.Fprintf(&b,
+			"# HELP magicwebb_build_info MagicWebb build metadata.\n"+
 				"# TYPE magicwebb_build_info gauge\n"+
 				"magicwebb_build_info{sha=\"%s\",env=\"%s\"} 1\n",
-			dropped, streak, sse.DroppedClientsGauge(), eth.HealthyCount(), lag, cacheHits, cacheMisses, cacheSets, cacheEvictions,
-			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
 			api.MWServerBuildSHA, config.C.Env,
-		))
+		)
+
+		return c.SendString(b.String())
 	})
 }
 
