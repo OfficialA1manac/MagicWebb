@@ -10,32 +10,23 @@ package imagestore
 
 import "github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore/thumbnail"
 
-// generateThumb creates a resized variant of body at targetWidth pixels.
-// Returns the thumbnail bytes and MIME type, or an error if generation fails.
+// generateThumb creates a resized variant of body at targetWidth pixels,
+// always outputting JPEG (universally supported, small file size). Uses
+// GenerateFormat which handles JPEG, PNG, GIF, and WebP inputs — any
+// format that image.Decode can read. WebP inputs are transcoded to JPEG.
 //
-// For JPEG, PNG, and GIF inputs, thumbnails preserve the original format.
-// For WebP inputs, thumbnails are transcoded to JPEG (WebP can be decoded
-// via golang.org/x/image/webp but Go stdlib cannot re-encode to WebP).
 // Bridges the StoreThumbnails function to the thumbnail package.
 func generateThumb(body []byte, mime string, targetWidth int) ([]byte, string, error) {
-	// Try same-format resize first (works for JPEG, PNG, GIF).
-	if resized, thumbMime, err := thumbnail.Generate(body, mime, targetWidth); err == nil {
-		return resized, thumbMime, nil
-	}
-
-	// Fallback: transcode to JPEG for formats that decode but can't re-encode
-	// in their original format (WebP, AVIF, etc.). GenerateAsJPEG uses
-	// image.Decode (which recognises WebP via golang.org/x/image/webp) and
-	// re-encodes as JPEG at quality 80.
-	if !thumbnail.CanResize(mime) {
-		return thumbnail.GenerateAsJPEG(body, targetWidth)
-	}
-
-	return nil, "", errUnsupportedThumb
+	return thumbnail.GenerateFormat(body, mime, targetWidth, thumbnail.FormatJPEG)
 }
 
-var errUnsupportedThumb = &thumbErr{msg: "thumbnail: unsupported source format"}
-
-type thumbErr struct{ msg string }
-
-func (e *thumbErr) Error() string { return e.msg }
+// generateThumbWebP creates a WebP variant at targetWidth pixels. WebP
+// typically achieves 25-35% smaller files than JPEG at equivalent quality,
+// making it the best format for listing-card thumbnails. Uses the pure-Go
+// deepteams/webp encoder (no CGO required).
+//
+// Falls back gracefully: if the WebP encoder is unavailable or the input
+// can't be decoded, returns an error. Caller treats this as best-effort.
+func generateThumbWebP(body []byte, mime string, targetWidth int) ([]byte, string, error) {
+	return thumbnail.GenerateFormat(body, mime, targetWidth, thumbnail.FormatWebP)
+}

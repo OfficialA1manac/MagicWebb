@@ -325,13 +325,17 @@ var ThumbnailSizes = []int{128, 256, 512}
 // stores them in the blob store linked to parentHash. Called after a
 // successful image ingest (Put() returns inserted/deduped).
 //
-// Generation is best-effort: if a particular size fails to generate (e.g.
-// corrupted image data), the remaining sizes still get stored. Returns the
-// count of successfully stored thumbnails.
+// Two formats are generated per size:
+//   - JPEG (universal fallback, works in every browser)
+//   - WebP (25-35% smaller, served to clients that advertise image/webp)
 //
-// For WebP source images, thumbnails are transcoded to JPEG (WebP decode is
-// supported via golang.org/x/image/webp, but Go stdlib cannot re-encode to
-// WebP). JPEG-only sources are not affected.
+// Generation is best-effort: if a particular size/format fails (e.g.
+// corrupted image data, WebP encoder unavailable), the remaining variants
+// still get stored. Returns the count of successfully stored thumbnails.
+//
+// For WebP source images, JPEG thumbnails are transcoded (WebP decode →
+// JPEG encode). WebP-to-WebP thumbnails use the pure-Go deepteams/webp
+// encoder — no CGO required.
 //
 // Thumbnail rows have parentHash set, so they:
 //   - Do NOT count toward per-collection blob quotas
@@ -342,31 +346,40 @@ func StoreThumbnails(ctx context.Context, s Store, fullSizeBody []byte, fullSize
 		return 0
 	}
 
+	// Two format generators — JPEG first (universal fallback),
+	// WebP second (best-effort, ~30% smaller for modern browsers).
+	generators := []func([]byte, string, int) ([]byte, string, error){
+		generateThumb,
+		generateThumbWebP,
+	}
+
 	stored := 0
 	for _, size := range ThumbnailSizes {
-		thumbBytes, thumbMime, err := generateThumb(fullSizeBody, fullSizeMime, size)
-		if err != nil || len(thumbBytes) == 0 {
-			continue
-		}
-		thumbHash := Hash(thumbBytes)
-		if thumbHash == "" {
-			continue
-		}
+		for _, gen := range generators {
+			thumbBytes, thumbMime, err := gen(fullSizeBody, fullSizeMime, size)
+			if err != nil || len(thumbBytes) == 0 {
+				continue
+			}
+			thumbHash := Hash(thumbBytes)
+			if thumbHash == "" {
+				continue
+			}
 
-		// Check if thumbnail already exists (dedup across collections).
-		if exists, err := s.HasImage(ctx, thumbHash); err != nil {
-			// Transient DB error — skip this size, don't block ingest.
-			// The retry worker can regenerate on next cycle.
-			continue
-		} else if exists {
+			// Check if thumbnail already exists (dedup across collections).
+			if exists, err := s.HasImage(ctx, thumbHash); err != nil {
+				// Transient DB error — skip this variant, don't block ingest.
+				// The retry worker can regenerate on next cycle.
+				continue
+			} else if exists {
+				stored++
+				continue
+			}
+
+			if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes); err != nil {
+				continue
+			}
 			stored++
-			continue
 		}
-
-		if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes); err != nil {
-			continue
-		}
-		stored++
 	}
 	return stored
 }
