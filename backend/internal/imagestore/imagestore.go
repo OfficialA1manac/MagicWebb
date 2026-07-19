@@ -134,7 +134,8 @@ type Store interface {
 	// GetImageByParent returns the blob for a thumbnail matching (parentHash,
 	// width). Returns pgx.ErrNoRows when no thumbnail exists at that size.
 	// IMG-1: used by HandleImageByHash when ?size= is present.
-	GetImageByParent(ctx context.Context, parentHash string, width int) (Blob, error)
+	// When preferWebP is true, prefers image/webp thumbnails over JPEG.
+	GetImageByParent(ctx context.Context, parentHash string, width int, preferWebP bool) (Blob, error)
 
 	// GetImage returns the blob bytes + mime + source URI for a known hash.
 	// Returns (nil, "", "", pgx.ErrNoRows) when the hash is unknown.

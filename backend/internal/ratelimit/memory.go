@@ -49,6 +49,67 @@ func (l *Limiter) Allow(key string, limit int, window time.Duration) bool {
 	return l.allowMem(key, limit, window)
 }
 
+// Remaining returns how many more requests are allowed for key within the
+// current window. RL-3: used by tiered rate-limit middleware to set
+// X-RateLimit-Remaining with the actual count (previously hardcoded to 0).
+// Returns 0 when the limit is already exceeded; never negative.
+func (l *Limiter) Remaining(key string, limit int, window time.Duration) int {
+	if l.pool != nil {
+		return l.remainingPg(key, limit, window)
+	}
+	return l.remainingMem(key, limit, window)
+}
+
+// remainingMem returns remaining capacity for the in-memory sliding window.
+func (l *Limiter) remainingMem(key string, limit int, window time.Duration) int {
+	now := time.Now().UnixMicro()
+	cutoff := now - window.Microseconds()
+
+	l.mu.Lock()
+	defer l.mu.Unlock()
+
+	e, ok := l.windows[key]
+	if !ok {
+		return limit
+	}
+	// Count timestamps still within the window.
+	n := 0
+	for _, ts := range e.timestamps {
+		if ts >= cutoff {
+			n++
+		}
+	}
+	rem := limit - n
+	if rem < 0 {
+		return 0
+	}
+	return rem
+}
+
+// remainingPg returns remaining capacity for the Postgres fixed-window
+// counter. Fails OPEN (returns 0) on DB error — a DB outage should
+// not claim capacity is available.
+func (l *Limiter) remainingPg(key string, limit int, window time.Duration) int {
+	windowStart := time.Now().Truncate(window)
+	ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
+	defer cancel()
+	var count int
+	err := l.pool.QueryRow(ctx,
+		`SELECT count FROM rate_limits WHERE rl_key = $1 AND window_start = $2`,
+		key, windowStart,
+	).Scan(&count)
+	if err != nil {
+		// DB error — report 0 remaining so headers match Allow()'s fail-closed
+		// rejection on the same DB outage.
+		return 0
+	}
+	rem := limit - count
+	if rem < 0 {
+		return 0
+	}
+	return rem
+}
+
 // allowPg is an atomic fixed-window counter: one round-trip UPSERT…RETURNING.
 // Fail-CLOSED on DB error: for a payment-grade marketplace an unguarded burst
 // is worse than a short 503. A counter metric is incremented so operators can

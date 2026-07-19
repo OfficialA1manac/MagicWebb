@@ -5,13 +5,13 @@ import (
 	"fmt"
 	"net"
 	"net/http"
+	"net/url"
 	"strings"
 	"time"
 
 	"github.com/99designs/gqlgen/graphql"
 	"github.com/99designs/gqlgen/graphql/handler"
 	"github.com/99designs/gqlgen/graphql/handler/extension"
-	"github.com/99designs/gqlgen/graphql/handler/lru"
 	"github.com/99designs/gqlgen/graphql/handler/transport"
 	"github.com/gofiber/fiber/v2"
 	"github.com/vektah/gqlparser/v2/ast"
@@ -40,10 +40,18 @@ var AuthCtxKey = authCtxKeyType{}
 // GraphQLServer wraps a gqlgen-generated executable schema with Fiber
 // HTTP handlers for POST /graphql, GET /graphql (docs), and GET /graphiql.
 // WebSocket subscriptions are served at /graphql/ws.
+//
+// ResponseCache is exported so the Prometheus /metrics endpoint can surface
+// GQL-2 cache hit/miss/set/eviction counters alongside the existing in-memory
+// cache metrics (CACHE-4).
 type GraphQLServer struct {
 	srv  *handler.Server
 	q    *db.Q  // retained for DataLoader creation per-request
 	cfg  *config.Config // GQL-4: JWT secret for WS auth
+
+	// GQL-2: Tiered response cache with Prometheus-compatible Stats().
+	// Set by NewGraphQLServer; nil before construction.
+	ResponseCache *ResponseCacheExtension
 }
 
 // NewGraphQLServer creates a gqlgen-based GraphQL server powered by the
@@ -98,22 +106,31 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	// APQ (Automatic Persisted Queries): clients send a hash first;
 	// full query only on cache miss. Halves bandwidth for repeated
 	// queries (e.g., polling a saved search).
+	//
+	// GQL-1: Uses PersistedQueryCache which pre-loads known queries at
+	// build time, eliminating the "PersistedQueryNotFound" round-trip
+	// for the most common queries (listings, collections, trending,
+	// metrics, search, etc.). Unknown hashes fall through to an LRU cache
+	// so the APQ protocol still works for dynamically-registered queries.
 	srv.Use(extension.AutomaticPersistedQuery{
-		Cache: lru.New[string](100),
+		Cache: NewPersistedQueryCache(200),
 	})
 
 	// ── GQL-2: Response cache ────────────────────────────────────────
 	// Caches complete JSON responses for deterministic read-heavy queries
-	// (collection, metrics) with 30s TTL. On cache hit, the DB and all
-	// resolvers are skipped entirely — reducing latency to near-zero.
-	srv.Use(NewResponseCacheExtension())
+	// (collection, metrics) with tiered TTLs. On cache hit, the DB and
+	// all resolvers are skipped entirely — reducing latency to near-zero.
+	// Stored on the GraphQLServer so the Prometheus /metrics endpoint can
+	// surface cache hit/miss/set/eviction counters (CACHE-4).
+	responseCache := NewResponseCacheExtension()
+	srv.Use(responseCache)
 
 	// Introspection: enabled in all environments so GraphiQL and
 	// external tooling (Apollo Studio, Postman, etc.) can discover
 	// the schema. No auth secrets are exposed through introspection.
 	// CORS already limits which origins can access /graphql.
 
-	return &GraphQLServer{srv: srv, q: q, cfg: cfg}
+	return &GraphQLServer{srv: srv, q: q, cfg: cfg, ResponseCache: responseCache}
 }
 
 // HandlePOST executes a GraphQL query and returns the JSON response.
@@ -159,8 +176,72 @@ func (s *GraphQLServer) HandlePOST(c *fiber.Ctx) error {
 	return c.SendStatus(fiber.StatusOK)
 }
 
-// HandleGET serves the GraphQL API documentation page.
+// HandleGET serves either the GraphQL API documentation page or executes a
+// persisted query via GET for CDN-friendly caching (GQL-1).
+//
+// Two modes:
+//  1. No query params → returns the API documentation HTML page.
+//  2. ?query_hash=<sha256>[&variables=<json>] → executes a build-time
+//     registered persisted query and returns JSON. Responses include CDN
+//     cache headers (Cache-Control: public, s-maxage=60) so edge proxies
+//     can serve cached results for common read queries without hitting
+//     the origin.
+//
+// GET mode only works for queries registered at build time in
+// persisted_queries.go. Runtime-registered queries (via POST APQ protocol)
+// are not available via GET. Use POST /graphql for general queries.
 func (s *GraphQLServer) HandleGET(c *fiber.Ctx) error {
+	// ── GQL-1: Persisted query via GET (CDN-cacheable) ──────────────────
+	if hash := c.Query("query_hash"); hash != "" {
+		queryText, ok := LookupPersistedQuery(hash)
+		if !ok {
+			return c.Status(fiber.StatusNotFound).JSON(fiber.Map{
+				"error":   "persisted query not found",
+				"message": "This hash is not registered at build time. Use POST with the full query to register it via APQ.",
+			})
+		}
+
+		// Build an HTTP GET request with the URL-encoded query and variables.
+		// gqlgen's transport.GET parses ?query= and ?variables= natively.
+		targetURL := "/graphql?query=" + url.QueryEscape(queryText)
+		if vars := c.Query("variables"); vars != "" {
+			targetURL += "&variables=" + url.QueryEscape(vars)
+		}
+
+		ctx, cancel := context.WithTimeout(c.Context(), 30*time.Second)
+		defer cancel()
+
+		req, err := http.NewRequestWithContext(ctx, "GET", targetURL, nil)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"errors": []map[string]any{{"message": "internal server error"}},
+			})
+		}
+
+		// Attach request-scoped DataLoaders.
+		req = req.WithContext(dataloader.WithLoaders(ctx, dataloader.New(s.q)))
+
+		// Pre-set Content-Type on Fiber before gqlgen writes the body.
+		c.Set("Content-Type", "application/json")
+
+		w := &fiberResponseWriter{c: c}
+		s.srv.ServeHTTP(w, req)
+
+		// ── GQL-1: CDN cache headers (only on success) ──────────────────
+		// Set cache headers AFTER the response is written so error
+		// responses are never cached at the edge.
+		if w.written && w.status < 400 {
+			c.Set("Cache-Control", "public, max-age=15, s-maxage=60")
+			c.Append("Vary", "Origin") // merges with compress middleware's Accept-Encoding
+		}
+
+		if w.written {
+			return nil
+		}
+		return c.SendStatus(fiber.StatusOK)
+	}
+
+	// No query_hash — serve the documentation page.
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	return c.SendString(graphqlDocsHTML)
 }
@@ -314,7 +395,7 @@ func (s *GraphQLServer) HandleGraphiQL(c *fiber.Ctx) error {
 type fiberResponseWriter struct {
 	c       *fiber.Ctx
 	written bool
-	status  int
+	status  int // defaults to 0; Write() without WriteHeader() implies 200 OK
 }
 
 func (w *fiberResponseWriter) Header() http.Header {

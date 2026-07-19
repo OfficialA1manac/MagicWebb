@@ -303,6 +303,15 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 		}
 	}
 
+	// GQL-2: surface GraphQL response cache stats alongside the in-memory
+	// cache counters. Prefixed graphql_cache_ to distinguish from the REST
+	// cache counters.
+	if GlobalGraphQLCache != nil {
+		for k, v := range GlobalGraphQLCache.Stats() {
+			out[k] = v
+		}
+	}
+
 	return out
 }
 

@@ -1606,6 +1606,44 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.TrendingScore.Window(childComplexity), true
 
+	case "Subscription.listingUpdated":
+		if e.complexity.Subscription.ListingUpdated == nil {
+			break
+		}
+
+		args, err := ec.field_Subscription_listingUpdated_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Subscription.ListingUpdated(childComplexity, args["collection"].(*string), args["tokenID"].(*string)), true
+
+	case "Subscription.auctionUpdated":
+		if e.complexity.Subscription.AuctionUpdated == nil {
+			break
+		}
+
+		args, err := ec.field_Subscription_auctionUpdated_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Subscription.AuctionUpdated(childComplexity, args["auctionId"].(*int)), true
+
+	case "Subscription.activityUpdated":
+		if e.complexity.Subscription.ActivityUpdated == nil {
+			break
+		}
+
+		return e.complexity.Subscription.ActivityUpdated(childComplexity), true
+
+	case "Subscription.notificationUpdated":
+		if e.complexity.Subscription.NotificationUpdated == nil {
+			break
+		}
+
+		return e.complexity.Subscription.NotificationUpdated(childComplexity), true
+
 	}
 	return 0, false
 }
@@ -1646,6 +1684,25 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 			}
 
 			return &response
+		}
+
+	// GQL-4: Subscription dispatch — feeds gqlgen's transport.Websocket with
+	// streamable results. The _Subscription method returns a closure that
+	// produces graphql.Marshaler values; ReadResponse reads from the closure
+	// until it returns nil (channel closed / context cancelled).
+	case ast.Subscription:
+		next := ec._Subscription(ctx, opCtx.Operation.SelectionSet)
+		if next == nil {
+			return nil
+		}
+		return func(ctx context.Context) *graphql.Response {
+			data := next(ctx)
+			if data == nil {
+				return nil
+			}
+			var buf bytes.Buffer
+			data.MarshalGQL(&buf)
+			return &graphql.Response{Data: buf.Bytes()}
 		}
 
 	default:
@@ -14489,6 +14546,10 @@ func (ec *executionContext) _Profile(ctx context.Context, sel ast.SelectionSet, 
 }
 
 var queryImplementors = []string{"Query"}
+
+// GQL-4: subscriptionImplementors lists the GraphQL type names that implement
+// the Subscription root type. Used by CollectFields to resolve fragment spreads.
+var subscriptionImplementors = []string{"Subscription"}
 
 func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
 	fields := graphql.CollectFields(ec.OperationContext, sel, queryImplementors)

@@ -811,15 +811,23 @@ func (q *Q) PutThumbnail(ctx context.Context, sha256hex, mime, parentHash, colle
 // width). Returns pgx.ErrNoRows when no thumbnail exists at that size.
 // IMG-1: used by HandleImageByHash when ?size= is present. Uses the
 // composite index idx_nft_image_blobs_parent_width for single-scan lookup.
-func (q *Q) GetImageByParent(ctx context.Context, parentHash string, width int) (imagestore.Blob, error) {
+//
+// When preferWebP is true, the ORDER BY prefers image/webp over image/jpeg
+// (the default). Modern browsers that send Accept: image/webp get ~30%
+// smaller thumbnails; all other clients get the universal JPEG fallback.
+func (q *Q) GetImageByParent(ctx context.Context, parentHash string, width int, preferWebP bool) (imagestore.Blob, error) {
 	var b imagestore.Blob
-	// JPEG is preferred (universal browser support). WebP is served only when
-	// explicitly requested via format negotiation — AddAccept-negotiation
-	// can add ?format=webp or use the Accept header later.
+	// Dynamic ORDER BY: JPEG-first by default, WebP-first when client
+	// advertises image/webp support via Accept header. Both formats are
+	// stored at every size, so the query always returns one result.
+	orderClause := "ORDER BY CASE WHEN mime = 'image/jpeg' THEN 0 ELSE 1 END"
+	if preferWebP {
+		orderClause = "ORDER BY CASE WHEN mime = 'image/webp' THEN 0 ELSE 1 END"
+	}
 	err := q.reader().QueryRow(ctx,
 		`SELECT body, mime, source_uri FROM nft_image_blobs
 		  WHERE parent_hash = $1 AND thumb_width = $2
-		  ORDER BY CASE WHEN mime = 'image/jpeg' THEN 0 ELSE 1 END
+		  `+orderClause+`
 		  LIMIT 1`, parentHash, width).
 		Scan(&b.Body, &b.Mime, &b.SourceURI)
 	return b, err

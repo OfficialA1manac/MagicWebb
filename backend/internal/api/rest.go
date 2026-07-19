@@ -140,6 +140,13 @@ var GlobalCaches struct {
 	Activity cache.CacheInterface
 }
 
+// GlobalGraphQLCache is the GraphQL response cache's stats provider. Set by
+// Mount() after NewGraphQLServer creates the cache; read by
+// registerMetricsRoute in main.go and BuildResponse in metrics.go for
+// Prometheus gauges and JSON metrics (CACHE-4 / GQL-2). Nil when the
+// GraphQL server is not wired (tests, single-purpose binaries).
+var GlobalGraphQLCache *graphql.ResponseCacheExtension
+
 // GlobalWSStats is the WebSocket handler's metrics provider. Set by Mount()
 // after wsHandler is created; read by registerMetricsRoute in main.go for
 // Prometheus gauges (active connections, rate-limited messages, rejections).
@@ -165,8 +172,13 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// gzip/brotli compression on every compressible response — bandwidth
 	// is by far the largest line item in our Fly bill and the JSON HTMX
 	// partials (listings/auctions/activity/token_live/etc.) compress >10x.
+	//
+	// Level 5 is the Brotli sweet spot: ~20% smaller than gzip for SVG
+	// thumbnails + JSON payloads. gzip at level 5 is only ~1-2% larger
+	// than the default level 6 — a negligible trade-off for the Brotli
+	// bandwidth savings. CPU cost is amortized by CDN immutable caching.
 	app.Use(compress.New(compress.Config{
-		Level: compress.LevelDefault,
+		Level: 5,
 	}))
 
 	// /healthz = liveness. Must respond 200 within ~3.5s even when the
@@ -233,6 +245,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// provided, decoupling presentation from storage. The client points
 	// to the local Fiber server (which also mounts the Connect-RPC handler).
 	gql := graphql.NewGraphQLServer(q, bcast, wsClient, cfg)
+	GlobalGraphQLCache = gql.ResponseCache // GQL-2: expose cache stats for Prometheus /metrics
 	gqlLimiter := rateLimitMiddleware(rl)
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
@@ -450,13 +463,20 @@ func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 func tieredRateLimitMiddleware(rl *ratelimit.Limiter, keyPrefix string, limit int, window time.Duration) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		key := keyPrefix + "|" + ClientIP(c)
-		if !rl.Allow(key, limit, window) {
+		// RL-3: peek remaining BEFORE consuming to get accurate count.
+		// If Allow() returns false (limit exceeded or TOCTOU race loss),
+		// fall through to the 429 path with remaining=0.
+		remaining := rl.Remaining(key, limit, window)
+		if remaining <= 0 || !rl.Allow(key, limit, window) {
 			c.Set("Retry-After", strconv.Itoa(int(window.Seconds())))
 			c.Set("X-RateLimit-Limit", strconv.Itoa(limit))
 			c.Set("X-RateLimit-Remaining", "0")
 			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(window).Unix(), 10))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
+		c.Set("X-RateLimit-Limit", strconv.Itoa(limit))
+		c.Set("X-RateLimit-Remaining", strconv.Itoa(remaining-1))
+		c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(window).Unix(), 10))
 		return c.Next()
 	}
 }

@@ -142,12 +142,20 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 	// When present, look up the thumbnail by (parent_hash, width) instead
 	// of serving the full-size blob directly. Falls back to the full-size
 	// image when no thumbnail exists at the requested size (best-effort).
+	//
+	// Format negotiation via Accept header: clients that send
+	// Accept: image/webp get WebP thumbnails (~30% smaller); all other
+	// clients get the universal JPEG fallback.
 	if sizeStr := c.Query("size"); sizeStr != "" {
 		size, err := strconv.Atoi(sizeStr)
 		if err != nil || (size != 128 && size != 256 && size != 512) {
 			return writeErr(c, fiber.StatusBadRequest, "size must be 128, 256, or 512")
 		}
-		blob, err := s.q.GetImageByParent(c.Context(), sha, size)
+		preferWebP := strings.Contains(c.Get("Accept"), "image/webp")
+		if preferWebP {
+			c.Append("Vary", "Accept") // merges with compress middleware's Accept-Encoding
+		}
+		blob, err := s.q.GetImageByParent(c.Context(), sha, size, preferWebP)
 		if err != nil {
 			if imagestore.IsNoRows(err) {
 				// No thumbnail at this size — fall through to full-size.
@@ -195,6 +203,10 @@ func (s *MediaService) handleRetry(c *fiber.Ctx) error {
 	if s.rl != nil {
 		ip := ClientIP(c)
 		if !s.rl.Allow("img-retry:"+ip, 10, time.Minute) {
+			c.Set("Retry-After", "60")
+			c.Set("X-RateLimit-Limit", "10")
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
 	}

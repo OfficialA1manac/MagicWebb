@@ -59,6 +59,11 @@ fly deploy --strategy canary                              # Fly canary:
 - [x] Keeper advisory-lock single-flight (`WaitKeeperLock`).
 - [x] WalletConnect v2 self-hosted UMD SDK (`static/wc-bundle.js`,
       no third-party CDN at runtime).
+- [x] Brotli compression at level 5 via Fiber `compress` middleware — ~21%
+      bandwidth savings vs gzip on HTML listings + JSON API responses.
+      Fly Proxy passes through `Content-Encoding: br` from origin untouched;
+      Fiber automatically appends `Vary: Accept-Encoding` so Fly's edge cache
+      stores separate gzip/brotli/uncompressed variants per client capability.
 
 ### Required env (Fly.io secrets, set via `flyctl secrets set`)
 
@@ -129,6 +134,56 @@ curl -fsS -X POST https://magicwebb.fly.dev/auth/verify \
   -H 'Content-Type: application/json' \
   -d '{"message":"Sign in to MagicWebb\nChain ID: 114\nAddress: 0x…\nNonce: …",
        "signature":"…","address":"…"}' | jq .error  # expect "chain id mismatch"
+```
+
+## Adding a third-party CDN (Cloudflare, Fastly)
+
+If you add Cloudflare or Fastly in front of Fly.io, the CDN may **normalize
+or strip** `Accept-Encoding` headers before they reach the origin, which
+would prevent the origin from serving Brotli. Configure the CDN to preserve
+the original `Accept-Encoding` value:
+
+### Cloudflare
+
+Cloudflare's default behavior is to normalize `Accept-Encoding` to either
+`gzip` or `br` for cache efficiency. This is safe — Cloudflare will request
+Brotli from the origin when the end-client supports it. No configuration
+needed unless you have custom caching rules.
+
+If using Cloudflare's **Cache Rules** or **Transform Rules**, ensure:
+```
+Respect existing headers: Preserve Vary: Accept-Encoding
+Origin cache-control: Honor Cache-Control: public, max-age=31536000, immutable
+```
+
+### Fastly
+
+Fastly automatically normalizes `Accept-Encoding` to a single value
+(`br` or `gzip`) for cache key efficiency, storing the original in
+`Fastly-Orig-Accept-Encoding`. By default this means:
+
+- Fastly requests either `br` or `gzip` from the origin (the normalised value).
+- The origin responds with that encoding, and Fastly caches it.
+- If a client that only supports gzip requests a cached Brotli response,
+  Fastly decompresses and re-compresses on the fly (no origin hit needed).
+
+To pass the **original** `Accept-Encoding` header to the origin (if your
+origin does complex content negotiation beyond brotli/gzip):
+```vcl
+# In vcl_recv:
+set req.http.Accept-Encoding = req.http.Fastly-Orig-Accept-Encoding;
+```
+
+### Verification
+
+```bash
+# Verify Brotli reaches the client through the CDN:
+curl -sI -H "Accept-Encoding: br" https://magicwebb.xyz/listings \
+  | grep -i 'content-encoding:\s*br'
+
+# Verify Vary header is preserved:
+curl -sI https://magicwebb.xyz/listings \
+  | grep -i 'vary:.*accept-encoding'
 ```
 
 ## Post-launch monitoring

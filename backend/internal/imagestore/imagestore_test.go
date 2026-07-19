@@ -69,7 +69,7 @@ func (f *fakeStore) PutThumbnail(_ context.Context, sha, mime, parentHash, colle
 // GetImageByParent returns a thumbnail by (parentHash, width). For the fake,
 // we iterate all rows — good enough for unit tests. Returns pgx.ErrNoRows
 // when no matching thumbnail exists.
-func (f *fakeStore) GetImageByParent(_ context.Context, parentHash string, width int) (Blob, error) {
+func (f *fakeStore) GetImageByParent(_ context.Context, parentHash string, width int, preferWebP bool) (Blob, error) {
 	// The fake doesn't track parentHash/width separately since PutThumbnail
 	// delegates to PutImage. In real usage, thumbnails have unique hashes.
 	// This stub returns pgx.ErrNoRows — integration tests cover the real path.

@@ -33,6 +33,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
@@ -283,6 +284,15 @@ func main() {
 	// Mount all REST + SSE routes
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al)
 
+	// ── CACHE-2: Warm critical caches on startup ─────────────────────────
+	// Query trending collections for the three standard windows and pre-fill
+	// the cache so the first page load after a deploy doesn't hit a cold
+	// cache. Trending scores are recomputed every 60s by the score worker;
+	// the cache TTL (30s) means warmed data is fresh enough for immediate use.
+	// Activity cache is not warmed — it's per-address and the first request
+	// naturally populates it.
+	go warmTrendingCache(ctx, q, api.GlobalCaches.Trending)
+
 	// AUTH-3: API key management endpoints (admin-only, admin tier rate limit).
 	api.MountAPIKeyRoutes(app, q, &config.C, rl, aks, al)
 
@@ -413,6 +423,18 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 			cacheEvictions += as["cache_evictions"]
 		}
 
+		// GQL-2: GraphQL response cache stats. Prefixed graphql_cache_ to
+		// distinguish from the REST in-memory cache counters.
+		var gqlCacheHits, gqlCacheMisses, gqlCacheSets, gqlCacheEvictions, gqlCacheSize int64
+		if gql := api.GlobalGraphQLCache; gql != nil {
+			gs := gql.Stats()
+			gqlCacheHits = gs["graphql_cache_hits"]
+			gqlCacheMisses = gs["graphql_cache_misses"]
+			gqlCacheSets = gs["graphql_cache_sets"]
+			gqlCacheEvictions = gs["graphql_cache_evictions"]
+			gqlCacheSize = gs["graphql_cache_size"]
+		}
+
 		// WS metrics: active connections, lifetime connections, rate-limited messages,
 		// and connection rejections (per-IP and global).
 		var wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal int64
@@ -480,18 +502,33 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 				"# HELP magicwebb_head_lag_blocks Chain head minus last indexed block.\n"+
 				"# TYPE magicwebb_head_lag_blocks gauge\n"+
 				"magicwebb_head_lag_blocks %d\n"+
-				"# HELP magicwebb_cache_hits_total Total cache hits across all caches.\n"+
+				"# HELP magicwebb_cache_hits_total Total cache hits across all REST in-memory caches.\n"+
 				"# TYPE magicwebb_cache_hits_total counter\n"+
 				"magicwebb_cache_hits_total %d\n"+
-				"# HELP magicwebb_cache_misses_total Total cache misses across all caches.\n"+
+				"# HELP magicwebb_cache_misses_total Total cache misses across all REST in-memory caches.\n"+
 				"# TYPE magicwebb_cache_misses_total counter\n"+
 				"magicwebb_cache_misses_total %d\n"+
-				"# HELP magicwebb_cache_sets_total Total cache sets across all caches.\n"+
+				"# HELP magicwebb_cache_sets_total Total cache sets across all REST in-memory caches.\n"+
 				"# TYPE magicwebb_cache_sets_total counter\n"+
 				"magicwebb_cache_sets_total %d\n"+
-				"# HELP magicwebb_cache_evictions_total Total cache evictions (lazy TTL expiry).\n"+
+				"# HELP magicwebb_cache_evictions_total Total cache evictions (lazy TTL expiry) across all REST in-memory caches.\n"+
 				"# TYPE magicwebb_cache_evictions_total counter\n"+
 				"magicwebb_cache_evictions_total %d\n"+
+				"# HELP magicwebb_graphql_cache_hits_total GraphQL response cache hits (GQL-2 tiered cache).\n"+
+				"# TYPE magicwebb_graphql_cache_hits_total counter\n"+
+				"magicwebb_graphql_cache_hits_total %d\n"+
+				"# HELP magicwebb_graphql_cache_misses_total GraphQL response cache misses.\n"+
+				"# TYPE magicwebb_graphql_cache_misses_total counter\n"+
+				"magicwebb_graphql_cache_misses_total %d\n"+
+				"# HELP magicwebb_graphql_cache_sets_total GraphQL response cache sets (population events).\n"+
+				"# TYPE magicwebb_graphql_cache_sets_total counter\n"+
+				"magicwebb_graphql_cache_sets_total %d\n"+
+				"# HELP magicwebb_graphql_cache_evictions_total GraphQL response cache LRU evictions.\n"+
+				"# TYPE magicwebb_graphql_cache_evictions_total counter\n"+
+				"magicwebb_graphql_cache_evictions_total %d\n"+
+				"# HELP magicwebb_graphql_cache_size Current number of entries in the GraphQL response cache.\n"+
+				"# TYPE magicwebb_graphql_cache_size gauge\n"+
+				"magicwebb_graphql_cache_size %d\n"+
 				"# HELP magicwebb_ws_active_connections Current active WebSocket connections.\n"+
 				"# TYPE magicwebb_ws_active_connections gauge\n"+
 				"magicwebb_ws_active_connections %d\n"+
@@ -509,6 +546,7 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 				"magicwebb_ws_conns_rejected_global %d\n",
 			dropped, streak, sse.DroppedClientsGauge(), eth.HealthyCount(), lag,
 			cacheHits, cacheMisses, cacheSets, cacheEvictions,
+			gqlCacheHits, gqlCacheMisses, gqlCacheSets, gqlCacheEvictions, gqlCacheSize,
 			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
 		)
 
@@ -682,6 +720,10 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := api.ClientIP(c)
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
+			c.Set("Retry-After", "60")
+			c.Set("X-RateLimit-Limit", "20")
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
 		address := strings.ToLower(strings.TrimSpace(c.Query("address")))
@@ -711,6 +753,10 @@ func verifyHandler(ns nonce.Store, rl *ratelimit.Limiter, rs auth.RefreshStore, 
 		ip := api.ClientIP(c)
 		ua := c.Get("User-Agent")
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
+			c.Set("Retry-After", "60")
+			c.Set("X-RateLimit-Limit", "20")
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
 			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
 		var req verifyReq
@@ -984,6 +1030,50 @@ func isValidEthAddr(s string) bool {
 		}
 	}
 	return true
+}
+
+// warmTrendingCache pre-fills the trending cache with the three standard
+// windows (1h, 24h, 7d) to prevent cold-start latency spikes on the first
+// trending page load after a deploy. Runs in a background goroutine so it
+// doesn't block server startup — the cache is populated asynchronously.
+// Non-fatal: failures are logged but never prevent the server from starting.
+// Each query is bounded by a 5s timeout so a slow DB at startup doesn't
+// hold the warming goroutine indefinitely.
+// CACHE-2: cache warming on deploy.
+func warmTrendingCache(ctx context.Context, q *db.Q, c cache.CacheInterface) {
+	if c == nil || q == nil {
+		return
+	}
+	windows := []struct {
+		name  string
+		limit int
+	}{
+		{"1h", 20},
+		{"24h", 20},
+		{"7d", 20},
+	}
+	for _, w := range windows {
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		// Bound each query with a 5s timeout so a slow DB doesn't hold
+		// the warming goroutine open indefinitely.
+		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		rows, err := q.GetTrendingCollections(queryCtx, w.name, w.limit)
+		cancel()
+		if err != nil {
+			log.Warn().Err(err).Str("window", w.name).Msg("startup: cache warm failed for trending window")
+			continue
+		}
+		if rows == nil {
+			rows = []db.TrendingScore{}
+		}
+		ckey := fmt.Sprintf("tr:%s:%d", w.name, w.limit)
+		c.Set(ckey, rows)
+		log.Info().Str("window", w.name).Int("rows", len(rows)).Msg("startup: cache warm complete")
+	}
 }
 
 // seedTracked ensures every collection the indexer needs to watch has a row in

@@ -54,6 +54,18 @@ const rateLimitBackoff = 30 * time.Second
 // RPC health events (e.g., "rpc-health" SSE type).
 type HealthCallback func(endpointIdx int, healthy bool, endpointCount int, healthyCount int)
 
+// ── RPC-2: Concurrent FilterLogs metrics ──────────────────────────────
+//
+// Exported atomic counters so the Prometheus /metrics endpoint can surface
+// concurrent-vs-sequential FilterLogs hit rates. When concurrentFilterLogs
+// returns ok=true, the concurrent path succeeded; when ok=false, it fell
+// back to sequential failover.
+var (
+	ConcurrentFilterLogsAttempts  atomic.Int64
+	ConcurrentFilterLogsSuccesses atomic.Int64
+	ConcurrentFilterLogsFallbacks atomic.Int64
+)
+
 // Pool fans calls out across endpoints with sticky selection and failover.
 // RPC-3: tracks per-endpoint rate-limit state so endpoints returning HTTP 429
 // are temporarily skipped during failover.
@@ -356,9 +368,12 @@ func (p *Pool) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.
 	// sequential failover (the original behaviour). Single-endpoint pools skip
 	// the fan-out and use sequential call() directly.
 	if len(p.nodes) >= 2 {
+		ConcurrentFilterLogsAttempts.Add(1)
 		if logs, ok := p.concurrentFilterLogs(ctx, q); ok {
+			ConcurrentFilterLogsSuccesses.Add(1)
 			return logs, nil
 		}
+		ConcurrentFilterLogsFallbacks.Add(1)
 		// Concurrent race returned ambiguous results — fall through to sequential.
 	}
 	return call(p, ctx, "FilterLogs", heavyTimeout, func(c context.Context, n ethNode) ([]types.Log, error) {

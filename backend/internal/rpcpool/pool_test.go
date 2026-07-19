@@ -143,3 +143,140 @@ func TestSendTransactionNonceTooLowIsError(t *testing.T) {
 		t.Fatal("'nonce too low' must not be reported as success")
 	}
 }
+
+// ── RPC-2: Concurrent FilterLogs tests ────────────────────────────────────
+
+// fakeLogNode allows custom FilterLogs responses for concurrent path testing.
+type fakeLogNode struct {
+	fakeNode
+	logs []types.Log
+	err  error
+}
+
+func (f *fakeLogNode) FilterLogs(ctx context.Context, q ethereum.FilterQuery) ([]types.Log, error) {
+	f.calls.Add(1)
+	if f.err != nil {
+		return nil, f.err
+	}
+	return f.logs, nil
+}
+
+func makeLogs(count int, baseTx string) []types.Log {
+	out := make([]types.Log, count)
+	for i := 0; i < count; i++ {
+		out[i] = types.Log{TxHash: common.HexToHash(baseTx + string(rune('0'+i)))}
+	}
+	return out
+}
+
+func TestConcurrentFilterLogsMatchingResults(t *testing.T) {
+	// Two endpoints return identical logs → concurrent path succeeds.
+	logs := makeLogs(3, "0xabc")
+	a := &fakeLogNode{logs: logs}
+	b := &fakeLogNode{logs: logs}
+	c := &fakeLogNode{logs: logs} // third endpoint — slower, result ignored
+
+	p := newPoolWithNodes([]ethNode{a, b, c}, time.Second)
+
+	prevAttempts := ConcurrentFilterLogsAttempts.Load()
+	prevSuccesses := ConcurrentFilterLogsSuccesses.Load()
+
+	got, err := p.FilterLogs(context.Background(), ethereum.FilterQuery{})
+	if err != nil {
+		t.Fatalf("concurrent FilterLogs failed: %v", err)
+	}
+	if len(got) != 3 {
+		t.Fatalf("want 3 logs, got %d", len(got))
+	}
+
+	// At least 2 endpoints should have been called (first 2 responding).
+	totalCalls := a.calls.Load() + b.calls.Load() + c.calls.Load()
+	if totalCalls < 2 {
+		t.Fatalf("want at least 2 FilterLogs calls, got %d", totalCalls)
+	}
+
+	// Metrics: this call must have incremented Attempts and Successes.
+	if ConcurrentFilterLogsAttempts.Load() <= prevAttempts {
+		t.Error("ConcurrentFilterLogsAttempts not incremented by this call")
+	}
+	if ConcurrentFilterLogsSuccesses.Load() <= prevSuccesses {
+		t.Error("ConcurrentFilterLogsSuccesses not incremented by this call")
+	}
+}
+
+func TestConcurrentFilterLogsMismatchingResults(t *testing.T) {
+	// Two endpoints disagree → falls back to sequential failover.
+	a := &fakeLogNode{logs: makeLogs(3, "0xabc")}
+	b := &fakeLogNode{logs: makeLogs(4, "0xdef")}
+
+	p := newPoolWithNodes([]ethNode{a, b}, time.Second)
+
+	prevFallbacks := ConcurrentFilterLogsFallbacks.Load()
+
+	got, err := p.FilterLogs(context.Background(), ethereum.FilterQuery{})
+	if err != nil {
+		t.Fatalf("sequential fallback FilterLogs failed: %v", err)
+	}
+	// Sequential fallback uses the first successful response (a = 3 logs).
+	if len(got) != 3 {
+		t.Fatalf("want 3 logs from sequential fallback, got %d", len(got))
+	}
+
+	// Metrics: this call must have incremented Fallbacks.
+	if ConcurrentFilterLogsFallbacks.Load() <= prevFallbacks {
+		t.Error("ConcurrentFilterLogsFallbacks not incremented on mismatch")
+	}
+}
+
+func TestConcurrentFilterLogsSingleEndpoint(t *testing.T) {
+	// Single endpoint → concurrent path not used, goes straight to sequential.
+	a := &fakeLogNode{logs: makeLogs(2, "0xabc")}
+	p := newPoolWithNodes([]ethNode{a}, time.Second)
+
+	prevAttempts := ConcurrentFilterLogsAttempts.Load()
+
+	got, err := p.FilterLogs(context.Background(), ethereum.FilterQuery{})
+	if err != nil {
+		t.Fatalf("FilterLogs failed: %v", err)
+	}
+	if len(got) != 2 {
+		t.Fatalf("want 2 logs, got %d", len(got))
+	}
+
+	// Single endpoint must NOT trigger concurrent path.
+	if ConcurrentFilterLogsAttempts.Load() != prevAttempts {
+		t.Error("single endpoint triggered concurrent FilterLogs path")
+	}
+}
+
+func TestConcurrentFilterLogsOneEndpointErrors(t *testing.T) {
+	// One endpoint errors, other succeeds → concurrent path succeeds with 2
+	// matching results (the errored endpoint is skipped).
+	logs := makeLogs(5, "0xabc")
+	a := &fakeLogNode{logs: logs}
+	b := &fakeLogNode{err: errors.New("rpc down")}
+	c := &fakeLogNode{logs: logs}
+
+	p := newPoolWithNodes([]ethNode{a, b, c}, time.Second)
+
+	got, err := p.FilterLogs(context.Background(), ethereum.FilterQuery{})
+	if err != nil {
+		t.Fatalf("concurrent FilterLogs failed despite healthy endpoints: %v", err)
+	}
+	if len(got) != 5 {
+		t.Fatalf("want 5 logs, got %d", len(got))
+	}
+}
+
+func TestConcurrentFilterLogsAllError(t *testing.T) {
+	// All endpoints error → concurrent returns nothing, sequential also fails.
+	a := &fakeLogNode{err: errors.New("rpc down")}
+	b := &fakeLogNode{err: errors.New("rpc down")}
+
+	p := newPoolWithNodes([]ethNode{a, b}, time.Second)
+
+	_, err := p.FilterLogs(context.Background(), ethereum.FilterQuery{})
+	if err == nil {
+		t.Fatal("want error when all endpoints fail")
+	}
+}
