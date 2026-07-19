@@ -14,6 +14,16 @@ type Collection struct {
 	Standard    string          `json:"standard"`
 	DeployBlock int             `json:"deployBlock"`
 	Verified    bool            `json:"verified"`
+
+	// GQL-3: Preloaded stats from the proto Collection message.
+	// When set (server.go::ListCollections populates these via
+	// GetCollectionStatsBatch), the CollectionResolver sub-resolvers
+	// skip DataLoader and return these directly, saving 1 DB round-trip
+	// per collection in list responses.
+	StatsPreloaded bool   `json:"-"`
+	PreloadedFloor string `json:"-"`
+	PreloadedVol   string `json:"-"`
+	PreloadedCount int    `json:"-"`
 }
 
 type CollectionStats struct {

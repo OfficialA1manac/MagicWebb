@@ -111,8 +111,17 @@ func (r *collectionResolver) getCollectionStats(ctx context.Context, address str
 }
 
 // Stats returns aggregated collection stats (floor, volume, listed count).
-// Uses DataLoader — multiple collection stats queries are batched into one DB round-trip.
+// GQL-3: when the proto Collection already includes stats (via
+// GetCollectionStatsBatch in server.go::ListCollections), the DataLoader
+// round-trip is skipped entirely, saving 1 DB query per collection.
 func (r *collectionResolver) Stats(ctx context.Context, obj *Collection) (*CollectionStats, error) {
+	if obj.StatsPreloaded {
+		return &CollectionStats{
+			FloorPriceWei: obj.PreloadedFloor,
+			Volume24hWei:  obj.PreloadedVol,
+			ListedCount:   obj.PreloadedCount,
+		}, nil
+	}
 	s, err := r.getCollectionStats(ctx, obj.Address)
 	if err != nil {
 		return nil, err
@@ -126,6 +135,9 @@ func (r *collectionResolver) Stats(ctx context.Context, obj *Collection) (*Colle
 
 // FloorPrice returns the floor price wei string.
 func (r *collectionResolver) FloorPrice(ctx context.Context, obj *Collection) (string, error) {
+	if obj.StatsPreloaded {
+		return obj.PreloadedFloor, nil
+	}
 	s, err := r.getCollectionStats(ctx, obj.Address)
 	if err != nil {
 		return "", err
@@ -135,6 +147,9 @@ func (r *collectionResolver) FloorPrice(ctx context.Context, obj *Collection) (s
 
 // Volume24h returns 24h volume wei string.
 func (r *collectionResolver) Volume24h(ctx context.Context, obj *Collection) (string, error) {
+	if obj.StatsPreloaded {
+		return obj.PreloadedVol, nil
+	}
 	s, err := r.getCollectionStats(ctx, obj.Address)
 	if err != nil {
 		return "", err
@@ -144,6 +159,9 @@ func (r *collectionResolver) Volume24h(ctx context.Context, obj *Collection) (st
 
 // ListedCount returns the count of active listings for the collection.
 func (r *collectionResolver) ListedCount(ctx context.Context, obj *Collection) (int, error) {
+	if obj.StatsPreloaded {
+		return obj.PreloadedCount, nil
+	}
 	s, err := r.getCollectionStats(ctx, obj.Address)
 	if err != nil {
 		return 0, err
@@ -181,14 +199,22 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 			return nil, err
 		}
 		c := resp.Msg
-		return &Collection{
+		out := &Collection{
 			Address:     c.Address,
 			Name:        c.Name,
 			Symbol:      c.Symbol,
 			Standard:    c.Standard,
 			DeployBlock: int(c.DeployBlock),
 			Verified:    c.Verified,
-		}, nil
+		}
+		// GQL-3: Preload stats when proto has them (server.go populates via GetCollectionStats).
+		if c.FloorPriceWei != "" || c.Volume_24HWei != "" || c.ListedCount > 0 {
+			out.StatsPreloaded = true
+			out.PreloadedFloor = c.FloorPriceWei
+			out.PreloadedVol = c.Volume_24HWei
+			out.PreloadedCount = int(c.ListedCount)
+		}
+		return out, nil
 	}
 
 	// Fallback to direct DB access.
@@ -1211,16 +1237,14 @@ func auctionFromGetResponse(a *marketplacev1.GetAuctionResponse) *Auction {
 }
 
 // collectionFromProto maps a proto Collection to a GraphQL Collection.
-// Stats (floor, volume, listed count) are resolved via the CollectionResolver
-// sub-resolver using DataLoader, which batches multiple collection stats
-// queries into one DB round-trip.
 //
-// GQL-3 note: the proto Collection already includes FloorPriceWei, Volume_24HWei,
-// and ListedCount fields populated by server.go. To eliminate the DataLoader
-// round-trip, the GraphQL Collection type needs these fields added to models.go
-// and schema.graphql, so collectionFromProto can populate them directly.
+// GQL-3: When the proto includes pre-populated stats (FloorPriceWei,
+// Volume_24HWei, ListedCount from server.go via GetCollectionStatsBatch),
+// they are stored as preloaded fields. The CollectionResolver sub-resolvers
+// check StatsPreloaded and return these directly, skipping the DataLoader
+// DB round-trip entirely — saving 1 query per collection in list responses.
 func collectionFromProto(c *marketplacev1.Collection) *Collection {
-	return &Collection{
+	out := &Collection{
 		Address:     c.Address,
 		Name:        c.Name,
 		Symbol:      c.Symbol,
@@ -1228,6 +1252,15 @@ func collectionFromProto(c *marketplacev1.Collection) *Collection {
 		DeployBlock: int(c.DeployBlock),
 		Verified:    c.Verified,
 	}
+	// GQL-3: Preload stats when the proto has them (server.go populates
+	// these via GetCollectionStatsBatch in ListCollections).
+	if c.FloorPriceWei != "" || c.Volume_24HWei != "" || c.ListedCount > 0 {
+		out.StatsPreloaded = true
+		out.PreloadedFloor = c.FloorPriceWei
+		out.PreloadedVol = c.Volume_24HWei
+		out.PreloadedCount = int(c.ListedCount)
+	}
+	return out
 }
 
 // activityFromProto maps a proto ActivityEvent (returned by GetActivity) to
