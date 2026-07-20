@@ -61,7 +61,7 @@ jobs:
 
       # ── Initialize CodeQL ───────────────────────────────────────────────
       - name: Initialize CodeQL
-        uses: github/codeql-action/init@v3.28.15
+        uses: github/codeql-action/init@v4.37.1
         with:
           languages: ${{ matrix.language }}
           # Custom queries can be added here. For Go, the default queries
@@ -77,10 +77,10 @@ jobs:
       # For Go, autobuild uses `go build ./...`. For JS/TS, CodeQL analyses
       # the source files directly without a build step.
       - name: Autobuild
-        uses: github/codeql-action/autobuild@v3.28.15
+        uses: github/codeql-action/autobuild@v4.37.1
 
       # ── Run analysis ────────────────────────────────────────────────────
       - name: Perform CodeQL analysis
-        uses: github/codeql-action/analyze@v3.28.15
+        uses: github/codeql-action/analyze@v4.37.1
         with:
           category: "/language:${{ matrix.language }}"
