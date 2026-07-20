@@ -91,15 +91,15 @@ type PromAlert struct {
 
 // PromPayload is the top-level Alertmanager webhook JSON body.
 type PromPayload struct {
-	Version           string            `json:"version"`           // "4"
-	GroupKey          string            `json:"groupKey"`          // grouping key for dedup
-	TruncatedAlerts   int               `json:"truncatedAlerts"`   // 0 = all alerts included
-	Status            string            `json:"status"`            // "firing" | "resolved"
-	Receiver          string            `json:"receiver"`          // receiver name
+	Version           string            `json:"version"`         // "4"
+	GroupKey          string            `json:"groupKey"`        // grouping key for dedup
+	TruncatedAlerts   int               `json:"truncatedAlerts"` // 0 = all alerts included
+	Status            string            `json:"status"`          // "firing" | "resolved"
+	Receiver          string            `json:"receiver"`        // receiver name
 	GroupLabels       map[string]string `json:"groupLabels"`
 	CommonLabels      map[string]string `json:"commonLabels"`
 	CommonAnnotations map[string]string `json:"commonAnnotations"`
-	ExternalURL       string            `json:"externalURL"`       // Alertmanager UI URL
+	ExternalURL       string            `json:"externalURL"` // Alertmanager UI URL
 	Alerts            []PromAlert       `json:"alerts"`
 }
 

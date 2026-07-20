@@ -141,7 +141,7 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	// pulls the token out of ListTokensMissingMetadata so we won't retry it
 	// on the next tick regardless).
 	metaURI := resolved
-	if metaSt, merr := imagestore.Put(ctx, r.q, sniffJSON, t.Collection, resolved, body); merr == nil && metaSt.Hash != "" && !metaSt.Skipped {
+	if metaSt, merr := imagestore.Put(ctx, r.imgStore, sniffJSON, t.Collection, resolved, body); merr == nil && metaSt.Hash != "" && !metaSt.Skipped {
 		metaURI = imagestore.PublicPath(metaSt.Hash)
 	} else if merr != nil || metaSt.Skipped {
 		log.Warn().Err(merr).Bool("skipped", metaSt.Skipped).Str("coll", t.Collection).Str("token", t.TokenID).Str("src", resolved).
@@ -161,11 +161,11 @@ func (r *Runner) fetchOne(ctx context.Context, t db.MissingToken) error {
 	if img := strings.TrimSpace(imageFromMeta(m)); img != "" {
 		imgResolved := media.ResolveURI(img, t.TokenID)
 		if imgBody, ferr := media.FetchBytes(ctx, imgResolved, t.TokenID); ferr == nil {
-			if imgSt, perr := imagestore.Put(ctx, r.q, media.SniffImage, t.Collection, imgResolved, imgBody); perr == nil && imgSt.Hash != "" && !imgSt.Skipped {
+			if imgSt, perr := imagestore.Put(ctx, r.imgStore, media.SniffImage, t.Collection, imgResolved, imgBody); perr == nil && imgSt.Hash != "" && !imgSt.Skipped {
 				imageURI = imagestore.PublicPath(imgSt.Hash)
 				// IMG-1: Generate and store thumbnail variants (128/256/512px).
 				// Best-effort — thumbnail failures never block metadata ingest.
-				if n := imagestore.StoreThumbnails(ctx, r.q, imgBody, imgSt.Mime, imgSt.Hash, t.Collection, imgResolved); n > 0 {
+				if n := imagestore.StoreThumbnails(ctx, r.imgStore, imgBody, imgSt.Mime, imgSt.Hash, t.Collection, imgResolved); n > 0 {
 					log.Debug().Int("count", n).Str("coll", t.Collection).Str("token", t.TokenID).
 						Msg("metadata: thumbnails stored")
 				}
@@ -288,7 +288,7 @@ func (r *Runner) retryOneImage(ctx context.Context, t db.ImageRetryToken) (retEr
 	if err != nil {
 		return fmt.Errorf("fetch image: %w", err)
 	}
-	st, err := imagestore.Put(ctx, r.q, media.SniffImage, t.Collection, t.ImageURI, imgBody)
+	st, err := imagestore.Put(ctx, r.imgStore, media.SniffImage, t.Collection, t.ImageURI, imgBody)
 	if err != nil {
 		return fmt.Errorf("imagestore put: %w", err)
 	}
@@ -307,7 +307,7 @@ func (r *Runner) retryOneImage(ctx context.Context, t db.ImageRetryToken) (retEr
 	localPath := imagestore.PublicPath(st.Hash)
 
 	// IMG-1: Generate and store thumbnail variants for the retried image.
-	if n := imagestore.StoreThumbnails(ctx, r.q, imgBody, st.Mime, st.Hash, t.Collection, t.ImageURI); n > 0 {
+	if n := imagestore.StoreThumbnails(ctx, r.imgStore, imgBody, st.Mime, st.Hash, t.Collection, t.ImageURI); n > 0 {
 		log.Debug().Int("count", n).Str("coll", t.Collection).Str("token", t.TokenID).
 			Msg("image-retry: thumbnails stored")
 	}

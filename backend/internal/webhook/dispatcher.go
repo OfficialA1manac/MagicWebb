@@ -22,17 +22,17 @@ import (
 type MarketplaceEventType string
 
 const (
-	EventListingCreated  MarketplaceEventType = "listing.created"
-	EventListingUpdated  MarketplaceEventType = "listing.updated"
-	EventListingSold     MarketplaceEventType = "listing.sold"
-	EventAuctionCreated  MarketplaceEventType = "auction.created"
-	EventAuctionBid      MarketplaceEventType = "auction.bid"
-	EventAuctionEnded    MarketplaceEventType = "auction.ended"
-	EventAuctionSettled  MarketplaceEventType = "auction.settled"
-	EventOfferCreated    MarketplaceEventType = "offer.created"
-	EventOfferAccepted   MarketplaceEventType = "offer.accepted"
-	EventOfferCancelled  MarketplaceEventType = "offer.cancelled"
-	EventActivity        MarketplaceEventType = "activity"
+	EventListingCreated MarketplaceEventType = "listing.created"
+	EventListingUpdated MarketplaceEventType = "listing.updated"
+	EventListingSold    MarketplaceEventType = "listing.sold"
+	EventAuctionCreated MarketplaceEventType = "auction.created"
+	EventAuctionBid     MarketplaceEventType = "auction.bid"
+	EventAuctionEnded   MarketplaceEventType = "auction.ended"
+	EventAuctionSettled MarketplaceEventType = "auction.settled"
+	EventOfferCreated   MarketplaceEventType = "offer.created"
+	EventOfferAccepted  MarketplaceEventType = "offer.accepted"
+	EventOfferCancelled MarketplaceEventType = "offer.cancelled"
+	EventActivity       MarketplaceEventType = "activity"
 )
 
 // ValidEvents is the set of all recognised webhook event types. Used to
@@ -51,20 +51,110 @@ var ValidEvents = map[MarketplaceEventType]bool{
 	EventActivity:       true,
 }
 
-// sseToWebhook maps SSE event type strings to webhook marketplace event types.
-// Events whose SSE type doesn't map to a webhook type are silently skipped.
-// NOTE: listing.created, listing.sold, auction.created, auction.ended,
-// auction.settled, offer.accepted, and offer.cancelled have no SSE mapping
-// yet — the indexer doesn't emit dedicated SSE types for on-chain events
-// like ListingSold or AuctionCreated. These webhook types are available for
-// subscription but won't fire until the SSE bridge gains per-event-type
-// emission (SSE-4 wiring task in docs/OPTIMIZATION_DESIGN.md).
-var sseToWebhook = map[string]MarketplaceEventType{
-	"listing-updated": EventListingUpdated, // listing.created/updated share SSE type
-	"auction-updated": EventAuctionBid,      // auction bid = new bid placed
-	"offer-updated":   EventOfferCreated,    // offer.created shares SSE type
-	"activity":        EventActivity,
-	"notification":    "", // notifications are user-targeted, not marketplace-wide
+// extractEventDiscriminator pulls the "event" field from an SSE Event's Data
+// payload. Handles map[string]any (local indexer publish), json.RawMessage
+// (gRPC bridge delivery), and []byte (defense-in-depth) so webhooks fire
+// correctly regardless of event origin.
+func extractEventDiscriminator(data any) string {
+	// Fast path: local indexer handlers publish map[string]any.
+	if m, ok := data.(map[string]any); ok {
+		if s, ok2 := m["event"].(string); ok2 {
+			return s
+		}
+		return ""
+	}
+	// Bridge path: events arriving via gRPC are stored as json.RawMessage.
+	if raw, ok := data.(json.RawMessage); ok {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil {
+			if s, ok2 := m["event"].(string); ok2 {
+				return s
+			}
+		}
+		return ""
+	}
+	// Defense-in-depth: raw []byte (same underlying type as json.RawMessage).
+	if raw, ok := data.([]byte); ok {
+		var m map[string]any
+		if json.Unmarshal(raw, &m) == nil {
+			if s, ok2 := m["event"].(string); ok2 {
+				return s
+			}
+		}
+	}
+	return ""
+}
+
+// sseEventToWebhookType resolves the correct MarketplaceEventType from an SSE event
+// by inspecting both the SSE type string and the "event" discriminator field
+// inside the Data payload. Every handler in handlers.go emits an "event" key
+// (e.g. "Listed", "BidPlaced", "OfferAccepted") that tells us exactly which
+// on-chain action occurred.
+//
+// This replaces the old flat sseToWebhook map (which only covered 4 of 11
+// webhook types) with full coverage: all 11 marketplace event types can now
+// fire from the existing 6 SSE event types without waiting for SSE-4.
+//
+// Data type handling: indexer handlers publish Data as map[string]any, but
+// events arriving via the gRPC bridge are stored as json.RawMessage
+// (grpc_bridge.go::StreamEvents). We handle both forms so webhooks fire
+// correctly on both the originating instance and bridged peers.
+func sseEventToWebhookType(ev sse.Event) MarketplaceEventType {
+	// Extract the "event" discriminator from the Data payload.
+	// Handle both map[string]any (local publish) and json.RawMessage (bridge).
+	eventDiscrim := extractEventDiscriminator(ev.Data)
+
+	switch ev.Type {
+	case "listing-updated":
+		switch eventDiscrim {
+		case "Listed":
+			return EventListingCreated
+		case "Bought":
+			return EventListingSold
+		case "Cancelled", "Transfer", "TransferSingle", "TransferBatch":
+			return EventListingUpdated // status change or ownership transfer
+		default:
+			return EventListingUpdated // generic update fallback
+		}
+
+	case "auction-updated":
+		switch eventDiscrim {
+		case "AuctionCreated":
+			return EventAuctionCreated
+		case "BidPlaced", "AuctionExtended", "OutbidNotification":
+			return EventAuctionBid
+		case "AuctionSettled":
+			return EventAuctionSettled
+		case "AuctionCancelled", "LoserRefunded", "RefundPushed":
+			return EventAuctionEnded
+		default:
+			return EventAuctionBid // generic update fallback
+		}
+
+	case "offer-updated":
+		switch eventDiscrim {
+		case "OfferMade":
+			return EventOfferCreated
+		case "OfferAccepted":
+			return EventOfferAccepted
+		case "OfferRefunded":
+			return EventOfferCancelled
+		default:
+			return EventOfferCreated // generic update fallback
+		}
+
+	case "activity":
+		return EventActivity
+
+	case "notification":
+		// Notifications are user-targeted (private), not marketplace-wide.
+		// Webhook subscribers should use user-scoped WS channels instead.
+		return ""
+
+	default:
+		// rpc-health and unknown types are silently skipped.
+		return ""
+	}
 }
 
 // ── Config model ─────────────────────────────────────────────────────────
@@ -107,9 +197,9 @@ type ConfigStore interface {
 // WebhookPayload is the JSON body POSTed to registered webhook URLs.
 type WebhookPayload struct {
 	Event     MarketplaceEventType `json:"event"`
-	Timestamp string               `json:"timestamp"`           // RFC3339
-	Instance  string               `json:"instance,omitempty"`  // origin instance UUID
-	Data      json.RawMessage      `json:"data"`                // original event Data
+	Timestamp string               `json:"timestamp"`          // RFC3339
+	Instance  string               `json:"instance,omitempty"` // origin instance UUID
+	Data      json.RawMessage      `json:"data"`               // original event Data
 }
 
 // Dispatcher subscribes to the SSE Broadcaster and fans out events to
@@ -154,15 +244,13 @@ func (d *Dispatcher) Start(ctx context.Context) {
 			d.dispatch(ctx, ev)
 		}
 	}
-}
-
-// dispatch maps an SSE event to a webhook event type and fans out to
+} // dispatch maps an SSE event to a webhook event type and fans out to
 // matching configs. Each delivery runs in its own goroutine with a
 // 30-second timeout so a slow webhook receiver doesn't block other
 // deliveries.
 func (d *Dispatcher) dispatch(ctx context.Context, ev sse.Event) {
-	hookType, ok := sseToWebhook[ev.Type]
-	if !ok || hookType == "" {
+	hookType := sseEventToWebhookType(ev)
+	if hookType == "" {
 		return // event type not mapped to any webhook type
 	}
 

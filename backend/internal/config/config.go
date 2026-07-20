@@ -42,6 +42,17 @@ type Config struct {
 	ReadPoolURL  string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
 	RedisURL     string // optional Redis URL for distributed cache; empty = in-memory only (CACHE-1)
 
+	// IMG-3: S3-compatible blob store backend. When ImgStoreBackend = "s3", blob
+	// bodies are stored in S3/MinIO instead of Postgres BYTEA, saving PG
+	// storage and freeing connections. Metadata (hashes, mime, refcounts)
+	// remains in nft_image_blobs for dedup and quota enforcement.
+	ImgStoreBackend string // "s3" or "" (empty = Postgres BYTEA, default)
+	S3Endpoint      string // S3-compatible endpoint (e.g. s3.amazonaws.com, play.min.io:9000)
+	S3Bucket        string // bucket name for blob storage
+	S3AccessKey     string // S3 access key ID
+	S3SecretKey     string // S3 secret access key
+	S3UseSSL        bool   // use HTTPS for S3 connections
+
 	// Servers
 	HTTPAddr  string
 	GRPCPort  int      // gRPC event bridge port (0 = disabled)
@@ -181,6 +192,13 @@ func Load() {
 		PostgresURL: required("POSTGRES_URL"),
 		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
 		RedisURL:    envOrDefault("REDIS_URL", ""),
+
+		ImgStoreBackend: envOrDefault("IMG_STORE_BACKEND", ""),
+		S3Endpoint:      envOrDefault("S3_ENDPOINT", ""),
+		S3Bucket:        envOrDefault("S3_BUCKET", ""),
+		S3AccessKey:     envOrDefault("S3_ACCESS_KEY", ""),
+		S3SecretKey:     envOrDefault("S3_SECRET_KEY", ""),
+		S3UseSSL:        os.Getenv("S3_USE_SSL") == "true",
 
 		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
 		GRPCPort: optInt("GRPC_PORT", 0),

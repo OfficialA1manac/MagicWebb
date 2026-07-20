@@ -38,6 +38,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/keeper"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
@@ -106,6 +107,27 @@ func main() {
 	q := db.New(pool)
 	if readPool != nil {
 		q = q.WithReadReplica(readPool)
+	}
+
+	// ── IMG-3: S3-compatible blob store backend ─────────────────────────
+	// When IMG_STORE_BACKEND=s3, blob bodies are stored in S3/MinIO instead
+	// of Postgres BYTEA. Metadata (hashes, mime, refcounts) remains in
+	// nft_image_blobs for dedup and quota enforcement.
+	var imgStore imagestore.Store = q // default: Postgres BYTEA
+	if config.C.ImgStoreBackend == "s3" {
+		if config.C.S3Endpoint == "" || config.C.S3Bucket == "" {
+			log.Fatal().Msg("img-3: IMG_STORE_BACKEND=s3 requires S3_ENDPOINT and S3_BUCKET to be set")
+		}
+		s3Store, err := imagestore.NewS3Store(ctx, pool,
+			config.C.S3Endpoint, config.C.S3Bucket,
+			config.C.S3AccessKey, config.C.S3SecretKey,
+			config.C.S3UseSSL)
+		if err != nil {
+			log.Fatal().Err(err).Msg("img-3: s3 store init failed")
+		}
+		imgStore = s3Store
+		log.Info().Str("endpoint", config.C.S3Endpoint).Str("bucket", config.C.S3Bucket).
+			Msg("img-3: using S3 blob store backend")
 	}
 
 	// SSE broadcaster with cross-instance fan-out via gRPC streaming mesh.
@@ -218,6 +240,7 @@ func main() {
 	// abstraction means runner.go doesn't need to change — it calls the gate
 	// function, gets back a lockCtx, and cancels it when leadership is lost.
 	runner := indexer.New(&config.C, q, bcast, eth, &serverTimeMs).
+		WithImgStore(imgStore).
 		WithKeeperGate(func(c context.Context) (context.Context, func(), error) {
 			if keeperElection == nil {
 				// Single-instance: no gate needed, keepers run immediately.
@@ -282,7 +305,7 @@ func main() {
 	go whDispatcher.Start(ctx)
 
 	// Mount all REST + SSE routes
-	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al)
+	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al, imgStore)
 
 	// ── CACHE-2: Warm critical caches on startup ─────────────────────────
 	// Query trending collections for the three standard windows and pre-fill

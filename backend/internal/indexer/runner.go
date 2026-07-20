@@ -20,6 +20,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 )
@@ -74,6 +75,10 @@ type Runner struct {
 	// at 2s block time on Flare/Coston2).
 	headLagBlocks int64
 
+	// IMG-3: blob store backend (Postgres BYTEA by default, S3/MinIO when configured).
+	// Used by metadata workers for image ingest and thumbnail generation.
+	imgStore imagestore.Store
+
 	// KPR-2: cached gas price to avoid repeated SuggestGasPrice RPC calls.
 	// Only the leader refreshes this; followers reuse the cached value.
 	gasPriceMu        sync.Mutex
@@ -105,7 +110,16 @@ func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, ser
 		h:            &handlers{q: q, bcast: bcast},
 		serverTimeMs: serverTimeMs,
 		lastNonce:    make(map[common.Address]uint64),
+		imgStore:     q, // default to Postgres BYTEA; override via WithImgStore
 	}
+}
+
+// WithImgStore sets the blob store backend for image ingest and thumbnail
+// generation (IMG-3). Defaults to q (Postgres BYTEA) when not called.
+// Pass an *imagestore.S3Store to use S3/MinIO for blob body storage.
+func (r *Runner) WithImgStore(s imagestore.Store) *Runner {
+	r.imgStore = s
+	return r
 }
 
 // WithKeeperGate sets the single-flight gate the keeper workers must win

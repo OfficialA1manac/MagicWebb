@@ -23,10 +23,11 @@ const maxInt64 = int64(1<<63 - 1)
 
 // MediaService handles media proxy, image retry, and image-by-hash operations.
 type MediaService struct {
-	q     *db.Q
-	eth   chain.Caller
-	rl    *ratelimit.Limiter // v35: per-IP rate limit on image-retry endpoint
-	fetch imageRetryFetcher
+	q        *db.Q
+	eth      chain.Caller
+	rl       *ratelimit.Limiter // v35: per-IP rate limit on image-retry endpoint
+	fetch    imageRetryFetcher
+	imgStore imagestore.Store // IMG-3: blob store backend (Postgres BYTEA by default)
 }
 
 // imageRetryFetcher is the signature of media.FetchBytes.
@@ -61,14 +62,13 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	resolved := media.ResolveURI(raw, tokenID)
 
 	if h := imagestore.ExtractHash(resolved); h != "" {
-		// Resolve local blob hash via the imagestore directly instead of
-		// calling imageByHash(c) which expects c.Params("sha256") from
-		// the /api/v1/img/:sha256 route. Construct a synthetic context
-		// by calling the store directly.
+		// Resolve local blob hash via the store (S3 or Postgres) directly
+		// instead of calling imageByHash(c) which expects c.Params("sha256")
+		// from the /api/v1/img/:sha256 route.
 		if !imagestore.ValidateHash(h) {
 			return writeErr(c, fiber.StatusBadRequest, "invalid sha256")
 		}
-		blob, err := s.q.GetImage(c.Context(), h)
+		blob, err := s.store().GetImage(c.Context(), h)
 		if err != nil {
 			if imagestore.IsNoRows(err) {
 				return writeErr(c, fiber.StatusNotFound, "blob not found")
@@ -132,6 +132,14 @@ func (s *MediaService) HandleImageByHash() fiber.Handler {
 	return s.imageByHash
 }
 
+// store returns the blob store for image lookups (S3Store or db.Q).
+func (s *MediaService) store() imagestore.Store {
+	if s.imgStore != nil {
+		return s.imgStore
+	}
+	return s.q
+}
+
 func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 	sha := c.Params("sha256")
 	if !imagestore.ValidateHash(sha) {
@@ -155,7 +163,7 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 		if preferWebP {
 			c.Append("Vary", "Accept") // merges with compress middleware's Accept-Encoding
 		}
-		blob, err := s.q.GetImageByParent(c.Context(), sha, size, preferWebP)
+		blob, err := s.store().GetImageByParent(c.Context(), sha, size, preferWebP)
 		if err != nil {
 			if imagestore.IsNoRows(err) {
 				// No thumbnail at this size — fall through to full-size.
@@ -168,7 +176,7 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 		// Fall through: no thumbnail found, serve full-size.
 	}
 
-	blob, err := s.q.GetImage(c.Context(), sha)
+	blob, err := s.store().GetImage(c.Context(), sha)
 	if err != nil {
 		if imagestore.IsNoRows(err) {
 			return writeErr(c, fiber.StatusNotFound, "blob not found")
@@ -259,7 +267,7 @@ func (s *MediaService) handleRetry(c *fiber.Ctx) error {
 			Msg("image-retry: upstream fetch failed")
 		return writeErr(c, fiber.StatusBadGateway, "upstream unavailable")
 	}
-	st, perr := imagestore.Put(c.Context(), s.q, media.SniffImage, coll, imageURI, body)
+	st, perr := imagestore.Put(c.Context(), s.store(), media.SniffImage, coll, imageURI, body)
 	if perr != nil {
 		log.Warn().Err(perr).Str("coll", coll).Str("token", tokenID).
 			Msg("image-retry: imagestore put failed")

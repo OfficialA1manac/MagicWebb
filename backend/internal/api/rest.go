@@ -25,6 +25,7 @@ import (
 	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect" // gRPC server reflection for grpcurl discovery
@@ -156,7 +157,7 @@ var GlobalWSStats WSStatsProvider
 // Mount registers all REST + SSE + WebSocket routes on the Fiber app.
 // serverTimeMs is updated atomically by the indexer; the /api/v1/server-time
 // endpoint reads it under the rate-limited api group.
-func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger) {
+func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limiter, cfg *config.Config, eth chain.Caller, serverTimeMs *int64, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger, imgStore imagestore.Store) {
 	app.Use(securityHeaders())
 	app.Use(cors.New(cors.Config{
 		AllowOrigins:     buildOrigins(cfg.FrontendURL, cfg.Env),
@@ -347,6 +348,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewOffersService(q).RegisterRoutes(api)
 	NewCollectionsService(q, trendingCache).RegisterRoutes(api)
 	ms := NewMediaService(q, eth, rl)
+	ms.imgStore = imgStore // IMG-3: wire S3/blob store backend to media service
 	ms.RegisterRoutes(api)
 	NewWalletService(q).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
