@@ -114,7 +114,7 @@ jobs:
             exit 1
           fi
           echo "OK — no .test.* files in app/src/pages/"
-      - uses: actions/setup-node@v4.3.0
+      - uses: actions/setup-node@v7.0.0
         with:
           node-version: "22"
           cache: npm
