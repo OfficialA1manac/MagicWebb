@@ -15,6 +15,7 @@ import (
 
 	"connectrpc.com/connect"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
@@ -200,14 +201,37 @@ func (s *Server) ListCollections(ctx context.Context, req *connect.Request[ListC
 		addrs = append(addrs, rows[i].Address)
 	}
 
+	// CACHE-3: Check the process-wide TTL cache before hitting the DB.
+	// Stats change slowly (only on new listings/bids/settlements), so a
+	// 30s cache eliminates repeat DB queries for collection pages and
+	// listing grids that reference the same collections.
+	cachedStats := make(map[string]db.CollectionStats, len(addrs))
+	var uncached []string
+	for _, addr := range addrs {
+		if cached, ok := dataloader.StatsCache.Get(addr); ok {
+			cachedStats[addr] = cached.(db.CollectionStats)
+		} else {
+			uncached = append(uncached, addr)
+		}
+	}
+
 	// Batch-fill stats: one round-trip for floor + listed count + volume.
-	if stats, err := s.q.GetCollectionStatsBatch(ctx, addrs); err == nil {
-		for i, c := range cols {
-			if s, ok := stats[c.Address]; ok {
-				cols[i].FloorPriceWei = s.FloorPriceWei
-				cols[i].Volume_24HWei = s.Volume24hWei
-				cols[i].ListedCount = int32(s.ListedCount)
+	// Only query DB for addresses not found in the cache.
+	if len(uncached) > 0 {
+		if stats, err := s.q.GetCollectionStatsBatch(ctx, uncached); err == nil {
+			for addr, s := range stats {
+				cachedStats[addr] = s
+				dataloader.StatsCache.Set(addr, s)
 			}
+		}
+	}
+
+	// Fill stats from the merged cache+DB result.
+	for i, c := range cols {
+		if s, ok := cachedStats[c.Address]; ok {
+			cols[i].FloorPriceWei = s.FloorPriceWei
+			cols[i].Volume_24HWei = s.Volume24hWei
+			cols[i].ListedCount = int32(s.ListedCount)
 		}
 	}
 
@@ -242,11 +266,21 @@ func (s *Server) GetCollection(ctx context.Context, req *connect.Request[GetColl
 		Verified:    row.Verified,
 	}
 
-	// Best-effort stats via existing consolidated helper (3 sub-queries, one shot).
-	if stats, err := s.q.GetCollectionStats(ctx, address); err == nil {
-		res.FloorPriceWei = stats.FloorPriceWei
-		res.Volume_24HWei = stats.Volume24hWei
-		res.ListedCount = int32(stats.ListedCount)
+	// CACHE-3: Check the process-wide TTL cache before hitting the DB.
+	// Single-collection stats queries also benefit from the shared cache.
+	if cached, ok := dataloader.StatsCache.Get(address); ok {
+		s := cached.(db.CollectionStats)
+		res.FloorPriceWei = s.FloorPriceWei
+		res.Volume_24HWei = s.Volume24hWei
+		res.ListedCount = int32(s.ListedCount)
+	} else {
+		// Best-effort stats via existing consolidated helper (3 sub-queries, one shot).
+		if stats, err := s.q.GetCollectionStats(ctx, address); err == nil {
+			res.FloorPriceWei = stats.FloorPriceWei
+			res.Volume_24HWei = stats.Volume24hWei
+			res.ListedCount = int32(stats.ListedCount)
+			dataloader.StatsCache.Set(address, stats)
+		}
 	}
 
 	return connect.NewResponse(res), nil

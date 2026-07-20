@@ -20,13 +20,13 @@ import (
 // collection page and every listing grid render).
 const CollectionStatsCacheTTL = 30 * time.Second
 
-// statsCache is a process-wide TTL cache for collection stats, shared across
-// all requests. Since stats are read-heavy and rarely change within 30s,
-// this eliminates the DB round-trip for repeat queries. Uses in-memory
-// cache by default (package-level init can't access config). When Redis
-// is later wired at a higher level, the collections service cache in
-// api/rest.go provides cross-instance consistency for the trending path.
-var statsCache cache.CacheInterface = cache.New(CollectionStatsCacheTTL)
+// StatsCache is a process-wide TTL cache for collection stats, shared across
+// all requests (GraphQL DataLoader, gRPC server, REST collections). Since
+// stats are read-heavy and rarely change within 30s, this eliminates the DB
+// round-trip for repeat queries. Uses in-memory cache by default; when Redis
+// is configured at a higher level, the collections service in api/rest.go
+// provides cross-instance consistency via its own Redis-backed cache.
+var StatsCache cache.CacheInterface = cache.New(CollectionStatsCacheTTL)
 
 // Loaders holds all DataLoader instances for a single GraphQL request.
 // Created per-request in the GraphQL HTTP handler and injected via context.
@@ -62,7 +62,7 @@ func loadCollectionStats(ctx context.Context, q *db.Q, addrs []string) []*datalo
 	// listing grids that reference the same collections.
 	var uncached []int // indices of addresses not found in cache
 	for i, addr := range addrs {
-		if cached, ok := statsCache.Get(addr); ok {
+		if cached, ok := StatsCache.Get(addr); ok {
 			results[i] = &dataloader.Result[db.CollectionStats]{Data: cached.(db.CollectionStats)}
 		} else {
 			uncached = append(uncached, i)
@@ -95,7 +95,7 @@ func loadCollectionStats(ctx context.Context, q *db.Q, addrs []string) []*datalo
 		if !ok {
 			s = db.CollectionStats{FloorPriceWei: "0", Volume24hWei: "0", ListedCount: 0}
 		}
-		statsCache.Set(addr, s)
+		StatsCache.Set(addr, s)
 		results[i] = &dataloader.Result[db.CollectionStats]{Data: s}
 	}
 	return results
