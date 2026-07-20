@@ -36,6 +36,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
@@ -308,13 +309,14 @@ func main() {
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al, imgStore)
 
 	// ── CACHE-2: Warm critical caches on startup ─────────────────────────
-	// Query trending collections for the three standard windows and pre-fill
-	// the cache so the first page load after a deploy doesn't hit a cold
-	// cache. Trending scores are recomputed every 60s by the score worker;
-	// the cache TTL (30s) means warmed data is fresh enough for immediate use.
+	// Pre-fill trending cache (1h/24h/7d windows) and collection stats cache
+	// (top 50 collections) so the first page load after a deploy doesn't hit
+	// a cold cache. Trending scores are recomputed every 60s by the score
+	// worker; collection stats change on new listings/bids. Both caches have
+	// a 30s TTL so warmed data is fresh enough for immediate use.
 	// Activity cache is not warmed — it's per-address and the first request
 	// naturally populates it.
-	go warmTrendingCache(ctx, q, api.GlobalCaches.Trending)
+	go warmCriticalCaches(ctx, q, api.GlobalCaches.Trending)
 
 	// AUTH-3: API key management endpoints (admin-only, admin tier rate limit).
 	api.MountAPIKeyRoutes(app, q, &config.C, rl, aks, al)
@@ -1055,18 +1057,21 @@ func isValidEthAddr(s string) bool {
 	return true
 }
 
-// warmTrendingCache pre-fills the trending cache with the three standard
-// windows (1h, 24h, 7d) to prevent cold-start latency spikes on the first
-// trending page load after a deploy. Runs in a background goroutine so it
-// doesn't block server startup — the cache is populated asynchronously.
-// Non-fatal: failures are logged but never prevent the server from starting.
-// Each query is bounded by a 5s timeout so a slow DB at startup doesn't
-// hold the warming goroutine indefinitely.
-// CACHE-2: cache warming on deploy.
-func warmTrendingCache(ctx context.Context, q *db.Q, c cache.CacheInterface) {
-	if c == nil || q == nil {
+// warmCriticalCaches pre-fills the trending cache (1h/24h/7d windows) and
+// the collection stats cache (top 50 collections) to prevent cold-start
+// latency spikes on the first page load after a deploy. Runs in a background
+// goroutine so it doesn't block server startup. Non-fatal: failures are
+// logged but never prevent the server from starting.
+// CACHE-2: cache warming on deploy — trending + collection stats.
+func warmCriticalCaches(ctx context.Context, q *db.Q, trendingCache cache.CacheInterface) {
+	if q == nil {
 		return
 	}
+
+	// ── Phase 1: Trending cache (1h, 24h, 7d windows) ──────────────────
+	// Guard: trendingCache may be nil if the backend failed to initialize.
+	// Collection stats warming (Phase 2) still runs independently.
+	if trendingCache != nil {
 	windows := []struct {
 		name  string
 		limit int
@@ -1081,8 +1086,6 @@ func warmTrendingCache(ctx context.Context, q *db.Q, c cache.CacheInterface) {
 			return
 		default:
 		}
-		// Bound each query with a 5s timeout so a slow DB doesn't hold
-		// the warming goroutine open indefinitely.
 		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
 		rows, err := q.GetTrendingCollections(queryCtx, w.name, w.limit)
 		cancel()
@@ -1094,8 +1097,51 @@ func warmTrendingCache(ctx context.Context, q *db.Q, c cache.CacheInterface) {
 			rows = []db.TrendingScore{}
 		}
 		ckey := fmt.Sprintf("tr:%s:%d", w.name, w.limit)
-		c.Set(ckey, rows)
-		log.Info().Str("window", w.name).Int("rows", len(rows)).Msg("startup: cache warm complete")
+		trendingCache.Set(ckey, rows)
+		log.Info().Str("window", w.name).Int("rows", len(rows)).Msg("startup: trending cache warm complete")
+	}
+	} // end trendingCache guard
+
+	// ── Phase 2: Collection stats cache (top 50 collections) ────────────
+	// Pre-fill dataloader.StatsCache so collection pages (GraphQL + gRPC
+	// ListCollections + gRPC GetCollection) don't hit a cold cache.
+	// Uses ListCollections to get the top collections by activity, then
+	// GetCollectionStatsBatch for a single round-trip stats fill.
+	select {
+	case <-ctx.Done():
+		return
+	default:
+	}
+	queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	cols, err := q.ListCollections(queryCtx, 50)
+	cancel()
+	if err != nil {
+		log.Warn().Err(err).Msg("startup: cache warm failed for collection list")
+	} else if len(cols) > 0 {
+		addrs := make([]string, len(cols))
+		for i, col := range cols {
+			addrs[i] = col.Address
+		}
+
+		select {
+		case <-ctx.Done():
+			return
+		default:
+		}
+		statsCtx, statsCancel := context.WithTimeout(ctx, 5*time.Second)
+		stats, err := q.GetCollectionStatsBatch(statsCtx, addrs)
+		statsCancel()
+		if err != nil {
+			log.Warn().Err(err).Msg("startup: cache warm failed for collection stats batch")
+		} else {
+			warmed := 0
+			for addr, s := range stats {
+				dataloader.StatsCache.Set(addr, s)
+				warmed++
+			}
+			log.Info().Int("collections", len(cols)).Int("stats_warmed", warmed).
+				Msg("startup: collection stats cache warm complete")
+		}
 	}
 }
 
