@@ -61,7 +61,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
+        uses: foundry-rs/foundry-toolchain@80bde0e8748eca459e9f35a28d22e67835c95998 # v1.2.0
       - name: Build
         working-directory: contracts
         run: forge build --sizes
@@ -79,9 +79,9 @@ jobs:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
+        uses: foundry-rs/foundry-toolchain@80bde0e8748eca459e9f35a28d22e67835c95998 # v1.2.0
       - name: Slither
-        uses: crytic/slither-action@3f839d464f8fb1b50c16776c12f3fda52cf4171f # v0.4.0
+        uses: crytic/slither-action@b52cc1cbfee9ca3e8722dd5224299d16c9a6b80f # v0.4.0
         with:
           target: contracts/
           slither-config: contracts/slither.config.json
