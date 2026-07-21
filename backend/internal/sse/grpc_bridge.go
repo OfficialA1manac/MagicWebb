@@ -17,6 +17,8 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/health"
+	"google.golang.org/grpc/health/grpc_health_v1"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse/proto"
 )
@@ -95,6 +97,16 @@ func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, event
 	b.handler = &bridgeHandler{bridge: b, eventsCh: eventsCh}
 	b.srv = grpc.NewServer(serverOpts...)
 	proto.RegisterEventBridgeServer(b.srv, b.handler)
+
+	// SSE-1: Register the standard gRPC health check protocol on the event
+	// bridge port. External monitoring (grpc_health_probe, grpcurl, health
+	// check sidecars) can now verify bridge connectivity without needing
+	// a custom probe. The Keeper election also uses this same gRPC port
+	// (via bcast.GRPCServer()), so health covers BOTH the event bridge
+	// AND keeper election in one check.
+	healthServer := health.NewServer()
+	healthServer.SetServingStatus("", grpc_health_v1.HealthCheckResponse_SERVING)
+	grpc_health_v1.RegisterHealthServer(b.srv, healthServer)
 
 	lis, err := net.Listen("tcp", fmt.Sprintf(":%d", port))
 	if err != nil {
