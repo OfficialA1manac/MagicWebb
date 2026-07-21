@@ -22,11 +22,8 @@ const (
 	// Set high enough for legitimate listing pages (48 listings × ~20 cost
 	// per listing = 960) but low enough to block deeply nested or unbounded
 	// queries (collections { listings { seller { profile { ... } } } }).
+	// Enforced by extension.FixedComplexityLimit (handler.go).
 	MaxQueryCost = 1000
-
-	// MaxNodeCount is the maximum number of resolved nodes per query.
-	// Combined with MaxQueryCost, this provides two-dimensional DoS protection.
-	MaxNodeCount = 500
 
 	// Field cost weights.
 	costScalar    = 1  // name, symbol, address, amountWei, txHash, etc.
@@ -39,14 +36,22 @@ const (
 )
 
 // ComplexityConfig returns the ComplexityRoot populated with per-field
-// cost functions. This replaces the FixedComplexityLimit(200) extension
-// with field-aware cost calculation (GQL-5).
+// cost functions. This replaces any fixed-cost-per-field model with
+// field-aware cost calculation (GQL-5).
 //
-// Usage in handler.go:
+// Usage: The ComplexityRoot is set in NewExecutableSchema's Config,
+// which embeds it in the schema. Then extension.FixedComplexityLimit
+// checks each query's total cost (computed from these per-field weights)
+// against MaxQueryCost. The depthValidator provides a secondary defense
+// against pathologically nested queries.
 //
-//	srv.Use(extension.ComplexityLimitFunc(MaxQueryCost, ComplexityConfig()))
-//	// Keep node limit as a secondary defense:
-//	srv.Use(extension.FixedComplexityLimit(MaxNodeCount))
+// In handler.go:
+//
+//	schema := NewExecutableSchema(Config{
+//	    Complexity: ComplexityConfig(),  // <-- per-field weights
+//	})
+//	srv.Use(extension.FixedComplexityLimit(MaxQueryCost))
+//	srv.Use(&depthValidator{maxDepth: 12})  // secondary nesting defense
 func ComplexityConfig() ComplexityRoot {
 	return ComplexityRoot{
 		// ── Scalar/enum/time costs = 1 ──────────────────────────
