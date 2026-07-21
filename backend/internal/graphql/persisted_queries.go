@@ -12,13 +12,45 @@ import (
 // ── GQL-1: Build-time persisted queries ──────────────────────────────────
 //
 // persistedQueries maps SHA-256 hashes to known GraphQL query strings,
-// pre-populated at init() time. Clients can send only the hash (no query
-// text), reducing request size by ~90%. The hash→query mapping is embedded
-// in the binary — no server round-trip needed for the initial registration.
+// pre-populated at init() time. Clients send only the hash (64 hex chars),
+// reducing request body size by ~72% on average (84% for the largest
+// parameterized queries). The hash→query mapping is embedded in the binary
+// — no server round-trip needed for initial registration.
 //
-// Common queries are registered here with both unparameterized (no variables,
-// for CDN caching) and parameterized (with $variables) forms. The hash is
+// Common queries are registered with both unparameterized (no variables,
+// CDN-cacheable) and parameterized (with $variables) forms. The hash is
 // computed as hex(sha256(queryText)) for Apollo APQ compatibility.
+//
+// ── GQL-1 Benchmark: Request size reduction (POST full query vs GET hash) ─
+//
+// Top 5 most impactful queries (sorted by bytes saved):
+//
+//   Query                        POST (bytes)   Hash (bytes)   Reduction
+//   ───────────────────────────  ─────────────  ─────────────  ─────────
+//   Listings (parameterized)          396             64          84%
+//   Auctions (parameterized)          386             64          83%
+//   Collection (parameterized)        347             64          82%
+//   Auction (parameterized)           253             64          75%
+//   Activity (parameterized)          238             64          73%
+//
+// Remaining queries:
+//
+//   Auctions (homepage)               178             64          64%
+//   Listings (homepage)               158             64          59%
+//   Collections (homepage)            129             64          50%
+//   Metrics (homepage)                107             64          40%
+//   Trending (homepage)                95             64          33%
+//
+//   ───────────────────────────  ─────────────  ─────────────  ─────────
+//   TOTAL (10 queries)               2,287           640          72%
+//
+// Run: cd tools/bench-persisted && go run . to regenerate this table.
+//
+// Design note: Smaller queries see lower % reduction because the fixed
+// 64-byte hash dominates. However, the absolute savings are still
+// significant — even the 95-byte Trending query saves 31 bytes (33%).
+// The parameterized queries (250-400 bytes) benefit most since they
+// carry long variable declarations that the hash completely replaces.
 var persistedQueries = map[string]string{}
 
 func init() {
