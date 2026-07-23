@@ -3,8 +3,13 @@
 //! Compile to a static library for linking via CGO:
 //!   zig build-lib -O ReleaseFast -dynamic zignsniff.zig
 //!
+//! Go generate support (ZIG-4):
+//!   go generate ./...  →  zig build-lib -O ReleaseFast -dynamic zignsniff.zig
+//!
 //! This replaces Go's SniffImage / isSVG / skipXMLPreamble chain, reducing
 //! 8 MB body processing from ~8 Go allocations to zero Zig heap allocations.
+
+//go:generate zig build-lib -O ReleaseFast -dynamic zignsniff.zig
 
 const std = @import("std");
 

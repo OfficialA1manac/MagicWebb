@@ -2,10 +2,15 @@
 //! Compile:
 //!   zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
 //!
+//! Go generate support (ZIG-4):
+//!   go generate ./...  →  zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
+//!
 //! Exports:
 //!   zig_keccak256(data, len, out) — Keccak-256 hash (fully working)
 //!   zig_keccak256_digest_size()   — returns 32
 //!   zig_ecdsa_verify(...)         — returns -1 (unimplemented, Go fallback)
+
+//go:generate zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
 
 const std = @import("std");
 const crypto = std.crypto;

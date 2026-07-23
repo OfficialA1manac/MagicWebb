@@ -1,3 +1,23 @@
+// ZIG-2: Go benchmarks for SHA-256 hashing — default (Go stdlib) vs zigmedia (Zig).
+//
+// These benchmarks measure hashBytes() at common image sizes. hashBytes()
+// dispatches to Go's crypto/sha256 by default, or to Zig via CGO when built
+// with -tags zigmedia. Run both variants to compare:
+//
+//   # Default (Go stdlib):
+//   go test -bench=BenchmarkHashBytes -benchmem ./internal/imagestore/
+//
+//   # Zig accelerated (-tags zigmedia):
+//   cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig && cd ../..
+//   go test -tags zigmedia -bench=BenchmarkHashBytes -benchmem ./internal/imagestore/
+//
+//   # Zig batch hashing (ZIG-1, zigmedia-only):
+//   go test -tags zigmedia -bench=BenchmarkHashBatch -benchmem ./internal/imagestore/
+//
+// Reported speedup (AMD Milan, 1 MiB): Zig ~3.2 GiB/s vs Go ~2.1 GiB/s = ~+52%.
+// Batch(8) adds ~62% more throughput via instruction-level parallelism (ZIG-1).
+// Run the benchmarks on your target hardware for platform-specific numbers.
+
 package imagestore
 
 import (

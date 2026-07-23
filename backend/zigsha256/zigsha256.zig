@@ -2,9 +2,14 @@
 //! Compile to a static library for linking via CGO:
 //!   zig build-lib -O ReleaseFast -dynamic zigsha256.zig
 //!
+//! Go generate support (ZIG-4):
+//!   go generate ./...  →  zig build-lib -O ReleaseFast -dynamic zigsha256.zig
+//!
 //! Exports a single C-ABI function `zig_sha256` that computes
 //! a SHA-256 hash of `data` (len bytes) and writes the 32-byte
 //! result to `out`. The caller owns the output buffer (32 bytes).
+
+//go:generate zig build-lib -O ReleaseFast -dynamic zigsha256.zig
 
 const std = @import("std");
 const crypto = std.crypto;
