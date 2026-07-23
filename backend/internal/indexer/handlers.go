@@ -51,7 +51,9 @@ func standardOf(b []byte) string {
 	return "erc721"
 }
 
-func (h *handlers) pub(evType string, payload any) {
+// pubTyped publishes a typed SSE-4 event payload. The payload must implement
+// sse.TypedEvent for the bridge to populate the proto oneof.
+func (h *handlers) pubTyped(evType string, payload sse.TypedEvent) {
 	h.bcast.Publish(sse.Event{Type: evType, Data: payload})
 }
 
@@ -63,7 +65,9 @@ func (h *handlers) notify(ctx context.Context, addr, kind, title, body, link str
 	if err := h.q.InsertNotification(ctx, addr, kind, title, body, link); err == nil {
 		// Phase 3 RBAC: include user_addr so the GraphQL subscription resolver
 		// can filter notifications to only the intended recipient.
-		h.pub("notification", map[string]any{"user_addr": addr, "kind": kind, "title": title, "body": body, "link": link})
+		h.pubTyped("notification", &sse.NotificationEvent{
+			User: addr, UserAddr: addr, Kind: kind, Title: title, Body: body, Link: link,
+		})
 	}
 }
 
@@ -152,7 +156,10 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 	if err := h.q.UpsertListingAndOwnership(ctx, r); err != nil {
 		return fmt.Errorf("onListed: %w", err)
 	}
-	h.pub("listing-updated", map[string]any{"event": "Listed", "data": r})
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "Listed", Collection: collection, TokenID: tokenID,
+		Seller: seller, PriceWei: priceWei, Data: r,
+	})
 	return nil
 }
 
@@ -167,8 +174,8 @@ func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 	if err := h.q.DeactivateListing(ctx, collection, tokenID, seller); err != nil {
 		return fmt.Errorf("onCancelled: %w", err)
 	}
-	h.pub("listing-updated", map[string]any{
-		"event": "Cancelled", "collection": collection, "tokenId": tokenID, "seller": seller,
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "Cancelled", Collection: collection, TokenID: tokenID, Seller: seller,
 	})
 	return nil
 }
@@ -195,9 +202,9 @@ func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) 
 		return fmt.Errorf("onBought: %w", err)
 	}
 	h.notify(ctx, seller, "sold", "Your NFT sold", priceWei+" wei", "/token/"+collection+"/"+tokenID)
-	h.pub("listing-updated", map[string]any{
-		"event": "Bought", "collection": collection, "tokenId": tokenID,
-		"buyer": buyer, "seller": seller, "priceWei": priceWei,
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "Bought", Collection: collection, TokenID: tokenID,
+		Buyer: buyer, Seller: seller, PriceWei: priceWei,
 	})
 	return nil
 }
@@ -239,7 +246,9 @@ func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 	if err := h.q.UpsertAuction(ctx, r); err != nil {
 		return fmt.Errorf("onAuctionCreated: %w", err)
 	}
-	h.pub("auction-updated", map[string]any{"event": "AuctionCreated", "data": r})
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionCreated", AuctionID: auctionID, Data: r,
+	})
 	return nil
 }
 
@@ -262,9 +271,9 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 	if err := h.q.InsertBidAndUpdateAuction(ctx, auctionID, bidder, amtWei, l.TxHash.Hex(), placedAt); err != nil {
 		return fmt.Errorf("onBidPlaced: %w", err)
 	}
-	h.pub("auction-updated", map[string]any{
-		"event": "BidPlaced", "auctionId": auctionID, "bidder": bidder,
-		"amtWei": amtWei, "effectiveWei": newTotal,
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "BidPlaced", AuctionID: auctionID, Bidder: bidder,
+		AmtWei: amtWei, EffectiveWei: newTotal,
 	})
 	return nil
 }
@@ -281,9 +290,9 @@ func (h *handlers) onOutbidNotification(ctx context.Context, l types.Log) error 
 	h.notify(ctx, outbid, "outbid", "You were outbid",
 		"New leading total "+newLeaderTotal+" wei. Add to your bid to reclaim the lead.",
 		"/auction/"+fmt.Sprint(auctionID))
-	h.pub("auction-updated", map[string]any{
-		"event": "OutbidNotification", "auctionId": auctionID,
-		"outbid": outbid, "leaderTotalWei": newLeaderTotal,
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "OutbidNotification", AuctionID: auctionID,
+		OutbidAddr: outbid, LeaderTotal: newLeaderTotal,
 	})
 	return nil
 }
@@ -305,8 +314,8 @@ func (h *handlers) onLoserRefunded(ctx context.Context, l types.Log) error {
 	if err := h.q.SeedPendingWithdrawal(ctx, bidder); err != nil {
 		log.Warn().Err(err).Str("bidder", bidder).Msg("seed pending withdrawal")
 	}
-	h.pub("auction-updated", map[string]any{
-		"event": "LoserRefunded", "auctionId": auctionID, "bidder": bidder, "amtWei": amount,
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "LoserRefunded", AuctionID: auctionID, Bidder: bidder, AmtWei: amount,
 	})
 	return nil
 }
@@ -337,8 +346,8 @@ func (h *handlers) onAuctionExtended(ctx context.Context, l types.Log) error {
 	if err := h.q.ExtendAuction(ctx, auctionID, newEndsAt); err != nil {
 		return fmt.Errorf("onAuctionExtended: %w", err)
 	}
-	h.pub("auction-updated", map[string]any{
-		"event": "AuctionExtended", "auctionId": auctionID, "endsAt": newEndsAt.Unix(),
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionExtended", AuctionID: auctionID, EndTimeUnix: newEndsAt.Unix(),
 	})
 	return nil
 }
@@ -361,9 +370,9 @@ func (h *handlers) onAuctionSettled(ctx context.Context, l types.Log) error {
 		h.notify(ctx, winner, "auction_won", "You won an auction", bidAmt+" wei", "/auction/"+fmt.Sprint(auctionID))
 		h.notify(ctx, seller, "sold", "Your auction settled", bidAmt+" wei", "/auction/"+fmt.Sprint(auctionID))
 	}
-	h.pub("auction-updated", map[string]any{
-		"event": "AuctionSettled", "auctionId": auctionID,
-		"winner": winner, "seller": seller, "amtWei": bidAmt,
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionSettled", AuctionID: auctionID,
+		Winner: winner, Seller: seller, AmtWei: bidAmt,
 	})
 	return nil
 }
@@ -377,7 +386,9 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 	if err := h.q.SetAuctionStatus(ctx, auctionID, "cancelled"); err != nil {
 		return fmt.Errorf("onAuctionCancelled: %w", err)
 	}
-	h.pub("auction-updated", map[string]any{"event": "AuctionCancelled", "auctionId": auctionID})
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionCancelled", AuctionID: auctionID,
+	})
 	return nil
 }
 
@@ -419,9 +430,9 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 		h.notify(ctx, owner, "offer_received", "New offer received",
 			principal+" wei", "/token/"+collection+"/"+tokenID)
 	}
-	h.pub("offer-updated", map[string]any{
-		"event": "OfferMade", "collection": collection, "tokenId": tokenID,
-		"bidder": bidder, "principal": principal,
+	h.pubTyped("offer-updated", &sse.OfferUpdatedEvent{
+		Event: "OfferMade", Collection: collection, TokenID: tokenID,
+		Bidder: bidder, Principal: principal, AmountWei: principal,
 	})
 	return nil
 }
@@ -452,9 +463,9 @@ func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime u
 	}
 	h.notify(ctx, bidder, "offer_accepted", "Your offer was accepted",
 		principal+" wei", "/token/"+collection+"/"+tokenID)
-	h.pub("offer-updated", map[string]any{
-		"event": "OfferAccepted", "collection": collection, "tokenId": tokenID,
-		"seller": seller, "bidder": bidder, "principal": principal,
+	h.pubTyped("offer-updated", &sse.OfferUpdatedEvent{
+		Event: "OfferAccepted", Collection: collection, TokenID: tokenID,
+		Seller: seller, Bidder: bidder, Principal: principal, AmountWei: principal,
 	})
 	return nil
 }
@@ -472,8 +483,8 @@ func (h *handlers) onOfferRefunded(ctx context.Context, l types.Log) error {
 	}
 	h.notify(ctx, bidder, "offer_rejected", "Your offer was refunded",
 		"", "/token/"+collection+"/"+tokenID)
-	h.pub("offer-updated", map[string]any{
-		"event": "OfferRefunded", "collection": collection, "tokenId": tokenID, "bidder": bidder,
+	h.pubTyped("offer-updated", &sse.OfferUpdatedEvent{
+		Event: "OfferRefunded", Collection: collection, TokenID: tokenID, Bidder: bidder,
 	})
 	return nil
 }
@@ -492,8 +503,8 @@ func (h *handlers) onTransfer721(ctx context.Context, l types.Log) error {
 	if err := h.q.ApplyTransfer721(ctx, collection, tokenID, to); err != nil {
 		return fmt.Errorf("onTransfer721: %w", err)
 	}
-	h.pub("listing-updated", map[string]any{
-		"event": "Transfer", "collection": collection, "tokenId": tokenID, "to": to,
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "Transfer", Collection: collection, TokenID: tokenID, ToAddr: to,
 	})
 	return nil
 }
@@ -511,8 +522,8 @@ func (h *handlers) onTransferSingle(ctx context.Context, l types.Log) error {
 	if err := h.q.ApplyTransfer1155(ctx, collection, tokenID, from, to, value.String()); err != nil {
 		return fmt.Errorf("onTransferSingle: %w", err)
 	}
-	h.pub("listing-updated", map[string]any{
-		"event": "TransferSingle", "collection": collection, "tokenId": tokenID, "from": from, "to": to,
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "TransferSingle", Collection: collection, TokenID: tokenID, FromAddr: from, ToAddr: to,
 	})
 	return nil
 }
@@ -566,8 +577,8 @@ func (h *handlers) onTransferBatch(ctx context.Context, l types.Log) error {
 			return fmt.Errorf("onTransferBatch id=%s: %w", id, err)
 		}
 	}
-	h.pub("listing-updated", map[string]any{
-		"event": "TransferBatch", "collection": collection, "from": from, "to": to,
+	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
+		Event: "TransferBatch", Collection: collection, FromAddr: from, ToAddr: to,
 	})
 	return nil
 }

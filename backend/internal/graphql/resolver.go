@@ -949,20 +949,32 @@ func (r *subscriptionResolver) ListingUpdated(ctx context.Context, collection *s
 				if ev.Type != "listing-updated" {
 					continue
 				}
-				// Marshal event data into a listing for filtering.
-				data, err := json.Marshal(ev.Data)
-				if err != nil {
+				// SSE-4: direct typed struct access — no JSON round-trip.
+			// The indexer always publishes typed structs post-SSE-4; bridge
+			// instances also send typed oneof payloads. No JSON fallback needed.
+				lev, ok := ev.Data.(*sse.ListingUpdatedEvent)
+				if !ok {
 					continue
 				}
-				var row db.ListingRow
-				if err := json.Unmarshal(data, &row); err != nil {
+				// Apply collection/tokenID filter from typed fields.
+				if collection != nil && !strings.EqualFold(lev.Collection, *collection) {
 					continue
 				}
-				// Apply collection/tokenID filter.
-				if collection != nil && !strings.EqualFold(row.Collection, *collection) {
+				if tokenID != nil && lev.TokenID != *tokenID {
 					continue
 				}
-				if tokenID != nil && row.TokenID != *tokenID {
+				row, ok := lev.Data.(db.ListingRow)
+				if !ok {
+					// Event has no embedded DB row; construct minimal Listing from fields.
+					select {
+					case ch <- &Listing{
+						Collection: lev.Collection,
+						TokenID:    lev.TokenID,
+						Seller:     lev.Seller,
+						PriceWei:   lev.PriceWei,
+					}:
+					default:
+					}
 					continue
 				}
 				select {
@@ -999,15 +1011,26 @@ func (r *subscriptionResolver) AuctionUpdated(ctx context.Context, auctionID *in
 				if ev.Type != "auction-updated" {
 					continue
 				}
-				data, err := json.Marshal(ev.Data)
-				if err != nil {
+				// SSE-4: direct typed struct access — no JSON round-trip.
+			// The indexer always publishes typed structs post-SSE-4; bridge
+			// instances also send typed oneof payloads. No JSON fallback needed.
+				aev, ok := ev.Data.(*sse.AuctionUpdatedEvent)
+				if !ok {
 					continue
 				}
-				var row db.AuctionRow
-				if err := json.Unmarshal(data, &row); err != nil {
+				if auctionID != nil && aev.AuctionID != int64(*auctionID) {
 					continue
 				}
-				if auctionID != nil && row.AuctionID != int64(*auctionID) {
+				row, ok := aev.Data.(db.AuctionRow)
+				if !ok {
+					// Event has no embedded DB row; construct minimal Auction from fields.
+					select {
+					case ch <- &Auction{
+						AuctionID: aev.AuctionID, Collection: aev.Collection,
+						TokenID: aev.TokenID, Seller: aev.Seller, Status: aev.Status,
+					}:
+					default:
+					}
 					continue
 				}
 				select {
@@ -1043,18 +1066,28 @@ func (r *subscriptionResolver) ActivityUpdated(ctx context.Context) (<-chan *Act
 				if ev.Type != "activity" {
 					continue
 				}
-				data, err := json.Marshal(ev.Data)
-				if err != nil {
-					continue
-				}
-				var row db.ActivityRow
-				if err := json.Unmarshal(data, &row); err != nil {
-					continue
-				}
-				act := &Activity{
-					Type: row.Type, Collection: row.Collection,
-					TokenID: row.TokenID, AmountWei: row.AmountWei,
-					Timestamp: row.Timestamp, TxHash: row.TxHash,
+				// SSE-4: prefer typed struct; fall back to JSON for backward compat.
+				var act *Activity
+				if aev, ok := ev.Data.(*sse.ActivityEvent); ok {
+					act = &Activity{
+						Type: aev.EventType, Collection: aev.Collection,
+						TokenID: aev.TokenID, AmountWei: aev.PriceWei,
+						TxHash: aev.TxHash,
+					}
+				} else {
+					data, err := json.Marshal(ev.Data)
+					if err != nil {
+						continue
+					}
+					var row db.ActivityRow
+					if err := json.Unmarshal(data, &row); err != nil {
+						continue
+					}
+					act = &Activity{
+						Type: row.Type, Collection: row.Collection,
+						TokenID: row.TokenID, AmountWei: row.AmountWei,
+						Timestamp: row.Timestamp, TxHash: row.TxHash,
+					}
 				}
 				select {
 				case ch <- act:
@@ -1097,22 +1130,21 @@ func (r *subscriptionResolver) NotificationUpdated(ctx context.Context) (<-chan 
 				if ev.Type != "notification" {
 					continue
 				}
-				data, err := json.Marshal(ev.Data)
-				if err != nil {
-					continue
-				}
-				var n db.NotificationRow
-				if err := json.Unmarshal(data, &n); err != nil {
+				// SSE-4: direct typed struct access — no JSON round-trip.
+			// The indexer always publishes typed structs post-SSE-4; bridge
+			// instances also send typed oneof payloads. No JSON fallback needed.
+				nev, ok := ev.Data.(*sse.NotificationEvent)
+				if !ok {
 					continue
 				}
 				// Phase 3 RBAC: only forward notifications owned by this user.
 				// Unauthenticated connections (authAddr="") see nothing.
-				if authAddr == "" || !strings.EqualFold(n.UserAddr, authAddr) {
+				if authAddr == "" || !strings.EqualFold(nev.UserAddr, authAddr) {
 					continue
 				}
 				notif := &Notification{
-					ID: n.ID, Kind: n.Kind, Title: n.Title,
-					Body: n.Body, Link: n.Link, Read: n.Read, CreatedAt: n.CreatedAt,
+					Kind: nev.Kind, Title: nev.Title,
+					Body: nev.Body, Link: nev.Link,
 				}
 				select {
 				case ch <- notif:
