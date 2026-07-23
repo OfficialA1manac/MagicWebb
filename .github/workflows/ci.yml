@@ -21,7 +21,7 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       # v35: pinned to full semver tags (immutable git references) instead
-      # of mutable major-version tags (@v4). Dependabot will bump these.
+      # of mutable major-version tags (@v4).
       - uses: actions/checkout@v4.2.0
       # ── Disk space recovery ──────────────────────────────────────────────────
       # GitHub-hosted runners start with ~29 GB free but can drop below 1 GB

@@ -13,8 +13,7 @@
 #   Adding a third-party CodeQL pack for Solidity would be experimental
 #   and duplicate coverage.
 #
-# schedule: "0 4 * * 1" — every Monday 04:00 UTC (same day as Dependabot
-#   bumps, so new dependency versions are scanned within hours of arrival).
+# schedule: "0 4 * * 1" — every Monday 04:00 UTC.
 #
 # permissions: security-events: write is REQUIRED for CodeQL to upload
 #   results to the GitHub Security tab. contents: read is the minimum for
