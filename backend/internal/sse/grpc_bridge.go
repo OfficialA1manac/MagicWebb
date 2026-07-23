@@ -133,6 +133,10 @@ func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, event
 // outbox is full, the event is dropped for that peer (logged at warn level).
 // Other peers and local subscribers still receive the event. This mirrors the
 // old bridge channel's non-blocking select pattern.
+//
+// SSE-4: Populates the protobuf oneof event field for known event types,
+// eliminating JSON round-trips on the receiving side. The bytes data field
+// is always populated for backward compat with older instances.
 func (b *GrpcEventBridge) Send(ev Event) {
 	data, err := json.Marshal(ev.Data)
 	if err != nil {
@@ -143,6 +147,13 @@ func (b *GrpcEventBridge) Send(ev Event) {
 		Type:   ev.Type,
 		Data:   data,
 		Seq:    ev.Seq, // SSE-2: pass sequence number through bridge
+	}
+
+	// SSE-4: populate typed oneof when the event type is known.
+	// PopulateProtoOneof sets msg.Event directly (proto oneof interface is unexported).
+	// msg.Data remains populated for backward compat (old instances).
+	if HasTypedPayload(ev.Type) {
+		PopulateProtoOneof(msg, ev.Type, ev.Data)
 	}
 
 	b.mu.Lock()
@@ -369,10 +380,19 @@ func (h *bridgeHandler) StreamEvents(stream proto.EventBridge_StreamEventsServer
 		// Feed into the Broadcaster's events channel for local fan-out.
 		// SSE-2: preserve the origin instance's sequence number so clients
 		// see consistent ordering across instances.
+		// SSE-4: prefer typed proto oneof payload when available;
+		// fall back to JSON raw message for unknown event types or
+		// backward compat with older bridge instances.
+		var evData any
+		if typed := FromProtoOneof(msg); typed != nil {
+			evData = typed
+		} else {
+			evData = json.RawMessage(msg.Data)
+		}
 		select {
 		case h.eventsCh <- Event{
 			Type: msg.Type,
-			Data: json.RawMessage(msg.Data),
+			Data: evData,
 			Seq:  msg.Seq,
 		}:
 		default:

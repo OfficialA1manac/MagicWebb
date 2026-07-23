@@ -39,16 +39,28 @@ message ListingUpdated {
   string token_id   = 2;
   string seller     = 3;
   string price_wei  = 4;
+  string event      = 5;  // sub-event: "Listed", "Cancelled", "Bought", "Transfer", "TransferSingle", "TransferBatch"
+  string buyer      = 6;
+  string to_addr    = 7;
+  string from_addr  = 8;
 }
 
 message AuctionUpdated {
-  int64  auction_id  = 1;
-  string collection  = 2;
-  string token_id    = 3;
-  string status      = 4;  // "active", "ended", "cancelled"
-  string highest_bid = 5;
+  int64  auction_id     = 1;
+  string collection     = 2;
+  string token_id       = 3;
+  string status         = 4;  // "active", "ended", "cancelled"
+  string highest_bid    = 5;
   string highest_bidder = 6;
   int64  end_time_unix  = 7;
+  string event          = 8;  // sub-event: "AuctionCreated", "BidPlaced", "OutbidNotification", "AuctionExtended", "AuctionSettled", "AuctionCancelled", "LoserRefunded"
+  string seller         = 9;
+  string winner         = 10;
+  string amt_wei        = 11;
+  string bidder         = 12;
+  string effective_wei  = 13;
+  string outbid_addr    = 14;
+  string leader_total   = 15;
 }
 
 message OfferUpdated {
@@ -58,13 +70,18 @@ message OfferUpdated {
   string bidder      = 4;
   string amount_wei  = 5;
   string status      = 6;  // "active", "accepted", "cancelled"
+  string event       = 7;  // sub-event: "OfferMade", "OfferAccepted", "OfferRefunded"
+  string seller      = 8;
+  string principal   = 9;
 }
 
 message Notification {
-  string user    = 1;  // target wallet address
-  string title   = 2;
-  string body    = 3;
-  string link    = 4;
+  string user      = 1;  // target wallet address
+  string title     = 2;
+  string body      = 3;
+  string link      = 4;
+  string kind      = 5;  // "sold", "outbid", "refund", "offer_received", "offer_accepted", "offer_rejected", "auction_won"
+  string user_addr = 6;
 }
 
 message Activity {

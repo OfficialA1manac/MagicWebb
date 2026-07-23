@@ -21,15 +21,32 @@ const (
 	_ = protoimpl.EnforceVersion(protoimpl.MaxVersion - 20)
 )
 
-// EventMessage is the cross-instance event envelope.
-// SSE-2: Seq field (4) carries the monotonic sequence number through the
-// gRPC bridge so remote instances can replay events with correct ordering.
+// EventMessage is the cross-instance event envelope. It mirrors the existing
+// sse.wire struct but uses protobuf binary encoding instead of JSON, removing
+// the pg_notify 8KB payload limit and eliminating JSON marshal/unmarshal
+// overhead for cross-instance fan-out.
+//
+// SSE-4: Added typed event messages in a oneof alongside the legacy bytes data
+// field. The typed path eliminates JSON round-trips for known event types,
+// using protobuf binary encoding end-to-end. The bytes data field remains for
+// backward compatibility and for event types not yet in the oneof.
 type EventMessage struct {
-	state         protoimpl.MessageState `protogen:"open.v1"`
-	Origin        string                 `protobuf:"bytes,1,opt,name=origin,proto3" json:"origin,omitempty"`
-	Type          string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`
-	Data          []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`
-	Seq           uint64                 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"` // SSE-2: monotonic event sequence number
+	state  protoimpl.MessageState `protogen:"open.v1"`
+	Origin string                 `protobuf:"bytes,1,opt,name=origin,proto3" json:"origin,omitempty"` // instance UUID — skip self-originated events
+	Type   string                 `protobuf:"bytes,2,opt,name=type,proto3" json:"type,omitempty"`     // e.g. "listing-updated", "auction-updated"
+	Data   []byte                 `protobuf:"bytes,3,opt,name=data,proto3" json:"data,omitempty"`     // legacy: JSON-marshalled event payload (backward compat)
+	Seq    uint64                 `protobuf:"varint,4,opt,name=seq,proto3" json:"seq,omitempty"`      // SSE-2: monotonic sequence number for gap detection + replay
+	// SSE-4: Typed event payloads — protobuf-native, no JSON round-trip.
+	//
+	// Types that are valid to be assigned to Event:
+	//
+	//	*EventMessage_ListingUpdated
+	//	*EventMessage_AuctionUpdated
+	//	*EventMessage_OfferUpdated
+	//	*EventMessage_Notification
+	//	*EventMessage_Activity
+	//	*EventMessage_RpcHealth
+	Event         isEventMessage_Event `protobuf_oneof:"event"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -85,10 +102,718 @@ func (x *EventMessage) GetData() []byte {
 	return nil
 }
 
-// GetSeq returns the event sequence number (SSE-2).
 func (x *EventMessage) GetSeq() uint64 {
 	if x != nil {
 		return x.Seq
+	}
+	return 0
+}
+
+func (x *EventMessage) GetEvent() isEventMessage_Event {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+func (x *EventMessage) GetListingUpdated() *ListingUpdated {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_ListingUpdated); ok {
+			return x.ListingUpdated
+		}
+	}
+	return nil
+}
+
+func (x *EventMessage) GetAuctionUpdated() *AuctionUpdated {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_AuctionUpdated); ok {
+			return x.AuctionUpdated
+		}
+	}
+	return nil
+}
+
+func (x *EventMessage) GetOfferUpdated() *OfferUpdated {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_OfferUpdated); ok {
+			return x.OfferUpdated
+		}
+	}
+	return nil
+}
+
+func (x *EventMessage) GetNotification() *Notification {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_Notification); ok {
+			return x.Notification
+		}
+	}
+	return nil
+}
+
+func (x *EventMessage) GetActivity() *Activity {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_Activity); ok {
+			return x.Activity
+		}
+	}
+	return nil
+}
+
+func (x *EventMessage) GetRpcHealth() *RPCHealth {
+	if x != nil {
+		if x, ok := x.Event.(*EventMessage_RpcHealth); ok {
+			return x.RpcHealth
+		}
+	}
+	return nil
+}
+
+type isEventMessage_Event interface {
+	isEventMessage_Event()
+}
+
+type EventMessage_ListingUpdated struct {
+	ListingUpdated *ListingUpdated `protobuf:"bytes,10,opt,name=listing_updated,json=listingUpdated,proto3,oneof"`
+}
+
+type EventMessage_AuctionUpdated struct {
+	AuctionUpdated *AuctionUpdated `protobuf:"bytes,11,opt,name=auction_updated,json=auctionUpdated,proto3,oneof"`
+}
+
+type EventMessage_OfferUpdated struct {
+	OfferUpdated *OfferUpdated `protobuf:"bytes,12,opt,name=offer_updated,json=offerUpdated,proto3,oneof"`
+}
+
+type EventMessage_Notification struct {
+	Notification *Notification `protobuf:"bytes,13,opt,name=notification,proto3,oneof"`
+}
+
+type EventMessage_Activity struct {
+	Activity *Activity `protobuf:"bytes,14,opt,name=activity,proto3,oneof"`
+}
+
+type EventMessage_RpcHealth struct {
+	RpcHealth *RPCHealth `protobuf:"bytes,15,opt,name=rpc_health,json=rpcHealth,proto3,oneof"` // RPC-1: endpoint health transitions
+}
+
+func (*EventMessage_ListingUpdated) isEventMessage_Event() {}
+
+func (*EventMessage_AuctionUpdated) isEventMessage_Event() {}
+
+func (*EventMessage_OfferUpdated) isEventMessage_Event() {}
+
+func (*EventMessage_Notification) isEventMessage_Event() {}
+
+func (*EventMessage_Activity) isEventMessage_Event() {}
+
+func (*EventMessage_RpcHealth) isEventMessage_Event() {}
+
+type ListingUpdated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"` // collection address
+	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Seller        string                 `protobuf:"bytes,3,opt,name=seller,proto3" json:"seller,omitempty"`
+	PriceWei      string                 `protobuf:"bytes,4,opt,name=price_wei,json=priceWei,proto3" json:"price_wei,omitempty"`
+	Event         string                 `protobuf:"bytes,5,opt,name=event,proto3" json:"event,omitempty"` // sub-event: "Listed", "Cancelled", "Bought", "Transfer", "TransferSingle", "TransferBatch"
+	Buyer         string                 `protobuf:"bytes,6,opt,name=buyer,proto3" json:"buyer,omitempty"`
+	ToAddr        string                 `protobuf:"bytes,7,opt,name=to_addr,json=toAddr,proto3" json:"to_addr,omitempty"`
+	FromAddr      string                 `protobuf:"bytes,8,opt,name=from_addr,json=fromAddr,proto3" json:"from_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *ListingUpdated) Reset() {
+	*x = ListingUpdated{}
+	mi := &file_events_proto_msgTypes[1]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *ListingUpdated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*ListingUpdated) ProtoMessage() {}
+
+func (x *ListingUpdated) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[1]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use ListingUpdated.ProtoReflect.Descriptor instead.
+func (*ListingUpdated) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{1}
+}
+
+func (x *ListingUpdated) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetPriceWei() string {
+	if x != nil {
+		return x.PriceWei
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetBuyer() string {
+	if x != nil {
+		return x.Buyer
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetToAddr() string {
+	if x != nil {
+		return x.ToAddr
+	}
+	return ""
+}
+
+func (x *ListingUpdated) GetFromAddr() string {
+	if x != nil {
+		return x.FromAddr
+	}
+	return ""
+}
+
+type AuctionUpdated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuctionId     int64                  `protobuf:"varint,1,opt,name=auction_id,json=auctionId,proto3" json:"auction_id,omitempty"`
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Status        string                 `protobuf:"bytes,4,opt,name=status,proto3" json:"status,omitempty"` // "active", "ended", "cancelled"
+	HighestBid    string                 `protobuf:"bytes,5,opt,name=highest_bid,json=highestBid,proto3" json:"highest_bid,omitempty"`
+	HighestBidder string                 `protobuf:"bytes,6,opt,name=highest_bidder,json=highestBidder,proto3" json:"highest_bidder,omitempty"`
+	EndTimeUnix   int64                  `protobuf:"varint,7,opt,name=end_time_unix,json=endTimeUnix,proto3" json:"end_time_unix,omitempty"`
+	Event         string                 `protobuf:"bytes,8,opt,name=event,proto3" json:"event,omitempty"` // sub-event: "AuctionCreated", "BidPlaced", "OutbidNotification", "AuctionExtended", "AuctionSettled", "AuctionCancelled", "LoserRefunded"
+	Seller        string                 `protobuf:"bytes,9,opt,name=seller,proto3" json:"seller,omitempty"`
+	Winner        string                 `protobuf:"bytes,10,opt,name=winner,proto3" json:"winner,omitempty"`
+	AmtWei        string                 `protobuf:"bytes,11,opt,name=amt_wei,json=amtWei,proto3" json:"amt_wei,omitempty"`
+	Bidder        string                 `protobuf:"bytes,12,opt,name=bidder,proto3" json:"bidder,omitempty"`
+	EffectiveWei  string                 `protobuf:"bytes,13,opt,name=effective_wei,json=effectiveWei,proto3" json:"effective_wei,omitempty"`
+	OutbidAddr    string                 `protobuf:"bytes,14,opt,name=outbid_addr,json=outbidAddr,proto3" json:"outbid_addr,omitempty"`
+	LeaderTotal   string                 `protobuf:"bytes,15,opt,name=leader_total,json=leaderTotal,proto3" json:"leader_total,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *AuctionUpdated) Reset() {
+	*x = AuctionUpdated{}
+	mi := &file_events_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *AuctionUpdated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*AuctionUpdated) ProtoMessage() {}
+
+func (x *AuctionUpdated) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use AuctionUpdated.ProtoReflect.Descriptor instead.
+func (*AuctionUpdated) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *AuctionUpdated) GetAuctionId() int64 {
+	if x != nil {
+		return x.AuctionId
+	}
+	return 0
+}
+
+func (x *AuctionUpdated) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetHighestBid() string {
+	if x != nil {
+		return x.HighestBid
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetHighestBidder() string {
+	if x != nil {
+		return x.HighestBidder
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetEndTimeUnix() int64 {
+	if x != nil {
+		return x.EndTimeUnix
+	}
+	return 0
+}
+
+func (x *AuctionUpdated) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetWinner() string {
+	if x != nil {
+		return x.Winner
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetAmtWei() string {
+	if x != nil {
+		return x.AmtWei
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetBidder() string {
+	if x != nil {
+		return x.Bidder
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetEffectiveWei() string {
+	if x != nil {
+		return x.EffectiveWei
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetOutbidAddr() string {
+	if x != nil {
+		return x.OutbidAddr
+	}
+	return ""
+}
+
+func (x *AuctionUpdated) GetLeaderTotal() string {
+	if x != nil {
+		return x.LeaderTotal
+	}
+	return ""
+}
+
+type OfferUpdated struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	OfferId       string                 `protobuf:"bytes,1,opt,name=offer_id,json=offerId,proto3" json:"offer_id,omitempty"`
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Bidder        string                 `protobuf:"bytes,4,opt,name=bidder,proto3" json:"bidder,omitempty"`
+	AmountWei     string                 `protobuf:"bytes,5,opt,name=amount_wei,json=amountWei,proto3" json:"amount_wei,omitempty"`
+	Status        string                 `protobuf:"bytes,6,opt,name=status,proto3" json:"status,omitempty"` // "active", "accepted", "cancelled"
+	Event         string                 `protobuf:"bytes,7,opt,name=event,proto3" json:"event,omitempty"`   // sub-event: "OfferMade", "OfferAccepted", "OfferRefunded"
+	Seller        string                 `protobuf:"bytes,8,opt,name=seller,proto3" json:"seller,omitempty"`
+	Principal     string                 `protobuf:"bytes,9,opt,name=principal,proto3" json:"principal,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *OfferUpdated) Reset() {
+	*x = OfferUpdated{}
+	mi := &file_events_proto_msgTypes[3]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *OfferUpdated) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*OfferUpdated) ProtoMessage() {}
+
+func (x *OfferUpdated) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[3]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use OfferUpdated.ProtoReflect.Descriptor instead.
+func (*OfferUpdated) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{3}
+}
+
+func (x *OfferUpdated) GetOfferId() string {
+	if x != nil {
+		return x.OfferId
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetBidder() string {
+	if x != nil {
+		return x.Bidder
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetAmountWei() string {
+	if x != nil {
+		return x.AmountWei
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetStatus() string {
+	if x != nil {
+		return x.Status
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetEvent() string {
+	if x != nil {
+		return x.Event
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetSeller() string {
+	if x != nil {
+		return x.Seller
+	}
+	return ""
+}
+
+func (x *OfferUpdated) GetPrincipal() string {
+	if x != nil {
+		return x.Principal
+	}
+	return ""
+}
+
+type Notification struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	User          string                 `protobuf:"bytes,1,opt,name=user,proto3" json:"user,omitempty"` // target wallet address
+	Title         string                 `protobuf:"bytes,2,opt,name=title,proto3" json:"title,omitempty"`
+	Body          string                 `protobuf:"bytes,3,opt,name=body,proto3" json:"body,omitempty"`
+	Link          string                 `protobuf:"bytes,4,opt,name=link,proto3" json:"link,omitempty"`
+	Kind          string                 `protobuf:"bytes,5,opt,name=kind,proto3" json:"kind,omitempty"` // "sold", "outbid", "refund", "offer_received", "offer_accepted", "offer_rejected", "auction_won"
+	UserAddr      string                 `protobuf:"bytes,6,opt,name=user_addr,json=userAddr,proto3" json:"user_addr,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Notification) Reset() {
+	*x = Notification{}
+	mi := &file_events_proto_msgTypes[4]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Notification) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Notification) ProtoMessage() {}
+
+func (x *Notification) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[4]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Notification.ProtoReflect.Descriptor instead.
+func (*Notification) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{4}
+}
+
+func (x *Notification) GetUser() string {
+	if x != nil {
+		return x.User
+	}
+	return ""
+}
+
+func (x *Notification) GetTitle() string {
+	if x != nil {
+		return x.Title
+	}
+	return ""
+}
+
+func (x *Notification) GetBody() string {
+	if x != nil {
+		return x.Body
+	}
+	return ""
+}
+
+func (x *Notification) GetLink() string {
+	if x != nil {
+		return x.Link
+	}
+	return ""
+}
+
+func (x *Notification) GetKind() string {
+	if x != nil {
+		return x.Kind
+	}
+	return ""
+}
+
+func (x *Notification) GetUserAddr() string {
+	if x != nil {
+		return x.UserAddr
+	}
+	return ""
+}
+
+type Activity struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EventType     string                 `protobuf:"bytes,1,opt,name=event_type,json=eventType,proto3" json:"event_type,omitempty"` // "sale", "bid", "list", "offer"
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	From          string                 `protobuf:"bytes,4,opt,name=from,proto3" json:"from,omitempty"`
+	To            string                 `protobuf:"bytes,5,opt,name=to,proto3" json:"to,omitempty"`
+	PriceWei      string                 `protobuf:"bytes,6,opt,name=price_wei,json=priceWei,proto3" json:"price_wei,omitempty"`
+	TxHash        string                 `protobuf:"bytes,7,opt,name=tx_hash,json=txHash,proto3" json:"tx_hash,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *Activity) Reset() {
+	*x = Activity{}
+	mi := &file_events_proto_msgTypes[5]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *Activity) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*Activity) ProtoMessage() {}
+
+func (x *Activity) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[5]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use Activity.ProtoReflect.Descriptor instead.
+func (*Activity) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{5}
+}
+
+func (x *Activity) GetEventType() string {
+	if x != nil {
+		return x.EventType
+	}
+	return ""
+}
+
+func (x *Activity) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *Activity) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+func (x *Activity) GetFrom() string {
+	if x != nil {
+		return x.From
+	}
+	return ""
+}
+
+func (x *Activity) GetTo() string {
+	if x != nil {
+		return x.To
+	}
+	return ""
+}
+
+func (x *Activity) GetPriceWei() string {
+	if x != nil {
+		return x.PriceWei
+	}
+	return ""
+}
+
+func (x *Activity) GetTxHash() string {
+	if x != nil {
+		return x.TxHash
+	}
+	return ""
+}
+
+type RPCHealth struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	EndpointIndex int32                  `protobuf:"varint,1,opt,name=endpoint_index,json=endpointIndex,proto3" json:"endpoint_index,omitempty"`
+	Healthy       bool                   `protobuf:"varint,2,opt,name=healthy,proto3" json:"healthy,omitempty"`
+	EndpointCount int32                  `protobuf:"varint,3,opt,name=endpoint_count,json=endpointCount,proto3" json:"endpoint_count,omitempty"`
+	HealthyCount  int32                  `protobuf:"varint,4,opt,name=healthy_count,json=healthyCount,proto3" json:"healthy_count,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *RPCHealth) Reset() {
+	*x = RPCHealth{}
+	mi := &file_events_proto_msgTypes[6]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *RPCHealth) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*RPCHealth) ProtoMessage() {}
+
+func (x *RPCHealth) ProtoReflect() protoreflect.Message {
+	mi := &file_events_proto_msgTypes[6]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use RPCHealth.ProtoReflect.Descriptor instead.
+func (*RPCHealth) Descriptor() ([]byte, []int) {
+	return file_events_proto_rawDescGZIP(), []int{6}
+}
+
+func (x *RPCHealth) GetEndpointIndex() int32 {
+	if x != nil {
+		return x.EndpointIndex
+	}
+	return 0
+}
+
+func (x *RPCHealth) GetHealthy() bool {
+	if x != nil {
+		return x.Healthy
+	}
+	return false
+}
+
+func (x *RPCHealth) GetEndpointCount() int32 {
+	if x != nil {
+		return x.EndpointCount
+	}
+	return 0
+}
+
+func (x *RPCHealth) GetHealthyCount() int32 {
+	if x != nil {
+		return x.HealthyCount
 	}
 	return 0
 }
@@ -97,11 +822,90 @@ var File_events_proto protoreflect.FileDescriptor
 
 const file_events_proto_rawDesc = "" +
 	"\n" +
-	"\fevents.proto\x12\x03sse\"N\n" +
+	"\fevents.proto\x12\x03sse\"\xba\x03\n" +
 	"\fEventMessage\x12\x16\n" +
 	"\x06origin\x18\x01 \x01(\tR\x06origin\x12\x12\n" +
 	"\x04type\x18\x02 \x01(\tR\x04type\x12\x12\n" +
-	"\x04data\x18\x03 \x01(\fR\x04data2G\n" +
+	"\x04data\x18\x03 \x01(\fR\x04data\x12\x10\n" +
+	"\x03seq\x18\x04 \x01(\x04R\x03seq\x12>\n" +
+	"\x0flisting_updated\x18\n" +
+	" \x01(\v2\x13.sse.ListingUpdatedH\x00R\x0elistingUpdated\x12>\n" +
+	"\x0fauction_updated\x18\v \x01(\v2\x13.sse.AuctionUpdatedH\x00R\x0eauctionUpdated\x128\n" +
+	"\roffer_updated\x18\f \x01(\v2\x11.sse.OfferUpdatedH\x00R\fofferUpdated\x127\n" +
+	"\fnotification\x18\r \x01(\v2\x11.sse.NotificationH\x00R\fnotification\x12+\n" +
+	"\bactivity\x18\x0e \x01(\v2\r.sse.ActivityH\x00R\bactivity\x12/\n" +
+	"\n" +
+	"rpc_health\x18\x0f \x01(\v2\x0e.sse.RPCHealthH\x00R\trpcHealthB\a\n" +
+	"\x05event\"\xe2\x01\n" +
+	"\x0eListingUpdated\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06seller\x18\x03 \x01(\tR\x06seller\x12\x1b\n" +
+	"\tprice_wei\x18\x04 \x01(\tR\bpriceWei\x12\x14\n" +
+	"\x05event\x18\x05 \x01(\tR\x05event\x12\x14\n" +
+	"\x05buyer\x18\x06 \x01(\tR\x05buyer\x12\x17\n" +
+	"\ato_addr\x18\a \x01(\tR\x06toAddr\x12\x1b\n" +
+	"\tfrom_addr\x18\b \x01(\tR\bfromAddr\"\xce\x03\n" +
+	"\x0eAuctionUpdated\x12\x1d\n" +
+	"\n" +
+	"auction_id\x18\x01 \x01(\x03R\tauctionId\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06status\x18\x04 \x01(\tR\x06status\x12\x1f\n" +
+	"\vhighest_bid\x18\x05 \x01(\tR\n" +
+	"highestBid\x12%\n" +
+	"\x0ehighest_bidder\x18\x06 \x01(\tR\rhighestBidder\x12\"\n" +
+	"\rend_time_unix\x18\a \x01(\x03R\vendTimeUnix\x12\x14\n" +
+	"\x05event\x18\b \x01(\tR\x05event\x12\x16\n" +
+	"\x06seller\x18\t \x01(\tR\x06seller\x12\x16\n" +
+	"\x06winner\x18\n" +
+	" \x01(\tR\x06winner\x12\x17\n" +
+	"\aamt_wei\x18\v \x01(\tR\x06amtWei\x12\x16\n" +
+	"\x06bidder\x18\f \x01(\tR\x06bidder\x12#\n" +
+	"\reffective_wei\x18\r \x01(\tR\feffectiveWei\x12\x1f\n" +
+	"\voutbid_addr\x18\x0e \x01(\tR\n" +
+	"outbidAddr\x12!\n" +
+	"\fleader_total\x18\x0f \x01(\tR\vleaderTotal\"\xff\x01\n" +
+	"\fOfferUpdated\x12\x19\n" +
+	"\boffer_id\x18\x01 \x01(\tR\aofferId\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x16\n" +
+	"\x06bidder\x18\x04 \x01(\tR\x06bidder\x12\x1d\n" +
+	"\n" +
+	"amount_wei\x18\x05 \x01(\tR\tamountWei\x12\x16\n" +
+	"\x06status\x18\x06 \x01(\tR\x06status\x12\x14\n" +
+	"\x05event\x18\a \x01(\tR\x05event\x12\x16\n" +
+	"\x06seller\x18\b \x01(\tR\x06seller\x12\x1c\n" +
+	"\tprincipal\x18\t \x01(\tR\tprincipal\"\x91\x01\n" +
+	"\fNotification\x12\x12\n" +
+	"\x04user\x18\x01 \x01(\tR\x04user\x12\x14\n" +
+	"\x05title\x18\x02 \x01(\tR\x05title\x12\x12\n" +
+	"\x04body\x18\x03 \x01(\tR\x04body\x12\x12\n" +
+	"\x04link\x18\x04 \x01(\tR\x04link\x12\x12\n" +
+	"\x04kind\x18\x05 \x01(\tR\x04kind\x12\x1b\n" +
+	"\tuser_addr\x18\x06 \x01(\tR\buserAddr\"\xbe\x01\n" +
+	"\bActivity\x12\x1d\n" +
+	"\n" +
+	"event_type\x18\x01 \x01(\tR\teventType\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\x12\x12\n" +
+	"\x04from\x18\x04 \x01(\tR\x04from\x12\x0e\n" +
+	"\x02to\x18\x05 \x01(\tR\x02to\x12\x1b\n" +
+	"\tprice_wei\x18\x06 \x01(\tR\bpriceWei\x12\x17\n" +
+	"\atx_hash\x18\a \x01(\tR\x06txHash\"\x98\x01\n" +
+	"\tRPCHealth\x12%\n" +
+	"\x0eendpoint_index\x18\x01 \x01(\x05R\rendpointIndex\x12\x18\n" +
+	"\ahealthy\x18\x02 \x01(\bR\ahealthy\x12%\n" +
+	"\x0eendpoint_count\x18\x03 \x01(\x05R\rendpointCount\x12#\n" +
+	"\rhealthy_count\x18\x04 \x01(\x05R\fhealthyCount2G\n" +
 	"\vEventBridge\x128\n" +
 	"\fStreamEvents\x12\x11.sse.EventMessage\x1a\x11.sse.EventMessage(\x010\x01BAZ?github.com/OfficialA1manac/MagicWebb/backend/internal/sse/protob\x06proto3"
 
@@ -117,18 +921,30 @@ func file_events_proto_rawDescGZIP() []byte {
 	return file_events_proto_rawDescData
 }
 
-var file_events_proto_msgTypes = make([]protoimpl.MessageInfo, 1)
+var file_events_proto_msgTypes = make([]protoimpl.MessageInfo, 7)
 var file_events_proto_goTypes = []any{
-	(*EventMessage)(nil), // 0: sse.EventMessage
+	(*EventMessage)(nil),   // 0: sse.EventMessage
+	(*ListingUpdated)(nil), // 1: sse.ListingUpdated
+	(*AuctionUpdated)(nil), // 2: sse.AuctionUpdated
+	(*OfferUpdated)(nil),   // 3: sse.OfferUpdated
+	(*Notification)(nil),   // 4: sse.Notification
+	(*Activity)(nil),       // 5: sse.Activity
+	(*RPCHealth)(nil),      // 6: sse.RPCHealth
 }
 var file_events_proto_depIdxs = []int32{
-	0, // 0: sse.EventBridge.StreamEvents:input_type -> sse.EventMessage
-	0, // 1: sse.EventBridge.StreamEvents:output_type -> sse.EventMessage
-	1, // [1:2] is the sub-list for method output_type
-	0, // [0:1] is the sub-list for method input_type
-	0, // [0:0] is the sub-list for extension type_name
-	0, // [0:0] is the sub-list for extension extendee
-	0, // [0:0] is the sub-list for field type_name
+	1, // 0: sse.EventMessage.listing_updated:type_name -> sse.ListingUpdated
+	2, // 1: sse.EventMessage.auction_updated:type_name -> sse.AuctionUpdated
+	3, // 2: sse.EventMessage.offer_updated:type_name -> sse.OfferUpdated
+	4, // 3: sse.EventMessage.notification:type_name -> sse.Notification
+	5, // 4: sse.EventMessage.activity:type_name -> sse.Activity
+	6, // 5: sse.EventMessage.rpc_health:type_name -> sse.RPCHealth
+	0, // 6: sse.EventBridge.StreamEvents:input_type -> sse.EventMessage
+	0, // 7: sse.EventBridge.StreamEvents:output_type -> sse.EventMessage
+	7, // [7:8] is the sub-list for method output_type
+	6, // [6:7] is the sub-list for method input_type
+	6, // [6:6] is the sub-list for extension type_name
+	6, // [6:6] is the sub-list for extension extendee
+	0, // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_events_proto_init() }
@@ -136,13 +952,21 @@ func file_events_proto_init() {
 	if File_events_proto != nil {
 		return
 	}
+	file_events_proto_msgTypes[0].OneofWrappers = []any{
+		(*EventMessage_ListingUpdated)(nil),
+		(*EventMessage_AuctionUpdated)(nil),
+		(*EventMessage_OfferUpdated)(nil),
+		(*EventMessage_Notification)(nil),
+		(*EventMessage_Activity)(nil),
+		(*EventMessage_RpcHealth)(nil),
+	}
 	type x struct{}
 	out := protoimpl.TypeBuilder{
 		File: protoimpl.DescBuilder{
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_events_proto_rawDesc), len(file_events_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   1,
+			NumMessages:   7,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
