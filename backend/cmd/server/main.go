@@ -347,7 +347,8 @@ func main() {
 	// Auth endpoints with tighter rate limit (20 req/min per IP)
 	app.Get("/auth/nonce", nonceHandler(ns, rl))
 	app.Post("/auth/verify", verifyHandler(ns, rl, rs, al))
-	app.Post("/auth/refresh", refreshHandler(rs, al))
+	app.Post("/auth/refresh", refreshHandler(rs, rl, al))
+	app.Post("/auth/logout", logoutHandler(rs, rl, al))
 
 	// Serve HTMX templates + static files
 	mountUI(app, q, &serverTimeMs)
@@ -939,23 +940,19 @@ func setRefreshCookie(c *fiber.Ctx, address, token string) {
 // family_id and jti from claims, atomically rotates the token, and issues
 // a new access+refresh pair. On replay (reused old token), the entire
 // family is revoked — forcing re-authentication.
-func refreshHandler(rs auth.RefreshStore, al auth.AuditLogger) fiber.Handler {
+func refreshHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLogger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := api.ClientIP(c)
 		ua := c.Get("User-Agent")
-
-		// Scan the Cookie header for mw_r_* (refresh cookie).
-		// c.Cookies() returns the raw header string; parse manually.
-		var refreshToken string
-		for _, cookie := range strings.Split(c.Get("Cookie"), ";") {
-			cookie = strings.TrimSpace(cookie)
-			if strings.HasPrefix(strings.ToLower(cookie), "mw_r_") {
-				if idx := strings.IndexByte(cookie, '='); idx > 0 {
-					refreshToken = cookie[idx+1:]
-					break
-				}
-			}
+		if !rl.Allow("auth:"+ip, 20, time.Minute) {
+			c.Set("Retry-After", "60")
+			c.Set("X-RateLimit-Limit", "20")
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
 		}
+
+		refreshToken := extractRefreshCookie(c)
 
 		// Also check Authorization header for Bearer refresh tokens
 		if refreshToken == "" {
@@ -1010,6 +1007,103 @@ func refreshHandler(rs auth.RefreshStore, al auth.AuditLogger) fiber.Handler {
 		setRefreshCookie(c, addr, newRefreshToken)
 		auth.AuditRefreshSuccess(al, addr, ip, ua)
 		return c.JSON(tokenResp{Token: accessToken, Address: addr})
+	}
+}
+
+// ── Logout handler ────────────────────────────────────────────────────────
+
+// logoutHandler implements POST /auth/logout with token family revocation.
+// Reads the mw_r_ refresh cookie, verifies it, revokes the entire token
+// family in the DB, and clears all session cookies. Idempotent — calling
+// logout without a valid token is a no-op (cookies cleared, 200 returned).
+func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, _ auth.AuditLogger) fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		ip := api.ClientIP(c)
+		if !rl.Allow("auth:"+ip, 20, time.Minute) {
+			c.Set("Retry-After", "60")
+			c.Set("X-RateLimit-Limit", "20")
+			c.Set("X-RateLimit-Remaining", "0")
+			c.Set("X-RateLimit-Reset", strconv.FormatInt(time.Now().Add(time.Minute).Unix(), 10))
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{"error": "rate limit exceeded"})
+		}
+
+		refreshToken := extractRefreshCookie(c)
+
+		if refreshToken == "" {
+			// No refresh token found — clear any existing session cookies
+			// by scanning the Cookie header for all mw_* cookies.
+			clearAllSessionCookies(c)
+			return c.JSON(fiber.Map{"status": "ok"})
+		}
+
+		// Verify the refresh JWT (audience: magicwebb:refresh).
+		addr, _, err := auth.Verify(refreshToken, config.C.JWTSecret, auth.RefreshAudience)
+		if err != nil {
+			// Invalid token — clear cookies and return OK (idempotent).
+			clearAllSessionCookies(c)
+			return c.JSON(fiber.Map{"status": "ok"})
+		}
+
+		// Extract family_id from claims for revocation.
+		familyID, _ := auth.ParseRefreshClaims(refreshToken, config.C.JWTSecret)
+		if familyID != "" {
+			if revokeErr := rs.RevokeFamily(c.Context(), addr, familyID); revokeErr != nil {
+				log.Warn().Err(revokeErr).Str("family_id", familyID).Str("address", addr).
+					Msg("logout: family revoke failed (non-fatal — cookies cleared)")
+			}
+		}
+
+		// Clear all session cookies by exact name.
+		clearAuthCookies(c, addr)
+		log.Info().Str("address", addr).Msg("logout: session terminated")
+		return c.JSON(fiber.Map{"status": "ok"})
+	}
+}
+
+// extractRefreshCookie scans the Cookie header for the first mw_r_* cookie
+// and returns its value. Returns empty string if no refresh cookie is present.
+func extractRefreshCookie(c *fiber.Ctx) string {
+	for _, cookie := range strings.Split(c.Get("Cookie"), ";") {
+		cookie = strings.TrimSpace(cookie)
+		if strings.HasPrefix(strings.ToLower(cookie), "mw_r_") {
+			if idx := strings.IndexByte(cookie, '='); idx > 0 {
+				return cookie[idx+1:]
+			}
+		}
+	}
+	return ""
+}
+
+// clearAllSessionCookies scans the Cookie header for all mw_a_*, mw_r_*,
+// and mw_s_* cookies and clears each one by exact name. Used when we don't
+// know the specific wallet address (e.g., logout without a valid token).
+func clearAllSessionCookies(c *fiber.Ctx) {
+	hdr := c.Get("Cookie")
+	if hdr == "" {
+		return
+	}
+	seen := make(map[string]struct{})
+	for _, part := range strings.Split(hdr, ";") {
+		p := strings.TrimSpace(part)
+		if !strings.HasPrefix(p, "mw_a_") && !strings.HasPrefix(p, "mw_r_") && !strings.HasPrefix(p, "mw_s_") {
+			continue
+		}
+		eq := strings.IndexByte(p, '=')
+		if eq <= 0 {
+			continue
+		}
+		name := p[:eq]
+		if _, ok := seen[name]; ok {
+			continue
+		}
+		seen[name] = struct{}{}
+		c.Cookie(&fiber.Cookie{
+			Name:     name,
+			Value:    "",
+			Path:     "/",
+			MaxAge:   -1,
+			HTTPOnly: true,
+		})
 	}
 }
 
