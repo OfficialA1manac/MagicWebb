@@ -24,49 +24,45 @@
 -- Also adds an index on tx_hash for efficient ON CONFLICT lookups and for
 -- the activity-feed query pattern (SELECT ... WHERE tx_hash = $1).
 
--- Step 1: Add index for conflict detection performance.
-CREATE INDEX IF NOT EXISTS idx_nft_events_tx_hash ON nft_events(tx_hash);
-CREATE INDEX IF NOT EXISTS idx_nft_ownership_changes_tx_hash ON nft_ownership_changes(tx_hash);
-
--- Step 2: Add unique constraint for idempotent event processing.
--- Covers: nft_events (listings, auctions, bids, sales, offers).
--- Use DO block to handle constraint already existing gracefully.
+-- These summary tables (nft_events, nft_ownership_changes, activity_feed) are
+-- NOT created by any migration and are not queried by the app — the live
+-- indexer dedups via idempotent upserts + per-collection checkpoints
+-- (migration 030). Guard every statement on table existence so this migration
+-- is a safe no-op where the tables are absent (all current deployments) yet
+-- still applies the dedup indexes/constraints on any deployment that DID
+-- create them. DDL runs directly inside plpgsql.
 DO $$
 BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'nft_events_tx_unique'
-          AND conrelid = 'nft_events'::regclass
-    ) THEN
-        ALTER TABLE nft_events ADD CONSTRAINT nft_events_tx_unique
-            UNIQUE (tx_hash, log_index, event_type, collection, token_id);
+    IF to_regclass('public.nft_events') IS NOT NULL THEN
+        CREATE INDEX IF NOT EXISTS idx_nft_events_tx_hash ON nft_events(tx_hash);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'nft_events_tx_unique' AND conrelid = 'nft_events'::regclass
+        ) THEN
+            ALTER TABLE nft_events ADD CONSTRAINT nft_events_tx_unique
+                UNIQUE (tx_hash, log_index, event_type, collection, token_id);
+        END IF;
     END IF;
-END $$;
 
--- Step 3: Add unique constraint for nft_ownership_changes (Transfer events).
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'nft_ownership_changes_tx_unique'
-          AND conrelid = 'nft_ownership_changes'::regclass
-    ) THEN
-        ALTER TABLE nft_ownership_changes ADD CONSTRAINT nft_ownership_changes_tx_unique
-            UNIQUE (tx_hash, log_index, collection, token_id);
+    IF to_regclass('public.nft_ownership_changes') IS NOT NULL THEN
+        CREATE INDEX IF NOT EXISTS idx_nft_ownership_changes_tx_hash ON nft_ownership_changes(tx_hash);
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'nft_ownership_changes_tx_unique' AND conrelid = 'nft_ownership_changes'::regclass
+        ) THEN
+            ALTER TABLE nft_ownership_changes ADD CONSTRAINT nft_ownership_changes_tx_unique
+                UNIQUE (tx_hash, log_index, collection, token_id);
+        END IF;
     END IF;
-END $$;
 
--- Step 4: Add unique constraint for activity_feed (the user-facing activity table).
--- Covers the same event types as nft_events but in the activity_feed denormalized form.
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM pg_constraint
-        WHERE conname = 'activity_feed_tx_unique'
-          AND conrelid = 'activity_feed'::regclass
-    ) THEN
-        ALTER TABLE activity_feed ADD CONSTRAINT activity_feed_tx_unique
-            UNIQUE (tx_hash, log_index, event_type);
+    IF to_regclass('public.activity_feed') IS NOT NULL THEN
+        IF NOT EXISTS (
+            SELECT 1 FROM pg_constraint
+            WHERE conname = 'activity_feed_tx_unique' AND conrelid = 'activity_feed'::regclass
+        ) THEN
+            ALTER TABLE activity_feed ADD CONSTRAINT activity_feed_tx_unique
+                UNIQUE (tx_hash, log_index, event_type);
+        END IF;
     END IF;
 END $$;
 

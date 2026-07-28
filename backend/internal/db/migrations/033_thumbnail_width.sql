@@ -3,6 +3,8 @@
 -- can look up thumbnails by (parent_hash, width) without decoding image bytes.
 -- NULL for full-size images, set to the target pixel width for thumbnails.
 
+-- +goose Up
+-- +goose StatementBegin
 ALTER TABLE nft_image_blobs
   ADD COLUMN IF NOT EXISTS thumb_width INTEGER;
 
@@ -14,3 +16,4 @@ ALTER TABLE nft_image_blobs
 CREATE INDEX IF NOT EXISTS idx_nft_image_blobs_parent_width
   ON nft_image_blobs(parent_hash, thumb_width)
   WHERE parent_hash IS NOT NULL AND thumb_width IS NOT NULL;
+-- +goose StatementEnd

@@ -9,6 +9,8 @@
 --     for 0xABC in the last 24h") and brute-force pattern detection.
 --   created_at: supports retention policies (DELETE WHERE created_at < ...).
 --   outcome: enables dashboard queries like "failed logins in the last hour".
+-- +goose Up
+-- +goose StatementBegin
 CREATE TABLE IF NOT EXISTS auth_audit_log (
     id           BIGSERIAL PRIMARY KEY,
     event_type   TEXT        NOT NULL,  -- 'login_success', 'login_failed', 'refresh_success', 'refresh_failed'
@@ -31,3 +33,4 @@ CREATE INDEX IF NOT EXISTS idx_auth_audit_created_at
 -- Dashboard: count failures grouped by event_type in a time window.
 CREATE INDEX IF NOT EXISTS idx_auth_audit_outcome
     ON auth_audit_log (outcome, created_at DESC);
+-- +goose StatementEnd

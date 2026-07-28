@@ -14,6 +14,8 @@
 -- Add last_scanned_block to tracked_collections if not already present.
 -- Some deployments may have this column from an earlier migration; the
 -- DO block makes this idempotent.
+-- +goose Up
+-- +goose StatementBegin
 DO $$
 BEGIN
     IF NOT EXISTS (
@@ -27,6 +29,23 @@ BEGIN
         WHERE table_name = 'tracked_collections' AND column_name = 'last_scanned_hash'
     ) THEN
         ALTER TABLE tracked_collections ADD COLUMN last_scanned_hash BYTEA;
+    END IF;
+    -- `tracked` and `updated_at` are required by the indexer checkpoint queries
+    -- (GetCollectionCheckpoints / GetMinCollectionCheckpoint filter WHERE
+    -- tracked = true; SetCollectionCheckpoint writes updated_at). They were
+    -- never created by an earlier migration, so add them here. Default
+    -- tracked = true means every enrolled collection is swept unless soft-disabled.
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tracked_collections' AND column_name = 'tracked'
+    ) THEN
+        ALTER TABLE tracked_collections ADD COLUMN tracked BOOLEAN NOT NULL DEFAULT true;
+    END IF;
+    IF NOT EXISTS (
+        SELECT 1 FROM information_schema.columns
+        WHERE table_name = 'tracked_collections' AND column_name = 'updated_at'
+    ) THEN
+        ALTER TABLE tracked_collections ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
     END IF;
 END
 $$;
@@ -42,3 +61,4 @@ COMMENT ON COLUMN tracked_collections.last_scanned_block IS
 'Last block number whose Transfer events were fully indexed for this collection. Advances after each successful processTransfers chunk.';
 COMMENT ON COLUMN tracked_collections.last_scanned_hash IS
 'Block hash of last_scanned_block for reorg detection. NULL after initial insert — set on first successful scan.';
+-- +goose StatementEnd
