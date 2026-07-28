@@ -445,6 +445,34 @@ func SniffImage(body []byte) (mime string, ok bool) {
 	return "", false
 }
 
+// SniffMedia detects renderable NFT media: every still-image type SniffImage
+// accepts, PLUS the common animated/video containers used by "animated NFTs"
+// (MP4/MOV via ISO-BMFF, WebM/Matroska). Returns the MIME and true when the
+// bytes are a browser-renderable image or video. The /media proxy uses this
+// (not SniffImage) so video NFTs serve with the right Content-Type instead of
+// a 415 that renders blank. Thumbnail generation still uses SniffImage — we do
+// not raster-thumbnail video.
+func SniffMedia(body []byte) (mime string, ok bool) {
+	if m, ok := SniffImage(body); ok {
+		return m, true
+	}
+	switch {
+	// ISO Base Media (MP4/MOV/M4V). AVIF/AVIS also carry `ftyp` but are
+	// already matched as still images by SniffImage above, so any remaining
+	// `ftyp` box here is a video container. QuickTime brand → video/quicktime,
+	// everything else → video/mp4 (browsers play both from either label).
+	case len(body) >= 12 && string(body[4:8]) == "ftyp":
+		if strings.HasPrefix(string(body[8:12]), "qt") {
+			return "video/quicktime", true
+		}
+		return "video/mp4", true
+	// WebM / Matroska EBML header.
+	case len(body) >= 4 && body[0] == 0x1A && body[1] == 0x45 && body[2] == 0xDF && body[3] == 0xA3:
+		return "video/webm", true
+	}
+	return "", false
+}
+
 // isSVG detects SVG documents by looking for the <svg opening tag after
 // optional BOM, XML declaration, and/or whitespace. Many on-chain generative
 // NFT collections render as SVG, so this is critical for marketplace display.

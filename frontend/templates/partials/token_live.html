@@ -22,7 +22,7 @@
       {{if $img}}
       <div class="relative h-full">
         <img src="{{mediaURL $img}}" alt="{{$name}}" class="w-full h-full object-cover"
-             onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+             onerror="mwMediaError(this)">
         <div class="aspect-square bg-ink-800/50 flex items-center justify-center text-7xl hidden mw-img-fallback shimmer">🖼</div>
         <!-- Top-left badges -->
         <div class="absolute top-4 left-4 flex flex-col gap-1.5">

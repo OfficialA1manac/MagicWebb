@@ -662,10 +662,21 @@ window.addEventListener('alpine:init', () => {
         // re-mounting on the next session. The pre-WC-only listener-stack
         // bug (window.ethereum singleton, repeated connect/disconnect
         // cycles) is gone; this defensive teardown stays as a belt.
-        const _onChain = () => location.reload();
+        // Echo-guard: WalletConnect re-emits chainChanged / accountsChanged
+        // with the CURRENT (unchanged) chain + account on every (re)pair.
+        // Reloading on those echoes caused an infinite reload↔silent-reconnect
+        // loop (page "constantly refreshing / reconnecting", esp. on /profile).
+        // Only reload when the value ACTUALLY changed.
+        const _onChain = (cid) => {
+          const next = typeof cid === 'string' ? parseInt(cid, 16) : Number(cid);
+          if (next && next === this.chainId) return; // echo on connect — ignore
+          location.reload();
+        };
         const _onAccts = (accs) => {
           if (!accs || !accs.length) { this.disconnect(); return; }
-          this.address = accs[0].toLowerCase();
+          const next = accs[0].toLowerCase();
+          if (next === this.address) return; // same account echoed on reconnect — ignore
+          this.address = next;
           localStorage.setItem('mw_addr', this.address);
           location.reload();
         };

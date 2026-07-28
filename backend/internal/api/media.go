@@ -75,7 +75,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 			}
 			return writeErr(c, fiber.StatusInternalServerError, "internal error")
 		}
-		if imgMime, isImg := media.SniffImage(blob.Body); isImg {
+		if imgMime, isImg := media.SniffMedia(blob.Body); isImg {
 			c.Set("Content-Type", imgMime)
 		} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
 			c.Set("Content-Type", "application/json")
@@ -95,7 +95,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 		if err != nil {
 			return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 		}
-		ct, ok := media.SniffImage(body)
+		ct, ok := media.SniffMedia(body)
 		if !ok {
 			return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
 		}
@@ -118,7 +118,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 	}
-	ct, ok := media.SniffImage(body)
+	ct, ok := media.SniffMedia(body)
 	if !ok {
 		return c.Status(fiber.StatusUnsupportedMediaType).SendString("unsupported media type")
 	}
@@ -189,7 +189,7 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 // serveBlob writes a blob response with correct Content-Type, cache headers,
 // and security headers. Shared by the full-size and thumbnail paths.
 func serveBlob(c *fiber.Ctx, sha string, blob imagestore.Blob) error {
-	if imgMime, isImg := media.SniffImage(blob.Body); isImg {
+	if imgMime, isImg := media.SniffMedia(blob.Body); isImg {
 		c.Set("Content-Type", imgMime)
 	} else if len(blob.Body) > 0 && blob.Body[0] == '{' {
 		c.Set("Content-Type", "application/json")

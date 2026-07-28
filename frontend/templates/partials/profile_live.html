@@ -11,7 +11,7 @@
         <img src="{{mediaURL .ImageURI}}" alt="{{if .Name}}{{.Name}}{{else}}#{{.TokenID}}{{end}}"
              loading="lazy"
              class="w-full h-full object-cover group-hover:scale-105 transition duration-500"
-             onerror="this.style.display='none';Array.from(this.parentElement.querySelectorAll('.mw-img-fallback')).forEach(function(el){el.classList.remove('hidden')})">
+             onerror="mwMediaError(this)">
         <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-4xl">🖼</div>
         {{else}}
         <div class="text-4xl text-white/20">🖼</div>

@@ -270,6 +270,38 @@
 </head>
 <body x-data>
 
+<!-- Development banner — marketplace is not yet live -->
+<div class="w-full bg-amber-500 text-ink-950 text-center text-xs sm:text-sm font-bold px-4 py-2 tracking-wide">
+  ⚠️ This marketplace is still in development and is not live.
+</div>
+
+<!-- Universal NFT media renderer. An <img> can't play animated/video NFTs
+     (MP4/WebM/MOV). When an <img> errors, try the same URL as a <video>
+     (animated NFT); only if THAT fails do we show the still-image fallback. -->
+<script>
+  window.mwShowFallback = function (img) {
+    img.style.display = 'none';
+    var grp = img.closest('.group') || img.parentNode;
+    if (!grp) return;
+    Array.prototype.forEach.call(
+      grp.querySelectorAll('.mw-img-fallback, .mw-img-retry'),
+      function (el) { el.classList.remove('hidden'); }
+    );
+  };
+  window.mwMediaError = function (img) {
+    if (img.dataset.mwTriedVideo) { window.mwShowFallback(img); return; }
+    img.dataset.mwTriedVideo = '1';
+    var v = document.createElement('video');
+    v.src = img.currentSrc || img.src;
+    v.autoplay = true; v.loop = true; v.muted = true;
+    v.playsInline = true; v.setAttribute('playsinline', '');
+    v.className = img.className;
+    v.onerror = function () { v.remove(); window.mwShowFallback(img); };
+    img.style.display = 'none';
+    if (img.parentNode) img.parentNode.insertBefore(v, img);
+  };
+</script>
+
 <!-- Nav -->
 <!-- v23.2 — only `open` (mobile drawer) remains. The v22-era `wcOpen`
      + `helpersOpen` flags drove the dropdown picker, which collapsed to

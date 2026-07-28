@@ -34,7 +34,7 @@
              alt="{{if .Name}}{{.Name}}{{else}}Token #{{.TokenID}}{{end}}"
              loading="lazy"
              class="w-full h-full object-cover group-hover:scale-105 transition duration-700"
-             onerror="this.style.display='none';Array.from(this.closest('.group').querySelectorAll('.mw-img-fallback, .mw-img-retry')).forEach(function(el){el.classList.remove('hidden')})">
+             onerror="mwMediaError(this)">
         <div class="hidden mw-img-fallback absolute inset-0 flex items-center justify-center text-white/40 text-5xl shimmer">🖼</div>
         {{else}}
         <div class="absolute inset-0 flex flex-col items-center justify-center text-white/40">
