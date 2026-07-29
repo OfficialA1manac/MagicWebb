@@ -44,7 +44,7 @@ jobs:
           df -h /
       - uses: actions/setup-go@v5.4.0
         with:
-          go-version: "1.25"
+          go-version: "1.26"
           cache: true
           cache-dependency-path: backend/go.sum
       - name: Install Zig
