@@ -139,6 +139,27 @@ var baseFuncMap = template.FuncMap{
 		}
 		return strconvI(int(ratio*100)) + "%"
 	},
+	// percent scales an integer metric to a 0..100 progress-bar width
+	// (value/max*100, clamped to [0,100]). Used by metrics.html's WS gauges.
+	// Distinct from pct, which formats an already-computed 0..1 ratio string.
+	"percent": func(value, max int64) int64 {
+		if max <= 0 || value <= 0 {
+			return 0
+		}
+		p := value * 100 / max
+		if p > 100 {
+			p = 100
+		}
+		return p
+	},
+	// div is integer division guarded against divide-by-zero (returns 0).
+	// Used by metrics.html for ratio gauges (e.g. subs-per-connection).
+	"div": func(a, b int64) int64 {
+		if b == 0 {
+			return 0
+		}
+		return a / b
+	},
 	// shortNumber adds thousands separators to integer strings (e.g.
 	// 1234567 → "1,234,567"). Used for supply, viewer, and bid counters.
 	// Iterative (no recursion) — anon funcs in funcMap can't resolve

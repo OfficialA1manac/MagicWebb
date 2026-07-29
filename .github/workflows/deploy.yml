@@ -315,7 +315,7 @@ jobs:
           # incident simulation first.
           sleep 30
           curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors \
-            https://magicwebb.fly.dev/healthz
+            https://magicwebb.fly.dev/readyz
       - name: Post-deploy sync gate (origin/main SHA == live X-MW-Build-SHA)
         # v23.1 — belt-and-braces against the v74-class deploy-drift bug.
         # Closes the gap where Fly records a new release "complete" but

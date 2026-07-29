@@ -207,12 +207,14 @@ func TestHealthz_LagAtThreshold_Boundary(t *testing.T) {
 		t.Fatalf("lag=15 should be healthy (200), got %d", resp.StatusCode)
 	}
 
-	// 16 is unhealthy.
+	// Liveness ignores indexer lag: /healthz stays 200 even far behind head.
+	// Lag is surfaced on the SLO route + Prometheus, not on the Fly-polled
+	// liveness probe, so indexer lag never drops the machine from the LB.
 	lag.Store(16)
 	resp = getReq(t, app, "/healthz")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("lag=16 should be 503, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("lag=16: liveness should stay 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -240,8 +242,12 @@ func TestHealthz_DbUnhealthy(t *testing.T) {
 	resp := getReq(t, app, "/healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("DB unhealthy should be 503, got %d", resp.StatusCode)
+	// Liveness is decoupled from the DB: /healthz stays 200 even when the DB
+	// ping would fail, so Fly's 30s probe never pings Neon (freeing the
+	// free-tier DB to idle-suspend) and a transient DB blip never drops the
+	// machine. DB readiness is checked on demand at /readyz instead.
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("DB down: liveness should stay 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -258,8 +264,8 @@ func TestHealthz_RpcUnhealthy(t *testing.T) {
 	resp := getReq(t, app, "/healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("RPC unhealthy should be 503, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("RPC down: liveness should stay 200, got %d", resp.StatusCode)
 	}
 }
 
@@ -273,18 +279,22 @@ func TestHealthz_LagExceedsThreshold(t *testing.T) {
 	resp := getReq(t, app, "/healthz")
 	defer resp.Body.Close()
 
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("lag=42 should be 503, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("lag=42: liveness should stay 200, got %d", resp.StatusCode)
 	}
 
+	// The lag value is surfaced on the SLO route (scraped on demand), not on
+	// the always-polled liveness probe.
+	slo := getReq(t, app, "/api/v1/indexer/slo")
+	defer slo.Body.Close()
 	body := make([]byte, 4096)
-	n, _ := resp.Body.Read(body)
+	n, _ := slo.Body.Read(body)
 	bodyStr := string(body[:n])
 	if !strings.Contains(bodyStr, "42") {
-		t.Fatalf("503 body should mention the lag value (42), got:\n%s", bodyStr)
+		t.Fatalf("SLO body should mention the lag value (42), got:\n%s", bodyStr)
 	}
-	if !strings.Contains(bodyStr, "blocks behind head") {
-		t.Fatalf("503 body should say 'blocks behind head', got:\n%s", bodyStr)
+	if !strings.Contains(bodyStr, "head_lag_blocks") {
+		t.Fatalf("SLO body should say 'head_lag_blocks', got:\n%s", bodyStr)
 	}
 }
 
@@ -305,10 +315,10 @@ func TestSLOAndHealthz_RegisteredConcurrently(t *testing.T) {
 		t.Fatalf("SLO with lag=999 should be 200, got %d", resp.StatusCode)
 	}
 
-	// Healthz should be 503 with this high lag.
+	// Healthz is liveness-only: stays 200 regardless of lag.
 	resp = getReq(t, app, "/healthz")
 	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusServiceUnavailable {
-		t.Fatalf("healthz with lag=999 should be 503, got %d", resp.StatusCode)
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("healthz with lag=999 should stay 200 (liveness), got %d", resp.StatusCode)
 	}
 }

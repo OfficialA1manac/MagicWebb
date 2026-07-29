@@ -1362,23 +1362,16 @@ func registerSLOHealthRoutes(app *fiber.App, q *db.Q, eth indexer.EthClient, get
 
 	// Override /healthz to also report indexer head lag SLO (Fiber LIFO route
 	// resolution means this runs after api.Mount's /healthz, effectively wrapping it).
+	// /healthz = LIVENESS ONLY — deliberately makes NO database or RPC call.
+	// Fly's [checks] polls this every 30s; if it pinged Postgres on each poll
+	// it would keep a free-tier Neon database (scale-to-zero after ~5 min idle)
+	// awake 24/7 and drain the monthly compute quota — the exact cause of the
+	// prior "db unhealthy" outage. Liveness answers only "is the process up?".
+	// Readiness (DB connectivity) lives at /readyz; the indexer head-lag SLO is
+	// exposed via the Prometheus SLO route. Both are scraped on demand
+	// (deploy smoke-gate, dashboards), never on a tight always-on loop, so the
+	// DB is free to idle-suspend during quiet periods.
 	app.Get("/healthz", func(c *fiber.Ctx) error {
-		pingCtx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
-		defer cancel()
-		if err := q.Ping(pingCtx); err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")
-		}
-		rpcCtx, cancelRPC := context.WithTimeout(c.Context(), 3*time.Second)
-		defer cancelRPC()
-		if _, err := eth.BlockNumber(rpcCtx); err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).SendString("rpc unhealthy")
-		}
-		// Indexer lag SLO: warn when more than 15 blocks behind the head.
-		// On Flare/Coston2 (~2s block time), 15 blocks ≈ 30 seconds of lag.
-		if lag := getHeadLag(); lag > 15 {
-			return c.Status(fiber.StatusServiceUnavailable).
-				SendString(fmt.Sprintf("indexer lag: %d blocks behind head", lag))
-		}
 		c.Set("X-MW-Build-SHA", api.MWServerBuildSHA)
 		return c.SendStatus(fiber.StatusOK)
 	})

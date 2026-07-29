@@ -25,7 +25,7 @@
        // v34: read active collection from the form input, not from the
        // server-rendered template value (which goes stale on form edits).
        async load() {
-         const input = document.querySelector('input[name="collection"]');
+         const input = document.querySelector('input[name=collection]');
          const coll = input ? input.value.trim() : '';
          if (!coll) { toast('Enter a collection above to filter by traits.', 'info'); return; }           // v34: always refetch traits when the collection changes (don't cache
            // from a previous collection). The cached trait set from a prior
@@ -40,9 +40,9 @@
        // lost when applying trait filters.
        apply() {
          const p = new URLSearchParams();
-         const input = document.querySelector('input[name="collection"]');
+         const input = document.querySelector('input[name=collection]');
          p.set('collection', input ? input.value.trim() : '');
-         const sort = document.querySelector('select[name="sort"]');
+         const sort = document.querySelector('select[name=sort]');
          if (sort && sort.value) p.set('sort', sort.value);
          for (const [k, v] of Object.entries(this.sel)) { if (v) p.set('trait_' + k, v); }
          location.search = p.toString();
