@@ -4,11 +4,11 @@
 // dispatches to Go's crypto/sha256 by default, or to Zig via CGO when built
 // with -tags zigmedia. Run both variants to compare:
 //
-//   # Default (Go stdlib):
+//   # Default (Go stdlib) — run from backend/ (the Go module root):
 //   go test -bench=BenchmarkHashBytes -benchmem ./internal/imagestore/
 //
-//   # Zig accelerated (-tags zigmedia):
-//   cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig && cd ../..
+//   # Zig accelerated (-tags zigmedia) — also from backend/:
+//   (cd zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig)
 //   go test -tags zigmedia -bench=BenchmarkHashBytes -benchmem ./internal/imagestore/
 //
 //   # Zig batch hashing (ZIG-1, zigmedia-only):

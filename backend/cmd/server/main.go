@@ -259,12 +259,12 @@ func main() {
 	// Stack `clientIpSpoof` 🟠 P1 (was: trivially spoofable rightmost-XFF
 	// extraction when traffic bypassed the proxy).
 	app := fiber.New(fiber.Config{
-		ReadTimeout:           5 * time.Second,
-		WriteTimeout:          0, // SSE connections need no write timeout
-		IdleTimeout:           60 * time.Second,
-		DisableStartupMessage: false,
+		ReadTimeout:             5 * time.Second,
+		WriteTimeout:            0, // SSE connections need no write timeout
+		IdleTimeout:             60 * time.Second,
+		DisableStartupMessage:   false,
 		EnableTrustedProxyCheck: false,
-		ProxyHeader:           "Fly-Client-IP",
+		ProxyHeader:             "Fly-Client-IP",
 		// BodyLimit: 1 MB. Prevents oversized payload DoS attacks on JSON
 		// endpoints (profile update, reports, auth verify). Fiber's default
 		// limit is 4 MB — tightening to 1 MB means a degenerate JSON upload
@@ -1004,9 +1004,10 @@ func refreshHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLo
 // Reads the mw_r_ refresh cookie, verifies it, revokes the entire token
 // family in the DB, and clears all session cookies. Idempotent — calling
 // logout without a valid token is a no-op (cookies cleared, 200 returned).
-func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, _ auth.AuditLogger) fiber.Handler {
+func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLogger) fiber.Handler {
 	return func(c *fiber.Ctx) error {
 		ip := api.ClientIP(c)
+		ua := c.Get("User-Agent")
 		if !rl.Allow("auth:"+ip, 20, time.Minute) {
 			c.Set("Retry-After", "60")
 			c.Set("X-RateLimit-Limit", "20")
@@ -1036,13 +1037,24 @@ func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, _ auth.AuditLogg
 		familyID, _ := auth.ParseRefreshClaims(refreshToken, config.C.JWTSecret)
 		if familyID != "" {
 			if revokeErr := rs.RevokeFamily(c.Context(), addr, familyID); revokeErr != nil {
+				// Do NOT report success: the refresh family is still valid
+				// server-side, so a captured refresh token could keep minting
+				// access tokens after an "apparent" logout. Clear cookies
+				// (best-effort client hygiene), audit the failure, and return
+				// 500 so the client retries.
 				log.Warn().Err(revokeErr).Str("family_id", familyID).Str("address", addr).
-					Msg("logout: family revoke failed (non-fatal — cookies cleared)")
+					Msg("logout: family revoke failed — reporting error to client")
+				auth.AuditLogoutFailed(al, addr, ip, ua, "revoke_failed",
+					map[string]string{"error": revokeErr.Error()})
+				clearAuthCookies(c, addr)
+				return c.Status(fiber.StatusInternalServerError).
+					JSON(fiber.Map{"error": "logout incomplete — retry"})
 			}
 		}
 
 		// Clear all session cookies by exact name.
 		clearAuthCookies(c, addr)
+		auth.AuditLogoutSuccess(al, addr, ip, ua)
 		log.Info().Str("address", addr).Msg("logout: session terminated")
 		return c.JSON(fiber.Map{"status": "ok"})
 	}
@@ -1085,10 +1097,17 @@ func clearAllSessionCookies(c *fiber.Ctx) {
 			continue
 		}
 		seen[name] = struct{}{}
+		// Refresh cookies (mw_r_*) are SET with Path=/auth (setRefreshCookie);
+		// a clear must use the same path or the browser keeps the original
+		// cookie. Everything else (mw_a_*, mw_s_*) is Path=/.
+		path := "/"
+		if strings.HasPrefix(name, "mw_r_") {
+			path = "/auth"
+		}
 		c.Cookie(&fiber.Cookie{
 			Name:     name,
 			Value:    "",
-			Path:     "/",
+			Path:     path,
 			MaxAge:   -1,
 			HTTPOnly: true,
 		})
@@ -1154,34 +1173,34 @@ func warmCriticalCaches(ctx context.Context, q *db.Q, trendingCache cache.CacheI
 	// Guard: trendingCache may be nil if the backend failed to initialize.
 	// Collection stats warming (Phase 2) still runs independently.
 	if trendingCache != nil {
-	windows := []struct {
-		name  string
-		limit int
-	}{
-		{"1h", 20},
-		{"24h", 20},
-		{"7d", 20},
-	}
-	for _, w := range windows {
-		select {
-		case <-ctx.Done():
-			return
-		default:
+		windows := []struct {
+			name  string
+			limit int
+		}{
+			{"1h", 20},
+			{"24h", 20},
+			{"7d", 20},
 		}
-		queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		rows, err := q.GetTrendingCollections(queryCtx, w.name, w.limit)
-		cancel()
-		if err != nil {
-			log.Warn().Err(err).Str("window", w.name).Msg("startup: cache warm failed for trending window")
-			continue
+		for _, w := range windows {
+			select {
+			case <-ctx.Done():
+				return
+			default:
+			}
+			queryCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+			rows, err := q.GetTrendingCollections(queryCtx, w.name, w.limit)
+			cancel()
+			if err != nil {
+				log.Warn().Err(err).Str("window", w.name).Msg("startup: cache warm failed for trending window")
+				continue
+			}
+			if rows == nil {
+				rows = []db.TrendingScore{}
+			}
+			ckey := fmt.Sprintf("tr:%s:%d", w.name, w.limit)
+			trendingCache.Set(ckey, rows)
+			log.Info().Str("window", w.name).Int("rows", len(rows)).Msg("startup: trending cache warm complete")
 		}
-		if rows == nil {
-			rows = []db.TrendingScore{}
-		}
-		ckey := fmt.Sprintf("tr:%s:%d", w.name, w.limit)
-		trendingCache.Set(ckey, rows)
-		log.Info().Str("window", w.name).Int("rows", len(rows)).Msg("startup: trending cache warm complete")
-	}
 	} // end trendingCache guard
 
 	// ── Phase 2: Collection stats cache (top 50 collections) ────────────
@@ -1229,11 +1248,12 @@ func warmCriticalCaches(ctx context.Context, q *db.Q, trendingCache cache.CacheI
 
 // seedTracked ensures every collection the indexer needs to watch has a row in
 // tracked_collections. It merges three sources at startup:
-//   1. Explicit TRACKED_COLLECTIONS env var (operator-configured NFT contracts)
-//   2. Every unique collection that already appears in nft_tokens (covers
-//      collections that were ever listed, auctioned, or had a Transfer event
-//      indexed at some point — even if their tracked_collections row was later
-//      lost or never explicitly seeded)
+//  1. Explicit TRACKED_COLLECTIONS env var (operator-configured NFT contracts)
+//  2. Every unique collection that already appears in nft_tokens (covers
+//     collections that were ever listed, auctioned, or had a Transfer event
+//     indexed at some point — even if their tracked_collections row was later
+//     lost or never explicitly seeded)
+//
 // A missing tracked_collections row means the indexer's processTransfers() skips
 // that contract entirely, so nft_ownership stays empty and WalletNFTs returns
 // zero results even when the wallet holds tokens. This seed runs once per
@@ -1332,8 +1352,9 @@ func verifyEIP191(message, sigHex, address string) (bool, error) {
 // ── SLO + Healthz routes (testable via registerSLOHealthRoutes) ────────────────
 
 // registerSLOHealthRoutes mounts two endpoints:
-//   /api/v1/indexer/slo — Prometheus-format head_lag_blocks gauge
-//   /healthz            — DB ping + RPC block number + head-lag threshold (503 when >15)
+//
+//	/api/v1/indexer/slo — Prometheus-format head_lag_blocks gauge
+//	/healthz            — DB ping + RPC block number + head-lag threshold (503 when >15)
 //
 // The getHeadLag callback lets tests inject a controllable lag value without needing
 // a real indexer.Runner. Production passes runner.HeadLagBlocks.

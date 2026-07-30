@@ -15,6 +15,8 @@ const (
 	EventLoginFailed    = "login_failed"
 	EventRefreshSuccess = "refresh_success"
 	EventRefreshFailed  = "refresh_failed"
+	EventLogoutSuccess  = "logout_success"
+	EventLogoutFailed   = "logout_failed"
 )
 
 // AuditEntry is a single row in auth_audit_log. All fields are required
@@ -24,8 +26,8 @@ type AuditEntry struct {
 	WalletAddr string `json:"wallet_addr"`
 	IP         string `json:"ip"`
 	UserAgent  string `json:"user_agent"`
-	Outcome    string `json:"outcome"`  // "success" | "failure"
-	Details    string `json:"details"`  // JSON-encoded map of extra context
+	Outcome    string `json:"outcome"` // "success" | "failure"
+	Details    string `json:"details"` // JSON-encoded map of extra context
 }
 
 // AuditLogger asynchronously persists auth audit entries without blocking
@@ -140,6 +142,39 @@ func AuditRefreshSuccess(log AuditLogger, addr, ip, ua string) {
 		UserAgent:  ua,
 		Outcome:    "success",
 		Details:    "{}",
+	})
+}
+
+// AuditLogoutSuccess logs a completed logout (POST /auth/logout) — the
+// refresh-token family was revoked and cookies cleared.
+func AuditLogoutSuccess(log AuditLogger, addr, ip, ua string) {
+	log.Log(AuditEntry{
+		EventType:  EventLogoutSuccess,
+		WalletAddr: addr,
+		IP:         ip,
+		UserAgent:  ua,
+		Outcome:    "success",
+		Details:    "{}",
+	})
+}
+
+// AuditLogoutFailed logs a logout whose family revocation failed — the
+// session cookies were cleared client-side but the refresh family may
+// still be valid server-side. Security-relevant: a stolen refresh token
+// could still mint access tokens until the family is revoked.
+func AuditLogoutFailed(log AuditLogger, addr, ip, ua, reason string, extra map[string]string) {
+	details := map[string]string{"reason": reason}
+	for k, v := range extra {
+		details[k] = v
+	}
+	b, _ := json.Marshal(details)
+	log.Log(AuditEntry{
+		EventType:  EventLogoutFailed,
+		WalletAddr: addr,
+		IP:         ip,
+		UserAgent:  ua,
+		Outcome:    "failure",
+		Details:    string(b),
 	})
 }
 
