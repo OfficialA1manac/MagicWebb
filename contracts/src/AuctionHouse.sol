@@ -64,11 +64,10 @@ contract AuctionHouse is MarketplaceCore {
     uint64 public constant EXTENSION_WINDOW     = 3 minutes;
 
 
-    /// @notice Absolute cap on total anti-snipe extensions. Set to 30 minutes
-    ///         per the product requirement: the auction can only be extended
-    ///         up to 30 minutes past its original end time via anti-snipe bids.
-    ///         startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION = the
-    ///         absolute latest possible endsAt, regardless of extension count.
+    /// @notice Absolute cap on total anti-snipe extensions: the auction can be
+    ///         extended at most 30 minutes past its ORIGINAL end time
+    ///         (`originalEndsAt[id] + MAX_TOTAL_EXTENSION` = absolute latest
+    ///         possible endsAt, regardless of extension count or duration).
     uint64 public constant MAX_TOTAL_EXTENSION = 30 minutes;
     /// @notice Grace period after endsAt before a permanently-failed auction
     ///         (NFT undeliverable: seller moved it or revoked approval) can be
@@ -148,6 +147,18 @@ contract AuctionHouse is MarketplaceCore {
     ///         accounts on the chain, and naturally bounded by per-auction
     ///         gas-budget economics (a single bidder pays gas for each rebind).
     mapping(uint256 => mapping(address => bool)) private _seenBidder;
+
+    /// @notice The auction's end time as set at creation, before any anti-snipe
+    ///         extension. Anti-snipe extensions are capped at
+    ///         `originalEndsAt[id] + MAX_TOTAL_EXTENSION` (30 minutes past the
+    ///         ORIGINAL end), regardless of the auction's chosen duration —
+    ///         the prior cap keyed off `startsAt + DURATION_24HR` let a 3-min
+    ///         auction extend for hours. Kept in a separate mapping (not a new
+    ///         Auction-struct field) so the `getAuction` ABI and stored struct
+    ///         layout are unchanged across the UUPS upgrade. Zero for auctions
+    ///         created before this upgrade — bid() falls back to the legacy
+    ///         cap for those.
+    mapping(uint256 => uint64) public originalEndsAt;
 
     // pendingReturns inherited from MarketplaceCore — no shadowing needed.
     // AuctionHouse.writeRefund() overrides MarketplaceCore.withdrawRefund()
@@ -288,6 +299,9 @@ contract AuctionHouse is MarketplaceCore {
         // activate step; creation = activation.
         a.active = true;
 
+        // Record the pre-extension end for the 30-min anti-snipe hard cap.
+        originalEndsAt[id] = endsAt;
+
         emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
     }
 
@@ -378,13 +392,19 @@ contract AuctionHouse is MarketplaceCore {
         // Anti-snipe — gated on `newLead` so sub-threshold accumulation cannot
         // extend the timer. Underflow-safe: the AuctionEnded check above
         // guarantees block.timestamp < a.endsAt here.
-        // M-01 fix: cap total cumulative extensions at 24h beyond the
-        // original auction window so griefers on low-gas/high-throughput
-        // networks (Flare mainnet at sub-cent FLR) cannot keep the auction
-        // alive indefinitely by alternating the lead by min increment.
+        // Extensions are hard-capped at 30 minutes past the auction's ORIGINAL
+        // end (originalEndsAt + MAX_TOTAL_EXTENSION) for every duration, so a
+        // 3-minute auction can run at most 33 minutes total and griefers on
+        // low-gas networks (Flare at sub-cent FLR) cannot keep any auction
+        // alive indefinitely by alternating the lead. Auctions created before
+        // this upgrade have originalEndsAt == 0 and fall back to the legacy
+        // startsAt + 24h + 30min cap.
         unchecked {
             if (newLead && a.endsAt - block.timestamp < EXTENSION_WINDOW) {
-                uint64 hardCap = a.startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION;
+                uint64 baseEnd = originalEndsAt[id];
+                uint64 hardCap = baseEnd != 0
+                    ? baseEnd + MAX_TOTAL_EXTENSION
+                    : a.startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION;
                 uint64 newEnd  = uint64(block.timestamp) + EXTENSION_WINDOW;
                 if (newEnd > hardCap) newEnd = hardCap;
                 if (newEnd > a.endsAt) {

@@ -17,6 +17,7 @@ import {
     OfferBook,
     NoOffer,
     OfferActive,
+    OfferExpired,
     OffersNotEligible
 } from "../src/OfferBook.sol";
 import {BelowMinPrice, NothingToWithdraw, WithdrawFailed, TokenStandard, InvalidDuration} from "../src/MarketplaceCore.sol";
@@ -312,39 +313,90 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     // ── OfferBook edit model ──────────────────────────────────────────────────
 
-    function test_makeOfferEditChangesExpiry() public {
+    /// Edit/top-up must NOT refresh the timer: the original expiresAt is
+    /// retained and the supplied expiry is ignored (product rule — a buyer
+    /// cannot extend an offer's life by repeatedly editing it).
+    function test_makeOfferEditKeepsOriginalExpiry() public {
         uint256 tid = nft.mint(seller);
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
         _enableOffers(address(nft));
-        uint64 longExp = uint64(block.timestamp + 4 hours);
+        uint64 origExp = uint64(block.timestamp + 4 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, longExp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, origExp);
         (uint128 pBefore,, uint64 expBefore,) = ob.positions(address(nft), tid, alice);
         assertEq(pBefore, 1 ether);
-        assertEq(expBefore, longExp);
-        uint64 shortExp = uint64(block.timestamp + 1 hours);
+        assertEq(expBefore, origExp);
+        // Attempt to move expiry out to 24h on edit — must be ignored.
+        uint64 attemptedExp = uint64(block.timestamp + 24 hours);
         uint256 aliceBalBefore = alice.balance;
         vm.prank(alice);
-        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, shortExp);
+        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, attemptedExp);
         (uint128 pAfter,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
         assertEq(pAfter, 2 ether, "principal replaced on edit, not compounded");
-        assertEq(expAfter, shortExp, "expiry UPDATED on edit");
+        assertEq(expAfter, origExp, "expiry RETAINED on edit - timer not refreshed");
         assertEq(alice.balance, aliceBalBefore - 2 ether + 1 ether, "net paid 1 eth more on edit-up");
         assertEq(ob.pendingReturns(alice), 0, "no fallback - push succeeded");
     }
 
-    function test_makeOfferEditInvalidDurationReverts() public {
+    /// Editing an EXPIRED position reverts: its escrow belongs to the keeper
+    /// refund path (refundExpiredOffer), not to a resurrected live offer.
+    function test_makeOfferEditExpiredReverts() public {
         uint256 tid = nft.mint(seller);
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
         _enableOffers(address(nft));
-        uint64 longExp = uint64(block.timestamp + 24 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, longExp);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1 hours));
+        vm.warp(block.timestamp + 1 hours); // exactly at expiry — expired
         vm.prank(alice);
-        vm.expectRevert(InvalidDuration.selector);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1));
+        vm.expectRevert(OfferExpired.selector);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1 hours));
+    }
+
+    /// A garbage expiry supplied on edit is harmless — it is ignored and the
+    /// original timer keeps counting (no InvalidDuration on edits).
+    function test_makeOfferEditIgnoresSuppliedDuration() public {
+        uint256 tid = nft.mint(seller);
+        vm.prank(seller);
+        nft.setApprovalForAll(address(ob), true);
+        _enableOffers(address(nft));
+        uint64 origExp = uint64(block.timestamp + 24 hours);
+        vm.prank(alice);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, origExp);
+        vm.prank(alice);
+        ob.makeOffer{value: 6 ether}(address(nft), tid, 6 ether, uint64(block.timestamp + 1)); // junk expiry
+        (,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
+        assertEq(expAfter, origExp, "junk expiry ignored on edit");
+    }
+
+    /// Anti-snipe extensions cap at 30 minutes past the ORIGINAL end for
+    /// every duration — a 3-minute auction can never run past 33 minutes.
+    function test_antiSnipeCapsAt30MinPastOriginalEnd() public {
+        uint256 tid = nft.mint(seller);
+        vm.startPrank(seller);
+        nft.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 0, 0);
+        vm.stopPrank();
+        uint64 origEnd = uint64(block.timestamp + 3 minutes);
+        assertEq(ah.originalEndsAt(id), origEnd, "originalEndsAt recorded at create");
+        uint64 hardCap = origEnd + 30 minutes;
+        // Alternate the lead inside the closing window until the cap binds.
+        address[2] memory bidders = [alice, bob];
+        for (uint256 i = 0; i < 40; i++) {
+            AuctionHouse.Auction memory a = ah.getAuction(id);
+            if (block.timestamp + 1 >= a.endsAt) break;
+            vm.warp(a.endsAt - 1); // inside the 3-min extension window
+            address who = bidders[i % 2];
+            (, uint128 lt) = _leader(id);
+            uint128 need = lt == 0 ? 1 ether : lt + 1 ether - ah.cumulative(id, who);
+            vm.deal(who, uint256(need) + 1 ether);
+            vm.prank(who);
+            ah.bid{value: need}(id);
+            assertLe(ah.getAuction(id).endsAt, hardCap, "endsAt must never exceed originalEndsAt + 30min");
+        }
+        assertLe(ah.getAuction(id).endsAt, hardCap, "final endsAt capped at original + 30min");
+        assertGt(ah.getAuction(id).endsAt, origEnd, "extensions did fire before the cap bound");
     }
 
     function test_refundLosersRevertsOnActiveAuction() public {
@@ -800,8 +852,11 @@ contract AuditFuzzTest is Test, TestHelpers {
     function test_forceCancel_noLeader_unsettled_works() public {
         (uint256 id,) = _auction7d();
         // No bids — no leader. settle() would cancel this, but we skip settle
-        // and go straight to forceCancel after the grace window.
-        vm.warp(block.timestamp + 3 days + 1 hours);
+        // and go straight to forceCancel after the grace window. The auction
+        // runs 24h and SELLER_DEFAULT_WINDOW is 3 days AFTER endsAt, so warp
+        // past endsAt + 3 days (the prior +3d1h from creation was 1 day short
+        // and correctly reverted AuctionLive).
+        vm.warp(block.timestamp + 24 hours + 3 days + 1 hours);
         vm.expectEmit(true, false, false, false, address(ah));
         emit AuctionForceCancelled(id);
         ah.forceCancel(id);

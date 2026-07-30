@@ -215,19 +215,28 @@ contract OfferBook is MarketplaceCore {
         // up or down without cancelling and re-creating.
         uint256 oldPrincipal = uint256(p.principal);
 
-        // Validate duration — must be one of the 6 fixed durations shared
-        // across all cores. Checked on both creation and edit (the buyer
-        // can change the expiry when editing).
-        uint256 dur = uint256(expiresAt) - block.timestamp;
-        if (dur != DURATION_3MIN && dur != DURATION_15MIN
-            && dur != DURATION_30MIN && dur != DURATION_1HR
-            && dur != DURATION_4HR && dur != DURATION_24HR) {
-            revert InvalidDuration();
+        if (isEdit) {
+            // Top-up/edit does NOT refresh the timer: the original expiresAt
+            // is retained and keeps counting down; the supplied expiresAt is
+            // ignored. (Product rule — a buyer must not extend an offer's
+            // life by repeatedly editing it.) An already-expired position
+            // cannot be edited: its escrow belongs in the keeper refund path
+            // (refundExpiredOffer), not in a new live offer.
+            if (block.timestamp >= p.expiresAt) revert OfferExpired();
+        } else {
+            // New position: validate duration — must be one of the 6 fixed
+            // durations shared across all cores (3min–24hr).
+            uint256 dur = uint256(expiresAt) - block.timestamp;
+            if (dur != DURATION_3MIN && dur != DURATION_15MIN
+                && dur != DURATION_30MIN && dur != DURATION_1HR
+                && dur != DURATION_4HR && dur != DURATION_24HR) {
+                revert InvalidDuration();
+            }
+            p.expiresAt = expiresAt;
         }
 
         p.principal = principal;
         p.units     = units;
-        p.expiresAt = expiresAt;
         p.standard  = standard;
 
         // Refund the old principal to the buyer atomically in the same tx.
