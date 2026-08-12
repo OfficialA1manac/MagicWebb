@@ -97,6 +97,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onLoserRefunded(ctx, l)
 	case TopicAuctionCancelled:
 		return h.onAuctionCancelled(ctx, l)
+	case TopicAuctionSettlementFailed:
+		return h.onAuctionSettlementFailed(ctx, l)
 	case TopicRefundPushed:
 		return h.onRefundPushed(ctx, l)
 	case TopicOfferMade:
@@ -388,6 +390,39 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 	}
 	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
 		Event: "AuctionCancelled", AuctionID: auctionID,
+	})
+	return nil
+}
+
+// AuctionSettlementFailed(uint256 indexed id, address indexed winner, uint128 amount)
+//
+// The seller moved the NFT away or revoked approval, so settle() finalised the
+// auction with no sale and returned the winner's escrow on the spot. Emitted
+// INSTEAD OF AuctionSettled — nothing else marks the auction terminal, so
+// without this handler the row stays 'active' and the keeper keeps re-settling
+// an auction the chain considers done.
+//
+// Status is 'cancelled', not 'settled': 'settled' reads as SOLD everywhere it is
+// consumed (sale history, volume, badges) and no sale happened here. Losers are
+// still refunded through refundLosers/LoserRefunded as usual.
+func (h *handlers) onAuctionSettlementFailed(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 3 || len(l.Data) < 32 {
+		return fmt.Errorf("onAuctionSettlementFailed: short log")
+	}
+	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
+	winner := addrStr(l.Topics[2].Bytes())
+	amt := bigStr(chunk(l.Data, 0))
+	if err := h.q.SetAuctionStatus(ctx, auctionID, "cancelled"); err != nil {
+		return fmt.Errorf("onAuctionSettlementFailed: %w", err)
+	}
+	// 'system' kind: notification_kind has no refund member, and this is neither
+	// an auction_won (no NFT) nor an auction_lost (they had the top bid).
+	h.notify(ctx, winner, "system", "Auction could not be completed",
+		"The seller did not deliver the NFT. "+amt+" wei has been returned to you.",
+		"/auction/"+fmt.Sprint(auctionID))
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionSettlementFailed", AuctionID: auctionID,
+		Winner: winner, AmtWei: amt,
 	})
 	return nil
 }

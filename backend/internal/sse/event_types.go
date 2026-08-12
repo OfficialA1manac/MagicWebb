@@ -36,7 +36,7 @@ type ListingUpdatedEvent struct {
 
 // AuctionUpdatedEvent carries the structured payload for auction-updated events.
 type AuctionUpdatedEvent struct {
-	Event         string `json:"event"` // sub-event: "AuctionCreated", "BidPlaced", "OutbidNotification", "AuctionExtended", "AuctionSettled", "AuctionCancelled", "LoserRefunded"
+	Event         string `json:"event"` // sub-event: "AuctionCreated", "BidPlaced", "OutbidNotification", "AuctionExtended", "AuctionSettled", "AuctionSettlementFailed", "AuctionCancelled", "LoserRefunded"
 	AuctionID     int64  `json:"auction_id"`
 	Collection    string `json:"collection,omitempty"`
 	TokenID       string `json:"token_id,omitempty"`

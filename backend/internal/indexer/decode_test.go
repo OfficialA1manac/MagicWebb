@@ -59,8 +59,8 @@ func TestBigStrAndTsUnix(t *testing.T) {
 // (OutbidNotification, LoserRefunded).
 func TestCoreTopicsIncludesAuctionExtended(t *testing.T) {
 	topics := coreTopics()[0]
-	if len(topics) != 14 {
-		t.Fatalf("core topics = %d, want 14", len(topics))
+	if len(topics) != 15 {
+		t.Fatalf("core topics = %d, want 15", len(topics))
 	}
 	has := func(want common.Hash) bool {
 		for _, h := range topics {
@@ -81,5 +81,8 @@ func TestCoreTopicsIncludesAuctionExtended(t *testing.T) {
 	}
 	if !has(TopicRefundPushed) {
 		t.Fatal("RefundPushed missing from coreTopics filter — withdraw-required tracking would be blind")
+	}
+	if !has(TopicAuctionSettlementFailed) {
+		t.Fatal("AuctionSettlementFailed missing from coreTopics filter — a seller-default auction would sit 'active' forever")
 	}
 }

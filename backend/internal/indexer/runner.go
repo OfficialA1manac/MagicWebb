@@ -133,33 +133,28 @@ func (r *Runner) WithKeeperGate(g KeeperGate) *Runner {
 func (r *Runner) Run(ctx context.Context) {
 	var wg sync.WaitGroup
 
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runWatcher(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runScoreWorker(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runOfferExpirySweeper(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runListingExpirySweeper(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runMetadataWorker(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runImageRetryWorker(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runOwnershipRepairWorker(ctx) }()
-
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runWithdrawalSweeper(ctx) }()
-
-	// Gas alert worker — runs independently of keeper key; just needs DB access.
-	wg.Add(1)
-	go func() { defer wg.Done(); r.runGasAlertWorker(ctx) }()
+	// Every worker runs under supervise(): a panic is logged and the worker
+	// restarts, instead of killing the process that also serves HTTP, SSE, WS
+	// and GraphQL. See supervise.go.
+	workers := []struct {
+		name string
+		fn   func(context.Context)
+	}{
+		{"watcher", r.runWatcher},
+		{"score", r.runScoreWorker},
+		{"offer-expiry", r.runOfferExpirySweeper},
+		{"listing-expiry", r.runListingExpirySweeper},
+		{"metadata", r.runMetadataWorker},
+		{"image-retry", r.runImageRetryWorker},
+		{"ownership-repair", r.runOwnershipRepairWorker},
+		{"withdrawal-sweeper", r.runWithdrawalSweeper},
+		// Gas alert worker — runs independently of keeper key; just needs DB access.
+		{"gas-alert", r.runGasAlertWorker},
+	}
+	for _, w := range workers {
+		wg.Add(1)
+		go func() { defer wg.Done(); supervise(ctx, w.name, w.fn) }()
+	}
 
 	if r.cfg.KeeperKey != "" {
 		// Phase 4 V4.1: one-shot keeper wallet balance check before any
@@ -194,20 +189,54 @@ func (r *Runner) Run(ctx context.Context) {
 							return
 						}
 					}
-					var kwg sync.WaitGroup
-					kwg.Add(3)
-					go func() { defer kwg.Done(); r.runAuctionKeeper(kctx) }()
-					go func() { defer kwg.Done(); r.runLoserRefundSweeper(kctx) }()
-					go func() { defer kwg.Done(); r.runOfferRefundSweeper(kctx) }()
+					// Keepers must stop on EITHER loss of single-flight
+					// ownership or process shutdown. The election's lock
+					// context descends from the election's own background
+					// context, not from ctx, so a shutdown signal would
+					// otherwise never reach them.
+					wctx, wcancel := context.WithCancel(kctx)
+					stop := make(chan struct{})
+					go func() {
+						select {
+						case <-ctx.Done():
+							wcancel()
+						case <-stop:
+						}
+					}()
+
+					keepers := []struct {
+						name string
+						fn   func(context.Context)
+					}{
+						{"auction-keeper", r.runAuctionKeeper},
+						{"loser-refund-sweeper", r.runLoserRefundSweeper},
+						{"offer-refund-sweeper", r.runOfferRefundSweeper},
+					}
 					// Fee sweep (Zodiac Allowance Module) — only when SAFE_ADDR is configured.
 					if r.cfg.SafeAddr != "" && r.cfg.PersonalWalletAddr != "" {
+						keepers = append(keepers, struct {
+							name string
+							fn   func(context.Context)
+						}{"fee-sweeper", r.runFeeSweeper})
+					}
+
+					var kwg sync.WaitGroup
+					for _, k := range keepers {
 						kwg.Add(1)
-						go func() { defer kwg.Done(); r.runFeeSweeper(kctx) }()
+						go func() { defer kwg.Done(); supervise(wctx, k.name, k.fn) }()
 					}
+
+					// Wait for every keeper worker to exit before handing the
+					// lock back. Releasing first returned immediately while the
+					// workers were still running, so this loop spawned a fresh
+					// worker set on every iteration: an unbounded pile of 1s
+					// tickers all polling Postgres (single-instance), or a
+					// re-election storm that killed each keeper microseconds
+					// after it started (multi-instance).
+					kwg.Wait()
+					close(stop)
+					wcancel()
 					release()
-					if r.keeperGate == nil {
-						return // no gate: keepers only stop on shutdown
-					}
 				}
 			}()
 		}

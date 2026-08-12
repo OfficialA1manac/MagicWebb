@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"os"
 	"os/signal"
+	"runtime/debug"
 	"strconv"
 	"strings"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 	"github.com/getsentry/sentry-go"
 	sentryfiber "github.com/getsentry/sentry-go/fiber"
 	"github.com/gofiber/fiber/v2"
+	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/jackc/pgx/v5"
 	"github.com/rs/zerolog"
 	"github.com/rs/zerolog/log"
@@ -275,6 +277,20 @@ func main() {
 	})
 
 	// ── Monitoring middleware ───────────────────────────────────────────
+	// Panic recovery, unconditionally. Sentry's recovery middleware below is
+	// gated on SENTRY_DSN being set; without this, an unset DSN meant a
+	// handler panic escaped to fasthttp, which drops the connection with no
+	// response at all instead of a clean 500. Registered first so it wraps
+	// the entire chain, Sentry included.
+	app.Use(fiberrecover.New(fiberrecover.Config{
+		EnableStackTrace: true,
+		StackTraceHandler: func(c *fiber.Ctx, e any) {
+			log.Error().Interface("panic", e).Str("path", c.Path()).
+				Str("method", c.Method()).Bytes("stack", debug.Stack()).
+				Msg("recovered panic in http handler")
+		},
+	}))
+
 	// Sentry recovery: captures panics and sends them to Sentry with full
 	// request context. Must be registered BEFORE other middleware so it
 	// can wrap the entire handler chain.
@@ -1354,7 +1370,7 @@ func verifyEIP191(message, sigHex, address string) (bool, error) {
 // registerSLOHealthRoutes mounts two endpoints:
 //
 //	/api/v1/indexer/slo — Prometheus-format head_lag_blocks gauge
-//	/healthz            — DB ping + RPC block number + head-lag threshold (503 when >15)
+//	/healthz            — liveness only, always 200 (no DB, no RPC, no head-lag gate)
 //
 // The getHeadLag callback lets tests inject a controllable lag value without needing
 // a real indexer.Runner. Production passes runner.HeadLagBlocks.
@@ -1369,9 +1385,11 @@ func registerSLOHealthRoutes(app *fiber.App, q *db.Q, eth indexer.EthClient, get
 				"head_lag_blocks %d\n", lag))
 	})
 
-	// Override /healthz to also report indexer head lag SLO (Fiber LIFO route
-	// resolution means this runs after api.Mount's /healthz, effectively wrapping it).
 	// /healthz = LIVENESS ONLY — deliberately makes NO database or RPC call.
+	// This is the ONLY /healthz registration: api.Mount used to register a
+	// dependency-probing one, and because Fiber v2 matches routes in
+	// registration order (first match wins, not LIFO as an earlier comment
+	// here claimed) that one shadowed this handler and served live traffic.
 	// Fly's [checks] polls this every 30s; if it pinged Postgres on each poll
 	// it would keep a free-tier Neon database (scale-to-zero after ~5 min idle)
 	// awake 24/7 and drain the monthly compute quota — the exact cause of the

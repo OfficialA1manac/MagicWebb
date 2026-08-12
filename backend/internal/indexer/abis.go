@@ -22,6 +22,10 @@ var (
 	TopicAuctionSettled     = crypto.Keccak256Hash([]byte("AuctionSettled(uint256,address,address,uint128,uint256)"))
 	TopicLoserRefunded      = crypto.Keccak256Hash([]byte("LoserRefunded(uint256,address,uint256)"))
 	TopicAuctionCancelled   = crypto.Keccak256Hash([]byte("AuctionCancelled(uint256)"))
+	// Seller failed to deliver the NFT: settle() finalises the auction with no
+	// sale and returns the winner's escrow. Emitted INSTEAD OF AuctionSettled,
+	// so without this topic the auction would sit 'active' in the DB forever.
+	TopicAuctionSettlementFailed = crypto.Keccak256Hash([]byte("AuctionSettlementFailed(uint256,address,uint128)"))
 	TopicRefundPushed       = crypto.Keccak256Hash([]byte("RefundPushed(address,uint256)"))
 
 	// OfferBook (Model A: stacked positions, fee taken at make)
@@ -42,6 +46,7 @@ func coreTopics() [][]common.Hash {
 		TopicListed, TopicCancelled, TopicBought,
 		TopicAuctionCreated, TopicBidPlaced, TopicOutbidNotification, TopicAuctionExtended,
 		TopicAuctionSettled, TopicLoserRefunded, TopicAuctionCancelled,
+		TopicAuctionSettlementFailed,
 		TopicRefundPushed,
 		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded,
 	}}

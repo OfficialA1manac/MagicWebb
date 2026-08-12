@@ -182,14 +182,27 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		Level: 5,
 	}))
 
-	// /healthz = liveness. Must respond 200 within ~3.5s even when the
-	// process is degraded — used by Fly's `[checks.health]` (30s interval,
-	// 5s timeout) to decide whether a machine is replaceable. Probes BOTH
-	// the DB (via q.Ping) AND the RPC pool (via eth.BlockNumber on a 3s ctx
-	// deadline): a wedged RPC pool would otherwise leak past this route
-	// until the first /api/v1/listings or /api/v1/auctions call surfaces a
-	// dial-timeout to a real user.
-	app.Get("/healthz", func(c *fiber.Ctx) error {
+	// /healthz is deliberately NOT registered here. Fiber v2 matches routes in
+	// registration order — first match wins — so a dependency-probing /healthz
+	// mounted here would shadow the liveness-only handler in cmd/server (which
+	// registers later) rather than being shadowed by it. That is exactly what
+	// happened: Fly's [checks.health] polled this route every 30s, pinning a
+	// scale-to-zero Neon free-tier DB awake and 503-ing the machine whenever
+	// the DB or the RPC pool hiccuped. Liveness lives in
+	// cmd/server.registerSLOHealthRoutes; readiness (below) carries the
+	// dependency probes.
+
+	// /readyz = readiness: DB connectivity (q.Ping — NOT row-writability or
+	// migration state) plus a live RPC head read, both on 3s deadlines. A
+	// wedged RPC pool would otherwise stay invisible until the first
+	// /api/v1/listings or /api/v1/auctions call surfaced a dial-timeout to a
+	// real user. Scraped on demand (deploy smoke-gate, dashboards), never on a
+	// tight always-on loop, so the DB is free to idle-suspend when quiet.
+	//
+	// The X-MW-Build-SHA header is injected via the Makefile's -ldflags as
+	// `api.MWServerBuildSHA` (see the top-of-file var). tools/check-fly-sync.sh
+	// reads it off /healthz, which carries the same header.
+	app.Get("/readyz", func(c *fiber.Ctx) error {
 		pingCtx, cancel := context.WithTimeout(c.Context(), 3*time.Second)
 		defer cancel()
 		if err := q.Ping(pingCtx); err != nil {
@@ -200,26 +213,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		if _, err := eth.BlockNumber(rpcCtx); err != nil {
 			return c.Status(fiber.StatusServiceUnavailable).SendString("rpc unhealthy")
 		}
-		// v23.1 — X-MW-Build-SHA header. Injected via Makefile -ldflags as
-		// `api.MWServerBuildSHA` (see top-of-file var declaration). Surfaced
-		// here so tools/check-fly-sync.sh can read it off the live site
-		// and assert it equals `git rev-parse origin/main` — the v74-class
-		// deploy-drift bug class (Fly records a new release, but the
-		// Docker layer cache still serves the previous build's static
-		// assets) becomes loudly detectable in CI instead of silently
-		// observable by a user hours later.
 		c.Set("X-MW-Build-SHA", MWServerBuildSHA)
-		return c.SendStatus(fiber.StatusOK)
-	})
-	// /readyz = readiness. DB-only (q.Ping verifies connectivity, NOT
-	// row-writability or migration state). Kept narrower than /healthz so
-	// an upstream RPC outage does not take /readyz down while the DB is
-	// fine — the liveness check on /healthz drives machine replacement
-	// separately.
-	app.Get("/readyz", func(c *fiber.Ctx) error {
-		if err := q.Ping(c.Context()); err != nil {
-			return c.Status(fiber.StatusServiceUnavailable).SendString("db unhealthy")
-		}
 		return c.SendStatus(fiber.StatusOK)
 	})
 
