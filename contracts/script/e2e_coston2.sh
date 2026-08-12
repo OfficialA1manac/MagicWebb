@@ -58,7 +58,7 @@ check "C cumulative 0.07" "70000000000000000" "$(cast call "$AH" "cumulative(uin
 echo "== C. offer 0.05 on token3 from C -> seller accepts =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 send "$PK_C" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 50000000000000000 $((NOW+86400)) --value 50000000000000000
-send "$PK_SELLER" "$OB" "acceptOffer(address,uint256,address)" "$NFT" 3 "$C"
+send "$PK_SELLER" "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$C" 50000000000000000
 check "token3 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 
 echo "== D. offer 0.05 on token4 from D, expires +90s (offer keeper must refund) =="

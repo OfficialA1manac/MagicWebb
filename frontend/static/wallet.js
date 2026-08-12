@@ -226,7 +226,7 @@ const AUCTION_ABI = [
 const OFFERBOOK_ABI = [
   'function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable',
   'function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt) external payable',
-  'function acceptOffer(address coll, uint256 tokenId, address bidder) external',
+  'function acceptOffer(address coll, uint256 tokenId, address bidder, uint128 expectedPrincipal) external',
   'function rejectOffer(address coll, uint256 tokenId, address bidder) external',
   'function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external',
   'function positions(address, uint256, address) external view returns (uint128 principal, uint128 units, uint64 expiresAt, uint8 standard)',
@@ -1565,24 +1565,32 @@ window.addEventListener('alpine:init', () => {
       } catch (e) { fail(e); }
     },
 
-    async acceptOffer(collection, tokenId, bidder) {
+    // principalWei is the offer amount the seller is looking at in the UI. It is
+    // passed straight through to acceptOffer's expectedPrincipal, so a bidder
+    // who re-prices the offer downward after this dialog opened gets a revert
+    // instead of the NFT at their new price.
+    async acceptOffer(collection, tokenId, bidder, principalWei) {
       if (!this._validateAction({ collection, tokenId, seller: bidder })) return { ok: false, error: 'validation' };
+      const showsAmount = principalWei !== undefined && principalWei !== null && principalWei !== '';
       return await this.runAction({
         kind: 'accept', icon: '✓',
         title: 'Accept offer',
         subtitle: `${fmtAddr(collection)} · #${tokenId}`,
         summary: [
           { label: 'Bidder',       value: fmtAddr(bidder), tone: 'sky' },
-          { label: 'You receive',  value: fmtFLR('0') + ' ' + NATIVE_CURRENCY + ' (98.5% of offer)', tone: 'gold' },
+          { label: 'Offer',        value: showsAmount ? fmtFLR(principalWei) + ' ' + NATIVE_CURRENCY : 'Read from contract', tone: 'sky' },
+          { label: 'You receive',  value: showsAmount
+                                          ? fmtFLR(netOfFee(principalWei).toString()) + ' ' + NATIVE_CURRENCY + ' (98.5%)'
+                                          : '98.5% of the offer', tone: 'gold' },
           { label: 'NFT transfers',value: 'To bidder on confirmation', tone: 'violet' },
         ],
         ctaLabel: 'Accept — get paid',
-        disclaimer: 'Accepting pays out your share immediately after tx confirmation.',
-        run: ({ setStep, done, fail }) => this._executeAcceptOffer(collection, tokenId, bidder, { setStep, done, fail }),
+        disclaimer: 'Accepting pays out your share immediately after tx confirmation. If the bidder changes the offer first, the transaction reverts instead of selling at the new price.',
+        run: ({ setStep, done, fail }) => this._executeAcceptOffer(collection, tokenId, bidder, principalWei, { setStep, done, fail }),
       });
     },
 
-    async _executeAcceptOffer(collection, tokenId, bidder, { setStep, done, fail }) {
+    async _executeAcceptOffer(collection, tokenId, bidder, principalWei, { setStep, done, fail }) {
       try {
         setStep(1, 'Approving escrow contract…');
         await this._approveOperator(collection, OFFERBOOK);
@@ -1590,7 +1598,29 @@ window.addEventListener('alpine:init', () => {
         const signer = await this.ensureSigner();
         if (!signer) { fail({ title: 'Wallet lost', body: 'Reconnect and try again.' }); return; }
         const contract = new ethers.Contract(OFFERBOOK, OFFERBOOK_ABI, R(signer));
-        const tx = await contract.acceptOffer(collection, tokenId, bidder);
+
+        // Resolve the principal we commit to. When the caller supplied one (all
+        // UI paths do), it must still match the live position — checking here
+        // turns a raw PrincipalChanged() revert into a readable message and
+        // saves the seller the gas.
+        let expected;
+        const onChain = (await contract.positions(collection, tokenId, bidder))[0];
+        if (principalWei === undefined || principalWei === null || principalWei === '') {
+          expected = onChain;
+        } else {
+          expected = BigInt(principalWei);
+          if (onChain !== expected) {
+            fail({
+              title: 'Offer changed',
+              body: onChain === 0n
+                ? 'That offer is no longer active. Refresh to see current offers.'
+                : `The offer is now ${fmtFLR(onChain.toString())} ${NATIVE_CURRENCY}, not ${fmtFLR(expected.toString())}. Refresh and accept again if you still want it.`,
+            });
+            return;
+          }
+        }
+
+        const tx = await contract.acceptOffer(collection, tokenId, bidder, expected);
         setStep(2, 'Waiting for confirmation…');
         await tx.wait();
         done({ txHash: tx.hash, title: 'Offer accepted', body: 'You received 98.5% (1.5% fee deducted). NFT transferred.' });

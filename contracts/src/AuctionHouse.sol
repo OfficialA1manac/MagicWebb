@@ -69,14 +69,14 @@ contract AuctionHouse is MarketplaceCore {
     ///         (`originalEndsAt[id] + MAX_TOTAL_EXTENSION` = absolute latest
     ///         possible endsAt, regardless of extension count or duration).
     uint64 public constant MAX_TOTAL_EXTENSION = 30 minutes;
-    /// @notice Grace period after endsAt before a permanently-failed auction
-    ///         (NFT undeliverable: seller moved it or revoked approval) can be
-    ///         force-cancelled via forceCancel(). The keeper retries settlement
-    ///         every tick during this window; 3 days gives ample time for the
-    ///         seller to resolve delivery (re-approve, return the NFT). After
-    ///         the window, anyone can call forceCancel() to mark the auction
-    ///         settled and unlock refundLosers() for all bidders — the leader's
-    ///         escrow is never permanently trapped.
+    /// @notice Grace period after endsAt before an auction that was never
+    ///         settled at all can be force-cancelled via forceCancel().
+    ///
+    ///         Undeliverable NFTs no longer need this window: settle() finalises
+    ///         the auction on a failed transfer and returns the winner's escrow
+    ///         on the spot (see AuctionSettlementFailed). forceCancel() remains
+    ///         only as a backstop for an auction nobody ever called settle() on,
+    ///         which settle()'s own permissionless tier already makes unlikely.
     uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
     /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
     ///         the current leader. The user's new cumulative bid must exceed the
@@ -188,6 +188,11 @@ contract AuctionHouse is MarketplaceCore {
     event AuctionCancelled(uint256 indexed id);
     /// @notice Emitted by forceCancel() — auction was permanently undeliverable.
     event AuctionForceCancelled(uint256 indexed id);
+    /// @notice Emitted by settle() when the seller failed to deliver the NFT.
+    ///         The auction is final, no fee is charged, the seller is paid
+    ///         nothing, and `amount` has been returned to (or credited to) the
+    ///         winner. Losers withdraw as usual via refundLosers().
+    event AuctionSettlementFailed(uint256 indexed id, address indexed winner, uint128 amount);
     event RefundPushed(address indexed bidder, uint256 amount);
     event AuctionActivated(uint256 indexed id);
 
@@ -480,29 +485,37 @@ contract AuctionHouse is MarketplaceCore {
         // Consume the winner's escrow up front so refundLosers never repays them.
         cumulative[id][winner] = 0;
 
-        // Transfer the NFT. Both standards use try/catch with state restoration
-        // so a seller who moved the NFT or revoked approval cannot permanently
-        // trap the winner's escrow. On failure the winner's escrow is restored
-        // and the tx reverts; the keeper retries on the next tick.
+        // Transfer the NFT. A seller who moved the NFT away or revoked approval
+        // has defaulted on delivery: settlement finalises anyway and the
+        // winner's escrow is released immediately. Reverting here (the previous
+        // behaviour) stranded the leader's funds until forceCancel() became
+        // callable at endsAt + SELLER_DEFAULT_WINDOW — a 3-day lockup the
+        // seller could trigger for free, and which the leader could not escape
+        // via withdrawLoserFunds() because that path excludes the leader.
         // slither-disable-next-line arbitrary-send-erc20
         a.settled = true;
+        bool delivered;
         if (std == TokenStandard.ERC721) {
-            try IERC721(coll).transferFrom(sel, winner, tid) {}
-            catch {
-                a.settled = false;
-                cumulative[id][winner] = winBid;
-                revert TransferFailed();
-            }
+            try IERC721(coll).transferFrom(sel, winner, tid) { delivered = true; }
+            catch {}
         } else {
-            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") {}
-            catch {
-                a.settled = false;
-                cumulative[id][winner] = winBid;
-                revert TransferFailed();
-            }
+            try IERC1155(coll).safeTransferFrom(sel, winner, tid, amt, "") { delivered = true; }
+            catch {}
         }
-
-        a.settled = true;
+        if (!delivered) {
+            // No sale happened: no fee is taken and the seller is paid nothing.
+            // The winner is made whole with the same best-effort push and
+            // pull-fallback used everywhere else, so a contract bidder without
+            // a payable receive() can still withdrawRefund(). Losers are
+            // refunded through refundLosers(), which is unlocked by a.settled.
+            (bool okWin,) = winner.call{gas: 50_000, value: winBid}("");
+            if (!okWin) {
+                pendingReturns[winner] += winBid;
+                emit PushFailed(winner, winBid);
+            }
+            emit AuctionSettlementFailed(id, winner, winBid);
+            return;
+        }
 
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
         if (fee > 0) {

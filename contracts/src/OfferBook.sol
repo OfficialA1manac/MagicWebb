@@ -26,6 +26,9 @@ event OfferEligibilitySet(address indexed coll, bool indexed eligible);
 
 error OffersNotEligible();
 error NotKeeper();
+/// @dev acceptOffer's expectedPrincipal did not match the stored position —
+///      the offer was re-priced (or replaced) between quote and acceptance.
+error PrincipalChanged();
 
 /// @title OfferBook
 /// @notice On-chain NFT offers: one active position per (NFT, buyer); the seller pays the fee on acceptance.
@@ -225,7 +228,11 @@ contract OfferBook is MarketplaceCore {
             if (block.timestamp >= p.expiresAt) revert OfferExpired();
         } else {
             // New position: validate duration — must be one of the 6 fixed
-            // durations shared across all cores (3min–24hr).
+            // durations shared across all cores (3min–24hr). The past-expiry
+            // guard comes first: subtracting an already-elapsed timestamp
+            // underflowed into Panic(0x11) instead of a decodable custom error
+            // (Marketplace._list and AuctionHouse._create both guard first).
+            if (uint256(expiresAt) <= block.timestamp) revert InvalidDuration();
             uint256 dur = uint256(expiresAt) - block.timestamp;
             if (dur != DURATION_3MIN && dur != DURATION_15MIN
                 && dur != DURATION_30MIN && dur != DURATION_1HR
@@ -254,9 +261,21 @@ contract OfferBook is MarketplaceCore {
 
     /// @notice Accept a bidder's full position. Caller must currently own/hold the NFT.
     ///         NFT → bidder, 1.5% fee → feeRecipient, principal − fee → seller.
-    function acceptOffer(address coll, uint256 tokenId, address bidder) external nonReentrant entryGate {
+    /// @param expectedPrincipal The principal the seller is agreeing to, in wei.
+    ///        Reverts PrincipalChanged() if the stored position differs — read it
+    ///        from `positions(coll, tokenId, bidder).principal` when building the tx.
+    function acceptOffer(address coll, uint256 tokenId, address bidder, uint128 expectedPrincipal)
+        external nonReentrant entryGate
+    {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();
+        // Price the seller signed for must be the price they get. makeOffer()
+        // edits a position in place and may LOWER the principal, so without
+        // this check a bidder could watch the mempool, front-run the seller's
+        // acceptOffer with a re-priced offer at MIN_PRICE, and take the NFT for
+        // a fraction of the agreed amount. Same guard Marketplace.buy() gets
+        // from its msg.value == price check.
+        if (p.principal != expectedPrincipal) revert PrincipalChanged();
 
         if (p.standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
@@ -307,10 +326,14 @@ contract OfferBook is MarketplaceCore {
     /// @param tokenId Token ID.
     /// @param bidder  The original offerer to refund.
     function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
-        // Only the keeper can refund expired offers when a MarketplaceManager is deployed.
-        // When no manager is configured (address(0)), refunding stays
-        // permissionless as a safety fallback so funds are never trapped.
-        if (manager != address(0)) {
+        // The bidder can ALWAYS reclaim their own expired escrow, regardless of
+        // manager configuration. Without this the exit was keeper-only: an idle
+        // keeper (bot down, key lost, role revoked) left the principal locked
+        // forever, since cancelOffer() reverts once expiresAt has passed. That
+        // contradicted the "unstoppable exits" guarantee in MarketplaceManager.
+        // Third parties still need KEEPER_ROLE, so the sweeper stays the only
+        // address that can move someone else's funds.
+        if (manager != address(0) && msg.sender != bidder) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );

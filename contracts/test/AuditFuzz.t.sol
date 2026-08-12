@@ -192,27 +192,38 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     // ── Seller fault tests ────────────────────────────────────────────────────
 
-    function test_sellerRevokeCausesSettleRevert() public {
+    function test_sellerRevokeSettlesAsDefaultAndRefundsWinner() public {
         (uint256 id, uint256 tid) = _auction7d();
         _bid(id, alice, 2 ether);       vm.warp(block.timestamp + 30 hours);
         vm.prank(seller);
         nft.setApprovalForAll(address(ah), false);
-        vm.expectRevert();
+        uint256 aliceBefore  = alice.balance;
+        uint256 sellerBefore = seller.balance;
+        vm.expectEmit(true, true, false, true, address(ah));
+        emit AuctionSettlementFailed(id, alice, 2 ether);
         ah.settle(id);
-        assertFalse(_settled(id), "NOT settled - keeper must retry");
-        assertEq(ah.cumulative(id, alice), 2 ether, "winner escrow intact");
+        // Settlement is final on seller default: no keeper retry, no 3-day
+        // forceCancel wait. The winner's escrow comes straight back.
+        assertTrue(_settled(id), "settled - seller default finalises the auction");
+        assertEq(alice.balance - aliceBefore, 2 ether, "winner escrow returned");
+        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed");
+        assertEq(seller.balance, sellerBefore, "defaulting seller paid nothing");
         assertEq(nft.ownerOf(tid), seller, "NFT still with seller");
     }
 
-    function test_sellerMovedNftCausesSettleRevert() public {
+    function test_sellerMovedNftSettlesAsDefaultAndRefundsWinner() public {
         (uint256 id, uint256 tid) = _auction7d();
         _bid(id, alice, 2 ether);       vm.warp(block.timestamp + 30 hours);
         vm.prank(seller);
         nft.transferFrom(seller, address(0x999), tid);
-        vm.expectRevert();
+        uint256 aliceBefore  = alice.balance;
+        uint256 sellerBefore = seller.balance;
         ah.settle(id);
-        assertFalse(_settled(id), "NOT settled - keeper must retry");
-        assertEq(ah.cumulative(id, alice), 2 ether, "winner escrow intact");
+        assertTrue(_settled(id), "settled - seller default finalises the auction");
+        assertEq(alice.balance - aliceBefore, 2 ether, "winner escrow returned");
+        assertEq(ah.cumulative(id, alice), 0, "winner escrow consumed");
+        assertEq(seller.balance, sellerBefore, "defaulting seller paid nothing");
+        assertEq(nft.ownerOf(tid), address(0x999), "NFT stays where the seller sent it");
     }
 
     // ── OfferBook push-fallback ───────────────────────────────────────────────
@@ -461,6 +472,7 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     event PushFailed(address indexed to, uint256 amount);
     event AuctionForceCancelled(uint256 indexed id);
+    event AuctionSettlementFailed(uint256 indexed id, address indexed winner, uint128 amount);
 
     function test_settle_feePushFallback_emitsPushFailed() public {
         RejectEtherNoReceive badFee = new RejectEtherNoReceive();
@@ -505,7 +517,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         assertEq(ah.pendingReturns(address(badSeller)), proceeds, "proceeds credited");
     }
 
-    function test_settle_sellerMovedNft_reverts() public {
+    function test_settle_sellerMovedNft_finalisesAndRefundsWinner() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
@@ -516,9 +528,13 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.warp(block.timestamp + 2 days);
         vm.prank(seller);
         nft.transferFrom(seller, address(0x999), tid);
-        vm.expectRevert();
+        uint256 aliceBefore = alice.balance;
+        vm.expectEmit(true, true, false, true, address(ah));
+        emit AuctionSettlementFailed(id, alice, 2 ether);
         ah.settle(id);
-        assertFalse(_settled(id), "NOT settled - revert on moved NFT");
+        assertTrue(_settled(id), "settled - a moved NFT is seller default, not a retry");
+        assertEq(alice.balance - aliceBefore, 2 ether, "winner refunded on the spot");
+        assertEq(nft.ownerOf(tid), address(0x999), "NFT stays where the seller sent it");
     }
 
     function test_refundLosers_perIterationPushFallback_emitsPushFailed() public {
@@ -801,7 +817,10 @@ contract AuditFuzzTest is Test, TestHelpers {
         assertFalse(_settled(id), "NOT settled - forceCancel before window reverts");
     }
 
-    function test_forceCancel_unlocksRefundLosers() public {
+    /// Undeliverable NFT no longer strands the leader for 3 days: settle()
+    /// finalises the auction, returns the winner's escrow on the spot, and
+    /// unlocks refundLosers() for everyone else. No fee, no seller payout.
+    function test_settle_undeliverableNFT_refundsWinnerAndFinalises() public {
         (uint256 id, uint256 tid) = _auction7d();
         _bid(id, alice, 2 ether);
         _bid(id, bob, 3 ether);
@@ -809,11 +828,44 @@ contract AuditFuzzTest is Test, TestHelpers {
         // Seller permanently blocks delivery by transferring NFT away.
         vm.prank(seller);
         nft.transferFrom(seller, address(0x999), tid);
-        // settle() reverts — NFT undeliverable.
-        vm.expectRevert();
+
+        uint256 bobBalBefore   = bob.balance;
+        uint256 sellerBefore   = seller.balance;
+        uint256 feeRecipBefore = ah.feeRecipient().balance;
+
+        vm.expectEmit(true, true, false, true, address(ah));
+        emit AuctionSettlementFailed(id, bob, 3 ether);
         ah.settle(id);
-        assertFalse(_settled(id), "NOT settled - settle reverted on moved NFT");
-        // Losers can withdraw via withdrawLoserFunds() since auction is unsettled.
+
+        assertTrue(_settled(id), "settled - failed delivery still finalises");
+        assertEq(bob.balance, bobBalBefore + 3 ether, "winner refunded immediately");
+        assertEq(ah.cumulative(id, bob), 0, "winner's escrow consumed, not repayable twice");
+        assertEq(seller.balance, sellerBefore, "seller paid nothing");
+        assertEq(ah.feeRecipient().balance, feeRecipBefore, "no fee on a failed sale");
+        assertEq(nft.ownerOf(tid), address(0x999), "NFT never moved");
+
+        // Losers are refunded through the normal settled path.
+        address[] memory batch = new address[](1);
+        batch[0] = alice;
+        uint256 aliceBalBefore = alice.balance;
+        ah.refundLosers(id, batch);
+        assertEq(alice.balance, aliceBalBefore + 2 ether, "alice refunded via refundLosers");
+        assertEq(ah.cumulative(id, alice), 0, "alice's cumulative cleared");
+
+        // The auction is already settled, so the forceCancel backstop is moot.
+        vm.warp(block.timestamp + 3 days + 1 hours);
+        vm.expectRevert(NotActive.selector);
+        ah.forceCancel(id);
+    }
+
+    /// forceCancel's remaining job: an auction nobody ever called settle() on.
+    /// The leader's escrow still comes back once the grace window elapses.
+    function test_forceCancel_unlocksRefundLosers() public {
+        (uint256 id,) = _auction7d();
+        _bid(id, alice, 2 ether);
+        _bid(id, bob, 3 ether);
+        vm.warp(block.timestamp + 30 hours);
+        // Nobody settles. Losers can still withdraw while unsettled.
         uint256 aliceBalBefore = alice.balance;
         vm.prank(alice);
         ah.withdrawLoserFunds(id);
@@ -822,7 +874,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(bob);
         vm.expectRevert(AuctionLive.selector);
         ah.withdrawLoserFunds(id);
-        assertEq(ah.cumulative(id, bob), 3 ether, "bob's escrow still trapped (leader)");
+        assertEq(ah.cumulative(id, bob), 3 ether, "bob's escrow still held (leader)");
         // Warp past SELLER_DEFAULT_WINDOW (3 days after endsAt).
         vm.warp(block.timestamp + 3 days + 1 hours);
         vm.expectEmit(true, false, false, false, address(ah));
@@ -876,11 +928,10 @@ contract AuditFuzzTest is Test, TestHelpers {
         assertEq(l, carol, "carol is leader");
         assertEq(lt, 5 ether, "carol leaderTotal = 5 ether");
         vm.warp(block.timestamp + 30 hours);
-        // Seller blocks delivery.
+        // Seller blocks delivery, and nobody calls settle() — the case
+        // forceCancel still exists for.
         vm.prank(seller);
         nft.setApprovalForAll(address(ah), false);
-        vm.expectRevert();
-        ah.settle(id);
         assertFalse(_settled(id));
         // Alice and Bob withdraw early (not leaders).
         vm.prank(alice);

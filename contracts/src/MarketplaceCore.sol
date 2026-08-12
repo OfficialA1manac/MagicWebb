@@ -16,6 +16,18 @@ error BelowMinPrice();
 error EntriesHalted();
 error BadManager();
 error InvalidDuration();
+/// @dev Caller does not hold DEFAULT_ADMIN_ROLE on the linked manager.
+error NotAdmin();
+/// @dev No manager is configured, so upgrade authorization has no trust anchor.
+error NoManager();
+/// @dev queueUpgrade was given a zero address or an EOA.
+error BadImplementation();
+/// @dev The implementation being installed is not the queued one.
+error UpgradeNotQueued();
+/// @dev The upgrade timelock has not elapsed yet.
+error UpgradeNotReady();
+/// @dev The queued upgrade sat past MAX_UPGRADE_WINDOW and must be re-queued.
+error UpgradeExpired();
 
 enum TokenStandard { ERC721, ERC1155 }
 
@@ -66,6 +78,13 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     event PushFailed(address indexed to, uint256 amount);
 
     address public manager;
+
+    /// @notice Implementation queued for upgrade, or address(0) when none is
+    ///         pending. Packs into a single slot with upgradeEta.
+    address public pendingImplementation;
+    /// @notice Earliest timestamp at which `pendingImplementation` may be
+    ///         installed. Zero when nothing is queued.
+    uint64  public upgradeEta;
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() {}
@@ -186,19 +205,81 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
 
     // ── UUPS upgrade authorization ───────────────────────────────────────────
 
-    /// @notice UUPS upgrade authorization — only the DEFAULT_ADMIN_ROLE holder
-    ///         on the linked MarketplaceManager can authorize contract upgrades.
-    ///         When manager == address(0), upgrades are permissionless (test/dev only).
-    function _authorizeUpgrade(address) internal override {
-        if (manager != address(0)) {
-            (bool ok, bytes memory data) = manager.staticcall(
-                abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
-            );
-            require(ok && data.length == 32 && abi.decode(data, (bool)), "Not authorized");
-        }
+    /// @notice How long a queued upgrade must wait before it can be installed.
+    ///         6 hours on testnets so fixes ship fast; 48 hours on Songbird and
+    ///         Flare, where the escrow is real money and users need a window to
+    ///         exit if an upgrade looks hostile.
+    /// @dev Chain IDs: 114 Coston2, 16 Coston, 31337 anvil/local, 19 Songbird,
+    ///      14 Flare. Anything unrecognised gets the conservative 48h.
+    function upgradeDelay() public view returns (uint64) {
+        uint256 id = block.chainid;
+        if (id == 114 || id == 16 || id == 31337) return 6 hours;
+        return 48 hours;
+    }
+
+    /// @notice Grace period after `upgradeEta` during which the queued
+    ///         implementation may still be installed. Past it the queue entry is
+    ///         stale and must be re-queued, so an approval granted months ago
+    ///         cannot be exercised on a whim.
+    uint64 public constant MAX_UPGRADE_WINDOW = 7 days;
+
+    /// @notice Emitted when an upgrade is queued and its timer starts.
+    event UpgradeQueued(address indexed implementation, uint64 eta);
+    /// @notice Emitted when a queued upgrade is abandoned before installation.
+    event UpgradeCancelled(address indexed implementation);
+
+    /// @dev Reverts unless the caller holds DEFAULT_ADMIN_ROLE on the manager.
+    function _requireAdmin() internal view {
+        (bool ok, bytes memory data) = manager.staticcall(
+            abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
+        );
+        if (!ok || data.length != 32 || !abi.decode(data, (bool))) revert NotAdmin();
+    }
+
+    /// @notice Start the timer on an upgrade. Queuing is public and emits, so
+    ///         holders can see a pending implementation and exit before it lands.
+    /// @param impl The implementation contract to install after the delay.
+    function queueUpgrade(address impl) external {
+        if (manager == address(0)) revert NoManager();
+        _requireAdmin();
+        if (impl == address(0) || impl.code.length == 0) revert BadImplementation();
+        pendingImplementation = impl;
+        upgradeEta = uint64(block.timestamp) + upgradeDelay();
+        emit UpgradeQueued(impl, upgradeEta);
+    }
+
+    /// @notice Abandon the queued upgrade. Used to withdraw a proposal, and as
+    ///         the immediate response if an admin key is suspected compromised.
+    function cancelUpgrade() external {
+        if (manager == address(0)) revert NoManager();
+        _requireAdmin();
+        emit UpgradeCancelled(pendingImplementation);
+        pendingImplementation = address(0);
+        upgradeEta = 0;
+    }
+
+    /// @notice UUPS upgrade authorization: DEFAULT_ADMIN_ROLE on the linked
+    ///         MarketplaceManager, AND the exact implementation must have been
+    ///         queued at least `upgradeDelay()` ago and not left to go stale.
+    /// @dev Previously this was a bare role check, so one compromised admin key
+    ///      could swap in a malicious implementation and sweep every escrowed
+    ///      wei in a single transaction with no warning. It was also a complete
+    ///      no-op when manager == address(0), which made such a proxy upgradable
+    ///      by anyone; that case now reverts, permanently freezing the
+    ///      implementation of any ungated (test-only) deployment.
+    function _authorizeUpgrade(address newImplementation) internal override {
+        if (manager == address(0)) revert NoManager();
+        _requireAdmin();
+        if (newImplementation != pendingImplementation) revert UpgradeNotQueued();
+        if (block.timestamp < upgradeEta) revert UpgradeNotReady();
+        if (block.timestamp > uint256(upgradeEta) + MAX_UPGRADE_WINDOW) revert UpgradeExpired();
+        pendingImplementation = address(0);
+        upgradeEta = 0;
     }
 
     /// @dev Storage gap for future upgrades — preserves child storage layout
     ///      across implementation upgrades. Follows OpenZeppelin UUPS convention.
-    uint256[48] private __gap;
+    /// @dev 48 → 47: pendingImplementation (address) and upgradeEta (uint64)
+    ///      pack into one freshly-claimed slot ahead of this gap.
+    uint256[47] private __gap;
 }

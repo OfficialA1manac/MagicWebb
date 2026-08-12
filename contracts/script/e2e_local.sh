@@ -79,7 +79,7 @@ NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 2000000000000000000 $((NOW+86400)) --value 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
 cast send "$NFT" "setApprovalForAll(address,bool)" "$OB" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
-cast send "$OB" "acceptOffer(address,uint256,address)" "$NFT" 3 "$ALICE" --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
+cast send "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$ALICE" 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
 check "offer NFT -> alice" "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 check "seller +1.97 (gas-adjusted >=1.96)" "1" "$(gt $S1 $S0 1960000000000000000)"

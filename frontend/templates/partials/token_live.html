@@ -277,7 +277,7 @@
       <span class="text-lg font-black text-gold-200">{{wei2flr .AmountWei}} <span class="text-[10px] text-gold-300/80 font-bold uppercase tracking-wider">{{$.NativeCurrency}}</span></span>
       <div class="flex gap-2 shrink-0">
         <button class="px-3 py-1.5 rounded-lg btn-sky hover:opacity-95 text-ink-950 text-xs font-extrabold transition glow-sky shadow-md shadow-sky-500/30 active:scale-[0.97]"
-                @click="$store.wallet.acceptOffer('{{$.Contract}}', '{{$.TokenID}}', '{{lower .Bidder}}')">Accept</button>
+                @click="$store.wallet.acceptOffer('{{$.Contract}}', '{{$.TokenID}}', '{{lower .Bidder}}', '{{.AmountWei}}')">Accept</button>
         <button class="px-3 py-1.5 rounded-lg border border-white/10 hover:bg-white/5 text-white text-xs font-bold transition"
                 @click="$store.wallet.rejectOffer('{{$.Contract}}', '{{$.TokenID}}', '{{lower .Bidder}}')">Reject</button>
       </div>

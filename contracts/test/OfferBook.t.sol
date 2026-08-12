@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {OfferBook, NoOffer, OfferActive, OfferExpired, NotOwner, NotApproved, WrongValue, NotKeeper, OffersNotEligible} from "../src/OfferBook.sol";
+import {OfferBook, NoOffer, OfferActive, OfferExpired, NotOwner, NotApproved, WrongValue, NotKeeper, OffersNotEligible, PrincipalChanged} from "../src/OfferBook.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {MockERC721} from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
@@ -65,7 +65,7 @@ contract OfferBookTest is Test, TestHelpers {
 
         uint256 sb = seller.balance;
         vm.prank(seller);
-        ob.acceptOffer(address(nft), tid, alice);
+        ob.acceptOffer(address(nft), tid, alice, 2 ether);
         assertEq(nft.ownerOf(tid), alice);
         assertEq(seller.balance, sb + 2 ether - _fee(2 ether));
     }
@@ -132,7 +132,7 @@ contract OfferBookTest is Test, TestHelpers {
         ob.makeOffer1155{value: 1 ether}(address(multi), 7, 1 ether, 3, uint64(block.timestamp + 24 hours));
 
         vm.prank(seller);
-        ob.acceptOffer(address(multi), 7, alice);
+        ob.acceptOffer(address(multi), 7, alice, 1 ether);
         assertEq(multi.balanceOf(alice, 7), 3);
     }
 
@@ -154,8 +154,71 @@ contract OfferBookTest is Test, TestHelpers {
 
         uint256 sb = seller.balance;
         vm.prank(seller);
-        ob.acceptOffer(address(nft), tid, alice);
+        ob.acceptOffer(address(nft), tid, alice, principal);
         uint256 fee = uint256(principal) * 150 / 10_000;
         assertEq(seller.balance, sb + uint256(principal) - fee);
+    }
+
+    /// A bidder who re-prices downward while the seller's acceptOffer sits in
+    /// the mempool must not get the NFT at the new price.
+    function test_acceptOffer_repricedUnderSeller_reverts() public {
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ob), true);
+        vm.stopPrank();
+
+        uint64 exp = uint64(block.timestamp + 24 hours);
+        vm.prank(alice);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, exp);
+
+        // Alice front-runs with an edit down to 1 ether.
+        vm.prank(alice);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+
+        vm.prank(seller);
+        vm.expectRevert(PrincipalChanged.selector);
+        ob.acceptOffer(address(nft), tid, alice, 5 ether);
+        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller");
+
+        // Accepting the price actually on-chain still works.
+        uint256 sb = seller.balance;
+        vm.prank(seller);
+        ob.acceptOffer(address(nft), tid, alice, 1 ether);
+        assertEq(nft.ownerOf(tid), alice);
+        assertEq(seller.balance, sb + 1 ether - _fee(1 ether));
+    }
+
+    /// Exits stay unstoppable: the bidder reclaims their own expired escrow
+    /// even with a manager configured and no keeper available.
+    function test_refundExpiredOffer_bidderSelfReclaim() public {
+        vm.prank(alice);
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+
+        vm.warp(block.timestamp + 5 minutes);
+        uint256 aBefore = alice.balance;
+        vm.prank(alice);
+        ob.refundExpiredOffer(address(nft), 0, alice);
+        assertEq(alice.balance, aBefore + 1 ether);
+        (uint128 p,,,) = ob.positions(address(nft), 0, alice);
+        assertEq(p, 0, "position cleared");
+    }
+
+    /// Third parties still cannot move someone else's escrow without the role.
+    function test_refundExpiredOffer_thirdParty_stillNeedsKeeper() public {
+        vm.prank(alice);
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+
+        vm.warp(block.timestamp + 5 minutes);
+        vm.prank(bob);
+        vm.expectRevert(NotKeeper.selector);
+        ob.refundExpiredOffer(address(nft), 0, alice);
+    }
+
+    /// An already-elapsed expiry used to underflow into Panic(0x11).
+    function test_makeOffer_pastExpiry_revertsInvalidDuration() public {
+        vm.warp(block.timestamp + 1 days);
+        vm.prank(alice);
+        vm.expectRevert(InvalidDuration.selector);
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp - 1));
     }
 }
