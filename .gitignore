@@ -49,7 +49,19 @@ contracts/out/
 contracts/cache/
 contracts/broadcast/
 contracts/foundry.lock
-contracts/lib/
+# contracts/lib holds Foundry dependencies. The three that remappings.txt
+# resolves against are tracked as submodules so CI can build; anything else
+# that lands here (stray `forge install`s) stays ignored.
+#
+# This used to be a blanket `contracts/lib/`, which meant only
+# openzeppelin-contracts-upgradeable survived (a registered submodule
+# overrides the ignore). forge-std and openzeppelin-contracts existed on
+# dev machines only, so every CI checkout failed to resolve imports and
+# `forge build` died — taking the Foundry and Slither jobs with it.
+contracts/lib/*
+!contracts/lib/forge-std
+!contracts/lib/openzeppelin-contracts
+!contracts/lib/openzeppelin-contracts-upgradeable
 *.gas-snapshot
 gas-report.txt
 
