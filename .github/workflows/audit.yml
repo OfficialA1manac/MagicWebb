@@ -117,7 +117,8 @@ jobs:
           fetch-depth: 0
 
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149
+        # See ci.yml: the old pin was not a real commit and no v2.5.0 exists.
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
 

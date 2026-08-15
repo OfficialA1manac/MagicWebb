@@ -151,6 +151,12 @@ jobs:
         with:
           fetch-depth: 0
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149 # v2.5.0
+        # Pinned to the v2.3.9 tag commit. The previous pin
+        # (4af6123da341504d1141b584faae0815802f5149, commented "v2.5.0") is not
+        # a commit in this repository and no v2.5.0 tag was ever published —
+        # the newest v2 is v2.3.9. GitHub resolves action references during
+        # "Set up job", so an unresolvable SHA failed the job before a single
+        # step ran, which is exactly how this presented.
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"

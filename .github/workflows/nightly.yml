@@ -61,7 +61,7 @@ jobs:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
+        uses: foundry-rs/foundry-toolchain@8f1998e9878d786675189ef566a2e4bf24869773 # v1.2.0
       - name: Build
         working-directory: contracts
         run: forge build --sizes
@@ -79,9 +79,9 @@ jobs:
           submodules: recursive
           persist-credentials: false
       - name: Install Foundry
-        uses: foundry-rs/foundry-toolchain@bd0a42a372a6cd06ac1b09b7f6af30d1d6c07ac2 # v1.2.0
+        uses: foundry-rs/foundry-toolchain@8f1998e9878d786675189ef566a2e4bf24869773 # v1.2.0
       - name: Slither
-        uses: crytic/slither-action@3f839d464f8fb1b50c16776c12f3fda52cf4171f # v0.4.0
+        uses: crytic/slither-action@f197989dea5b53e986d0f88c60a034ddd77ec9a8 # v0.4.0
         with:
           target: contracts/
           slither-config: contracts/slither.config.json
@@ -97,6 +97,6 @@ jobs:
           fetch-depth: 0
           persist-credentials: false
       - name: gitleaks
-        uses: gitleaks/gitleaks-action@4af6123da341504d1141b584faae0815802f5149 # v2.5.0
+        uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
