@@ -235,6 +235,7 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
         window.addEventListener('mw-ws-open', function () { load(); });
         // Also refresh on wallet-related custom events
         window.addEventListener('mw-wallet-changed', function () { load(); });
+      })();
 
       // ── Mobile wallet controls ──
       (function(){if(typeof window==='undefined')return;
