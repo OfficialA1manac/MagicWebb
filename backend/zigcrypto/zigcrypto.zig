@@ -90,12 +90,17 @@ test "zig_keccak256 hello" {
     const testing = std.testing;
     var out: [32]u8 = undefined;
     zig_keccak256("hello", 5, &out);
-    // Keccak-256("hello") = 1c8aff950685c2ed4bc31723f3679aa0f2e3b8e3d6f1e7b0e3b9b8f0b8a7f0c5
+    // Keccak-256("hello") = 1c8aff950685c2ed4bc3174f3472287b56d9517b9c948127319a09a7a36deac8
+    // (verified with `cast keccak "hello"`). The previous constant kept the
+    // real first 10 bytes and then diverged into invented ones, so this test
+    // had never passed — it is why the Backend CI job failed at ZIG-4. The
+    // implementation was always correct: the empty-string vector above is a
+    // well-known value and passes.
     const expected = [_]u8{
         0x1c, 0x8a, 0xff, 0x95, 0x06, 0x85, 0xc2, 0xed,
-        0x4b, 0xc3, 0x17, 0x23, 0xf3, 0x67, 0x9a, 0xa0,
-        0xf2, 0xe3, 0xb8, 0xe3, 0xd6, 0xf1, 0xe7, 0xb0,
-        0xe3, 0xb9, 0xb8, 0xf0, 0xb8, 0xa7, 0xf0, 0xc5,
+        0x4b, 0xc3, 0x17, 0x4f, 0x34, 0x72, 0x28, 0x7b,
+        0x56, 0xd9, 0x51, 0x7b, 0x9c, 0x94, 0x81, 0x27,
+        0x31, 0x9a, 0x09, 0xa7, 0xa3, 0x6d, 0xea, 0xc8,
     };
     try testing.expectEqualSlices(u8, &expected, &out);
 }

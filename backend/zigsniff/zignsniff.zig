@@ -43,11 +43,16 @@ export fn zig_sniff_image(data: [*]const u8, len: usize) callconv(.C) c_uint {
         return @intFromEnum(ImageFormat.jpeg);
     }
 
-    // GIF: "GIF87a" or "GIF89a"
+    // GIF: "GIF87a" or "GIF89a". The version digits are bytes 3-4 ("87"/"89"),
+    // so byte 3 is always '8' and byte 4 is the one that varies. The previous
+    // check had them transposed — it accepted '8'/'7'/'9' at byte 3 and then
+    // demanded '7' at byte 4, which matches GIF87a by luck and never matches
+    // GIF89a. Animation was introduced in 89a, so every animated GIF fell
+    // through to `unknown`.
     if (len >= 6 and
         bytes[0] == 'G' and bytes[1] == 'I' and bytes[2] == 'F' and
-        (bytes[3] == '8' or bytes[3] == '7' or bytes[3] == '9') and
-        bytes[4] == '7' and bytes[5] == 'a')
+        bytes[3] == '8' and (bytes[4] == '7' or bytes[4] == '9') and
+        bytes[5] == 'a')
     {
         return @intFromEnum(ImageFormat.gif);
     }
@@ -164,8 +169,17 @@ test "zig_sniff_image detects JPEG" {
 
 test "zig_sniff_image detects GIF" {
     const testing = std.testing;
+    // `"GIF89a" ++ ...` is already a pointer to array (*const [16:0]u8), so the
+    // `&` that used to be here produced *const *const [16:0]u8 and failed to
+    // compile — which took the whole ZIG-4 test step down with it. The array
+    // literals above (png_header, jpeg) do need `&`; string literals do not.
     const gif = "GIF89a" ++ [_]u8{0} ** 10;
-    try testing.expectEqual(@as(c_uint, 3), zig_sniff_image(&gif, gif.len));
+    try testing.expectEqual(@as(c_uint, 3), zig_sniff_image(gif, gif.len));
+
+    // GIF87a must keep working too — the old transposed check matched this
+    // one by accident, which is how the bug survived.
+    const gif87 = "GIF87a" ++ [_]u8{0} ** 10;
+    try testing.expectEqual(@as(c_uint, 3), zig_sniff_image(gif87, gif87.len));
 }
 
 test "zig_sniff_image detects SVG" {
