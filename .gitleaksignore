@@ -2,12 +2,49 @@
 #
 # Fingerprint format: <commit>:<file>:<rule>:<startLine>
 #
-# generic-api-key flagged the string "CGO_ENABLED=1" (a Go build flag) in the now-deleted
-# backend/Makefile. Verified non-secret (entropy 3.55, plain build env var). The file has been
-# removed from the working tree; this suppresses the lingering history match so CI stays green.
-cd791cea38ccc6880c2a3816597153d0e80b21a3:backend/Makefile:generic-api-key:52
+# Every entry below was opened and read before being suppressed. Nothing here
+# is a live credential. Real secrets (POSTGRES_URL, JWT_SECRET, KEEPER_KEY,
+# SERVICE_TOKEN) live in an untracked .env locally and in `fly secrets` in
+# production, and must never appear in this file.
 
-# generic-api-key flagged a deliberately-fake JWT test fixture
-# ("test-secret-at-least-32-chars-long-xx") used to satisfy the 32-char JWT_SECRET
-# minimum in unit tests. Not a real credential — a hardcoded test constant.
+# ── backend/Makefile ────────────────────────────────────────────────────────
+# generic-api-key flagged the string "CGO_ENABLED=1" (a Go build flag).
+# Verified non-secret (entropy 3.55, plain build env var).
+cd791cea38ccc6880c2a3816597153d0e80b21a3:backend/Makefile:generic-api-key:52
+356d96364c902c3833e55813cf3e89f830128493:backend/Makefile:generic-api-key:52
+
+# ── backend/internal/auth/jwt_test.go ───────────────────────────────────────
+# Deliberately-fake JWT test fixtures ("test-secret-at-least-32-chars-long-xx"
+# and siblings) that exist only to satisfy the 32-char JWT_SECRET minimum in
+# unit tests. Hardcoded test constants, never used outside _test.go.
 45eafc4be2527ce07dfe868f00513b4bee55dced:backend/internal/auth/jwt_test.go:generic-api-key:11
+ecbd33b8e75e26e55ba74da4666fd4ec013c4be7:backend/internal/auth/jwt_test.go:generic-api-key:11
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:12
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:31
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:48
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:62
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:91
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:109
+c32ae0267f1258f526b3b38d9195dee9e88e085e:backend/internal/auth/jwt_test.go:generic-api-key:125
+9694e8504c9e3ffda3d29d2e9f6eb79421ee3249:backend/internal/auth/jwt_test.go:generic-api-key:142
+
+# ── backend/internal/indexer/keeper_gas_test.go ─────────────────────────────
+# testKeeperKeyHex = "0123456789abcdef" repeated to 64 chars. A deterministic
+# dummy ECDSA key so gas-logging tests are reproducible. Controls no funds.
+c4ceb3e5ea6b4b1b88aec03678e5aaaa25e813c0:backend/internal/indexer/keeper_gas_test.go:generic-api-key:24
+
+# ── backend/internal/config/config_test.go ──────────────────────────────────
+# The flagged value is the env var NAME "TEST_OPT_UINT64_BAD", used to prove
+# optUint64 falls back to its default on a malformed value. Not a secret.
+1c22809b689b74acf2b87eb788b0d911302eb1f4:backend/internal/config/config_test.go:generic-api-key:257
+
+# ── vendored browser bundles ────────────────────────────────────────────────
+# ethers.umd.min.js ships defaultApiKey / defaultToken — ethers' own public
+# fallback endpoints, published in the library source. appkit-bridge.js is the
+# built Reown AppKit bundle; amplitudeApiKey is Reown's public client-side
+# analytics key, shipped to every browser that loads their SDK. Neither is ours
+# and neither grants access to anything of ours.
+ccb8781d45e41f5a510e2211e53797707da84a86:backend/internal/ui/static/ethers.umd.min.js:generic-api-key:1
+4943245a05066a0344abfd50b80b6044d4b4256d:frontend/static/appkit-bridge.js:generic-api-key:313
+4943245a05066a0344abfd50b80b6044d4b4256d:frontend/static/appkit-bridge.js:generic-api-key:12997
+4943245a05066a0344abfd50b80b6044d4b4256d:frontend/static/appkit-bridge.js:generic-api-key:13014
