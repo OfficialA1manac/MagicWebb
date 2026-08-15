@@ -5,13 +5,25 @@ package ratelimit
 
 import (
 	"context"
+	"errors"
 	"sync"
 	"sync/atomic"
 	"time"
 
+	"github.com/jackc/pgx/v5"
+	"github.com/jackc/pgx/v5/pgconn"
 	"github.com/jackc/pgx/v5/pgxpool"
 	"github.com/rs/zerolog/log"
 )
+
+// pgPool is the subset of *pgxpool.Pool the Postgres-backed limiter uses.
+// Narrowed to an interface so the fixed-window paths can be exercised against
+// pgxmock without a live database — the no-row cold-start case that broke
+// every /api/v1 route was untestable while this was a concrete *pgxpool.Pool.
+type pgPool interface {
+	QueryRow(ctx context.Context, sql string, args ...any) pgx.Row
+	Exec(ctx context.Context, sql string, args ...any) (pgconn.CommandTag, error)
+}
 
 type entry struct {
 	timestamps []int64 // UnixMicro
@@ -22,7 +34,7 @@ type entry struct {
 type Limiter struct {
 	mu      sync.Mutex
 	windows map[string]*entry
-	pool    *pgxpool.Pool
+	pool    pgPool
 }
 
 // New creates an in-memory Limiter and starts background cleanup.
@@ -87,7 +99,7 @@ func (l *Limiter) remainingMem(key string, limit int, window time.Duration) int 
 }
 
 // remainingPg returns remaining capacity for the Postgres fixed-window
-// counter. Fails OPEN (returns 0) on DB error — a DB outage should
+// counter. Fails CLOSED (returns 0) on DB error — a DB outage should
 // not claim capacity is available.
 func (l *Limiter) remainingPg(key string, limit int, window time.Duration) int {
 	windowStart := time.Now().Truncate(window)
@@ -98,9 +110,20 @@ func (l *Limiter) remainingPg(key string, limit int, window time.Duration) int {
 		`SELECT count FROM rate_limits WHERE rl_key = $1 AND window_start = $2`,
 		key, windowStart,
 	).Scan(&count)
+	if errors.Is(err, pgx.ErrNoRows) {
+		// No row yet == nothing spent in this window. This is the NORMAL state
+		// for the first request of every key in every window, not a failure.
+		// Conflating it with a DB error returned 0, and the caller in
+		// api.tieredRateLimitMiddleware short-circuits on `remaining <= 0`
+		// before calling Allow() — so the counter row was never inserted, the
+		// SELECT kept finding nothing, and every /api/v1 and /graphql request
+		// 429'd forever. Full read-API outage; auth and media survived only
+		// because they call Allow() directly.
+		return limit
+	}
 	if err != nil {
-		// DB error — report 0 remaining so headers match Allow()'s fail-closed
-		// rejection on the same DB outage.
+		// Real DB error — report 0 remaining so headers match Allow()'s
+		// fail-closed rejection on the same DB outage.
 		return 0
 	}
 	rem := limit - count
