@@ -242,6 +242,12 @@ contract Marketplace is MarketplaceCore {
     ///      The `seller` arg selects which listing to buy (listings are seller-keyed).
     ///      Entire tx reverts if the NFT transfer fails (seller no longer owns/approves) —
     ///      no fee is taken, the listing remains. This is how first-settle-wins works.
+    // The only state written after the payout calls is `pendingReturns[to] += amount`
+    // inside _pay's failure branch. Those calls carry a 50_000 gas stipend, which
+    // cannot fund a reentrant call, and this function is nonReentrant — the shared
+    // ReentrancyGuard status also blocks re-entering withdrawRefund mid-buy, so the
+    // cross-function path slither reports is not reachable.
+    // slither-disable-next-line reentrancy-eth
     function buy(address coll, uint256 id, address seller) external payable nonReentrant entryGate {
         Listing memory l = listings[coll][id][seller];
         if (l.seller == address(0)) revert NotListed();

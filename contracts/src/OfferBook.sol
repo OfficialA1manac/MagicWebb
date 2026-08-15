@@ -264,6 +264,10 @@ contract OfferBook is MarketplaceCore {
     /// @param expectedPrincipal The principal the seller is agreeing to, in wei.
     ///        Reverts PrincipalChanged() if the stored position differs — read it
     ///        from `positions(coll, tokenId, bidder).principal` when building the tx.
+    // Same reasoning as Marketplace.buy: the post-call write is _pay's
+    // pull-fallback credit, the payout calls are gas-capped at 50_000, and
+    // nonReentrant blocks both direct and cross-function re-entry.
+    // slither-disable-next-line reentrancy-eth
     function acceptOffer(address coll, uint256 tokenId, address bidder, uint128 expectedPrincipal)
         external nonReentrant entryGate
     {

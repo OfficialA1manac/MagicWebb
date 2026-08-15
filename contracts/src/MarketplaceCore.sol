@@ -175,6 +175,11 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     ///         Callable by any address that has a pendingReturns credit.
     ///         virtual so child contracts (AuctionHouse, OfferBook) can
     ///         override with their own pendingReturns mapping.
+    // The post-call write is a restore-on-failure inside `if (!ok)`, and that
+    // branch reverts immediately, so the write is discarded with the rest of
+    // the transaction. The credit is zeroed BEFORE the call (CEI) and the
+    // function is nonReentrant, so there is no reentrant path to drain.
+    // slither-disable-next-line reentrancy-eth
     function withdrawRefund() external virtual nonReentrant {
         uint256 amt = pendingReturns[msg.sender];
         if (amt == 0) revert NothingToWithdraw();

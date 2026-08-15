@@ -492,10 +492,14 @@ contract AuctionHouse is MarketplaceCore {
         // callable at endsAt + SELLER_DEFAULT_WINDOW — a 3-day lockup the
         // seller could trigger for free, and which the leader could not escape
         // via withdrawLoserFunds() because that path excludes the leader.
-        // slither-disable-next-line arbitrary-send-erc20
         a.settled = true;
         bool delivered;
         if (std == TokenStandard.ERC721) {
+            // `sel` is the auction's recorded seller, not caller-supplied: it was
+            // written by create() and is never mutated. Pulling from an arbitrary
+            // `from` is the whole point of an escrowless marketplace — the seller
+            // approved this contract at listing time.
+            // slither-disable-next-line arbitrary-send-erc20
             try IERC721(coll).transferFrom(sel, winner, tid) { delivered = true; }
             catch {}
         } else {
@@ -672,6 +676,9 @@ contract AuctionHouse is MarketplaceCore {
     ///         Restore-on-failure: if the push fails, the credit is restored
     ///         so the caller can retry once their contract is fixed — no
     ///         funds are permanently lost.
+    // Same shape as MarketplaceCore.withdrawRefund: zero-then-call, and the
+    // only post-call write is the restore inside the reverting failure branch.
+    // slither-disable-next-line reentrancy-eth
     function withdrawRefund() external override nonReentrant {
         uint256 amt = pendingReturns[msg.sender];
         if (amt == 0) revert NothingToWithdraw();
