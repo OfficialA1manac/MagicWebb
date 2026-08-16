@@ -148,9 +148,14 @@ jobs:
       - name: Astro check (typecheck)
         working-directory: app
         run: npx astro check
+      # The github-actions reporter turns each failed assertion into a check
+      # annotation, so failures are visible on the PR and through the public
+      # check-runs API instead of being buried in a log that needs an
+      # authenticated download. Without it a red run reports only "Process
+      # completed with exit code 1".
       - name: Vitest (unit tests)
         working-directory: app
-        run: npx vitest run
+        run: npx vitest run --reporter=default --reporter=github-actions
 
   secrets:
     name: Secret scan (gitleaks)
