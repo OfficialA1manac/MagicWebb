@@ -95,16 +95,8 @@ jobs:
           cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig && \
           cd ../zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig && \
           cd ../zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
-      # cgo embeds no rpath for the Zig shared objects, so the test binaries
-      # cannot find libzigsha256.so / libzigcrypto.so / libzignsniff.so at
-      # run time and every package dies before main. Same fix as the CI
-      # workflow's Test (zigmedia) step; the production image instead copies
-      # the .so files into /usr/lib (see Dockerfile).
       - name: Test (zigmedia, race detector)
-        run: |
-          cd backend
-          export LD_LIBRARY_PATH="$PWD/zigsha256:$PWD/zigcrypto:$PWD/zigsniff:$LD_LIBRARY_PATH"
-          CGO_ENABLED=1 go test -tags zigmedia ./... -race -count=1 -timeout 120s
+        run: cd backend && CGO_ENABLED=1 go test -tags zigmedia ./... -race -count=1 -timeout 120s
 
   frontend-lint:
     name: Frontend (Astro check + vitest + guards)
