@@ -153,9 +153,20 @@ jobs:
       # check-runs API instead of being buried in a log that needs an
       # authenticated download. Without it a red run reports only "Process
       # completed with exit code 1".
+      # The github-actions reporter only annotates assertion failures — if
+      # Vitest dies during startup it never loads, and the job reports nothing
+      # but "Process completed with exit code 1". Echoing the tail of the
+      # output as an ::error makes startup crashes visible too. Newlines are
+      # percent-encoded because workflow commands are single-line.
       - name: Vitest (unit tests)
         working-directory: app
-        run: npx vitest run --reporter=default --reporter=github-actions
+        run: |
+          set -o pipefail
+          if npx vitest run --reporter=default --reporter=github-actions 2>&1 | tee /tmp/vitest.log; then
+            exit 0
+          fi
+          echo "::error title=Vitest failed::$(tail -c 3000 /tmp/vitest.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
+          exit 1
 
   secrets:
     name: Secret scan (gitleaks)
