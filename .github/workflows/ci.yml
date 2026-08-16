@@ -76,9 +76,18 @@ jobs:
         run: |
           go install golang.org/x/vuln/cmd/govulncheck@latest
           govulncheck ./...
+      # The Zig libraries are built as shared objects, and cgo does not embed
+      # an rpath pointing at them. Building and vetting only need them at link
+      # time, but `go test` *runs* the binaries, so the loader has to find
+      # libzigsha256.so / libzigcrypto.so / libzignsniff.so or every package
+      # dies before main with "cannot open shared object file". The production
+      # image sidesteps this by copying the .so files into /usr/lib (see
+      # Dockerfile); CI resolves them in place instead.
       - name: Test (zigmedia)
         working-directory: backend
-        run: CGO_ENABLED=1 go test -tags zigmedia ./...
+        run: |
+          export LD_LIBRARY_PATH="$PWD/zigsha256:$PWD/zigcrypto:$PWD/zigsniff:$LD_LIBRARY_PATH"
+          CGO_ENABLED=1 go test -tags zigmedia ./...
 
   contracts:
     name: Contracts (Foundry)

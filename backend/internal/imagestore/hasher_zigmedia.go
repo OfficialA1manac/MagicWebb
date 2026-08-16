@@ -9,6 +9,7 @@ package imagestore
 import "C"
 import (
 	"crypto/sha256"
+	"runtime"
 	"unsafe"
 )
 
@@ -47,15 +48,30 @@ func hashBatch(bodies [][]byte) [][sha256.Size]byte {
 	}
 
 	// Build pointer/length arrays for CGO.
+	//
+	// `ptrs` is Go memory that itself holds Go pointers, and we hand C a
+	// pointer to it. The cgo pointer rules forbid that unless every pointer
+	// stored inside is pinned — without the Pinner this panics at runtime
+	// with "argument of cgo function has Go pointer to unpinned Go pointer".
+	// Pinning keeps each body at a fixed address for the duration of the C
+	// call without copying it out to the C heap.
+	var pinner runtime.Pinner
+	defer pinner.Unpin()
+
 	ptrs := make([]*C.uint8_t, n)
 	lens := make([]C.size_t, n)
 	for i, body := range bodies {
 		if len(body) > 0 {
-			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(body)))
+			p := unsafe.SliceData(body)
+			pinner.Pin(p)
+			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(p))
 		} else {
 			// Pass a valid non-nil pointer for zero-length inputs to avoid
-			// null pointer dereference in Zig.
-			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(&[1]byte{}))
+			// null pointer dereference in Zig. Zig reads zero bytes from it,
+			// but it still has to be pinned like any other stored pointer.
+			z := new(byte)
+			pinner.Pin(z)
+			ptrs[i] = (*C.uint8_t)(unsafe.Pointer(z))
 		}
 		lens[i] = C.size_t(len(body))
 	}
