@@ -98,3 +98,16 @@ docs/REVIEW_PRODUCTION_HARDENING.md
 # ── Tools ───────────────────────────────────────────────────────────────────
 tools/seed-testnet/seed-testnet
 tools/seed-testnet/*.exe
+
+# ── Zig build outputs (zigmedia) ────────────────────────────────────────────
+# `zig build-lib -dynamic` writes these next to the .zig source. Regenerated
+# by `make zigmedia-build` and by CI; only the .zig and .h files are source.
+backend/zig*/*.so
+backend/zig*/*.so.*
+backend/zig*/*.dll
+backend/zig*/*.dll.obj
+backend/zig*/*.lib
+backend/zig*/*.pdb
+backend/zig*/*.o
+backend/zig*/zig-cache/
+backend/zig*/zig-out/
