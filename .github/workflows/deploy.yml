@@ -225,9 +225,25 @@ jobs:
         # needs stronger verification in the future, the recommended
         # path is: pin a known-good flyctl binary checksum from a
         # previous release and verify it here.
+        #
+        # The install is verified rather than assumed. `curl | sh` reports
+        # success even when the script only partially writes its binary, and
+        # the failure then surfaces one step later as a bare `exit 126`
+        # ("found but not executable") from `fly deploy` with nothing to go on
+        # — which is exactly how run 31955011882 died. Checking `flyctl
+        # version` here fails at the point of breakage, with the directory
+        # listing attached.
         run: |
+          set -euo pipefail
           curl -fsSL https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+          echo "  contents of $HOME/.fly/bin:"
+          ls -l "$HOME/.fly/bin" || true
+          chmod +x "$HOME/.fly/bin/"* 2>/dev/null || true
+          if ! "$HOME/.fly/bin/flyctl" version; then
+            echo "::error title=flyctl install failed::flyctl is not executable after install.sh; see the directory listing above"
+            exit 1
+          fi
       - name: Stamp build SHA into Go source
         # v38 — generate a Go source file with the commit SHA. Fly's remote
         # builder may ignore in-place mutations of tracked files (like sed on
@@ -283,9 +299,19 @@ jobs:
         # PUBLIC_REOWN_PROJECT_ID into the Astro build.
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+        #
+        # Failures are echoed back as a check annotation. Actions log
+        # downloads need an authenticated token, but check-run annotations are
+        # public, so this is what makes a broken deploy diagnosable at all.
+        # Newlines are percent-encoded because workflow commands are one line.
         run: |
+          set -o pipefail
           echo "  deploying commit $GITHUB_SHA"
-          fly deploy --remote-only --strategy rolling --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }}
+          if fly deploy --remote-only --strategy rolling --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }} 2>&1 | tee /tmp/fly-deploy.log; then
+            exit 0
+          fi
+          echo "::error title=fly deploy failed::$(tail -c 3000 /tmp/fly-deploy.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
+          exit 1
       - name: Post-deploy smoke check (curl /healthz)
         # Catches the class of failure where `fly deploy` succeeds
         # (image pushes, machine replaces) but the new binary boots
