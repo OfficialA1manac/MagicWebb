@@ -33,6 +33,13 @@ var chainTables = []string{
 	"tracked_collections",
 	"collections",
 	"indexer_state",
+	// The startup guard in cmd/server compares deployment_config against the
+	// env addresses and refuses to boot on a mismatch, telling the operator to
+	// "truncate on-chain data first". Leaving this row behind meant doing
+	// exactly that still left the server blocked — the wipe cleared the data
+	// the row describes but not the row. Empty is the correct post-wipe state:
+	// the server re-inserts it from the current env on the ErrNoRows path.
+	"deployment_config",
 }
 
 func main() {
