@@ -77,7 +77,7 @@ type CollectionRow struct {
 	Symbol      string `json:"symbol"`
 	Standard    string `json:"standard"` // "erc721" | "erc1155"
 	DeployBlock uint64 `json:"deploy_block"`
-	Verified    bool   `json:"verified"` // curation badge (admin-set)
+	Verified    bool   `json:"verified"` // standard_verified AND metadata resolved; set by internal/verifier
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {

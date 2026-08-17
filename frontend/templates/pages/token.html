@@ -97,6 +97,11 @@
           </span>
           Live
         </span>
+        <!-- Verified: see internal/verifier — supportsInterface plus resolved
+             metadata, computed on-chain rather than curated. -->
+        {{if .CollectionVerified}}
+        <span class="inline-flex items-center gap-1 px-2 py-0.5 rounded-full bg-violet-500/15 border border-violet-500/30 text-violet-200 text-[10px] font-extrabold uppercase tracking-wider glow-violet" title="Contract declares a standard NFT interface and its metadata resolves">✓ Verified</span>
+        {{end}}
       </div>
     </div>
 

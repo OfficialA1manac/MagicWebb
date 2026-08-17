@@ -37,6 +37,7 @@ import (
 // responsive utility — and only the live site surfaces the symptom
 // after the next deploy, when users on a clean browser cache see
 // nothing.
+//
 //go:embed static/tailwind.css
 var tailwindCSS string
 
@@ -76,7 +77,7 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		"RPCURL": "https://coston2-api.flare.network/ext/C/rpc",
 		// ExplorerPrefix still rendered for legacy <a> tags (kept
 		// for backward-compat with any partial that referenced it).
-		"ExplorerPrefix": "https://coston2-explorer.flare.network",
+		"ExplorerPrefix":  "https://coston2-explorer.flare.network",
 		"Now":             int64(1700000000),
 		"Ended":           false,
 		"ListingCount":    int64(1),
@@ -98,9 +99,9 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 	}{
 		// Runtime config injected (single source of truth: layout.html)
 		{"MW_WC_PROJECT_ID", "window.MW_WC_PROJECT_ID = 'ba97b5bd13de477c242103bfbf471930'"},
-		{"MW_MARKETPLACE",   "window.MW_MARKETPLACE   = '0xf9355c77f4dba5ceca217ceb4d762a33ab7efe37'"},
-		{"MW_AUCTION",       "window.MW_AUCTION       = '0x9452518e29dea185da392e16be03982c1511753c'"},
-		{"MW_OFFERBOOK",     "window.MW_OFFERBOOK     = '0x0c6edb481bc73b4b817a2e7235b309276d703906'"},
+		{"MW_MARKETPLACE", "window.MW_MARKETPLACE   = '0xf9355c77f4dba5ceca217ceb4d762a33ab7efe37'"},
+		{"MW_AUCTION", "window.MW_AUCTION       = '0x9452518e29dea185da392e16be03982c1511753c'"},
+		{"MW_OFFERBOOK", "window.MW_OFFERBOOK     = '0x0c6edb481bc73b4b817a2e7235b309276d703906'"},
 		// v24.0.1 — five-field WalletConnect config. The previous
 		// v23 audit only injected 4 fields; MW_NATIVE_CURRENCY is the
 		// missing 5th. These four pairs pin each shadow as a literal
@@ -121,7 +122,7 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// empty string. Substring pins are also robust to the
 		// 6-vs-9-space comma alignment drift the literal-string match
 		// had in v24.0.1's first cut (see PR diff for MW_NETWORK_ID).
-		{"MW_NETWORK_NAME",    "Flare Coston2"},
+		{"MW_NETWORK_NAME", "Flare Coston2"},
 		{"MW_NATIVE_CURRENCY", "C2FLR"},
 		// MW_RPC_URL — pinned to the host substring rather than the
 		// full URL. Go html/template's JS-string-context escaping in a
@@ -132,9 +133,9 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// The full URL `{{.RPCURL}}` is still in layout.html line 149
 		// and the auto-inject is in cmd/server/ui.go render(); this
 		// pin only verifies the value reaches the rendered body.
-		{"MW_RPC_URL",         "coston2-api.flare.network"},
-		{"MW_EXPLORER",        "coston2-explorer.flare.network"},
-		{"MW_NETWORK_ID",      "114"},
+		{"MW_RPC_URL", "coston2-api.flare.network"},
+		{"MW_EXPLORER", "coston2-explorer.flare.network"},
+		{"MW_NETWORK_ID", "114"},
 		// v28.0.2 — server-injected NativeCurrency. home.html:54
 		// (`{{wei2flr .Volume24hWei}} <span class="text-sm">{{.NativeCurrency}}</span>`)
 		// resolves to `<span class="text-sm">C2FLR</span>` after render().
@@ -146,74 +147,74 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// token, auction, listing_cards, auction_cards, auction_live,
 		// token_live, offers_live, activity_feed, profile_live) live
 		// in the new checkRenderHelpersAcceptNativeCurrency test stub.
-		{"home-native-currency-span", "<span class=\"text-sm\">C2FLR</span>"},  // Self-hosted assets served with `?v=19` cache-buster — bumping
-  // from v18 forces returning browsers to re-fetch layout.html so the
-  // v19 cleanup lands on users that loaded the previous shell.
-  // v19 ships a CODE HYGIENE pass only — no behaviour change.
-  // Three dead window.* exports are removed from static/wallet.js:
-  //   window.fmtFLR, window.fmtAddr, window.mediaURL — each had zero
-  //   live call sites outside the wallet.js IIFE closure (templates
-  //   resolve these names against the per-partial x-data scope, NOT
-  //   the global window). Dropping them leaves the wallet store's
-  //   local fmtFLR/fmtAddr/mediaURL call sites unchanged.
-  // The wallet store's `_toast(msg, type)` method wrapper is inlined
-  // to direct `toast(...)` calls (top-level IIFE function declared at
-  // line ~1350, hoisted throughout). The wrapper had no external
-  // callers; it was a 1-line `return toast(...)` shortcut. Inlining
-  // removes one indirection without changing observable behaviour.
-  // v17/v18 history (cross-tab hardening + MW_WC_HIDE removal) is still
-  // shipping in the same wallet.js bundle that ships v19 — only the
-  // cache-buster bumped so returning browsers refetch. v17 ships
-	// the cross-tab / cross-modal hardening pass:
-	//   layout.html — every dropdown / drawer surface
-	//     (Connect Wallet dropdown, bell notifications dropdown,
-	//     mobile-hamburger drawer, WC pairing chip trigger) now
-	//     carries an inline `style="display: none;"` for first-paint
-	//     fail-safe hiding (so an Alpine init error or a wedged
-	//     x-transition cannot leave any modal stuck onscreen).
-	//     Connect Wallet dropdown ditched its
-	//     `x-transition.opacity.duration.150ms` because Alpine's
-	//     transition listener (requestAnimationFrame) pauses when a
-	//     tab is hidden — that pause was the mechanism that produced
-	//     the "frozen across tabs" + "auto-displays and won't close"
-	//     user-reported class of bugs. Bell + mobile drawer get the
-	//     same anti-stuck protection. Each surface picked up a
-	//     `@keydown.escape.window` handler so Esc closes any of them
-	//     without depending on Alpine's reactive x-show path (the
-	//     path that's frozen in the bug).
-	//   partials/action_modal.html — keeps its heavier x-transition
-	//     (because fade-in is desirable on a modal that hides the
-	//     rest of the page), but adds a `x-bind:style` fail-safe
-	//     that forces `display: none !important` when the reactive
-	//     `$store.modals.open` flips to false. This breaks the
-	//     wedged-transition visibility race without giving up the
-	//     fade-in aesthetic.
-	//   static/wallet.js — surfaces a global `window.MW_HIDE_ALL()`
-	//     kill-switch that force-flips every dropdown flag false and
-	//     force-hides every modal-root via direct DOM. Registered as
-	//     a `visibilitychange` listener so on every tab-focus return
-	//     any modal that was wedged by an interrupted x-transition
-	//     while the tab was hidden gets torn down before the user
-	//     sees it. The action_modal is exempt from auto-dismiss
-	//     when `step >= 1` (in-flight signing) so a user mid-buy
-	//     doesn't lose their modal context on tab switch.  // Mounted under /static/* with a 60-second Cache-Control: max-
-  // age=60 (see mountStatic) so the baseline freshness policy isn't
-  // solely reliant on the bump.
-	// v24.0.1: ?v=20 → ?v=21 cache-buster bump. Chain-metadata
-	// wiring pass — the layout.html script tags and tailwind.css
-	// all bumped together so a returning browser atomic-refetches
-	// and observes window.MW_NATIVE_CURRENCY + the renamed
-	// entry points in lock-step with the wallet.js edits.
-	// v24.0.1: ?v=N bump to match the live layout.html. The previous
-	// ?v=20/21 needles were drift-stale (actual was ?v=27/28) so the
-	// cache-buster assertions had been silently failing pre-patch.
-	// Bumping to ?v=28 here closes the drift and pins the next-deployed
-	// buster version on lock-step with layout.html's <script src=> tags.
-	{"tailwind-static-link", "tailwind.css?v=34"},
-	{"wallet-js-defer",      "wallet.js?v=34"},
-	{"ethers-umd-defer",     "ethers.umd.min.js?v=34"},
-	{"cdn-min-js-defer",     "cdn.min.js?v=34"},
-	{"htmx-min-js-defer",    "htmx.min.js?v=34"},
+		{"home-native-currency-span", "<span class=\"text-sm\">C2FLR</span>"}, // Self-hosted assets served with `?v=19` cache-buster — bumping
+		// from v18 forces returning browsers to re-fetch layout.html so the
+		// v19 cleanup lands on users that loaded the previous shell.
+		// v19 ships a CODE HYGIENE pass only — no behaviour change.
+		// Three dead window.* exports are removed from static/wallet.js:
+		//   window.fmtFLR, window.fmtAddr, window.mediaURL — each had zero
+		//   live call sites outside the wallet.js IIFE closure (templates
+		//   resolve these names against the per-partial x-data scope, NOT
+		//   the global window). Dropping them leaves the wallet store's
+		//   local fmtFLR/fmtAddr/mediaURL call sites unchanged.
+		// The wallet store's `_toast(msg, type)` method wrapper is inlined
+		// to direct `toast(...)` calls (top-level IIFE function declared at
+		// line ~1350, hoisted throughout). The wrapper had no external
+		// callers; it was a 1-line `return toast(...)` shortcut. Inlining
+		// removes one indirection without changing observable behaviour.
+		// v17/v18 history (cross-tab hardening + MW_WC_HIDE removal) is still
+		// shipping in the same wallet.js bundle that ships v19 — only the
+		// cache-buster bumped so returning browsers refetch. v17 ships
+		// the cross-tab / cross-modal hardening pass:
+		//   layout.html — every dropdown / drawer surface
+		//     (Connect Wallet dropdown, bell notifications dropdown,
+		//     mobile-hamburger drawer, WC pairing chip trigger) now
+		//     carries an inline `style="display: none;"` for first-paint
+		//     fail-safe hiding (so an Alpine init error or a wedged
+		//     x-transition cannot leave any modal stuck onscreen).
+		//     Connect Wallet dropdown ditched its
+		//     `x-transition.opacity.duration.150ms` because Alpine's
+		//     transition listener (requestAnimationFrame) pauses when a
+		//     tab is hidden — that pause was the mechanism that produced
+		//     the "frozen across tabs" + "auto-displays and won't close"
+		//     user-reported class of bugs. Bell + mobile drawer get the
+		//     same anti-stuck protection. Each surface picked up a
+		//     `@keydown.escape.window` handler so Esc closes any of them
+		//     without depending on Alpine's reactive x-show path (the
+		//     path that's frozen in the bug).
+		//   partials/action_modal.html — keeps its heavier x-transition
+		//     (because fade-in is desirable on a modal that hides the
+		//     rest of the page), but adds a `x-bind:style` fail-safe
+		//     that forces `display: none !important` when the reactive
+		//     `$store.modals.open` flips to false. This breaks the
+		//     wedged-transition visibility race without giving up the
+		//     fade-in aesthetic.
+		//   static/wallet.js — surfaces a global `window.MW_HIDE_ALL()`
+		//     kill-switch that force-flips every dropdown flag false and
+		//     force-hides every modal-root via direct DOM. Registered as
+		//     a `visibilitychange` listener so on every tab-focus return
+		//     any modal that was wedged by an interrupted x-transition
+		//     while the tab was hidden gets torn down before the user
+		//     sees it. The action_modal is exempt from auto-dismiss
+		//     when `step >= 1` (in-flight signing) so a user mid-buy
+		//     doesn't lose their modal context on tab switch.  // Mounted under /static/* with a 60-second Cache-Control: max-
+		// age=60 (see mountStatic) so the baseline freshness policy isn't
+		// solely reliant on the bump.
+		// v24.0.1: ?v=20 → ?v=21 cache-buster bump. Chain-metadata
+		// wiring pass — the layout.html script tags and tailwind.css
+		// all bumped together so a returning browser atomic-refetches
+		// and observes window.MW_NATIVE_CURRENCY + the renamed
+		// entry points in lock-step with the wallet.js edits.
+		// v24.0.1: ?v=N bump to match the live layout.html. The previous
+		// ?v=20/21 needles were drift-stale (actual was ?v=27/28) so the
+		// cache-buster assertions had been silently failing pre-patch.
+		// Bumping to ?v=28 here closes the drift and pins the next-deployed
+		// buster version on lock-step with layout.html's <script src=> tags.
+		{"tailwind-static-link", "tailwind.css?v=34"},
+		{"wallet-js-defer", "wallet.js?v=34"},
+		{"ethers-umd-defer", "ethers.umd.min.js?v=34"},
+		{"cdn-min-js-defer", "cdn.min.js?v=34"},
+		{"htmx-min-js-defer", "htmx.min.js?v=34"},
 		// Reown AppKit built-in modal handles QR display (showQrModal: true).
 		// The custom WC QR overlay was removed; no manual overlay events needed.
 		// NFT picker v7 hardening — same close-pattern as the WC
@@ -225,9 +226,9 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// buttons keep working without a public-API break.
 		{"nft-picker-show-event-listener", "mw-nft-picker-show"},
 		{"nft-picker-hide-event-listener", "mw-nft-picker-hide"},
-		{"nft-picker-modal-root-id",       "nft-picker-modal-root"},
-		{"nft-picker-overlay-id",          "nft-picker-overlay"},
-		{"nft-picker-legacy-bridge",       "open-nft-picker"},
+		{"nft-picker-modal-root-id", "nft-picker-modal-root"},
+		{"nft-picker-overlay-id", "nft-picker-overlay"},
+		{"nft-picker-legacy-bridge", "open-nft-picker"},
 		// v8 — wallet control surfaces in the mobile drawer so the connect
 		// flow stays reachable on small viewports (where the desktop
 		// navbar dropdown previously clipped off-screen). Mirrors the
@@ -239,18 +240,20 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// connected-path text here. The desktop reconnect path on the
 		// token detail page exposes the connected-state disconnect
 		// affordance and is covered by integration rollout.
-		{"mobile-drawer-wallet-section",  "pt-3 mt-2"},
+		{"mobile-drawer-wallet-section", "pt-3 mt-2"},
 		// (mobile-drawer-browser-button assertion removed in v24.0.1 —
 		// the Browser Wallet / MetaMask / injected path was dropped in
 		// v23.2 per user request (see static/wallet.js connect() header
 		// comment: "v23.2 — WalletConnect-only"). The mobile drawer now
 		// exposes only the WalletConnect / QR affordance.)
-		{"mobile-drawer-wc-button",       "WalletConnect"},
-		// 1s polling guard: The `[!document.hidden]` condition is pinned
-		// below by `every-1s-condition`. The home page activity ticker
-		// was removed per user request.
-	{"home-listings-grid-poll", "id=\"listings-grid\""},
-	{"every-1s-condition",      "every 60s [!document.hidden]"},
+		{"mobile-drawer-wc-button", "WalletConnect"},
+		// Polling guard. The grid used to refresh on an `every 60s
+		// [!document.hidden]` timer; W2 (9a39e36) replaced that with a
+		// websocket push, so the invariant worth pinning is now the
+		// absence of a timer, not its interval. A regression to hx-trigger
+		// polling would put every idle home page back on the API.
+		{"home-listings-grid", "id=\"listings-grid\""},
+		{"home-listings-grid-ws-driven", "hx-trigger=\"listing-updated\""},
 		// (WC-connect-call assertion removed in v24.0.1 — the
 		// `store.wallet.connect(kind, ...)` API was reduced to
 		// `connect({silent=false})` in v23.2 per the v24.0/23.2
@@ -278,16 +281,16 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// the user must invoke to actually re-connect. Asserting both
 		// names here makes a future regression on either path (e.g.
 		// re-introducing a silent auto-connect) trip the smoke test in CI.
-		{"saved-wallet-getter",     "hasSavedWallet"},
-		{"saved-wallet-reconnect",  "reconnectSaved()"},
-		{"saved-wallet-forget",     "forgetSaved()"},
+		{"saved-wallet-getter", "hasSavedWallet"},
+		{"saved-wallet-reconnect", "reconnectSaved()"},
+		{"saved-wallet-forget", "forgetSaved()"},
 		{"saved-wallet-pill-label", "Saved wallet"},
-		{"saved-wallet-shortener",  "shortSavedAddr"},
-	// v14 — Navbar uses idiomatic `hidden md:block` (replacing the
-	// v12 `md:flex` workaround). The exact class string is asserted
-	// so a future regression that flips it back to md:flex (e.g.
-	// mass-find-replace that loses the v14 intent) trips CI.
-	{"navbar-wallet-button-md-block", "relative hidden md:block"},
+		{"saved-wallet-shortener", "shortSavedAddr"},
+		// v14 — Navbar uses idiomatic `hidden md:block` (replacing the
+		// v12 `md:flex` workaround). The exact class string is asserted
+		// so a future regression that flips it back to md:flex (e.g.
+		// mass-find-replace that loses the v14 intent) trips CI.
+		{"navbar-wallet-button-md-block", "relative hidden md:block"},
 	}
 
 	fail := 0
