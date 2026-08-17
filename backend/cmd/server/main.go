@@ -49,6 +49,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/verifier"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 	"github.com/OfficialA1manac/MagicWebb/frontend"
 	"google.golang.org/grpc/health/grpc_health_v1"
@@ -251,6 +252,15 @@ func main() {
 		log.Info().Msg("indexer starting")
 		runner.Run(ctx)
 		log.Info().Msg("indexer stopped")
+	}()
+
+	// Collection badge sweeper. Recomputes `collections.verified` from
+	// supportsInterface plus resolved metadata — the on-chain replacement for
+	// the admin curation removed in 3d2010d.
+	go func() {
+		log.Info().Msg("collection verifier starting")
+		verifier.New(q, eth).Run(ctx)
+		log.Info().Msg("collection verifier stopped")
 	}()
 
 	// Fiber app. ProxyHeader=Fly-Client-IP plus EnableTrustedProxyCheck=false

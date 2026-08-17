@@ -64,6 +64,58 @@ func (q *Q) EnsureCollection(ctx context.Context, addr, standard string, block u
 	return err
 }
 
+// ── Collection verification (migration 034) ────────────────────────────────
+
+// ListCollectionsForVerification returns collections whose verification is
+// unknown or stale, never-checked ones first. `staleBefore` is the cutoff for a
+// recheck; pass the zero time to claim only never-checked rows.
+//
+// A recheck is not busywork: the metadata half of the badge lands *after* a
+// collection is first seen, so a collection indexed minutes ago legitimately
+// fails the check and only passes on a later pass.
+func (q *Q) ListCollectionsForVerification(ctx context.Context, staleBefore time.Time, limit int) ([]string, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT address FROM collections
+		  WHERE verification_checked_at IS NULL
+		     OR verification_checked_at < $1
+		  ORDER BY verification_checked_at NULLS FIRST
+		  LIMIT $2`, staleBefore, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []string
+	for rows.Next() {
+		var a string
+		if err := rows.Scan(&a); err != nil {
+			return nil, err
+		}
+		out = append(out, a)
+	}
+	return out, rows.Err()
+}
+
+// SetCollectionVerification records the outcome of one supportsInterface probe
+// and recomputes the composite badge in the same statement.
+//
+// `verified` is deliberately derived here rather than passed in: it must stay
+// exactly "declares a standard AND has resolvable metadata", and the metadata
+// half is a fact the database already holds. Deriving it in SQL also makes the
+// badge sticky — nft_metadata rows persist, so an IPFS gateway outage can never
+// un-verify a collection that already resolved once.
+func (q *Q) SetCollectionVerification(ctx context.Context, addr string, standardVerified bool) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE collections c
+		    SET standard_verified = $2,
+		        verification_checked_at = now(),
+		        verified = $2 AND EXISTS (
+		            SELECT 1 FROM nft_metadata m WHERE m.collection = c.address
+		        )
+		  WHERE c.address = $1`, addr, standardVerified)
+	return err
+}
+
 // SeedTrackedCollections ensures every address in `addrs` has a row in
 // tracked_collections by calling EnsureCollection for each one. Standard
 // defaults to 'erc721' when unknown. Errors are logged but not fatal — a
