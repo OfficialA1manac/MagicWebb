@@ -1,8 +1,11 @@
 # ── Secrets / env ────────────────────────────────────────────────────────────
 .env
-# fly.toml is generated in CI from fly.toml.example + GitHub vars/secrets.
-# fly.toml.example is the public template (committed). See that file for setup.
+# fly.toml is generated in CI from the fly.<network>.toml.example template for
+# the network being deployed, plus GitHub vars/secrets. The .example templates
+# are public and committed; anything resolved from them is not.
 /fly.toml
+/fly.*.toml
+!/fly.*.toml.example
 .env.*
 **/.env.local
 **/secrets.*

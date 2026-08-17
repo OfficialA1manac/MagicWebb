@@ -46,13 +46,21 @@
 #   REOWN_PROJECT_ID   — WalletConnect/Reown project ID from cloud.reown.com
 #
 # Repository variables (GitHub → Settings → Secrets and variables → Actions → Variables):
-#   RPC_URL, RPC_URLS, CHAIN_ID
+#   NETWORK            — coston2 | songbird | flare. Selects which
+#                        fly.<network>.toml.example is deployed. Unset =
+#                        coston2, the only network with contracts deployed.
 #   MARKETPLACE_ADDR, AUCTION_ADDR, OFFERBOOK_ADDR, NFT_ADDR, MARKETPLACE_MANAGER_ADDR
 #   TRACKED_COLLECTIONS, INDEX_FROM_BLOCK
-#   SIWE_DOMAIN, FRONTEND_URL
 #
-# fly.toml is generated in CI from fly.toml.example + the above vars/secrets.
-# fly.toml itself is gitignored — never commit real deployment config.
+# CHAIN_ID, RPC_URL, RPC_URLS, SIWE_DOMAIN and FRONTEND_URL are no longer
+# repository variables: they are properties of the network, not of a
+# deployment, so they live in the per-network template. Point an app at a
+# private RPC provider with `fly secrets set RPC_URL=...`, which overrides
+# the [env] value at runtime without putting the URL in a public repo.
+#
+# fly.toml is generated in CI from the selected template + the above
+# vars/secrets. fly.toml itself is gitignored — never commit real
+# deployment config.
 # ─────────────────────────────────────────────────────────────────────────────
 
 name: Deploy (push to main)
@@ -255,17 +263,17 @@ jobs:
           echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
           echo "  stamped backend/internal/api/build_sha_gen.go → $GITHUB_SHA"
       - name: Generate fly.toml from template
-        # v35 — fly.toml is gitignored and never committed. It is generated
-        # here from the public fly.toml.example template by replacing
-        # CHANGE_ME_* placeholders with values from GitHub repository
+        # fly.toml is gitignored and never committed. It is generated here from
+        # the public per-network template (fly.<network>.toml.example) by
+        # replacing CHANGE_ME_* placeholders with values from GitHub repository
         # variables (vars.*) and secrets (secrets.*). This keeps real
-        # deployment config (contract addresses, RPC endpoints, domains)
-        # out of the public repository while preserving a readable,
-        # self-documenting template for contributors.
+        # deployment config out of the public repository while preserving a
+        # readable, self-documenting template for contributors.
         env:
-          RPC_URL: ${{ vars.RPC_URL }}
-          RPC_URLS: ${{ vars.RPC_URLS }}
-          CHAIN_ID: ${{ vars.CHAIN_ID }}
+          # Selects which per-network template to deploy. Unset = coston2,
+          # which is the only network with contracts deployed — a missing
+          # variable must not silently deploy a chain that serves empty pages.
+          NETWORK: ${{ vars.NETWORK }}
           MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
           AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
           OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
@@ -273,25 +281,49 @@ jobs:
           MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
           TRACKED_COLLECTIONS: ${{ vars.TRACKED_COLLECTIONS }}
           INDEX_FROM_BLOCK: ${{ vars.INDEX_FROM_BLOCK }}
-          SIWE_DOMAIN: ${{ vars.SIWE_DOMAIN }}
-          FRONTEND_URL: ${{ vars.FRONTEND_URL }}
           WC_PROJECT_ID: ${{ secrets.WC_PROJECT_ID }}
         run: |
-          cp fly.toml.example fly.toml
-          sed -i "s|CHANGE_ME_RPC_URL|${RPC_URL}|g" fly.toml
-          sed -i "s|CHANGE_ME_RPC_URLS|${RPC_URLS}|g" fly.toml
-          sed -i "s|CHANGE_ME_CHAIN_ID|${CHAIN_ID}|g" fly.toml
-          sed -i "s|CHANGE_ME_MARKETPLACE_ADDR|${MARKETPLACE_ADDR}|g" fly.toml
-          sed -i "s|CHANGE_ME_AUCTION_ADDR|${AUCTION_ADDR}|g" fly.toml
-          sed -i "s|CHANGE_ME_OFFERBOOK_ADDR|${OFFERBOOK_ADDR}|g" fly.toml
-          sed -i "s|CHANGE_ME_NFT_ADDR|${NFT_ADDR}|g" fly.toml
-          sed -i "s|CHANGE_ME_MARKETPLACE_MANAGER_ADDR|${MARKETPLACE_MANAGER_ADDR}|g" fly.toml
-          sed -i "s|CHANGE_ME_TRACKED_COLLECTIONS|${TRACKED_COLLECTIONS}|g" fly.toml
-          sed -i "s|CHANGE_ME_INDEX_FROM_BLOCK|${INDEX_FROM_BLOCK}|g" fly.toml
-          sed -i "s|CHANGE_ME_SIWE_DOMAIN|${SIWE_DOMAIN}|g" fly.toml
-          sed -i "s|CHANGE_ME_FRONTEND_URL|${FRONTEND_URL}|g" fly.toml
-          sed -i "s|CHANGE_ME_WC_PROJECT_ID|${WC_PROJECT_ID}|g" fly.toml
-          echo "  generated fly.toml from fly.toml.example"
+          set -euo pipefail
+          NETWORK="${NETWORK:-coston2}"
+          TEMPLATE="fly.${NETWORK}.toml.example"
+          if [ ! -f "$TEMPLATE" ]; then
+            echo "::error::NETWORK=${NETWORK} has no template ($TEMPLATE). Expected one of: coston2, songbird, flare."
+            exit 1
+          fi
+          # Validate BEFORE substituting. An unset repository variable arrives
+          # as the empty string, so sed would happily resolve the placeholder
+          # to nothing and leave a syntactically valid fly.toml with a blank
+          # contract address — which config.go accepts and the indexer then
+          # matches no events against. Checking the placeholders after the fact
+          # cannot see that; checking the inputs first can.
+          REQUIRED="MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR TRACKED_COLLECTIONS INDEX_FROM_BLOCK WC_PROJECT_ID"
+          MISSING=""
+          for key in $REQUIRED; do
+            eval "value=\${$key:-}"
+            [ -n "$value" ] || MISSING="$MISSING $key"
+          done
+          if [ -n "$MISSING" ]; then
+            echo "::error::missing repository variables/secrets for NETWORK=${NETWORK}:${MISSING}"
+            exit 1
+          fi
+          cp "$TEMPLATE" fly.toml
+          for key in $REQUIRED; do
+            eval "value=\${$key}"
+            sed -i "s|CHANGE_ME_${key}|${value}|g" fly.toml
+          done
+          # Belt and braces: a placeholder the loop does not know about (a new
+          # key added to the template without a matching variable) still fails
+          # here rather than reaching production. Comments are skipped — the
+          # header documents the placeholder syntax and READ_POOL_URL is a
+          # commented-out optional key. `|| true` because the happy path is
+          # grep finding nothing, which exits 1 and would trip `set -e`;
+          # xargs collapses the remaining matches onto one line.
+          UNRESOLVED=$(grep -v '^[[:space:]]*#' fly.toml | grep -o 'CHANGE_ME_[A-Z_]*' | sort -u | xargs || true)
+          if [ -n "$UNRESOLVED" ]; then
+            echo "::error::unresolved placeholders in generated fly.toml: ${UNRESOLVED}"
+            exit 1
+          fi
+          echo "  generated fly.toml from $TEMPLATE"
       - name: Deploy (Fly remote build → rolling release)
         # FLY_API_TOKEN scoped to this single step — narrower blast
         # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
