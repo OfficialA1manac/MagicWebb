@@ -9,6 +9,39 @@ const { title, description, activeNav } = Astro.props;
 const desc = description || 'Decentralized NFT marketplace on Flare Network — buy, sell, and auction NFTs';
 const currentPath = Astro.url?.pathname || '/';
 const isActive = (path: string) => currentPath === path ? 'active' : '';
+
+// Network switcher — mirrors config.buildNetworks in the Go backend.
+//
+// Each network is a separate origin with its own API, database and websocket
+// (the backend validates exactly one CHAIN_ID per process), so switching is a
+// navigation to another host, never a client-side chain change.
+//
+// PUBLIC_NETWORK_URLS is a comma-separated list of `chainID=origin` pairs, the
+// same format the backend reads from NETWORK_URLS. A chain that is absent has
+// no deployment and renders disabled rather than linking to an app that does
+// not exist — which is the honest default today, since only Coston2 has
+// contracts deployed.
+const KNOWN_NETWORKS = [
+  { chainId: 114, name: 'Coston2' },
+  { chainId: 19, name: 'Songbird' },
+  { chainId: 14, name: 'Flare' },
+];
+const currentChainId = Number(import.meta.env.PUBLIC_CHAIN_ID ?? 114);
+const networkUrls = new Map<number, string>();
+for (const pair of (import.meta.env.PUBLIC_NETWORK_URLS ?? '').split(',')) {
+  const [id, ...rest] = pair.split('=');
+  const origin = rest.join('=').trim().replace(/\/+$/, '');
+  const chainId = Number(id.trim());
+  if (Number.isFinite(chainId) && origin) networkUrls.set(chainId, origin);
+}
+// The current network stays available even when the list omits it: the user is
+// already on it, so a missing self-entry is a config typo rather than a reason
+// to grey out the page being viewed.
+const networks = KNOWN_NETWORKS.map((n) => {
+  const url = networkUrls.get(n.chainId) ?? '';
+  const current = n.chainId === currentChainId;
+  return { ...n, url, current, available: url !== '' || current };
+});
 ---
 
 <!doctype html>
@@ -101,6 +134,20 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
       .notif-btn { position: relative; width: 2.25rem; height: 2.25rem; border-radius: 0.5rem; background: transparent; color: var(--white-60); font-size: 1.125rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
       .notif-btn:hover { color: var(--white); background: rgba(255,255,255,0.08); }
       .notif-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: linear-gradient(135deg, var(--gold-300), var(--gold-500)); color: var(--ink-950); font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px -4px rgba(251,191,36,0.50); }
+      /* Network switcher — mirrors the HTMX layout's dropdown. Disabled
+         entries are rendered as text, never as links: a network with no
+         contracts deployed has no app to navigate to. */
+      .net-switcher { position: relative; }
+      .net-btn { display: flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.625rem; border-radius: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--white-10); color: var(--white-60); font-size: 0.75rem; font-weight: 700; transition: all 0.2s; }
+      .net-btn:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+      .net-dot { width: 0.375rem; height: 0.375rem; border-radius: 999px; background: var(--sky-300); }
+      .net-menu { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 14rem; padding: 0.375rem; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 0.75rem; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
+      .net-menu.open { display: block; }
+      .net-item { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 700; color: var(--white-60); transition: all 0.2s; }
+      a.net-item:hover { color: var(--white); background: rgba(255,255,255,0.08); }
+      .net-item-current { background: rgba(56,189,248,0.15); color: var(--sky-300); }
+      .net-item-off { color: rgba(255,255,255,0.25); cursor: not-allowed; }
+      .net-tag { font-size: 0.5625rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
       .notif-dropdown { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 20rem; max-width: 90vw; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 1rem; overflow: hidden; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
       .notif-dropdown.open { display: block; }
       .notif-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--white-10); font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; }
@@ -174,6 +221,27 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
         <a href="/docs" class={isActive('/docs') ? 'active' : ''}>Docs</a>
       </div>
       <div class="nav-right">
+        <div class="net-switcher">
+          <button type="button" id="net-switcher-btn" class="net-btn" aria-haspopup="true" aria-expanded="false"
+                  title="Switch network — each network is a separate deployment">
+            <span class="net-dot" aria-hidden="true"></span>
+            {networks.find((n) => n.current)?.name ?? 'Network'}
+            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+          </button>
+          <div id="net-switcher-menu" class="net-menu">
+            {networks.map((n) => (
+              n.current ? (
+                <span class="net-item net-item-current">{n.name}<span class="net-tag">Current</span></span>
+              ) : n.available ? (
+                <a href={n.url} class="net-item">{n.name}<span class="net-tag">Chain {n.chainId}</span></a>
+              ) : (
+                <span class="net-item net-item-off" title={`No contracts are deployed on ${n.name} yet`}>
+                  {n.name}<span class="net-tag">Unavailable</span>
+                </span>
+              )
+            ))}
+          </div>
+        </div>
         <div id="notif-bell-container" style="position:relative;">
           <button id="notif-bell-btn" class="notif-btn" aria-label="Notifications" title="Notifications">
             <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
@@ -216,6 +284,9 @@ const isActive = (path: string) => currentPath === path ? 'active' : '';
       (function(){if(typeof window==='undefined')return;const o=new IntersectionObserver(function(e){e.forEach(function(en){if(en.isIntersecting){en.target.classList.add('visible');o.unobserve(en.target);}});},{threshold:0.15,rootMargin:'0px 0px -40px 0px'});document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.reveal').forEach(function(el){o.observe(el);});});setTimeout(function(){document.querySelectorAll('.reveal:not(.visible)').forEach(function(el){o.observe(el);});},300);})();
       (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){const b=document.getElementById('mobile-menu-btn'),m=document.getElementById('mobile-menu');if(b&&m){b.addEventListener('click',function(){const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');});m.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){m.classList.remove('open');});});}});})();
       (function(){if(typeof window==='undefined')return;let t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){const h=document.querySelector('.hero-parallax');if(h){const s=window.pageYOffset;h.style.transform='translateY('+(s*0.3)+'px)';h.style.opacity=Math.max(0,1-s/600);}t=false;});t=true;}},{passive:true});})();
+
+      // ── Network switcher dropdown ──
+      (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){const b=document.getElementById('net-switcher-btn'),m=document.getElementById('net-switcher-menu');if(!b||!m)return;b.addEventListener('click',function(e){e.stopPropagation();const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');});document.addEventListener('click',function(e){if(!b.parentNode.contains(e.target)){m.classList.remove('open');b.setAttribute('aria-expanded','false');}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){m.classList.remove('open');b.setAttribute('aria-expanded','false');}});});})();
 
       // ── Notification bell ──
       (function(){if(typeof window==='undefined')return;let unread=0;

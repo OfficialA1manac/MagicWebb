@@ -17,6 +17,30 @@ import (
 // C is the global config loaded once at startup via Load().
 var C Config
 
+// Network is one entry in the frontend's network switcher.
+//
+// Availability cannot be derived at runtime: this process only knows about its
+// own chain, and asking another network's API whether it is alive would make
+// every page render depend on a cross-origin request. It is declared instead,
+// through NETWORK_URLS — a network with no URL is one that has no deployment,
+// and the switcher renders it disabled rather than linking to a dead app.
+type Network struct {
+	ChainID   uint64
+	Name      string // display label, e.g. "Songbird"
+	URL       string // origin of that network's app; empty when not deployed
+	Current   bool   // the network this process serves
+	Available bool   // has a URL, so it can be navigated to
+}
+
+// knownNetworks is the catalogue the switcher is built from, in display order.
+// It mirrors the CHAIN_ID validation switch below: a chain the backend refuses
+// to run must not appear as a destination in the UI.
+var knownNetworks = []Network{
+	{ChainID: 114, Name: "Coston2"},
+	{ChainID: 19, Name: "Songbird"},
+	{ChainID: 14, Name: "Flare"},
+}
+
 type Config struct {
 	// Runtime
 	Env string // "development" | "production"
@@ -28,6 +52,12 @@ type Config struct {
 	NetworkName    string // EIP-155 chain name (e.g. "Flare Coston2"); surfaced to UI + WC metadata
 	NativeCurrency string // EIP-155 native-currency symbol (e.g. "C2FLR"); rendered in user-facing labels
 	ExplorerURL    string // block-explorer base URL (e.g. https://coston2-explorer.flare.network)
+
+	// Networks is every chain the frontend switcher offers, in display order,
+	// including the one this process serves. Each network is a separate origin
+	// with its own API, database and /ws, so switching is a navigation, not a
+	// state change — see NETWORK_URLS.
+	Networks []Network
 
 	// Contract addresses
 	MarketplaceAddr           string
@@ -297,6 +327,8 @@ func Load() {
 		os.Exit(1)
 	}
 
+	C.Networks = buildNetworks(os.Getenv("NETWORK_URLS"), C.ChainID)
+
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
 	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
 	// never silently drop the primary from rotation.
@@ -442,6 +474,46 @@ func parseURLList(v string) []string {
 		if p = strings.TrimSpace(p); p != "" {
 			out = append(out, p)
 		}
+	}
+	return out
+}
+
+// buildNetworks resolves the switcher's entries from NETWORK_URLS, a
+// comma-separated list of `chainID=origin` pairs:
+//
+//	NETWORK_URLS="114=https://magicwebb.fly.dev,19=https://magicwebb-songbird.fly.dev"
+//
+// A chain absent from the list, or listed with an empty origin, is marked
+// unavailable. That is the correct default rather than a degraded one: at the
+// time of writing only Coston2 has contracts deployed, so an operator who sets
+// nothing gets a switcher that tells the truth.
+//
+// The current network is always available regardless of the list — the user is
+// already looking at it, and a missing self-entry is a config typo, not a
+// reason to grey out the page they are on.
+func buildNetworks(networkURLs string, currentChainID uint64) []Network {
+	urls := make(map[uint64]string, len(knownNetworks))
+	for _, pair := range strings.Split(networkURLs, ",") {
+		id, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
+		if !ok {
+			continue
+		}
+		chainID, err := strconv.ParseUint(strings.TrimSpace(id), 10, 64)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "WARN: NETWORK_URLS entry %q has a non-numeric chain id; ignoring\n", pair)
+			continue
+		}
+		if origin = strings.TrimRight(strings.TrimSpace(origin), "/"); origin != "" {
+			urls[chainID] = origin
+		}
+	}
+
+	out := make([]Network, 0, len(knownNetworks))
+	for _, n := range knownNetworks {
+		n.URL = urls[n.ChainID]
+		n.Current = n.ChainID == currentChainID
+		n.Available = n.URL != "" || n.Current
+		out = append(out, n)
 	}
 	return out
 }

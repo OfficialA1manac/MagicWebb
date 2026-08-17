@@ -87,6 +87,20 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		"Listings":        []any{},
 		"Trending":        []any{},
 		"Activity":        []any{},
+		// Network switcher. The shape mirrors config.Network; the three
+		// states below are exactly the three the template branches on —
+		// current, available elsewhere, and not deployed.
+		"Networks": []struct {
+			ChainID   uint64
+			Name      string
+			URL       string
+			Current   bool
+			Available bool
+		}{
+			{ChainID: 114, Name: "Coston2", Current: true, Available: true},
+			{ChainID: 19, Name: "Songbird", URL: "https://magicwebb-songbird.fly.dev", Available: true},
+			{ChainID: 14, Name: "Flare"},
+		},
 	}
 	var buf bytes.Buffer
 	if err := tmpl.Execute(&buf, data); err != nil {
@@ -253,6 +267,14 @@ func TestHomePageInjectsAllRuntimeGlobals(t *testing.T) {
 		// absence of a timer, not its interval. A regression to hx-trigger
 		// polling would put every idle home page back on the API.
 		{"home-listings-grid", "id=\"listings-grid\""},
+		// Network switcher. Each network is a separate origin, so the
+		// destination must be an absolute URL to another host — a relative
+		// href would silently keep the user on the current chain's app while
+		// appearing to switch. And a chain with no deployment must never
+		// render as a link: pin the disabled state too.
+		{"switcher-current-network", "Current"},
+		{"switcher-available-network", "https://magicwebb-songbird.fly.dev"},
+		{"switcher-unavailable-network", "No contracts are deployed on Flare yet"},
 		{"home-listings-grid-ws-driven", "hx-trigger=\"listing-updated\""},
 		// (WC-connect-call assertion removed in v24.0.1 — the
 		// `store.wallet.connect(kind, ...)` API was reduced to

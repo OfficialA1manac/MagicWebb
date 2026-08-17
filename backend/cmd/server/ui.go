@@ -83,6 +83,13 @@ func render(c *fiber.Ctx, name string, data any) error {
 		if _, present := m["ChainID"]; !present {
 			m["ChainID"] = config.C.ChainID
 		}
+		// Networks drives the nav switcher. Injected here for the same reason
+		// as the quartet above: every page renders the nav, so a per-handler
+		// opt-in would silently drop the switcher from whichever page a
+		// contributor forgot.
+		if _, present := m["Networks"]; !present {
+			m["Networks"] = config.C.Networks
+		}
 	}
 	c.Set("Content-Type", "text/html; charset=utf-8")
 	execName := filepath.Base(name)
