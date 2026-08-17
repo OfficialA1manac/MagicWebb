@@ -30,7 +30,13 @@ COPY app/ ./
 RUN npm run build
 
 # ── Go builder ───────────────────────────────────────────────────────────────────
-FROM golang:1.26-alpine AS go-build
+# Debian, not Alpine. The final stage is distroless/base-debian12 (glibc), and
+# this stage builds with CGO_ENABLED=1 for the Zig bridge — so a musl-linked
+# binary and musl-linked .so files would build fine here and then fail to exec
+# in the final image, which has no /lib/ld-musl-x86_64.so.1. Both stages must
+# agree on the libc. This image also ships gcc, curl and xz-utils already,
+# which the alpine variant did not.
+FROM golang:1.26-bookworm AS go-build
 WORKDIR /src
 
 # Copy go.mod files first (layer caching)
@@ -57,11 +63,12 @@ COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 # Download Zig 0.13.0 official release (Linux x86_64) — the same version
 # used in CI (ci.yml). The tarball is ~47 MB and extracted to /usr/local.
 # A symlink from /usr/local/bin/zig ensures zig is on PATH for build-lib.
-# xz is required for tar -xJf; install it first since the golang alpine
-# image doesn't include it by default. The package is `xz` on Alpine —
-# `xz-utils` is the Debian/Ubuntu name and apk fails with "no such package"
-# (that name is correct in ci.yml, which runs apt-get on an Ubuntu runner).
-RUN apk add --no-cache curl xz && \
+# curl and xz-utils (for tar -xJf) ship with golang:bookworm, but install
+# them explicitly so a future slimmer base image fails here with a clear
+# message rather than midway through the Zig download.
+RUN apt-get update && \
+    apt-get install -y --no-install-recommends curl xz-utils && \
+    rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz && \
     tar -xJf /tmp/zig.tar.xz -C /usr/local && \
     ln -sf /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig && \
