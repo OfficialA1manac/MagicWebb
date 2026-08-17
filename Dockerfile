@@ -57,9 +57,11 @@ COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 # Download Zig 0.13.0 official release (Linux x86_64) — the same version
 # used in CI (ci.yml). The tarball is ~47 MB and extracted to /usr/local.
 # A symlink from /usr/local/bin/zig ensures zig is on PATH for build-lib.
-# xz-utils is required for tar -xJf; install it first since the golang
-# alpine image doesn't include it by default.
-RUN apk add --no-cache curl xz-utils && \
+# xz is required for tar -xJf; install it first since the golang alpine
+# image doesn't include it by default. The package is `xz` on Alpine —
+# `xz-utils` is the Debian/Ubuntu name and apk fails with "no such package"
+# (that name is correct in ci.yml, which runs apt-get on an Ubuntu runner).
+RUN apk add --no-cache curl xz && \
     curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz && \
     tar -xJf /tmp/zig.tar.xz -C /usr/local && \
     ln -sf /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig && \
