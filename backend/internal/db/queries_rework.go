@@ -559,13 +559,6 @@ func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
 	return err
 }
 
-func (q *Q) SetVerified(ctx context.Context, addr string, verified bool) error {
-	_, err := q.writer().Exec(ctx,
-		`INSERT INTO profiles(address, verified, updated_at) VALUES($1,$2, now())
-		 ON CONFLICT(address) DO UPDATE SET verified=EXCLUDED.verified, updated_at=now()`,
-		strings.ToLower(addr), verified)
-	return err
-}
 
 // ── Reports ────────────────────────────────────────────────────────────────
 

@@ -1547,12 +1547,6 @@ func (q *Q) GetVerifiedPendingWithdrawal(ctx context.Context, address string) (s
 	return amt, err
 }
 
-// SetCollectionVerified flips the curation badge on a collection.
-func (q *Q) SetCollectionVerified(ctx context.Context, address string, verified bool) error {
-	_, err := q.writer().Exec(ctx,
-		`UPDATE collections SET verified = $2 WHERE address = $1`, address, verified)
-	return err
-}
 
 // ── Atomic combined writes ────────────────────────────────────────────────
 

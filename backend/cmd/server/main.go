@@ -322,9 +322,6 @@ func main() {
 	// naturally populates it.
 	go warmCriticalCaches(ctx, q, api.GlobalCaches.Trending)
 
-	// AUTH-3: API key management endpoints (admin-only, admin tier rate limit).
-	api.MountAPIKeyRoutes(app, q, &config.C, rl, aks, al)
-
 	// ── gRPC health service (standard grpc.health.v1.Health) ──────────────
 	// Registered on the event bridge's gRPC server so Fly.io can probe this
 	// instance with a sub-millisecond gRPC health check instead of a full HTTP
@@ -334,11 +331,6 @@ func main() {
 		grpc_health_v1.RegisterHealthServer(grpcSrv, health.New(q, eth, runner.HeadLagBlocks))
 		log.Info().Int("port", config.C.GRPCPort).Msg("grpc: health service registered")
 	}
-
-	// Admin-only endpoint: force re-scan of Transfer events for a specific
-	// collection (mounted after runner creation so the handler can call
-	// runner.ReindexCollection).
-	api.MountReindexRoute(app, runner, &config.C)
 
 	// Prometheus /metrics endpoint
 	registerMetricsRoute(app, q, runner.HeadLagBlocks, eth, api.GlobalWSStats)
@@ -1443,7 +1435,6 @@ func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
 	app.Get("/search", uiSearch(q))
 	app.Get("/metrics", uiMetrics(q))
 	app.Get("/metrics/gas", uiGasMetrics(q))
-	app.Get("/admin/stalled", uiAdminStalled(q))
 	app.Get("/docs", uiDocsIndex())
 	app.Get("/docs/:slug", uiDoc())
 

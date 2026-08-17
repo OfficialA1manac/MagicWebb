@@ -345,13 +345,6 @@ func uiGasMetrics(q *db.Q) fiber.Handler {
 	}
 }
 
-func uiAdminStalled(q *db.Q) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		return render(c, "pages/admin_stalled.html", fiber.Map{
-			"Title": "Admin — Stalled Auctions",
-		})
-	}
-}
 
 // ── HTMX partials ─────────────────────────────────────────────────────────────
 

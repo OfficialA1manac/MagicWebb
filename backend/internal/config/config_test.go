@@ -39,27 +39,6 @@ func TestParseAddrList(t *testing.T) {
 	}
 }
 
-func TestIsAdmin(t *testing.T) {
-	c := &Config{AdminAllowlist: parseAddrList("0xAAA,0xBBB")}
-
-	if !c.IsAdmin("0xaaa") {
-		t.Fatal("0xaaa should be admin")
-	}
-	if !c.IsAdmin("  0xBBB  ") { // case-insensitive + trimmed
-		t.Fatal("0xBBB should be admin regardless of case/whitespace")
-	}
-	if c.IsAdmin("0xccc") {
-		t.Fatal("0xccc must not be admin")
-	}
-	if c.IsAdmin("") {
-		t.Fatal("empty address must not be admin")
-	}
-
-	empty := &Config{}
-	if empty.IsAdmin("0xaaa") {
-		t.Fatal("empty allowlist must admit no one")
-	}
-}
 
 // ── v35: isValidEthAddr (contract + admin allowlist validation) ───────────
 

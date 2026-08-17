@@ -132,8 +132,6 @@ type Config struct {
 	// Set to "0" to sweep every tick (not recommended).
 	FeeSweepMinWei string
 
-	// Admin token for IndexerService.Reindex (leave empty to disable)
-	ServiceToken string
 
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
@@ -155,9 +153,6 @@ type Config struct {
 	// request. The endpoint is a secret — set via fly secrets.
 	OTELExporterOTLPEndpoint string
 
-	// AdminAllowlist is the set of lowercased addresses permitted to call admin
-	// endpoints (e.g. profile verification). Off-chain admin = env allowlist + SIWE JWT.
-	AdminAllowlist []string
 }
 
 // Load reads environment variables and panics on missing required values.
@@ -245,7 +240,6 @@ func Load() {
 		EmailFrom:  envOrDefault("EMAIL_FROM", ""),
 		EmailTo:    envOrDefault("EMAIL_TO", ""),
 
-		ServiceToken: envOrDefault("SERVICE_TOKEN", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
@@ -253,7 +247,6 @@ func Load() {
 		SentryDSN:               envOrDefault("SENTRY_DSN", ""),
 		OTELExporterOTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
 
-		AdminAllowlist: parseAddrList(envOrDefault("ADMIN_ALLOWLIST", "")),
 	}
 
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)
@@ -334,11 +327,6 @@ func Load() {
 		}
 	}
 
-	// v35: SERVICE_TOKEN minimum length — consistent with JWT_SECRET ≥32.
-	if C.ServiceToken != "" && len(C.ServiceToken) < 32 {
-		fmt.Fprintf(os.Stderr, "FATAL: SERVICE_TOKEN must be at least 32 characters when set\n")
-		os.Exit(1)
-	}
 
 	// Phase 4 V4.1: validate KeeperMinBalanceWei at startup. A typo like
 	// "0.1" (missing wei conversion — should be 100000000000000000) would
@@ -363,14 +351,6 @@ func Load() {
 		}
 	}
 
-	// v35: ADMIN_ALLOWLIST entry validation. Each entry must be a well-formed
-	// Ethereum address; malformed entries produce a clear startup failure.
-	for _, addr := range C.AdminAllowlist {
-		if !isValidEthAddr(addr) {
-			fmt.Fprintf(os.Stderr, "FATAL: ADMIN_ALLOWLIST contains invalid address: %q\n", addr)
-			os.Exit(1)
-		}
-	}
 
 	// v35: TRACKED_COLLECTIONS entry validation. Invalid entries are a WARN
 	// (not fatal) because a typo in one collection doesn't break the rest.
@@ -393,11 +373,6 @@ func Load() {
 		fmt.Fprintln(os.Stderr, "WARN: TRACKED_COLLECTIONS is empty in production; the indexer will only watch collections auto-discovered from nft_tokens. Add your NFT contracts to TRACKED_COLLECTIONS.")
 	}
 
-	// v35: production guard — empty ADMIN_ALLOWLIST in production is a
-	// misconfiguration (no admin can verify collections or manage the platform).
-	if C.Env == "production" && len(C.AdminAllowlist) == 0 {
-		fmt.Fprintln(os.Stderr, "WARN: ADMIN_ALLOWLIST is empty in production; no admin can verify collections or manage the platform")
-	}
 
 	// v35: contract address validation — MARKETPLACE_ADDR, AUCTION_ADDR,
 	// OFFERBOOK_ADDR must be well-formed Ethereum addresses. Previously
@@ -486,16 +461,6 @@ func parseAddrList(v string) []string {
 	return out
 }
 
-// IsAdmin reports whether addr is in the admin allowlist (case-insensitive).
-func (c *Config) IsAdmin(addr string) bool {
-	addr = strings.ToLower(strings.TrimSpace(addr))
-	for _, a := range c.AdminAllowlist {
-		if a == addr {
-			return true
-		}
-	}
-	return false
-}
 
 // MaxFeeCapWei returns the keeper's fee-cap ceiling in wei, or nil when the
 // ceiling is disabled (0). v29 audit F-03 — bounded by KEEPER_MAX_FEE_CAP_GWEI.

@@ -14,7 +14,6 @@ import (
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
-	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
@@ -29,7 +28,6 @@ import (
 
 	"connectrpc.com/connect"
 	"connectrpc.com/grpcreflect" // gRPC server reflection for grpcurl discovery
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ws"
@@ -319,7 +317,6 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// cross-tier bucket interference — a search at 30/min uses a different
 	// bucket from a listing at 60/min even for the same client IP.
 	apiSearch := app.Group("/api/v1", tieredRateLimitMiddleware(rl, "search", 30, time.Minute))
-	apiAdmin := app.Group("/api/v1", tieredRateLimitMiddleware(rl, "admin", 10, time.Minute))
 
 	// ── CACHE-1: Distributed-ready caches for read-heavy endpoints ──────
 	// When REDIS_URL is configured and the go-redis dependency is compiled
@@ -347,7 +344,6 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewWalletService(q).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
 	NewProfilesService(q).RegisterRoutes(api, cfg)
-	NewAdminService(q, cfg).RegisterRoutes(apiAdmin, cfg)
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)
@@ -622,79 +618,3 @@ func bodyDecode(c *fiber.Ctx, v any) error {
 
 // ── Reindex Collection ──────────────────────────────────────────────────────
 
-type reindexCollectionReq struct {
-	Collection string `json:"collection"`
-	FromBlock  uint64 `json:"from_block"`
-}
-
-// handleReindexCollection forces a re-scan of Transfer events for a specific
-// collection from a given block. This makes past holdings visible after a
-// collection is added to TRACKED_COLLECTIONS.
-func handleReindexCollection(runner *indexer.Runner, cfg *config.Config) fiber.Handler {
-	return func(c *fiber.Ctx) error {
-		addr := Caller(c)
-		if addr == "" || !cfg.IsAdmin(addr) {
-			return writeErr(c, fiber.StatusForbidden, "admin only")
-		}
-
-		var req reindexCollectionReq
-		if err := bodyDecode(c, &req); err != nil {
-			return writeErr(c, fiber.StatusBadRequest, "invalid request body")
-		}
-
-		req.Collection = strings.TrimSpace(req.Collection)
-		if req.Collection == "" || len(req.Collection) != 42 || !strings.HasPrefix(req.Collection, "0x") {
-			return writeErr(c, fiber.StatusBadRequest, "invalid collection address")
-		}
-
-		if req.FromBlock == 0 {
-			req.FromBlock = 1 // default: scan from block 1 (genesis is empty)
-		}
-
-		log.Info().
-			Str("admin", addr).
-			Str("collection", req.Collection).
-			Uint64("from_block", req.FromBlock).
-			Msg("admin: reindex-collection requested")
-
-		// Run the reindex synchronously so the caller gets the result.
-		// For large collections this can take seconds to minutes;
-		// the admin caller should set a generous HTTP timeout.
-		scanned, err := runner.ReindexCollection(c.Context(), strings.ToLower(req.Collection), req.FromBlock)
-		if err != nil {
-			log.Error().Err(err).
-				Str("collection", req.Collection).
-				Int("scanned", scanned).
-				Msg("admin: reindex-collection failed")
-			return writeErr(c, fiber.StatusInternalServerError, err.Error())
-		}
-
-		return c.JSON(fiber.Map{
-			"collection":     strings.ToLower(req.Collection),
-			"blocks_scanned": scanned,
-			"status":         "complete",
-		})
-	}
-}
-
-// MountReindexRoute registers the admin reindex-collection endpoint.
-// Call AFTER the indexer Runner is created so the handler can access it.
-func MountReindexRoute(app *fiber.App, runner *indexer.Runner, cfg *config.Config) {
-	app.Post("/api/v1/admin/indexer/reindex-collection", JwtMiddleware(cfg),
-		handleReindexCollection(runner, cfg))
-}
-
-// MountAPIKeyRoutes registers the API key management endpoints on the admin
-// rate-limited group (AUTH-3). Called from main.go after the API key store
-// and audit logger are created. Uses the same rate limiter instance as Mount()
-// and registers on the same admin tier (10/min) with JWT middleware.
-func MountAPIKeyRoutes(app *fiber.App, q *db.Q, cfg *config.Config, rl *ratelimit.Limiter, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger) {
-	adminSvc := NewAdminService(q, cfg).WithAPIKeyStore(apiKeyStore, auditLog)
-	// Create an admin-tier sub-group at /api/v1/admin/apikeys with 10/min rate limit.
-	// Uses a distinct sub-path (/apikeys) to avoid conflicting with the
-	// existing /api/v1/admin/* routes registered by AdminService.RegisterRoutes.
-	apikeyGroup := app.Group("/api/v1/admin/apikeys", tieredRateLimitMiddleware(rl, "admin", 10, time.Minute))
-	apikeyGroup.Post("/", JwtMiddleware(cfg), adminSvc.handleCreateAPIKey)
-	apikeyGroup.Get("/", JwtMiddleware(cfg), adminSvc.handleListAPIKeys)
-	apikeyGroup.Delete("/:id", JwtMiddleware(cfg), adminSvc.handleRevokeAPIKey)
-}
