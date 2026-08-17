@@ -403,10 +403,18 @@ func main() {
 
 // ── Prometheus /metrics endpoint ────────────────────────────────────────────
 
-// registerMetricsRoute mounts a Prometheus-compatible /metrics endpoint that
-// exposes gauges and counters from across the system. Formatted as
-// Prometheus text exposition format so standard scrapers (Prometheus,
-// Grafana Agent, Datadog Agent with OpenMetrics check) can ingest it.
+// registerMetricsRoute mounts a Prometheus-compatible endpoint at
+// /internal/metrics that exposes gauges and counters from across the system.
+// Formatted as Prometheus text exposition format so standard scrapers
+// (Prometheus, Grafana Agent, Datadog Agent with OpenMetrics check) can
+// ingest it.
+//
+// NOT /metrics: that path belongs to the human-facing HTML dashboard mounted
+// by mountUI (uiMetrics), which every nav in both frontends links to. Both
+// were registered on "/metrics" and Fiber matches the first route it was
+// given — this one, registered earlier — so visiting the Metrics link in the
+// site served raw exposition text and the dashboard was unreachable.
+// Scrapers are configured by URL and simply point at the new path.
 //
 // Exported metrics:
 //
@@ -419,7 +427,7 @@ func main() {
 // 15-60s and a rate limit would silently drop scrape intervals, creating gaps
 // in dashboards.
 func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth *rpcpool.Pool, wsStats api.WSStatsProvider) {
-	app.Get("/metrics", func(c *fiber.Ctx) error {
+	app.Get("/internal/metrics", func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/plain; charset=utf-8")
 
 		// SSE saturation metrics from the broadcaster.
