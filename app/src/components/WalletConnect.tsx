@@ -354,7 +354,18 @@ async function initAppKit(): Promise<void> {
     createAppKit({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- chains matches AppKitNetwork structurally but type defs differ
       adapters: [adapter], networks: chains as any, defaultNetwork: targetAppKitNetwork, projectId,
-      metadata: { name: 'MagicWebb', description: 'NFT Marketplace on Flare Network', url: 'https://magicwebb.fly.dev', icons: ['/favicon.ico'] },
+      // Reown validates metadata.url against the requesting origin, so it must
+      // be derived, not hardcoded: each network is a separate deployment on its
+      // own host, and announcing magicwebb.fly.dev from the Songbird or Flare
+      // app is exactly the origin mismatch the relay rejects (see the init
+      // failure path in frontend/static/wallet.js). icons must be absolute for
+      // the same reason. Matches appkit-bridge.js and wallet.js.
+      metadata: {
+        name: 'MagicWebb',
+        description: 'Non-custodial NFT marketplace on ' + targetChain.name,
+        url: window.location.origin,
+        icons: [window.location.origin + '/favicon.ico'],
+      },
       features: { analytics: false, email: false, socials: false },
       themeMode: 'dark',
     });
