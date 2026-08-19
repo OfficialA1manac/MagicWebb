@@ -155,3 +155,85 @@ func TestDetectStandardProbeOrder(t *testing.T) {
 		t.Fatalf("made %d calls after a 721 hit, want 1", len(f.calls))
 	}
 }
+
+// name() and symbol() are optional in the metadata extension, and the two
+// encodings below both occur on real chains. Getting the bytes32 case wrong
+// yields a name padded with NULs, which then reaches templates and search.
+func TestDecodeString(t *testing.T) {
+	abiString := func(s string) []byte {
+		out := make([]byte, 64)
+		out[31] = 32 // offset
+		out[63] = byte(len(s))
+		return append(out, []byte(s)...)
+	}
+	fixed32 := func(s string) []byte {
+		out := make([]byte, 32)
+		copy(out, s)
+		return out
+	}
+
+	tests := []struct {
+		name string
+		in   []byte
+		want string
+	}{
+		{"abi dynamic string", abiString("Magic Webb Animi"), "Magic Webb Animi"},
+		{"bytes32 legacy", fixed32("ANIMI"), "ANIMI"},
+		{"empty return", nil, ""},
+		{"short return", []byte{0x01}, ""},
+		{"control chars stripped", abiString("Ani\nmi\x00"), "Animi"},
+		{"surrounding space trimmed", abiString("  Animi  "), "Animi"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if got := decodeString(tt.in); got != tt.want {
+				t.Fatalf("decodeString = %q, want %q", got, tt.want)
+			}
+		})
+	}
+}
+
+func TestCollectionInfo(t *testing.T) {
+	abiString := func(s string) []byte {
+		out := make([]byte, 64)
+		out[31] = 32
+		out[63] = byte(len(s))
+		return append(out, []byte(s)...)
+	}
+	f := &fakeCaller{fn: func(data []byte) ([]byte, error) {
+		switch {
+		case bytes.Equal(data[:4], nameSelector):
+			return abiString("Magic Webb Animi"), nil
+		case bytes.Equal(data[:4], symbolSelector):
+			return abiString("ANIMI"), nil
+		}
+		return nil, errors.New("execution reverted")
+	}}
+	name, symbol, err := CollectionInfo(context.Background(), f, coll)
+	if err != nil {
+		t.Fatalf("unexpected error: %v", err)
+	}
+	if name != "Magic Webb Animi" || symbol != "ANIMI" {
+		t.Fatalf("got (%q, %q)", name, symbol)
+	}
+}
+
+// A contract without the optional getters must yield empty strings, not an
+// error — the caller then keeps whatever it already stored.
+func TestCollectionInfoMissingGetters(t *testing.T) {
+	f := &fakeCaller{fn: func([]byte) ([]byte, error) { return nil, errors.New("execution reverted") }}
+	name, symbol, err := CollectionInfo(context.Background(), f, coll)
+	if err != nil || name != "" || symbol != "" {
+		t.Fatalf("got (%q, %q, %v), want empty with no error", name, symbol, err)
+	}
+}
+
+// A transport failure must propagate so the sweeper retries instead of
+// recording a blank name over a good one.
+func TestCollectionInfoTransportErrorPropagates(t *testing.T) {
+	boom := errors.New("dial tcp: connection refused")
+	f := &fakeCaller{fn: func([]byte) ([]byte, error) { return nil, boom }}
+	if _, _, err := CollectionInfo(context.Background(), f, coll); !errors.Is(err, boom) {
+		t.Fatalf("err = %v, want %v", err, boom)
+	}
+}

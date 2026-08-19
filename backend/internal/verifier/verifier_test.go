@@ -14,6 +14,7 @@ import (
 type fakeStore struct {
 	addrs   []string
 	stamped map[string]bool
+	info    map[string][2]string
 	listErr error
 }
 
@@ -26,6 +27,14 @@ func (f *fakeStore) SetCollectionVerification(_ context.Context, addr string, st
 		f.stamped = map[string]bool{}
 	}
 	f.stamped[addr] = standardVerified
+	return nil
+}
+
+func (f *fakeStore) SetCollectionInfo(_ context.Context, addr, name, symbol string) error {
+	if f.info == nil {
+		f.info = map[string][2]string{}
+	}
+	f.info[addr] = [2]string{name, symbol}
 	return nil
 }
 

@@ -2,7 +2,9 @@ package chain
 
 import (
 	"context"
+	"math/big"
 	"strings"
+	"unicode/utf8"
 
 	ethereum "github.com/ethereum/go-ethereum"
 	"github.com/ethereum/go-ethereum/common"
@@ -94,4 +96,84 @@ func isContractRefusal(err error) bool {
 		}
 	}
 	return false
+}
+
+var (
+	nameSelector   = crypto.Keccak256([]byte("name()"))[:4]
+	symbolSelector = crypto.Keccak256([]byte("symbol()"))[:4]
+)
+
+// CollectionInfo reads the ERC-721/1155 metadata extension's name() and
+// symbol(). Both are optional in the standards, so a contract that omits them
+// is not an error — it yields empty strings and the caller keeps whatever it
+// already had.
+//
+// Callers MUST NOT overwrite stored values with the empty string: a chain blip
+// and a contract that genuinely has no name are indistinguishable here, and
+// blanking a good name because one eth_call failed is the worse outcome.
+func CollectionInfo(ctx context.Context, eth Caller, collection string) (name, symbol string, err error) {
+	name, err = callString(ctx, eth, collection, nameSelector)
+	if err != nil {
+		return "", "", err
+	}
+	symbol, err = callString(ctx, eth, collection, symbolSelector)
+	if err != nil {
+		return name, "", err
+	}
+	return name, symbol, nil
+}
+
+// callString performs a no-argument eth_call and decodes the result as a
+// solidity string. A revert means the contract does not implement the getter,
+// which is a definitive empty answer rather than a failure.
+func callString(ctx context.Context, eth Caller, collection string, selector []byte) (string, error) {
+	to := common.HexToAddress(collection)
+	out, err := eth.CallContract(ctx, ethereum.CallMsg{To: &to, Data: selector}, nil)
+	if err != nil {
+		if isContractRefusal(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	return decodeString(out), nil
+}
+
+// decodeString handles both shapes seen in the wild: the ABI dynamic string
+// (offset, length, bytes) and the pre-ABI bytes32 that early NFT contracts
+// returned for name/symbol.
+func decodeString(out []byte) string {
+	switch {
+	case len(out) == 0:
+		return ""
+	case len(out) >= 64:
+		offset := new(big.Int).SetBytes(out[:32]).Uint64()
+		// A bytes32-style return has no valid offset; fall through to the
+		// fixed-width branch rather than indexing past the buffer.
+		if offset == 32 && uint64(len(out)) >= 64 {
+			length := new(big.Int).SetBytes(out[32:64]).Uint64()
+			if 64+length <= uint64(len(out)) {
+				return sanitizeUTF8(string(out[64 : 64+length]))
+			}
+		}
+		fallthrough
+	case len(out) >= 32:
+		return sanitizeUTF8(strings.TrimRight(string(out[:32]), "\x00"))
+	default:
+		return ""
+	}
+}
+
+// sanitizeUTF8 drops control characters and invalid runes. Collection names are
+// attacker-controlled: they reach templates, JSON and search, so anything that
+// could smuggle a newline or a NUL into a log line or a header is removed here,
+// at the boundary, rather than trusted downstream.
+func sanitizeUTF8(s string) string {
+	var b strings.Builder
+	for _, r := range s {
+		if r == utf8.RuneError || r < 0x20 || r == 0x7f {
+			continue
+		}
+		b.WriteRune(r)
+	}
+	return strings.TrimSpace(b.String())
 }

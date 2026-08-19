@@ -22,6 +22,7 @@ import (
 type Store interface {
 	ListCollectionsForVerification(ctx context.Context, staleBefore time.Time, limit int) ([]string, error)
 	SetCollectionVerification(ctx context.Context, addr string, standardVerified bool) error
+	SetCollectionInfo(ctx context.Context, addr, name, symbol string) error
 }
 
 // Defaults chosen to stay invisible next to the indexer's RPC load: 25 calls
@@ -99,6 +100,19 @@ func (r *Runner) SweepOnce(ctx context.Context) (int, error) {
 			log.Debug().Err(err).Str("collection", addr).Msg("verifier probe unreachable")
 			continue
 		}
+		// Name and symbol come from the same sweep because the eth_calls are
+		// free to batch here and nothing else ever reads them: UpsertCollection
+		// takes them as arguments but has no caller, so every collection has
+		// rendered as a bare hex address and name search has never matched.
+		// A failure here is not fatal to the verification result.
+		if name, symbol, nerr := chain.CollectionInfo(ctx, r.eth, addr); nerr == nil {
+			if name != "" || symbol != "" {
+				if err := r.q.SetCollectionInfo(ctx, addr, name, symbol); err != nil {
+					log.Warn().Err(err).Str("collection", addr).Msg("verifier info write failed")
+				}
+			}
+		}
+
 		if err := r.q.SetCollectionVerification(ctx, addr, std != ""); err != nil {
 			log.Warn().Err(err).Str("collection", addr).Msg("verifier write failed")
 			continue

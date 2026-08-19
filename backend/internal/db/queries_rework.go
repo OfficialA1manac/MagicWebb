@@ -116,6 +116,22 @@ func (q *Q) SetCollectionVerification(ctx context.Context, addr string, standard
 	return err
 }
 
+// SetCollectionInfo stores a collection's on-chain name and symbol.
+//
+// Empty values never overwrite stored ones. name() and symbol() are optional in
+// the ERC-721/1155 metadata extension, so an empty read means either "this
+// contract has no name" or "the call failed" — indistinguishable here, and
+// blanking a good name because of a chain blip is the worse outcome. NULLIF
+// turns the empty string into NULL and COALESCE then keeps the existing value.
+func (q *Q) SetCollectionInfo(ctx context.Context, addr, name, symbol string) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE collections
+		    SET name   = COALESCE(NULLIF($2, ''), name),
+		        symbol = COALESCE(NULLIF($3, ''), symbol)
+		  WHERE address = $1`, addr, name, symbol)
+	return err
+}
+
 // SeedTrackedCollections ensures every address in `addrs` has a row in
 // tracked_collections by calling EnsureCollection for each one. Standard
 // defaults to 'erc721' when unknown. Errors are logged but not fatal — a
@@ -474,7 +490,7 @@ func (q *Q) ListingPreflight(ctx context.Context, collection, tokenID, seller st
 // either count blocks buy preflight.
 func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) ([]struct {
 	Collection, TokenID, Seller, Standard string
-	Amount                                 int64
+	Amount                                int64
 }, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50
@@ -494,12 +510,12 @@ func (q *Q) ListActiveListingsMissingOwnership(ctx context.Context, limit int) (
 	defer rows.Close()
 	var out []struct {
 		Collection, TokenID, Seller, Standard string
-		Amount                                 int64
+		Amount                                int64
 	}
 	for rows.Next() {
 		var r struct {
 			Collection, TokenID, Seller, Standard string
-			Amount                                 int64
+			Amount                                int64
 		}
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.Standard, &r.Amount); err != nil {
 			return nil, err
@@ -610,7 +626,6 @@ func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
 		strings.ToLower(p.Address), p.DisplayName, p.Bio, p.AvatarURI, p.BannerURI, p.Twitter, p.Website)
 	return err
 }
-
 
 // ── Reports ────────────────────────────────────────────────────────────────
 
@@ -740,10 +755,10 @@ func (q *Q) MarkMissing(ctx context.Context, collection, tokenID string) error {
 // hosting failed (image_uri is still an http(s) URL instead of a local blob
 // path). The slow-path retry worker picks these up on a longer cadence.
 type ImageRetryToken struct {
-	Collection   string
-	TokenID      string
-	ImageURI     string // the upstream http(s) URL to retry
-	RetryCount   int    // how many times we've already tried
+	Collection string
+	TokenID    string
+	ImageURI   string // the upstream http(s) URL to retry
+	RetryCount int    // how many times we've already tried
 }
 
 // maxImageRetries is the ceiling after which the worker stops re-attempting
@@ -790,7 +805,7 @@ func (q *Q) ListTokensWithUpstreamImages(ctx context.Context, limit int) ([]Imag
 // nft_image_blobs: SHA-256 keyed, BYTEA-backed content-addressed store. Every
 // row is dedup-by-hash so identical image bytes from different contracts share
 // one entry + a refcount, capped at imagestore.MaxBlobBytes per row. The body	// is what the frontend serves from /api/v1/img/<sha256> — no upstream
-	// gateways are in the render path after ingest.
+// gateways are in the render path after ingest.
 //
 // Compile-time assertion pinning *Q as an imagestore.Store so future signature
 // drift breaks the build immediately rather than at the first ingest request
