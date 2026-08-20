@@ -1,0 +1,87 @@
+---
+// Docs index. Replaces the Go handler that rendered pages/docs.html from an
+// embedded registry — the registry lives here now, next to the documents it
+// describes, and the whole page is static HTML after build.
+import BaseLayout from '../../layouts/BaseLayout.astro';
+import WalletConnect from '../../components/WalletConnect';
+
+const docs = [
+  { slug: 'whitepaper',  title: 'Whitepaper',           icon: '📜', accent: '#34d399',
+    blurb: 'Vision, market, and the seller-pays economic model.' },
+  { slug: 'technical',   title: 'Technical Whitepaper', icon: '⚙️', accent: '#7dd3fc',
+    blurb: 'Contracts, escrow flows, and the indexer pipeline in depth.' },
+  { slug: 'user-guide',  title: 'User Guide',           icon: '🧭', accent: '#a78bfa',
+    blurb: 'Listing, bidding, offers, and withdrawals — step by step.' },
+  { slug: 'faq',         title: 'FAQ',                  icon: '💡', accent: '#fcd34d',
+    blurb: 'Quick answers: fees, refunds, wallets, and safety.' },
+  { slug: 'token-hooks', title: 'Token Architecture',   icon: '🔗', accent: '#fb7185',
+    blurb: 'Future token integration points anchored in the manager contract.' },
+  { slug: 'api',         title: 'API Reference',        icon: '🔌', accent: '#22d3ee',
+    blurb: 'Complete REST API documentation — endpoints, auth, schemas, and examples.' },
+];
+---
+
+<BaseLayout title="Docs" description="MagicWebb documentation — whitepapers, user guide, FAQ, and the API reference." activeNav="docs">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section class="docs-index">
+    <header class="docs-head">
+      <h1>Documentation</h1>
+      <p>How the marketplace works, what it costs, and how to build against it.</p>
+    </header>
+
+    <div class="docs-grid">
+      {docs.map((d) => (
+        <a href={`/docs/${d.slug}/`} class="doc-card" style={`--accent:${d.accent}`}>
+          <span class="doc-card-icon" aria-hidden="true">{d.icon}</span>
+          <span class="doc-card-title">{d.title}</span>
+          <span class="doc-card-blurb">{d.blurb}</span>
+        </a>
+      ))}
+    </div>
+
+    <p class="docs-foot">
+      Machine-readable API spec: <a href="/docs/api.yaml">/docs/api.yaml</a>
+    </p>
+  </section>
+</BaseLayout>
+
+<style>
+  .docs-index { max-width: 68rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+  .docs-head { margin-bottom: 2.5rem; }
+  .docs-head h1 {
+    font-size: clamp(1.875rem, 5vw, 2.75rem); font-weight: 900;
+    letter-spacing: -0.025em; color: #fafafa; margin: 0 0 0.5rem;
+  }
+  .docs-head p { color: rgba(255,255,255,0.5); font-size: 1rem; margin: 0; }
+
+  .docs-grid {
+    display: grid; gap: 1rem;
+    grid-template-columns: repeat(auto-fill, minmax(17rem, 1fr));
+  }
+  .doc-card {
+    display: flex; flex-direction: column; gap: 0.375rem;
+    padding: 1.25rem; border-radius: 1rem;
+    background: rgba(255,255,255,0.02);
+    border: 1px solid rgba(255,255,255,0.08);
+    border-top: 2px solid var(--accent);
+    transition: background 0.2s, border-color 0.2s, transform 0.2s;
+  }
+  .doc-card:hover {
+    background: rgba(255,255,255,0.05);
+    border-color: rgba(255,255,255,0.16);
+    border-top-color: var(--accent);
+    transform: translateY(-2px);
+  }
+  .doc-card-icon { font-size: 1.5rem; line-height: 1; }
+  .doc-card-title { font-size: 1rem; font-weight: 800; color: #fafafa; }
+  .doc-card-blurb { font-size: 0.8125rem; color: rgba(255,255,255,0.5); line-height: 1.5; }
+
+  .docs-foot { margin-top: 2.5rem; font-size: 0.8125rem; color: rgba(255,255,255,0.4); }
+  .docs-foot a { color: #7dd3fc; }
+
+  @media (prefers-reduced-motion: reduce) {
+    .doc-card { transition: none; }
+    .doc-card:hover { transform: none; }
+  }
+</style>

@@ -1,0 +1,119 @@
+---
+// Wrapper for the markdown documents under src/pages/docs/.
+//
+// These were rendered at request time by the Go binary (goldmark against an
+// embedded FS) and served through the HTMX template stack. Astro renders the
+// same markdown at build time instead, so the pages cost nothing at runtime,
+// carry no markdown dependency in the server, and — unlike the old path — do
+// not pull a wallet bundle onto a page that has no wallet interaction.
+import BaseLayout from './BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+
+const { frontmatter } = Astro.props;
+const title = frontmatter?.title ?? 'Docs';
+const description = frontmatter?.description;
+
+const docs = [
+  { slug: 'whitepaper',  title: 'Whitepaper',           icon: '📜' },
+  { slug: 'technical',   title: 'Technical Whitepaper', icon: '⚙️' },
+  { slug: 'user-guide',  title: 'User Guide',           icon: '🧭' },
+  { slug: 'faq',         title: 'FAQ',                  icon: '💡' },
+  { slug: 'token-hooks', title: 'Token Architecture',   icon: '🔗' },
+  { slug: 'api',         title: 'API Reference',        icon: '🔌' },
+];
+const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
+---
+
+<BaseLayout title={title} description={description} activeNav="docs">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <div class="doc-shell">
+    <nav class="doc-nav" aria-label="Documents">
+      <p class="doc-nav-label">Documents</p>
+      {docs.map((d) => (
+        <a href={`/docs/${d.slug}/`} class={`doc-nav-link${d.slug === current ? ' is-current' : ''}`}
+           aria-current={d.slug === current ? 'page' : undefined}>
+          <span aria-hidden="true">{d.icon}</span>{d.title}
+        </a>
+      ))}
+      <a href="/docs/api.yaml" class="doc-nav-link doc-nav-aux">
+        <span aria-hidden="true">⤓</span>OpenAPI spec
+      </a>
+    </nav>
+
+    <article class="doc-body">
+      <slot />
+    </article>
+  </div>
+</BaseLayout>
+
+<style>
+  .doc-shell {
+    max-width: 74rem;
+    margin: 0 auto;
+    padding: 2.5rem 1.5rem 6rem;
+    display: grid;
+    gap: 2.5rem;
+    grid-template-columns: 1fr;
+  }
+  @media (min-width: 900px) {
+    .doc-shell { grid-template-columns: 15rem 1fr; }
+    .doc-nav { position: sticky; top: 5rem; align-self: start; }
+  }
+
+  .doc-nav { display: flex; flex-direction: column; gap: 0.125rem; }
+  .doc-nav-label {
+    font-size: 0.625rem; font-weight: 800; letter-spacing: 0.12em;
+    text-transform: uppercase; color: rgba(255,255,255,0.4);
+    margin: 0 0 0.5rem 0.75rem;
+  }
+  .doc-nav-link {
+    display: flex; align-items: center; gap: 0.5rem;
+    padding: 0.5rem 0.75rem; border-radius: 0.5rem;
+    font-size: 0.8125rem; font-weight: 600;
+    color: rgba(255,255,255,0.6); transition: all 0.2s;
+  }
+  .doc-nav-link:hover { color: #fafafa; background: rgba(255,255,255,0.06); }
+  .doc-nav-link.is-current { color: #7dd3fc; background: rgba(56,189,248,0.12); }
+  .doc-nav-aux { color: rgba(255,255,255,0.35); margin-top: 0.5rem; }
+
+  /* Markdown body. Measure is capped so long prose stays readable. */
+  .doc-body { min-width: 0; max-width: 68ch; color: rgba(255,255,255,0.82); line-height: 1.7; }
+  .doc-body :global(h1) {
+    font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 900; letter-spacing: -0.025em;
+    color: #fafafa; margin: 0 0 1rem; text-wrap: balance;
+  }
+  .doc-body :global(h2) {
+    font-size: 1.375rem; font-weight: 800; color: #fafafa;
+    margin: 2.5rem 0 0.75rem; padding-bottom: 0.5rem;
+    border-bottom: 1px solid rgba(255,255,255,0.08); text-wrap: balance;
+  }
+  .doc-body :global(h3) { font-size: 1.0625rem; font-weight: 700; color: #fafafa; margin: 1.75rem 0 0.5rem; }
+  .doc-body :global(p) { margin: 0 0 1rem; }
+  .doc-body :global(ul), .doc-body :global(ol) { margin: 0 0 1rem; padding-left: 1.35rem; }
+  .doc-body :global(li) { margin: 0 0 0.4rem; }
+  .doc-body :global(a) { color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px; }
+  .doc-body :global(strong) { color: #fafafa; font-weight: 700; }
+  .doc-body :global(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 2rem 0; }
+  .doc-body :global(blockquote) {
+    margin: 1.25rem 0; padding: 0.5rem 0 0.5rem 1rem;
+    border-left: 3px solid rgba(167,139,250,0.5); color: rgba(255,255,255,0.65);
+  }
+  .doc-body :global(code) {
+    font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85em;
+    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 4px; padding: 0.1em 0.35em;
+  }
+  /* Wide content scrolls inside its own box so the page never scrolls sideways. */
+  .doc-body :global(pre) {
+    background: rgba(9,9,11,0.7); border: 1px solid rgba(255,255,255,0.1);
+    border-radius: 0.75rem; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem;
+  }
+  .doc-body :global(pre code) { background: none; border: none; padding: 0; }
+  .doc-body :global(table) { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: 0.9375rem; display: block; overflow-x: auto; }
+  .doc-body :global(th), .doc-body :global(td) {
+    text-align: left; padding: 0.5rem 0.75rem;
+    border-bottom: 1px solid rgba(255,255,255,0.08); vertical-align: top;
+  }
+  .doc-body :global(th) { color: rgba(255,255,255,0.5); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
+</style>
