@@ -34,3 +34,33 @@ renounced both, keeper holds `KEEPER_ROLE`.
 - [ ] One real list → buy round-trip from two wallets.
 - [ ] Add origin to `NETWORK_URLS` on the other networks' apps.
 - [ ] `docs/IMMUTABILITY_TRANSITION.md` — decide the upgrade-delay posture.
+
+## Coston2 redeploy after the duration ABI change (2026-08-21)
+
+`list/list1155/batchList`, `create/create1155`, `makeOffer/makeOffer1155` changed signature
+(`uint64 duration` instead of `uint64 expiresAt`). The live Coston2 set predates this and
+cannot accept listings at all. Redeploy:
+
+```bash
+cd contracts
+export PRIVATE_KEY=0x…            # funded Coston2 deployer
+export CREATOR_ADDR=0x…           # fee recipient (can be the same EOA on testnet)
+export KEEPER_ADDR=0x…            # address of the backend KEEPER_KEY
+forge script script/DeployCoston2.s.sol \
+  --rpc-url https://coston2-api.flare.network/ext/C/rpc --broadcast -vv
+```
+
+Then:
+1. Copy the five addresses + deploy block into `deployments/coston2.json`
+   (`make load-addrs` parses `contracts/broadcast/.../114/run-latest.json`), and move the
+   previous set into `superseded`. Run `tools/check-deployments.sh`.
+2. Update the GitHub repository variables `MARKETPLACE_ADDR`, `AUCTION_ADDR`,
+   `OFFERBOOK_ADDR`, `MARKETPLACE_MANAGER_ADDR`, `NFT_ADDR`, `INDEX_FROM_BLOCK`
+   (CI refuses to deploy if they disagree with the JSON).
+3. Wipe the Coston2 database's on-chain tables — the startup guard will otherwise refuse
+   the new addresses: `POSTGRES_URL=… go run ./cmd/chainwipe` from `backend/`.
+4. Enable offers on your test collection once, from the collection owner wallet:
+   `cast send $OFFERBOOK "setOfferEligible(address,bool)" $NFT true --private-key …`
+   (or use the "Enable offers" button on any token page of that collection while
+   connected as the owner).
+5. Push / merge to `main`; CI deploys; run one list → buy with two wallets.

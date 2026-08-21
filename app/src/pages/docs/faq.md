@@ -144,3 +144,29 @@ independent audit has been completed.
 Transactions are atomic: either the whole trade completes or it reverts with no fee
 taken. Escrowed bids and offer principals are always recoverable via refund or the
 pull-withdrawal fallback.
+
+## Trust & safety
+
+<a id="verified"></a>
+### What does the "Verified NFT" badge mean?
+Two on-chain facts, checked automatically by the indexer and re-checked daily — no human
+curation, no application form:
+
+1. The collection contract answers ERC-165 `supportsInterface()` as a standard **ERC-721**
+   or **ERC-1155** NFT.
+2. Its token metadata (name/image) has resolved at least once.
+
+It does **not** mean MagicWebb vouches for the art, the creator, or the seller. "Unverified"
+means one of the two checks has not passed yet — often just a brand-new collection whose
+metadata has not loaded. Anyone can list from any collection either way.
+
+### Why did my listing, auction or offer need a duration instead of a date?
+The contracts accept six fixed durations (3 min, 15 min, 30 min, 1 h, 4 h, 24 h) and compute
+the expiry on-chain from the block that mines your transaction. Picking a duration is the
+only way a wallet can satisfy that rule; the exact expiry is shown once the transaction
+confirms.
+
+### Where do refunds go?
+If you are outbid, an offer you made is declined, or a payment could not be delivered, the
+amount is held for you in the contract. Your profile shows "Refunds waiting for you" with a
+one-tap Withdraw. Nothing expires and nothing is taken.

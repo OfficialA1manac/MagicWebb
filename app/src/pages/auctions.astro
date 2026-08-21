@@ -198,7 +198,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
       const sellerInput = document.getElementById('filter-seller');
 
       // Live: refresh on any marketplace event (debounced).
-      (function(){var t=null;function arm(){if(!window.MW)return;window.MW.ws.subscribe(window.MW.ch.activity);window.MW.ws.on('*',function(_d,m){if(m.type==='notification')return;if(t)clearTimeout(t);t=setTimeout(function(){t=null;fetchAuctions();},400);});}if(window.MW)arm();else window.addEventListener('mw-ready',arm,{once:true});})();
+      (function(){let t=null;function arm(){if(!window.MW)return;window.MW.ws.subscribe(window.MW.ch.activity);window.MW.ws.on('*',function(_d,m){if(m.type==='notification')return;if(t)clearTimeout(t);t=setTimeout(function(){t=null;fetchAuctions();},400);});}if(window.MW)arm();else window.addEventListener('mw-ready',arm,{once:true});})();
       async function fetchAuctions() {
         if (!grid) return;
         const apiUrl = buildApiUrl();
