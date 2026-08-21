@@ -330,14 +330,14 @@ func TestAuctionsService_HandleList_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(1), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "", "", int16(100),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", ""))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", "", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -365,14 +365,14 @@ func TestAuctionsService_HandleList_Filtered(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50, "0xcol1", "active").
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(2), "0xcol1", "2", "0xseller2", "erc1155",
 				"10000000000000000000", "15000000000000000000", "0xbidder1", int16(200),
-				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", ""))
+				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", "", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -400,14 +400,14 @@ func TestAuctionsService_HandleGet_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(int64(42)).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(42), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "6000000000000000000", "0xbidder1", int16(150),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", ""))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", "", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -1202,7 +1202,7 @@ func TestAuctionsService_HandleList_InvalidLimit(t *testing.T) {
 
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
 
 	// limit=-5 is clamped by the handler to 1 (n < 1 → n = 1)
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).

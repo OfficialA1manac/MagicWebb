@@ -250,25 +250,24 @@ func (x *GetAuctionRequest) GetAuctionId() int64 {
 }
 
 type GetAuctionResponse struct {
-	state              protoimpl.MessageState `protogen:"open.v1"`
-	AuctionId          int64                  `protobuf:"varint,1,opt,name=auction_id,json=auctionId,proto3" json:"auction_id,omitempty"`
-	Collection         string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
-	TokenId            string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
-	Seller             string                 `protobuf:"bytes,4,opt,name=seller,proto3" json:"seller,omitempty"`
-	Standard           string                 `protobuf:"bytes,5,opt,name=standard,proto3" json:"standard,omitempty"`
-	ReservePriceWei    string                 `protobuf:"bytes,6,opt,name=reserve_price_wei,json=reservePriceWei,proto3" json:"reserve_price_wei,omitempty"`
-	HighestBidWei      string                 `protobuf:"bytes,7,opt,name=highest_bid_wei,json=highestBidWei,proto3" json:"highest_bid_wei,omitempty"`
-	HighestBidder      string                 `protobuf:"bytes,8,opt,name=highest_bidder,json=highestBidder,proto3" json:"highest_bidder,omitempty"`
-	MinIncrementBps    int32                  `protobuf:"varint,9,opt,name=min_increment_bps,json=minIncrementBps,proto3" json:"min_increment_bps,omitempty"`
-	StartsAtMs         int64                  `protobuf:"varint,10,opt,name=starts_at_ms,json=startsAtMs,proto3" json:"starts_at_ms,omitempty"`
-	EndsAtMs           int64                  `protobuf:"varint,11,opt,name=ends_at_ms,json=endsAtMs,proto3" json:"ends_at_ms,omitempty"`
-	Status             string                 `protobuf:"bytes,12,opt,name=status,proto3" json:"status,omitempty"` // "active" | "settled" | "cancelled"
-	CreateTx           string                 `protobuf:"bytes,13,opt,name=create_tx,json=createTx,proto3" json:"create_tx,omitempty"`
-	Name               string                 `protobuf:"bytes,14,opt,name=name,proto3" json:"name,omitempty"`
-	ImageUri           string                 `protobuf:"bytes,15,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
-	CollectionVerified bool                   `protobuf:"varint,16,opt,name=collection_verified,json=collectionVerified,proto3" json:"collection_verified,omitempty"`
-	unknownFields      protoimpl.UnknownFields
-	sizeCache          protoimpl.SizeCache
+	state           protoimpl.MessageState `protogen:"open.v1"`
+	AuctionId       int64                  `protobuf:"varint,1,opt,name=auction_id,json=auctionId,proto3" json:"auction_id,omitempty"`
+	Collection      string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`
+	TokenId         string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"`
+	Seller          string                 `protobuf:"bytes,4,opt,name=seller,proto3" json:"seller,omitempty"`
+	Standard        string                 `protobuf:"bytes,5,opt,name=standard,proto3" json:"standard,omitempty"`
+	ReservePriceWei string                 `protobuf:"bytes,6,opt,name=reserve_price_wei,json=reservePriceWei,proto3" json:"reserve_price_wei,omitempty"`
+	HighestBidWei   string                 `protobuf:"bytes,7,opt,name=highest_bid_wei,json=highestBidWei,proto3" json:"highest_bid_wei,omitempty"`
+	HighestBidder   string                 `protobuf:"bytes,8,opt,name=highest_bidder,json=highestBidder,proto3" json:"highest_bidder,omitempty"`
+	MinIncrementBps int32                  `protobuf:"varint,9,opt,name=min_increment_bps,json=minIncrementBps,proto3" json:"min_increment_bps,omitempty"`
+	StartsAtMs      int64                  `protobuf:"varint,10,opt,name=starts_at_ms,json=startsAtMs,proto3" json:"starts_at_ms,omitempty"`
+	EndsAtMs        int64                  `protobuf:"varint,11,opt,name=ends_at_ms,json=endsAtMs,proto3" json:"ends_at_ms,omitempty"`
+	Status          string                 `protobuf:"bytes,12,opt,name=status,proto3" json:"status,omitempty"` // "active" | "settled" | "cancelled"
+	CreateTx        string                 `protobuf:"bytes,13,opt,name=create_tx,json=createTx,proto3" json:"create_tx,omitempty"`
+	Name            string                 `protobuf:"bytes,14,opt,name=name,proto3" json:"name,omitempty"`
+	ImageUri        string                 `protobuf:"bytes,15,opt,name=image_uri,json=imageUri,proto3" json:"image_uri,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *GetAuctionResponse) Reset() {
@@ -404,13 +403,6 @@ func (x *GetAuctionResponse) GetImageUri() string {
 		return x.ImageUri
 	}
 	return ""
-}
-
-func (x *GetAuctionResponse) GetCollectionVerified() bool {
-	if x != nil {
-		return x.CollectionVerified
-	}
-	return false
 }
 
 type GetOfferRequest struct {
@@ -2759,7 +2751,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x13collection_verified\x18\f \x01(\bR\x12collectionVerified\"2\n" +
 	"\x11GetAuctionRequest\x12\x1d\n" +
 	"\n" +
-	"auction_id\x18\x01 \x01(\x03R\tauctionId\"\xa0\x04\n" +
+	"auction_id\x18\x01 \x01(\x03R\tauctionId\"\xef\x03\n" +
 	"\x12GetAuctionResponse\x12\x1d\n" +
 	"\n" +
 	"auction_id\x18\x01 \x01(\x03R\tauctionId\x12\x1e\n" +
@@ -2781,8 +2773,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x06status\x18\f \x01(\tR\x06status\x12\x1b\n" +
 	"\tcreate_tx\x18\r \x01(\tR\bcreateTx\x12\x12\n" +
 	"\x04name\x18\x0e \x01(\tR\x04name\x12\x1b\n" +
-	"\timage_uri\x18\x0f \x01(\tR\bimageUri\x12/\n" +
-	"\x13collection_verified\x18\x10 \x01(\bR\x12collectionVerified\",\n" +
+	"\timage_uri\x18\x0f \x01(\tR\bimageUri\",\n" +
 	"\x0fGetOfferRequest\x12\x19\n" +
 	"\boffer_id\x18\x01 \x01(\tR\aofferId\"\xe3\x02\n" +
 	"\x10GetOfferResponse\x12\x19\n" +

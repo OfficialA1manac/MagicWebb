@@ -84,19 +84,20 @@ func (s *Server) GetAuction(ctx context.Context, req *connect.Request[GetAuction
 	}
 
 	res := &GetAuctionResponse{
-		AuctionId:       row.AuctionID,
-		Collection:      row.Collection,
-		TokenId:         row.TokenID,
-		Seller:          row.Seller,
-		Standard:        row.Standard,
-		ReservePriceWei: row.ReservePriceWei,
-		HighestBidWei:   row.HighestBidWei,
-		HighestBidder:   row.HighestBidder,
-		MinIncrementBps: int32(row.MinIncrementBps),
-		Status:          row.Status,
-		CreateTx:        row.CreateTx,
-		Name:            row.Name,
-		ImageUri:        row.ImageURI,
+		AuctionId:          row.AuctionID,
+		Collection:         row.Collection,
+		TokenId:            row.TokenID,
+		Seller:             row.Seller,
+		Standard:           row.Standard,
+		ReservePriceWei:    row.ReservePriceWei,
+		HighestBidWei:      row.HighestBidWei,
+		HighestBidder:      row.HighestBidder,
+		MinIncrementBps:    int32(row.MinIncrementBps),
+		Status:             row.Status,
+		CreateTx:           row.CreateTx,
+		Name:               row.Name,
+		ImageUri:           row.ImageURI,
+		CollectionVerified: row.CollectionVerified,
 	}
 	if !row.StartsAt.IsZero() {
 		res.StartsAtMs = row.StartsAt.UnixMilli()
@@ -368,19 +369,20 @@ func (s *Server) ListAuctions(ctx context.Context, req *connect.Request[ListAuct
 
 	for i := range rows {
 		a := &Auction{
-			AuctionId:       rows[i].AuctionID,
-			Collection:      rows[i].Collection,
-			TokenId:         rows[i].TokenID,
-			Seller:          rows[i].Seller,
-			Standard:        rows[i].Standard,
-			ReservePriceWei: rows[i].ReservePriceWei,
-			HighestBidWei:   rows[i].HighestBidWei,
-			HighestBidder:   rows[i].HighestBidder,
-			MinIncrementBps: int32(rows[i].MinIncrementBps),
-			Status:          rows[i].Status,
-			CreateTx:        rows[i].CreateTx,
-			Name:            rows[i].Name,
-			ImageUri:        rows[i].ImageURI,
+			AuctionId:          rows[i].AuctionID,
+			Collection:         rows[i].Collection,
+			TokenId:            rows[i].TokenID,
+			Seller:             rows[i].Seller,
+			Standard:           rows[i].Standard,
+			ReservePriceWei:    rows[i].ReservePriceWei,
+			HighestBidWei:      rows[i].HighestBidWei,
+			HighestBidder:      rows[i].HighestBidder,
+			MinIncrementBps:    int32(rows[i].MinIncrementBps),
+			Status:             rows[i].Status,
+			CreateTx:           rows[i].CreateTx,
+			Name:               rows[i].Name,
+			ImageUri:           rows[i].ImageURI,
+			CollectionVerified: rows[i].CollectionVerified,
 		}
 		if !rows[i].StartsAt.IsZero() {
 			a.StartsAtMs = rows[i].StartsAt.UnixMilli()

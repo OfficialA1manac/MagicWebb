@@ -502,6 +502,7 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 					env := Message{
 						Type: MessageType(ev.Type),
 						Data: json.RawMessage(payload),
+						Seq:  ev.Seq,
 					}
 					msg, err := json.Marshal(env)
 					if err != nil {
@@ -987,6 +988,7 @@ func (h *Handler) BroadcastTo(ev sse.Event) {
 	env := Message{
 		Type: MessageType(ev.Type),
 		Data: json.RawMessage(payload),
+		Seq:  ev.Seq,
 	}
 	msg, err := json.Marshal(env)
 	if err != nil {

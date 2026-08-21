@@ -15,6 +15,7 @@ const (
 	MsgOfferUpdated     MessageType = "offer-updated"
 	MsgNotification     MessageType = "notification"
 	MsgActivity         MessageType = "activity"
+	MsgTxIndexed        MessageType = "tx-indexed" // instant lane (indexer/observe.go)
 
 	// Client-to-server request types.
 	MsgPing      MessageType = "ping"
@@ -47,6 +48,9 @@ const (
 type Message struct {
 	Type MessageType     `json:"type"`
 	Data json.RawMessage `json:"data,omitempty"`
+	// Seq is the Broadcaster sequence number for pushed events (0 on control
+	// frames). Clients detect gaps and request replay via MsgRetry.
+	Seq uint64 `json:"seq,omitempty"`
 }
 
 // PingData is sent by the client to keep the connection alive.

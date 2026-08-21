@@ -318,6 +318,7 @@ func main() {
 	go whDispatcher.Start(ctx)
 
 	// Mount all REST + SSE routes
+	api.SetTxObserver(runner) // instant lane: POST /api/v1/tx/observe
 	api.Mount(app, q, bcast, rl, &config.C, eth, &serverTimeMs, aks, al, imgStore)
 
 	// ── CACHE-2: Warm critical caches on startup ─────────────────────────

@@ -57,6 +57,8 @@ type Runner struct {
 	eth        EthClient
 	h          *handlers
 	keeperGate KeeperGate
+	// observed dedupes instant-lane ObserveTx calls (see observe.go).
+	observed observedSet
 	// serverTimeMs is the latest block timestamp in milliseconds (atomic).
 	serverTimeMs *int64
 	// gasAlertLastFired tracks the last time a gas cost alert webhook was sent.

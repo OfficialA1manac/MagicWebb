@@ -107,6 +107,7 @@ message GetAuctionResponse {
   string create_tx = 13;
   string name = 14;
   string image_uri = 15;
+  bool collection_verified = 16;
 }
 
 // ── GetOffer ──────────────────────────────────────────────────────────────────
@@ -250,6 +251,8 @@ message Auction {
   string create_tx = 13;
   string name = 14;
   string image_uri = 15;
+  // Collection badge: standard NFT contract with resolved metadata (migration 034).
+  bool collection_verified = 16;
 }
 
 // ── GetActivity ────────────────────────────────────────────────────────────────

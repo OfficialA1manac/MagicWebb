@@ -582,6 +582,9 @@ type AuctionRow struct {
 	CreateTx        string    `json:"create_tx"`
 	Name            string    `json:"name"`
 	ImageURI        string    `json:"image_uri"`
+	// CollectionVerified mirrors ListingRow: the collection answers ERC-165 for
+	// a standard NFT interface and its metadata has resolved (migration 034).
+	CollectionVerified bool `json:"collection_verified"`
 }
 
 // auctionSelectCols is the canonical SELECT projection for an AuctionRow.
@@ -591,17 +594,19 @@ type AuctionRow struct {
 const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.seller, a.standard::text,
 		        a.reserve_price_wei::text, a.highest_bid_wei::text, COALESCE(a.highest_bidder,''),
 		        a.min_increment_bps, a.starts_at, a.ends_at, a.status::text, a.create_tx,
-		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')`
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
+		        COALESCE(c.verified,false)`
 
 const auctionFromJoin = ` FROM auctions a
 		 LEFT JOIN nft_metadata m ON m.collection=a.collection AND m.token_id=a.token_id
-		 LEFT JOIN nft_tokens t ON t.collection=a.collection AND a.token_id=t.token_id`
+		 LEFT JOIN nft_tokens t ON t.collection=a.collection AND a.token_id=t.token_id
+		 LEFT JOIN collections c ON c.address=a.collection`
 
 func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
 	var r AuctionRow
 	err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 		&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
-		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI)
+		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI, &r.CollectionVerified)
 	return r, err
 }
 
@@ -643,7 +648,7 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
 			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx,
-			&r.Name, &r.ImageURI)
+			&r.Name, &r.ImageURI, &r.CollectionVerified)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("auction not found: %d", auctionID)
 	}
@@ -1360,6 +1365,9 @@ type SearchResult struct {
 	TokenID    string `json:"token_id,omitempty"`
 	Name       string `json:"name"`
 	ImageURI   string `json:"image_uri,omitempty"`
+	// Verified is the collection badge (standard NFT contract + resolved
+	// metadata), carried on both kinds so search results show it too.
+	Verified bool `json:"collection_verified"`
 }
 
 // Search finds NFTs and collections matching query using Postgres full-text search.
@@ -1378,9 +1386,11 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       t.collection::text,
 			       t.token_id::text,
 			       coalesce(m.name, t.name, '') AS name,
-			       coalesce(m.image_uri, t.image_uri, '') AS image_uri
+			       coalesce(m.image_uri, t.image_uri, '') AS image_uri,
+			       coalesce(c.verified, false) AS verified
 			FROM nft_tokens t
 			LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
+			LEFT JOIN collections c ON c.address=t.collection
 			WHERE t.search_vec @@ plainto_tsquery('english', $1)
 			ORDER BY t.token_id ASC
 			LIMIT $2
@@ -1391,7 +1401,8 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       c.address::text,
 			       ''::text,
 			       c.name,
-			       ''::text
+			       ''::text,
+			       coalesce(c.verified, false)
 			FROM collections c
 			WHERE c.search_vec @@ plainto_tsquery('english', $1)
 			ORDER BY c.name ASC
@@ -1407,7 +1418,7 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	var out []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI); err != nil {
+		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI, &r.Verified); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

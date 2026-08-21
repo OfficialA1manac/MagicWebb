@@ -161,11 +161,11 @@ func TestGetAuction_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"auction_id", "collection", "token_id", "seller", "standard",
 			"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-			"starts_at", "ends_at", "status", "create_tx", "name", "image_uri",
+			"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified",
 		}).AddRow(
 			int64(42), "0xcol", "1", "0xseller", "erc721",
 			"5000000000000000000", "6000000000000000000", "0xbidder", int16(100),
-			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "",
+			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "", true,
 		))
 
 	srv := NewServer(db.New(mock), nil)

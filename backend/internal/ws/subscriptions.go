@@ -16,6 +16,12 @@ const (
 	channelToken      = "token:"
 	channelCollection = "collection:"
 	channelUser       = "user:"
+	// tx:<hash> — the instant lane (indexer/observe.go) publishes "tx-indexed"
+	// with tx_hash; TxModal subscribes to learn the marketplace caught up.
+	channelTx = "tx:"
+	// activity — everything. Index pages (listings, auctions, activity feed)
+	// use it to refresh live without naming every collection.
+	channelActivity = "activity"
 )
 
 // channelRE is a compiled regex that validates channel names at subscription
@@ -26,8 +32,10 @@ const (
 //   token:<0x-addr>:<id>      e.g. token:0xabc...:42
 //   collection:<0x-addr>      e.g. collection:0xabc...
 //   user:<0x-addr>            e.g. user:0xabc...
+//   tx:<0x-hash>              e.g. tx:0x9a...e31 (instant lane)
+//   activity                  every event
 var channelRE = regexp.MustCompile(
-	`^(token:[^:]+:[^:]+|collection:[^:]+|user:.+)$`,
+	`^(token:[^:]+:[^:]+|collection:[^:]+|user:.+|tx:0x[0-9a-fA-F]{64}|activity)$`,
 )
 
 // isValidChannel reports whether a channel name follows our naming convention.
@@ -55,6 +63,9 @@ type eventPayload struct {
 	// field is checked by channelMatchesUser to ensure a WS subscriber
 	// only receives notifications addressed to them.
 	UserAddr string `json:"user_addr"`
+	// TxHash is carried by "tx-indexed" (instant lane) and by every indexed
+	// event that records its originating transaction.
+	TxHash string `json:"tx_hash"`
 }
 
 // channelMatchesEvent returns true if the channel matches the event, using
@@ -83,6 +94,12 @@ func channelMatchesEvent(channel, eventType string, ev *eventPayload) bool {
 // prefix against the event type. Token/collection channels match all events;
 // user channels match notification events only.
 func channelMatchesPrefix(channel, eventType string) bool {
+	if channel == channelActivity {
+		return true
+	}
+	if strings.HasPrefix(channel, channelTx) {
+		return eventType == "tx-indexed"
+	}
 	if strings.HasPrefix(channel, channelToken) || strings.HasPrefix(channel, channelCollection) {
 		return true
 	}
@@ -96,6 +113,10 @@ func channelMatchesPrefix(channel, eventType string) bool {
 // and the event payload.
 func channelMatchesPayload(channel string, ev *eventPayload) bool {
 	switch {
+	case channel == channelActivity:
+		return true
+	case strings.HasPrefix(channel, channelTx):
+		return strings.EqualFold(strings.TrimPrefix(channel, channelTx), ev.TxHash)
 	case strings.HasPrefix(channel, channelToken):
 		return channelMatchesToken(channel, ev)
 	case strings.HasPrefix(channel, channelCollection):
