@@ -30,7 +30,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(nft), tid, 1 ether, uint64(_LIST_24HR));
         vm.stopPrank();
 
         (address s, , , uint128 p,) = mp.listings(address(nft), tid, seller);
@@ -46,7 +46,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         multi.mint(seller, 42, 10);
         multi.setApprovalForAll(address(mp), true);
-        mp.list1155(address(multi), 42, 5, 2 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list1155(address(multi), 42, 5, 2 ether, uint64(_LIST_24HR));
         vm.stopPrank();
 
         vm.prank(buyer);
@@ -58,7 +58,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(nft), tid, 1 ether, uint64(_LIST_24HR));
         vm.stopPrank();
 
         vm.prank(seller);
@@ -71,7 +71,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(nft), tid, 1 ether, uint64(_LIST_24HR));
         vm.stopPrank();
 
         vm.prank(buyer);
@@ -83,7 +83,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes));
+        mp.list(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
 
         vm.warp(block.timestamp + 5 minutes);
@@ -96,7 +96,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(nft), tid, 1 ether, uint64(_LIST_24HR));
         vm.stopPrank();
 
         vm.prank(seller);
@@ -113,8 +113,8 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.stopPrank();
 
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](2);
-        items[0] = Marketplace.BatchItem(address(nft), t1, 1 ether, uint64(block.timestamp + _LIST_24HR));
-        items[1] = Marketplace.BatchItem(address(nft), t2, 2 ether, uint64(block.timestamp + _LIST_24HR));
+        items[0] = Marketplace.BatchItem(address(nft), t1, 1 ether, uint64(_LIST_24HR));
+        items[1] = Marketplace.BatchItem(address(nft), t2, 2 ether, uint64(_LIST_24HR));
 
         vm.prank(seller);
         mp.batchList(items);
@@ -130,7 +130,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes));
+        mp.list(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
 
         vm.warp(block.timestamp + 5 minutes);
@@ -151,7 +151,7 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.startPrank(s2);
         uint256 tid = nft2.mint(s2);
         nft2.setApprovalForAll(address(freshMp), true);
-        freshMp.list(address(nft2), tid, price, uint64(block.timestamp + 24 hours));
+        freshMp.list(address(nft2), tid, price, uint64(24 hours));
         vm.stopPrank();
 
         uint256 sb = s2.balance;
@@ -159,5 +159,32 @@ contract MarketplaceTest is Test, TestHelpers {
         freshMp.buy{value: uint256(price)}(address(nft2), tid, s2);
         uint256 fee = uint256(price) * 150 / 10_000;
         assertEq(s2.balance, sb + uint256(price) - fee);
+    }
+
+    /// Six shared durations accepted; expiry computed on-chain from block.timestamp.
+    function test_list_durationsAndExpiry() public {
+        uint64[6] memory ok = [uint64(3 minutes), uint64(15 minutes), uint64(30 minutes), uint64(1 hours), uint64(4 hours), uint64(24 hours)];
+        vm.warp(1_700_000_000);
+        for (uint256 i; i < ok.length; ++i) {
+            vm.startPrank(seller);
+            uint256 tid = nft.mint(seller);
+            nft.setApprovalForAll(address(mp), true);
+            mp.list(address(nft), tid, 1 ether, ok[i]);
+            vm.stopPrank();
+            (address s_, uint64 expiresAt, , , ) = mp.listings(address(nft), tid, seller);
+            assertEq(s_, seller);
+            assertEq(expiresAt, 1_700_000_000 + ok[i]);
+        }
+    }
+
+    function test_list_badDuration_reverts() public {
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(mp), true);
+        vm.expectRevert(InvalidDuration.selector);
+        mp.list(address(nft), tid, 1 ether, 2 hours);
+        vm.expectRevert(InvalidDuration.selector);
+        mp.list(address(nft), tid, 1 ether, 0);
+        vm.stopPrank();
     }
 }

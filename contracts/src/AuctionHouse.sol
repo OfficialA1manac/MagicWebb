@@ -230,20 +230,21 @@ contract AuctionHouse is MarketplaceCore {
     ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
     /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
     ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
-    function create(address coll, uint256 tokenId, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
+    /// @param duration One of the six shared durations; endsAt is computed on-chain.
+    function create(address coll, uint256 tokenId, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant entryGate returns (uint256 id)
     {
-        return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, endsAt, minIncBps, minIncFlat);
+        return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, _expiryFor(duration), minIncBps, minIncFlat);
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
     /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
     /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 endsAt, uint16 minIncBps, uint128 minIncFlat)
+    function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant entryGate returns (uint256 id)
     {
         if (amount == 0) revert InvalidAmount();
-        return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, endsAt, minIncBps, minIncFlat);
+        return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, _expiryFor(duration), minIncBps, minIncFlat);
     }
 
     function _create(
@@ -256,14 +257,8 @@ contract AuctionHouse is MarketplaceCore {
         uint16  minIncBps,
         uint128 minIncFlat
     ) internal returns (uint256 id) {
+        // endsAt was produced by _expiryFor(): in the future, one of the six durations.
         if (endsAt <= block.timestamp) revert InvalidWindow();
-        // Validate auction duration is one of the 6 fixed durations shared across all cores.
-        uint256 duration = uint256(endsAt) - block.timestamp;
-        if (duration != DURATION_3MIN && duration != DURATION_15MIN
-            && duration != DURATION_30MIN && duration != DURATION_1HR
-            && duration != DURATION_4HR && duration != DURATION_24HR) {
-            revert InvalidDuration();
-        }
         if (minIncBps > MAX_MIN_INCREMENT_BPS) revert BadIncrement();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
 

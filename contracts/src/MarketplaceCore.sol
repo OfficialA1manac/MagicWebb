@@ -33,6 +33,10 @@ enum TokenStandard { ERC721, ERC1155 }
 
 /// @dev Shared durations for listings, auctions, and offers across all cores.
 ///      Every time-bound action must pick one of these exact six values.
+///      Callers pass the DURATION; the contract computes the expiry from
+///      block.timestamp (MarketplaceCore._expiryFor). Passing an absolute
+///      expiresAt was unusable from a wallet: the caller cannot know the
+///      timestamp of the block that will mine the transaction.
 uint64 constant DURATION_3MIN  = 3 minutes;
 uint64 constant DURATION_15MIN = 15 minutes;
 uint64 constant DURATION_30MIN = 30 minutes;
@@ -56,6 +60,17 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
 
     /// @notice Minimum accepted commitment everywhere (list price, auction reserve, offer amount).
     uint256 public constant MIN_PRICE = 1 ether;
+
+    /// @dev Validate a caller-supplied duration and turn it into an absolute expiry.
+    ///      Reverts InvalidDuration unless duration is one of the six shared values.
+    function _expiryFor(uint64 duration) internal view returns (uint64) {
+        if (duration != DURATION_3MIN && duration != DURATION_15MIN
+            && duration != DURATION_30MIN && duration != DURATION_1HR
+            && duration != DURATION_4HR && duration != DURATION_24HR) {
+            revert InvalidDuration();
+        }
+        return uint64(block.timestamp) + duration;
+    }
 
     /// @notice Wallet that receives all platform fees. Set once during initialization.
     ///         Was immutable in v1; now upgradeable storage so future upgrades can

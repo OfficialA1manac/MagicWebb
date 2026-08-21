@@ -43,7 +43,7 @@ NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 echo "== A. list -> buy (1 ether, fee split 1.5%) =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 1
 cast send "$NFT" "setApprovalForAll(address,bool)" "$MP" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
-cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 1000000000000000000 $((NOW+86400)) --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
+cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
 cast send "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
@@ -55,7 +55,7 @@ echo "== B. auction -> bid -> outbid -> cumulative top-up -> settle -> loser ref
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 2
 cast send "$NFT" "setApprovalForAll(address,bool)" "$AH" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-cast send "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 1000000000000000000 $((NOW+3600)) 500 0 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
+cast send "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 1000000000000000000 3600 500 0 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 AID=$(cast call "$AH" "nextAuctionId()(uint256)" --rpc-url "$RPC")
 echo "auction id=$AID"
 cast send "$AH" "bid(uint256)" "$AID" --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null  # alice leads @1
@@ -76,7 +76,7 @@ check "bob (loser) refunded 1.1e18" "1100000000000000000" "$(sub $B1 $B0)"
 echo "== C. offer -> accept -> distribute =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 3
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 2000000000000000000 $((NOW+86400)) --value 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
+cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 2000000000000000000 86400 --value 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
 cast send "$NFT" "setApprovalForAll(address,bool)" "$OB" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
 cast send "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$ALICE" 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
@@ -88,7 +88,7 @@ check "fee    +0.03"       "30000000000000000" "$(sub $C1 $C0)"
 echo "== D. offer expiry -> permissionless keeper refund =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 4
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 $((NOW+3600)) --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_BOB" >/dev/null
+cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 3600 --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_BOB" >/dev/null
 warp 7200
 B0=$(bal "$BOB")
 cast send "$OB" "refundExpiredOffer(address,uint256,address)" "$NFT" 4 "$BOB" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
@@ -103,13 +103,13 @@ PK_CREATOR=0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6
 cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null
 check "entriesAllowed=false" "false" "$(cast call "$MGR" "entriesAllowed()(bool)" --rpc-url "$RPC")"
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 $((NOW+86400)) --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null 2>&1 \
+cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null 2>&1 \
   && { echo "  FAIL  list should revert while paused"; fail=1; } \
   || echo "  PASS  list halted while paused"
 cast send "$MGR" "unpauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null
 check "entriesAllowed=true" "true" "$(cast call "$MGR" "entriesAllowed()(bool)" --rpc-url "$RPC")"
 # Recovery proof: an entry must actually succeed again after unpause.
-cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 $((NOW+86400)) --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
+cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 echo "  PASS  entries recover after unpause"
 
 echo

@@ -179,21 +179,21 @@ contract OfferBook is MarketplaceCore {
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
-    /// @param expiresAt  Position expiry (one of 6 fixed durations: 3min–24hr).
-    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 expiresAt) external payable nonReentrant entryGate {
+    /// @param duration   One of the six shared durations (3m–24h). Ignored when topping up an existing position.
+    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 duration) external payable nonReentrant entryGate {
         if (!offerEligible[coll]) revert OffersNotEligible();
-        _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, expiresAt);
+        _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, duration);
     }
 
     /// @notice Offer on ERC-1155 units. Send exactly `principal` as msg.value. FREE.
     ///         The target collection must be offer-eligible (setOfferEligible).
     /// @param units  Number of ERC-1155 units desired (replaces any previous position).
-    function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 expiresAt)
+    function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 duration)
         external payable nonReentrant entryGate
     {
         if (units == 0) revert InvalidAmount();
         if (!offerEligible[coll]) revert OffersNotEligible();
-        _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, expiresAt);
+        _makeOffer(TokenStandard.ERC1155, coll, tokenId, principal, units, duration);
     }
 
     function _makeOffer(
@@ -202,7 +202,7 @@ contract OfferBook is MarketplaceCore {
         uint256 tokenId,
         uint128 principal,
         uint128 units,
-        uint64  expiresAt
+        uint64  duration
     ) internal {
         // Zero-value offers are rejected — every position must have escrow.
         if (principal == 0) revert InvalidAmount();
@@ -227,19 +227,9 @@ contract OfferBook is MarketplaceCore {
             // (refundExpiredOffer), not in a new live offer.
             if (block.timestamp >= p.expiresAt) revert OfferExpired();
         } else {
-            // New position: validate duration — must be one of the 6 fixed
-            // durations shared across all cores (3min–24hr). The past-expiry
-            // guard comes first: subtracting an already-elapsed timestamp
-            // underflowed into Panic(0x11) instead of a decodable custom error
-            // (Marketplace._list and AuctionHouse._create both guard first).
-            if (uint256(expiresAt) <= block.timestamp) revert InvalidDuration();
-            uint256 dur = uint256(expiresAt) - block.timestamp;
-            if (dur != DURATION_3MIN && dur != DURATION_15MIN
-                && dur != DURATION_30MIN && dur != DURATION_1HR
-                && dur != DURATION_4HR && dur != DURATION_24HR) {
-                revert InvalidDuration();
-            }
-            p.expiresAt = expiresAt;
+            // New position: the caller supplied a DURATION; validate it and
+            // compute the absolute expiry on-chain (see MarketplaceCore._expiryFor).
+            p.expiresAt = _expiryFor(duration);
         }
 
         p.principal = principal;

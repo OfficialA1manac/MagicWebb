@@ -35,17 +35,17 @@ contract OfferBookTest is Test, TestHelpers {
 
     function test_makeOfferEscrowsPrincipal() public {
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(24 hours));
         (uint128 p,,,) = ob.positions(address(nft), 0, alice);
         assertEq(p, 1 ether);
     }
 
     function test_makeOfferEditReplacesNotCompounds() public {
         vm.prank(alice);
-        ob.makeOffer{value: 5 ether}(address(nft), 0, 5 ether, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: 5 ether}(address(nft), 0, 5 ether, uint64(24 hours));
 
         vm.prank(alice);
-        ob.makeOffer{value: 2 ether}(address(nft), 0, 2 ether, uint64(block.timestamp + 4 hours));
+        ob.makeOffer{value: 2 ether}(address(nft), 0, 2 ether, uint64(4 hours));
 
         (uint128 p,,,) = ob.positions(address(nft), 0, alice);
         // Not compounded: position shows 2 ether, not 7 ether.
@@ -61,7 +61,7 @@ contract OfferBookTest is Test, TestHelpers {
         vm.stopPrank();
 
         vm.prank(alice);
-        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, uint64(24 hours));
 
         uint256 sb = seller.balance;
         vm.prank(seller);
@@ -77,7 +77,7 @@ contract OfferBookTest is Test, TestHelpers {
         vm.stopPrank();
 
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, uint64(24 hours));
 
         vm.prank(seller);
         ob.rejectOffer(address(nft), tid, alice);
@@ -88,7 +88,7 @@ contract OfferBookTest is Test, TestHelpers {
 
     function test_cancelOfferFullRefund() public {
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(24 hours));
 
         uint256 aBefore = alice.balance;
         vm.prank(alice);
@@ -98,7 +98,7 @@ contract OfferBookTest is Test, TestHelpers {
 
     function test_cancelExpiredReverts() public {
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(3 minutes));
 
         vm.warp(block.timestamp + 5 minutes);
         vm.prank(alice);
@@ -113,7 +113,7 @@ contract OfferBookTest is Test, TestHelpers {
         mgr.grantRole(mgr.KEEPER_ROLE(), bob);
 
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(3 minutes));
 
         vm.warp(block.timestamp + 5 minutes);
         uint256 aBefore = alice.balance;
@@ -129,7 +129,7 @@ contract OfferBookTest is Test, TestHelpers {
         vm.stopPrank();
 
         vm.prank(alice);
-        ob.makeOffer1155{value: 1 ether}(address(multi), 7, 1 ether, 3, uint64(block.timestamp + 24 hours));
+        ob.makeOffer1155{value: 1 ether}(address(multi), 7, 1 ether, 3, uint64(24 hours));
 
         vm.prank(seller);
         ob.acceptOffer(address(multi), 7, alice, 1 ether);
@@ -147,7 +147,7 @@ contract OfferBookTest is Test, TestHelpers {
         vm.stopPrank();
 
         vm.prank(alice);
-        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, uint64(block.timestamp + 24 hours));
+        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, uint64(24 hours));
         // No fee at makeOffer — alice's full amount escrowed.
         (uint128 pEscrow,,,) = ob.positions(address(nft), tid, alice);
         assertEq(pEscrow, principal);
@@ -167,13 +167,12 @@ contract OfferBookTest is Test, TestHelpers {
         nft.setApprovalForAll(address(ob), true);
         vm.stopPrank();
 
-        uint64 exp = uint64(block.timestamp + 24 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, exp);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, 24 hours);
 
         // Alice front-runs with an edit down to 1 ether.
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, 1 days);
 
         vm.prank(seller);
         vm.expectRevert(PrincipalChanged.selector);
@@ -192,7 +191,7 @@ contract OfferBookTest is Test, TestHelpers {
     /// even with a manager configured and no keeper available.
     function test_refundExpiredOffer_bidderSelfReclaim() public {
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(3 minutes));
 
         vm.warp(block.timestamp + 5 minutes);
         uint256 aBefore = alice.balance;
@@ -206,7 +205,7 @@ contract OfferBookTest is Test, TestHelpers {
     /// Third parties still cannot move someone else's escrow without the role.
     function test_refundExpiredOffer_thirdParty_stillNeedsKeeper() public {
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp + 3 minutes));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(3 minutes));
 
         vm.warp(block.timestamp + 5 minutes);
         vm.prank(bob);
@@ -214,11 +213,23 @@ contract OfferBookTest is Test, TestHelpers {
         ob.refundExpiredOffer(address(nft), 0, alice);
     }
 
-    /// An already-elapsed expiry used to underflow into Panic(0x11).
-    function test_makeOffer_pastExpiry_revertsInvalidDuration() public {
-        vm.warp(block.timestamp + 1 days);
+    /// Durations are validated on-chain; anything but the six shared values reverts.
+    function test_makeOffer_badDuration_revertsInvalidDuration() public {
         vm.prank(alice);
         vm.expectRevert(InvalidDuration.selector);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(block.timestamp - 1));
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 2 hours);
+        vm.prank(alice);
+        vm.expectRevert(InvalidDuration.selector);
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 0);
+    }
+
+    /// The contract computes expiresAt = block.timestamp + duration, so a wallet
+    /// never has to guess the mining block's timestamp.
+    function test_makeOffer_expiryComputedOnChain() public {
+        vm.warp(1_700_000_000);
+        vm.prank(alice);
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 15 minutes);
+        (, , uint64 expiresAt, ) = ob.positions(address(nft), 0, alice);
+        assertEq(expiresAt, 1_700_000_000 + 15 minutes);
     }
 }

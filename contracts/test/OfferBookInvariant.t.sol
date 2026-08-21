@@ -40,10 +40,9 @@ contract OfferHandler is Test {
             uint64(3 minutes), uint64(15 minutes), uint64(30 minutes),
             uint64(1 hours), uint64(4 hours), uint64(24 hours)
         ];
-        uint64 exp = uint64(block.timestamp) + durations[ttl % 6];
         if (uint256(existingPrincipal) > type(uint128).max) return;
         vm.prank(b);
-        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, exp);
+        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 6]);
         ghostEscrowed = ghostEscrowed + principal - uint256(existingPrincipal);
     }
 

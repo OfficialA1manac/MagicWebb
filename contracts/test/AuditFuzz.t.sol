@@ -113,7 +113,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp) + dt, 500, 0);
+        id = ah.create(address(nft), tid, 1 ether, dt, 500, 0);
         vm.stopPrank();
     }
 
@@ -151,7 +151,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, reserve, uint64(block.timestamp + 24 hours), minIncBps, minIncFlat);
+        id = ah.create(address(nft), tid, reserve, uint64(24 hours), minIncBps, minIncFlat);
         vm.stopPrank();
     }
 
@@ -234,11 +234,10 @@ contract AuditFuzzTest is Test, TestHelpers {
         nft.setApprovalForAll(address(ob), true);
         GreedyReceiver bidder = new GreedyReceiver();
         vm.deal(address(bidder), 10 ether);
-        uint64 exp = uint64(block.timestamp) + 1 days;
         _enableOffers(address(nft));
         bidder.setBlocked(false);
         vm.prank(address(bidder));
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, 1 days);
         (uint128 principal,,,) = ob.positions(address(nft), tid, address(bidder));
         assertEq(principal, 1 ether, "offer escrowed at principal = 1 ETH");
         bidder.setBlocked(true);
@@ -334,15 +333,14 @@ contract AuditFuzzTest is Test, TestHelpers {
         _enableOffers(address(nft));
         uint64 origExp = uint64(block.timestamp + 4 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, origExp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, 4 hours);
         (uint128 pBefore,, uint64 expBefore,) = ob.positions(address(nft), tid, alice);
         assertEq(pBefore, 1 ether);
         assertEq(expBefore, origExp);
         // Attempt to move expiry out to 24h on edit — must be ignored.
-        uint64 attemptedExp = uint64(block.timestamp + 24 hours);
         uint256 aliceBalBefore = alice.balance;
         vm.prank(alice);
-        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, attemptedExp);
+        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, 24 hours);
         (uint128 pAfter,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
         assertEq(pAfter, 2 ether, "principal replaced on edit, not compounded");
         assertEq(expAfter, origExp, "expiry RETAINED on edit - timer not refreshed");
@@ -358,11 +356,11 @@ contract AuditFuzzTest is Test, TestHelpers {
         nft.setApprovalForAll(address(ob), true);
         _enableOffers(address(nft));
         vm.prank(alice);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1 hours));
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(1 hours));
         vm.warp(block.timestamp + 1 hours); // exactly at expiry — expired
         vm.prank(alice);
         vm.expectRevert(OfferExpired.selector);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(block.timestamp + 1 hours));
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, uint64(1 hours));
     }
 
     /// A garbage expiry supplied on edit is harmless — it is ignored and the
@@ -374,9 +372,9 @@ contract AuditFuzzTest is Test, TestHelpers {
         _enableOffers(address(nft));
         uint64 origExp = uint64(block.timestamp + 24 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, origExp);
+        ob.makeOffer{value: 5 ether}(address(nft), tid, 5 ether, 24 hours);
         vm.prank(alice);
-        ob.makeOffer{value: 6 ether}(address(nft), tid, 6 ether, uint64(block.timestamp + 1)); // junk expiry
+        ob.makeOffer{value: 6 ether}(address(nft), tid, 6 ether, uint64(1)); // junk expiry
         (,, uint64 expAfter,) = ob.positions(address(nft), tid, alice);
         assertEq(expAfter, origExp, "junk expiry ignored on edit");
     }
@@ -387,7 +385,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 tid = nft.mint(seller);
         vm.startPrank(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 3 minutes), 0, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(3 minutes), 0, 0);
         vm.stopPrank();
         uint64 origEnd = uint64(block.timestamp + 3 minutes);
         assertEq(ah.originalEndsAt(id), origEnd, "originalEndsAt recorded at create");
@@ -429,7 +427,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
         nft2.setApprovalForAll(address(ah2), true);
-        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
         vm.stopPrank();
         vm.prank(address(griefer));
         ah2.bid{value: 1 ether}(id2);
@@ -481,7 +479,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
         nft2.setApprovalForAll(address(ah2), true);
-        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
         vm.stopPrank();
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
@@ -502,7 +500,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(address(badSeller));
         uint256 tid2 = nft2.mint(address(badSeller));
         nft2.setApprovalForAll(address(ah), true);
-        uint256 id2 = ah.create(address(nft2), tid2, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        uint256 id2 = ah.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
         vm.stopPrank();
         vm.prank(alice);
         ah.bid{value: 2 ether}(id2);
@@ -521,7 +519,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(block.timestamp + 1 days), 500, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(1 days), 500, 0);
         vm.stopPrank();
         vm.deal(alice, 2 ether);
         _bid(id, alice, 2 ether);
@@ -572,9 +570,8 @@ contract AuditFuzzTest is Test, TestHelpers {
         bidder.setBlocked(false);
         vm.deal(address(bidder), 10 ether);
         _enableOffers(address(nft));
-        uint64 exp = uint64(block.timestamp + 1 days);
         vm.prank(address(bidder));
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, 1 days);
         bidder.setBlocked(true);
         vm.expectEmit(true, false, false, true, address(ob));
         emit PushFailed(address(bidder), 1 ether);
@@ -605,9 +602,9 @@ contract AuditFuzzTest is Test, TestHelpers {
         coll.setApprovalForAll(address(mp), true);
         vm.stopPrank();
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](3);
-        items[0] = Marketplace.BatchItem(address(coll), t1, 1 ether,  uint64(block.timestamp + _LIST_24HR));
-        items[1] = Marketplace.BatchItem(address(coll), t2, 1.5 ether, uint64(block.timestamp + _LIST_24HR));
-        items[2] = Marketplace.BatchItem(address(coll), t3, 2 ether,  uint64(block.timestamp + _LIST_24HR));
+        items[0] = Marketplace.BatchItem(address(coll), t1, 1 ether,  uint64(_LIST_24HR));
+        items[1] = Marketplace.BatchItem(address(coll), t2, 1.5 ether, uint64(_LIST_24HR));
+        items[2] = Marketplace.BatchItem(address(coll), t3, 2 ether,  uint64(_LIST_24HR));
         vm.prank(seller);
         mp.batchList(items);
         (address s1, , TokenStandard std1, uint128 p1,) = mp.listings(address(coll), t1, seller);
@@ -630,8 +627,8 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 t2 = coll.mint(seller);
         uint256 t99 = coll.mint(seller);
         coll.setApprovalForAll(address(mp), true);
-        mp.list(address(coll), t1, 1 ether, uint64(block.timestamp + _LIST_24HR));
-        mp.list(address(coll), t2, 1.5 ether, uint64(block.timestamp + _LIST_24HR));
+        mp.list(address(coll), t1, 1 ether, uint64(_LIST_24HR));
+        mp.list(address(coll), t2, 1.5 ether, uint64(_LIST_24HR));
         vm.stopPrank();
         ReentrantBuyer buyer = new ReentrantBuyer(mp);
         vm.prank(seller);
@@ -640,7 +637,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(address(buyer));
         coll.setApprovalForAll(address(mp), true);
         Marketplace.BatchItem[] memory reentry = new Marketplace.BatchItem[](1);
-        reentry[0] = Marketplace.BatchItem(address(coll), t99, 1 ether, uint64(block.timestamp + _LIST_24HR));
+        reentry[0] = Marketplace.BatchItem(address(coll), t99, 1 ether, uint64(_LIST_24HR));
         buyer.setReentryItems(reentry);
         buyer.arm();
         vm.prank(address(buyer));
@@ -680,7 +677,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         multi.mint(seller, 99, 10);
         multi.setApprovalForAll(address(ah), true);
-        uint256 id1155 = ah.create1155(address(multi), 99, 10, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
+        uint256 id1155 = ah.create1155(address(multi), 99, 10, 1 ether, uint64(24 hours), 500, 0);
         vm.stopPrank();
         assertEq(id1155, 2, "create1155() produced auction id 2");
         AuctionHouse.Auction memory a1155 = ah.getAuction(id1155);
@@ -781,9 +778,8 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(seller);
         nft.setApprovalForAll(address(ob), true);
         _enableOffers(address(nft));
-        uint64 exp = uint64(block.timestamp + 1 days);
         vm.prank(address(bidder));
-        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, exp);
+        ob.makeOffer{value: 1 ether}(address(nft), tid, 1 ether, 1 days);
         bidder.setBlocked(true);
         vm.prank(seller);
         ob.rejectOffer(address(nft), tid, address(bidder));

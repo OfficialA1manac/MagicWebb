@@ -43,15 +43,15 @@ send "$PK_SELLER" "$NFT" "setApprovalForAll(address,bool)" "$OB" true
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 
 echo "== A. list token1 @0.05 -> C buys =="
-send "$PK_SELLER" "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 50000000000000000 $((NOW+86400))
+send "$PK_SELLER" "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 50000000000000000 86400
 send "$PK_C" "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 50000000000000000
 check "token1 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 1 --rpc-url "$RPC")"
 
 echo "== B. auction token2 (reserve 0.05, ends +480s): C 0.05 -> D 0.06 -> C +0.02 =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_SELLER" "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 50000000000000000 $((NOW+480)) 500 0
+send "$PK_SELLER" "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 50000000000000000 180 500 0
 AID=$(cast call "$AH" "nextAuctionId()(uint256)" --rpc-url "$RPC")
-echo "auction id=$AID ends $(date -d @$((NOW+480)) 2>/dev/null || echo +480s)"
+echo "auction id=$AID ends $(date -d @180 2>/dev/null || echo +480s)"
 send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 50000000000000000
 send "$PK_D" "$AH" "bid(uint256)" "$AID" --value 60000000000000000
 send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 20000000000000000
@@ -59,13 +59,13 @@ check "C cumulative 0.07" "70000000000000000" "$(cast call "$AH" "cumulative(uin
 
 echo "== C. offer 0.05 on token3 from C -> seller accepts =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_C" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 50000000000000000 $((NOW+86400)) --value 50000000000000000
+send "$PK_C" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 50000000000000000 86400 --value 50000000000000000
 send "$PK_SELLER" "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$C" 50000000000000000
 check "token3 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 
-echo "== D. offer 0.05 on token4 from D, expires +90s (offer keeper must refund) =="
+echo "== D. offer 0.05 on token4 from D, expires in 3 min — the shortest allowed duration (offer keeper must refund) =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_D" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 50000000000000000 $((NOW+90)) --value 50000000000000000
+send "$PK_D" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 50000000000000000 180 --value 50000000000000000
 D_AFTER_OFFER=$(bal "$D")
 
 echo "== E. WAIT: backend keeper must settle auction $AID + refund loser D + refund expired offer =="

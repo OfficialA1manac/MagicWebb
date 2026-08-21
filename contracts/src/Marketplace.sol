@@ -83,17 +83,18 @@ contract Marketplace is MarketplaceCore {
     ///      still cause unexpected state reads mid-call. The modifier costs
     ///      ~2.3k gas on the first call and zero on re-entry (revert); the
     ///      invariant is cheap insurance.
-    function list(address coll, uint256 id, uint128 price, uint64 expiresAt) external nonReentrant entryGate {
-        _list(TokenStandard.ERC721, coll, id, 1, price, expiresAt);
+    /// @param duration One of the six shared durations (3m/15m/30m/1h/4h/24h); expiry is computed on-chain.
+    function list(address coll, uint256 id, uint128 price, uint64 duration) external nonReentrant entryGate {
+        _list(TokenStandard.ERC721, coll, id, 1, price, _expiryFor(duration));
     }
 
     /// @notice List ERC-1155 units at a fixed price. FREE — no listing fee.
     /// @dev Defense-in-depth: nonReentrant added per L-09 invariant.
     ///      Same rationale as list() — a malicious ERC-1155 collection could
     ///      re-enter during the balanceOf or isApprovedForAll probes.
-    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 expiresAt) external nonReentrant entryGate {
+    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 duration) external nonReentrant entryGate {
         if (amount == 0) revert InvalidAmount();
-        _list(TokenStandard.ERC1155, coll, id, amount, price, expiresAt);
+        _list(TokenStandard.ERC1155, coll, id, amount, price, _expiryFor(duration));
     }
 
     // ── Batch List ────────────────────────────────────────────────────────────
@@ -102,7 +103,7 @@ contract Marketplace is MarketplaceCore {
         address coll;
         uint256 id;
         uint128 price;
-        uint64  expiresAt;
+        uint64  duration; // one of the six shared durations
     }
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
@@ -129,7 +130,7 @@ contract Marketplace is MarketplaceCore {
     function batchList(BatchItem[] calldata items) external nonReentrant entryGate {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         for (uint256 i; i < items.length; ++i) {
-            _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, items[i].expiresAt);
+            _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, _expiryFor(items[i].duration));
         }
     }
 
@@ -148,15 +149,9 @@ contract Marketplace is MarketplaceCore {
         if (existing.seller != address(0) && block.timestamp <= existing.expiresAt && existing.price != price) {
             revert NotOwner(); // seller must cancel first to relist at a different price
         }
+        // expiresAt was produced by _expiryFor(): strictly in the future and one
+        // of the six shared durations away. Kept as a cheap invariant check.
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
-        // Validate that the listing duration is one of the fixed durations.
-        // expiresAt is uint64, block.timestamp is uint256 — cast both to uint256 for math.
-        uint256 duration = uint256(expiresAt) - block.timestamp;
-        if (duration != DURATION_3MIN && duration != DURATION_15MIN
-            && duration != DURATION_30MIN && duration != DURATION_1HR
-            && duration != DURATION_4HR && duration != DURATION_24HR) {
-            revert InvalidDuration();
-        }
 
         if (standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(id) != msg.sender) revert NotOwner();

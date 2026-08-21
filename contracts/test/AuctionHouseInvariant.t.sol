@@ -28,7 +28,7 @@ contract AuctionHouseHandler is Test {
         vm.startPrank(seller);
         tokenId = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(block.timestamp + 24 hours), 500, 0);
+        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(24 hours), 500, 0);
         vm.stopPrank();
     }
 

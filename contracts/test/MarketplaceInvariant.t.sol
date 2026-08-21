@@ -20,7 +20,7 @@ contract MarketplaceHandler is Test {
         vm.startPrank(owner);
         tokenId = nft.mint(owner);
         nft.setApprovalForAll(address(mp), true);
-        mp.list(address(nft), tokenId, 1 ether, uint64(block.timestamp + 24 hours));
+        mp.list(address(nft), tokenId, 1 ether, uint64(24 hours));
         ghostListed = 1 ether;
         vm.stopPrank();
     }

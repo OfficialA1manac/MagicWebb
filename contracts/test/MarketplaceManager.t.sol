@@ -65,7 +65,7 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         nft.mint(address(0xBEEF));
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert(EntriesHalted.selector);
-        mp.list(address(nft), 0, 1 ether, uint64(block.timestamp + 24 hours));
+        mp.list(address(nft), 0, 1 ether, uint64(24 hours));
         vm.stopPrank();
     }
 
@@ -96,7 +96,7 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         vm.startPrank(address(0xBEEF));
         uint256 tid = nft.mint(address(0xBEEF));
         nft.setApprovalForAll(address(freeMp), true);
-        freeMp.list(address(nft), tid, 1 ether, uint64(block.timestamp + 24 hours));
+        freeMp.list(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
 
         (address s, , ,,) = freeMp.listings(address(nft), tid, address(0xBEEF));
