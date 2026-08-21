@@ -5,6 +5,7 @@ package config
 import (
 	"encoding/hex"
 	"fmt"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain/profile"
 	"math/big"
 	"os"
 	"strconv"
@@ -59,18 +60,23 @@ type Config struct {
 	// state change — see NETWORK_URLS.
 	Networks []Network
 
+	// Profile is the per-chain tuning table entry for ChainID
+	// (internal/chain/profile). Env vars override individual values; the
+	// profile supplies every default so a new network needs no code change.
+	Profile profile.Profile
+
 	// Contract addresses
-	MarketplaceAddr           string
-	AuctionAddr               string
-	OfferBookAddr             string
-	NFTAddr                   string
-	MarketplaceManagerAddr    string
-	RoyaltyAddr               string
+	MarketplaceAddr        string
+	AuctionAddr            string
+	OfferBookAddr          string
+	NFTAddr                string
+	MarketplaceManagerAddr string
+	RoyaltyAddr            string
 
 	// Database
-	PostgresURL  string // primary (read-write) connection
-	ReadPoolURL  string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
-	RedisURL     string // optional Redis URL for distributed cache; empty = in-memory only (CACHE-1)
+	PostgresURL string // primary (read-write) connection
+	ReadPoolURL string // optional read-replica connection for query offloading; empty = all reads use PostgresURL
+	RedisURL    string // optional Redis URL for distributed cache; empty = in-memory only (CACHE-1)
 
 	// IMG-3: S3-compatible blob store backend. When ImgStoreBackend = "s3", blob
 	// bodies are stored in S3/MinIO instead of Postgres BYTEA, saving PG
@@ -115,7 +121,6 @@ type Config struct {
 	ScoreWVolume float64
 	ScoreDecay   float64
 
-
 	// Metadata worker
 	MetadataConcurrency int // concurrent metadata fetches per tick; env METADATA_CONCURRENCY
 
@@ -142,12 +147,12 @@ type Config struct {
 
 	// SMTP email alerting — when SMTPHost and EmailTo are set, gas alerts are
 	// also sent via email as an alternative to webhook-based notifications.
-	SMTPHost   string // SMTP server hostname
-	SMTPPort   int    // SMTP server port (default 587)
-	SMTPUser   string // SMTP username (usually the email address)
-	SMTPPass   string // SMTP password or app-specific token
-	EmailFrom  string // from-address for alert emails
-	EmailTo    string // to-address for alert emails
+	SMTPHost  string // SMTP server hostname
+	SMTPPort  int    // SMTP server port (default 587)
+	SMTPUser  string // SMTP username (usually the email address)
+	SMTPPass  string // SMTP password or app-specific token
+	EmailFrom string // from-address for alert emails
+	EmailTo   string // to-address for alert emails
 
 	// Fee sweep (Zodiac Allowance Module on Gnosis Safe)
 	// SafeAddr is the Gnosis Safe multisig used as feeRecipient. When set and
@@ -161,7 +166,6 @@ type Config struct {
 	// a meaningful multiple of current gas cost. Default: 0.1 native token (1e17 wei).
 	// Set to "0" to sweep every tick (not recommended).
 	FeeSweepMinWei string
-
 
 	// FrontendURL is the allowed CORS origin (e.g. https://magicwebb.xyz).
 	FrontendURL string
@@ -182,11 +186,11 @@ type Config struct {
 	// span exporter and an otelfiber middleware that creates a span per HTTP
 	// request. The endpoint is a secret — set via fly secrets.
 	OTELExporterOTLPEndpoint string
-
 }
 
 // Load reads environment variables and panics on missing required values.
 func Load() {
+	prof := profileFor(requiredUint64("CHAIN_ID"))
 	C = Config{
 		Env:     envOrDefault("ENV", "development"),
 		RPCURL:  required("RPC_URL"),
@@ -203,16 +207,20 @@ func Load() {
 		// 114) exclusively; NETWORK_NAME, NATIVE_CURRENCY, and EXPLORER_URL
 		// allow operators to customise display labels WITHOUT changing the
 		// underlying chain or the chain-ID validation below.
-		NetworkName:    envOrDefault("NETWORK_NAME", "Flare Coston2"),
-		NativeCurrency: envOrDefault("NATIVE_CURRENCY", "C2FLR"),
-		ExplorerURL:    envOrDefault("EXPLORER_URL", "https://coston2-explorer.flare.network"),
+		NetworkName:    envOrDefault("NETWORK_NAME", prof.Name),
+		NativeCurrency: envOrDefault("NATIVE_CURRENCY", prof.Currency),
+		ExplorerURL:    envOrDefault("EXPLORER_URL", prof.Explorer),
+		Profile:        prof,
 
-		MarketplaceAddr:           required("MARKETPLACE_ADDR"),
-		AuctionAddr:               required("AUCTION_ADDR"),
-		OfferBookAddr:             required("OFFERBOOK_ADDR"),
-		NFTAddr:                   envOrDefault("NFT_ADDR", ""),
-		MarketplaceManagerAddr:    envOrDefault("MARKETPLACE_MANAGER_ADDR", ""),
-		RoyaltyAddr:               envOrDefault("ROYALTY_ADDR", ""),
+		// Contract addresses may all be empty: that is "read-only network
+		// mode" (see ContractsDeployed) used while Songbird/Flare have no
+		// contracts yet. Partially set is a configuration error.
+		MarketplaceAddr:        envOrDefault("MARKETPLACE_ADDR", ""),
+		AuctionAddr:            envOrDefault("AUCTION_ADDR", ""),
+		OfferBookAddr:          envOrDefault("OFFERBOOK_ADDR", ""),
+		NFTAddr:                envOrDefault("NFT_ADDR", ""),
+		MarketplaceManagerAddr: envOrDefault("MARKETPLACE_MANAGER_ADDR", ""),
+		RoyaltyAddr:            envOrDefault("ROYALTY_ADDR", ""),
 
 		PostgresURL: required("POSTGRES_URL"),
 		ReadPoolURL: envOrDefault("READ_POOL_URL", ""),
@@ -225,25 +233,24 @@ func Load() {
 		S3SecretKey:     envOrDefault("S3_SECRET_KEY", ""),
 		S3UseSSL:        os.Getenv("S3_USE_SSL") == "true",
 
-		HTTPAddr: envOrDefault("HTTP_ADDR", ":8080"),
-		GRPCPort: optInt("GRPC_PORT", 0),
+		HTTPAddr:  envOrDefault("HTTP_ADDR", ":8080"),
+		GRPCPort:  optInt("GRPC_PORT", 0),
 		GRPCPeers: parseURLList(os.Getenv("GRPC_PEERS")),
 
 		SIWEDomain: envOrDefault("SIWE_DOMAIN", "localhost"),
 		JWTSecret:  required("JWT_SECRET"),
 		NonceTTL:   optDuration("NONCE_TTL", 5*time.Minute),
 
-		IndexFromBlock:       optUint64("INDEX_FROM_BLOCK", 0),
-		GetLogsChunk:         optUint64("GETLOGS_CHUNK", 30),
-		GetLogsBlockCap:      optUint64("GETLOGS_BLOCK_CAP", 30),
-		MetadataConcurrency:  optInt("METADATA_CONCURRENCY", 3),
-		TrackedCollections:   parseAddrList(envOrDefault("TRACKED_COLLECTIONS", "")),
+		IndexFromBlock:      optUint64("INDEX_FROM_BLOCK", 0),
+		GetLogsChunk:        optUint64("GETLOGS_CHUNK", prof.GetLogsChunk),
+		GetLogsBlockCap:     optUint64("GETLOGS_BLOCK_CAP", prof.GetLogsBlockCap),
+		MetadataConcurrency: optInt("METADATA_CONCURRENCY", prof.MetadataConcurrency),
+		TrackedCollections:  parseAddrList(envOrDefault("TRACKED_COLLECTIONS", "")),
 
 		ScoreWViews:  optFloat64("SCORE_W_VIEWS", 0.3),
 		ScoreWBids:   optFloat64("SCORE_W_BIDS", 0.5),
 		ScoreWVolume: optFloat64("SCORE_W_VOLUME", 0.2),
 		ScoreDecay:   optFloat64("SCORE_DECAY", 0.05),
-
 
 		KeeperKey: envOrDefault("KEEPER_KEY", ""),
 
@@ -252,8 +259,8 @@ func Load() {
 		FeeSweepMinWei:     envOrDefault("FEE_SWEEP_MIN_WEI", "100000000000000000"), // 0.1 native token
 
 		// v29: ceiling on keeper gas pricing. 0 = unbounded (NOT recommended).
-		MaxFeeCapGwei: optFloat64("KEEPER_MAX_FEE_CAP_GWEI", 100),
-		MaxTipCapGwei: optFloat64("KEEPER_MAX_TIP_CAP_GWEI", 5),
+		MaxFeeCapGwei: optFloat64("KEEPER_MAX_FEE_CAP_GWEI", prof.MaxFeeCapGwei),
+		MaxTipCapGwei: optFloat64("KEEPER_MAX_TIP_CAP_GWEI", prof.MaxTipCapGwei),
 
 		// Phase 4 V4.1: minimum keeper wallet balance. Default 0.1 FLR.
 		// Env: KEEPER_MIN_BALANCE_WEI (empty = 100000000000000000)
@@ -263,20 +270,18 @@ func Load() {
 		PrometheusWebhookURL: envOrDefault("PROMETHEUS_WEBHOOK_URL", ""),
 		GasAlertThresholdWei: envOrDefault("GAS_ALERT_THRESHOLD_WEI", "500000000000000000"), // 0.5 native token default
 
-		SMTPHost:   envOrDefault("SMTP_HOST", ""),
-		SMTPPort:   optInt("SMTP_PORT", 587),
-		SMTPUser:   envOrDefault("SMTP_USER", ""),
-		SMTPPass:   envOrDefault("SMTP_PASS", ""),
-		EmailFrom:  envOrDefault("EMAIL_FROM", ""),
-		EmailTo:    envOrDefault("EMAIL_TO", ""),
-
+		SMTPHost:  envOrDefault("SMTP_HOST", ""),
+		SMTPPort:  optInt("SMTP_PORT", 587),
+		SMTPUser:  envOrDefault("SMTP_USER", ""),
+		SMTPPass:  envOrDefault("SMTP_PASS", ""),
+		EmailFrom: envOrDefault("EMAIL_FROM", ""),
+		EmailTo:   envOrDefault("EMAIL_TO", ""),
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
 
-		SentryDSN:               envOrDefault("SENTRY_DSN", ""),
+		SentryDSN:                envOrDefault("SENTRY_DSN", ""),
 		OTELExporterOTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),
-
 	}
 
 	C.MarketplaceAddr = strings.ToLower(C.MarketplaceAddr)
@@ -297,37 +302,27 @@ func Load() {
 	// Per-chain defaults: only set when the operator has NOT explicitly set
 	// the env var (os.Getenv returns ""). envOrDefault would have already
 	// set the Coston2 defaults above; we only overwrite for non-Coston2.
-	switch C.ChainID {
-	case 14:
-		// Flare mainnet
-		if os.Getenv("NETWORK_NAME") == "" {
-			C.NetworkName = "Flare"
-		}
-		if os.Getenv("NATIVE_CURRENCY") == "" {
-			C.NativeCurrency = "FLR"
-		}
-		if os.Getenv("EXPLORER_URL") == "" {
-			C.ExplorerURL = "https://flare-explorer.flare.network"
-		}
-	case 19:
-		// Songbird mainnet — canary network, same stack as Flare.
-		if os.Getenv("NETWORK_NAME") == "" {
-			C.NetworkName = "Songbird"
-		}
-		if os.Getenv("NATIVE_CURRENCY") == "" {
-			C.NativeCurrency = "SGB"
-		}
-		if os.Getenv("EXPLORER_URL") == "" {
-			C.ExplorerURL = "https://songbird-explorer.flare.network"
-		}
-	case 114:
-		// Coston2 — envOrDefault defaults are correct; no action.
-	default:
-		fmt.Fprintf(os.Stderr, "FATAL: unsupported CHAIN_ID=%d; supported chains: 14 (Flare), 19 (Songbird), 114 (Coston2).\n", C.ChainID)
-		os.Exit(1)
-	}
+	// Identity, cadences and caps all came from the profile above; the only
+	// thing left to enforce is that the chain id was one we have a profile for
+	// (profileFor already exited otherwise).
 
 	C.Networks = buildNetworks(os.Getenv("NETWORK_URLS"), C.ChainID)
+
+	// All-or-nothing on the three cores. An operator who sets one address but
+	// not the others has a broken deploy, not a read-only one.
+	set := 0
+	for _, a := range []string{C.MarketplaceAddr, C.AuctionAddr, C.OfferBookAddr} {
+		if a != "" {
+			set++
+		}
+	}
+	if set != 0 && set != 3 {
+		fmt.Fprintln(os.Stderr, "FATAL: MARKETPLACE_ADDR, AUCTION_ADDR and OFFERBOOK_ADDR must be set together (or all unset for read-only network mode)")
+		os.Exit(1)
+	}
+	if set == 0 {
+		fmt.Fprintf(os.Stderr, "WARN: no contract addresses for chain %d — read-only network mode: API and UI serve, indexer/keepers/verifier idle (see deployments/%s.json)\n", C.ChainID, C.Profile.Key)
+	}
 
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
 	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
@@ -359,7 +354,6 @@ func Load() {
 		}
 	}
 
-
 	// Phase 4 V4.1: validate KeeperMinBalanceWei at startup. A typo like
 	// "0.1" (missing wei conversion — should be 100000000000000000) would
 	// silently skip the balance check with only a log line. Fail fast here
@@ -383,7 +377,6 @@ func Load() {
 		}
 	}
 
-
 	// v35: TRACKED_COLLECTIONS entry validation. Invalid entries are a WARN
 	// (not fatal) because a typo in one collection doesn't break the rest.
 	// The indexer skips malformed addresses at seed time via SeedTrackedCollections,
@@ -404,7 +397,6 @@ func Load() {
 	if C.Env == "production" && len(C.TrackedCollections) == 0 {
 		fmt.Fprintln(os.Stderr, "WARN: TRACKED_COLLECTIONS is empty in production; the indexer will only watch collections auto-discovered from nft_tokens. Add your NFT contracts to TRACKED_COLLECTIONS.")
 	}
-
 
 	// v35: contract address validation — MARKETPLACE_ADDR, AUCTION_ADDR,
 	// OFFERBOOK_ADDR must be well-formed Ethereum addresses. Previously
@@ -533,7 +525,6 @@ func parseAddrList(v string) []string {
 	return out
 }
 
-
 // MaxFeeCapWei returns the keeper's fee-cap ceiling in wei, or nil when the
 // ceiling is disabled (0). v29 audit F-03 — bounded by KEEPER_MAX_FEE_CAP_GWEI.
 func (c *Config) MaxFeeCapWei() *big.Int {
@@ -621,4 +612,23 @@ func optInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// profileFor resolves the per-chain profile or exits with the same FATAL line
+// the old chain switch printed, so operators keep a familiar error.
+func profileFor(chainID uint64) profile.Profile {
+	p, err := profile.For(chainID)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: %v.\n", err)
+		os.Exit(1)
+	}
+	return p
+}
+
+// ContractsDeployed reports whether this network has marketplace contracts.
+// False = read-only network mode: the process serves the UI and API (so the
+// network switcher, docs and health checks work) but runs no indexer,
+// keepers or verifier because there is nothing on chain to watch.
+func (c *Config) ContractsDeployed() bool {
+	return c.MarketplaceAddr != "" && c.AuctionAddr != "" && c.OfferBookAddr != ""
 }

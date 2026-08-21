@@ -1,5 +1,3 @@
-//go:build redis
-
 package cache
 
 import (

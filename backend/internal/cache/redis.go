@@ -235,16 +235,14 @@ func truncateURL(u string) string {
 // When redisURL is set:
 //   - With -tags redis: connects to Redis and returns *RedisCache on success.
 //     Falls back to *Cache on connection failure (graceful degradation).
-//   - Without -tags redis: returns *Cache with a warning log (build-tag-gated
-//     fallback in redis_client_default.go). Rebuild with -tags redis to activate.
+//   - Redis unreachable at startup (ping fails within 3s): returns *Cache with
+//     a warning log. Redis support is always compiled in; REDIS_URL decides.
 func NewRedisOrMemory(redisURL string, ttl time.Duration) CacheInterface {
 	if redisURL == "" {
 		return New(ttl)
 	}
 
-	// newRedisClient is build-tag-gated:
-	//   redis_client.go       (//go:build redis)        → real Redis connection
-	//   redis_client_default.go (//go:build !redis)       → error + warning log
+	// newRedisClient (redis_client.go) dials and pings; any failure → memory.
 	if c, err := newRedisClient(redisURL, ttl); err == nil {
 		return c
 	}

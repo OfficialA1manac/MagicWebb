@@ -39,7 +39,7 @@ type rawMeta struct {
 // runMetadataWorker lazily resolves off-chain metadata for owned tokens that have
 // none yet: read tokenURI/uri on-chain, fetch the JSON, persist name/image/traits.
 func (r *Runner) runMetadataWorker(ctx context.Context) {
-	ticker := time.NewTicker(30 * time.Second)
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.MetadataTick, 30*time.Second))
 	defer ticker.Stop()
 
 	// Semaphore-bounded parallelism: limit concurrent metadata fetches to

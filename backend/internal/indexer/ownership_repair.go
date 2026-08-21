@@ -15,7 +15,7 @@ const maxInt64 = int64(1<<63 - 1)
 // runOwnershipRepairWorker fixes stale nft_ownership rows that block buy
 // preflight when the on-chain holder still matches the listing seller.
 func (r *Runner) runOwnershipRepairWorker(ctx context.Context) {
-	ticker := time.NewTicker(60 * time.Second)
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.OwnershipTick, 60*time.Second))
 	defer ticker.Stop()
 	for {
 		select {

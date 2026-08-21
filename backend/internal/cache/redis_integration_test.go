@@ -1,4 +1,4 @@
-//go:build redis
+//go:build integration
 
 // Package cache — Redis integration tests using testcontainers-go.
 //

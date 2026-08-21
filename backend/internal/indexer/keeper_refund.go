@@ -64,7 +64,7 @@ func (r *Runner) runLoserRefundSweeper(ctx context.Context) {
 	signer := types.NewLondonSigner(chainIDBig)
 
 	log.Info().Str("keeper", keeperAddr.Hex()).Msg("refund sweeper: started")
-	ticker := time.NewTicker(45 * time.Second)
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.RefundTick, 45*time.Second))
 	defer ticker.Stop()
 	for {
 		select {

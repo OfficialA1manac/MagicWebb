@@ -225,7 +225,7 @@ func (r *Runner) runFeeSweeper(ctx context.Context) {
 		Str("dust_wei", dustThreshold.String()).
 		Msg("fee sweeper: started — requires on-chain Allowance Module setup on Safe")
 
-	ticker := time.NewTicker(5 * time.Minute)
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.FeeSweepTick, 5*time.Minute))
 	defer ticker.Stop()
 	for {
 		select {

@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"net/http"
+	"net/url"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -20,9 +21,9 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	connectv1 "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
 	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/interceptors"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 
@@ -43,10 +44,10 @@ import (
 // Type-Options=nosniff across all responses prevents MIME sniffing even
 // where image handlers already set it.
 const (
-	cspHeader = "default-src 'self'; " +	// All JS bundles are SELF-HOSTED under /static (htmx, ethers, alpinejs,
-	// qrcode, wc-bundle, wallet.js, ws.js). No third-party CDN script
-	// dependencies remain. The AppKit bridge (appkit-bridge.js) is built
-	// by Astro/Vite from app/src/appkit-bridge.js and served same-origin.
+	cspHeader = "default-src 'self'; " + // All JS bundles are SELF-HOSTED under /static (htmx, ethers, alpinejs,
+		// qrcode, wc-bundle, wallet.js, ws.js). No third-party CDN script
+		// dependencies remain. The AppKit bridge (appkit-bridge.js) is built
+		// by Astro/Vite from app/src/appkit-bridge.js and served same-origin.
 		// Alpine.js evaluates expressions via `new Function()` at runtime, so
 		// 'unsafe-eval' is required for any x-data / x-show / x-if to mount
 		// under CSP. The alternative (@alpinejs/csp) requires a maintained
@@ -56,18 +57,18 @@ const (
 		// only the Alpine runtime parses expressions).
 		//
 		// 'unsafe-inline' is required so the server-rendered inline <script>
-	// blocks in templates/layout.html execute: the runtime-config inject
-	// (window.MW_MARKETPLACE = '{{.MarketplaceAddr}}') and the inline wallet
-	// init IIFE. Both blocks contain only env-controlled values plus literal
+		// blocks in templates/layout.html execute: the runtime-config inject
+		// (window.MW_MARKETPLACE = '{{.MarketplaceAddr}}') and the inline wallet
+		// init IIFE. Both blocks contain only env-controlled values plus literal
 		// JS — Go's html/template auto-escapes the injected strings — so the
 		// 'unsafe-inline' tradeoff is the standard practical match for
 		// self-hosted Alpine + dynamic injection.
-	"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+		"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		// font-src: Google Fonts (Inter, JetBrains Mono) + Reown AppKit fonts
 		// (KHTeka, KHTekaMono). AppKit's self-hosted web components load these
 		// from fonts.reown.com via @font-face CSS rules inside wc-bundle.js.
-	"font-src 'self' https://fonts.gstatic.com https://fonts.reown.com; " +
+		"font-src 'self' https://fonts.gstatic.com https://fonts.reown.com; " +
 		"img-src 'self' data: blob: https:; " +
 		// connect-src: WalletConnect relay and RPC endpoints required for
 		// wallet pairing and blockchain interaction. The self-hosted WC bundle
@@ -77,11 +78,11 @@ const (
 		// api.reown.com (formerly api.web3modal.org) via fetch(), which is
 		// governed by connect-src, not script-src. cca-lite.coinbase.com is
 		// the Coinbase Wallet SDK amp endpoint loaded by AppKit internally.
-	"connect-src 'self' https://coston2-api.flare.network https://flare-api.flare.network https://songbird-api.flare.network https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org https://api.reown.com https://api.web3modal.org https://cca-lite.coinbase.com https://*.reown.com; " +
+		"connect-src 'self' %RPC_ORIGINS% https://rpc.walletconnect.com https://*.walletconnect.com https://*.walletconnect.org wss://relay.walletconnect.com wss://*.walletconnect.com wss://relay.walletconnect.org wss://*.walletconnect.org wss://www.walletlink.org https://api.reown.com https://api.web3modal.org https://cca-lite.coinbase.com https://*.reown.com; " +
 		// worker-src: blob workers needed by WalletConnect SDK crypto relay.
-	"worker-src 'self' blob:; " +
+		"worker-src 'self' blob:; " +
 		// frame-src: WalletConnect + Reown verify iframes + explorer panel.
-	"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://*.reown.com; " +
+		"frame-src 'self' https://*.walletconnect.com https://*.walletconnect.org https://verify.walletconnect.com https://verify.walletconnect.org https://*.reown.com; " +
 		"frame-ancestors 'none'; " +
 		"base-uri 'self'; " +
 		"form-action 'self'; " +
@@ -96,25 +97,28 @@ const (
 // Tighten the CSP if your deployment uses self-hosted bundles exclusively;
 // the connect-src list is the only path that touches third-party origins.
 func securityHeaders() fiber.Handler {
+	// connect-src names only THIS network's RPC origins (the configured
+	// rotation), not every chain we know about: one origin == one chain.
+	csp := strings.Replace(cspHeader, "%RPC_ORIGINS%", rpcOrigins(), 1)
 	return func(c *fiber.Ctx) error {
-		c.Set("Content-Security-Policy", cspHeader)
+		c.Set("Content-Security-Policy", csp)
 		c.Set("Strict-Transport-Security", hstsHeader)
 		c.Set("X-Frame-Options", "DENY")
 		c.Set("X-Content-Type-Options", "nosniff")
 		c.Set("Referrer-Policy", referrerPolicy)
 		c.Set("Permissions-Policy", permissionsPolicy)
 		// Cross-Origin-Opener-Policy: "same-origin-allow-popups" is the
-	// wallet-safe value. "same-origin" breaks Coinbase Wallet SDK +
-	// WalletConnect popup flows; omitting COOP entirely works but leaks
-	// the opener relationship to cross-origin navigations. This value
-	// isolates the browsing context from cross-origin openers while
-	// still allowing the wallet popup window to access its opener.
-	c.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
-	// Cross-Origin-Resource-Policy: "same-origin" prevents cross-origin
-	// documents from embedding our resources (images, scripts, styles).
-	// The CSP frame-ancestors 'none' already blocks framing, but CORP
-	// adds a defence-in-depth layer at the resource-fetch level.
-	c.Set("Cross-Origin-Resource-Policy", "same-origin")
+		// wallet-safe value. "same-origin" breaks Coinbase Wallet SDK +
+		// WalletConnect popup flows; omitting COOP entirely works but leaks
+		// the opener relationship to cross-origin navigations. This value
+		// isolates the browsing context from cross-origin openers while
+		// still allowing the wallet popup window to access its opener.
+		c.Set("Cross-Origin-Opener-Policy", "same-origin-allow-popups")
+		// Cross-Origin-Resource-Policy: "same-origin" prevents cross-origin
+		// documents from embedding our resources (images, scripts, styles).
+		// The CSP frame-ancestors 'none' already blocks framing, but CORP
+		// adds a defence-in-depth layer at the resource-fetch level.
+		c.Set("Cross-Origin-Resource-Policy", "same-origin")
 		return c.Next()
 	}
 }
@@ -479,16 +483,16 @@ func tieredRateLimitMiddleware(rl *ratelimit.Limiter, keyPrefix string, limit in
 // aware resolution as the rate limiter, instead of calling c.IP() directly.
 //
 // Trust hierarchy (top wins):
-//   1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header;
-//      mathematically unspoofable from the outside because Fly's edge
-//      strips any inbound copy.
-//   2. RFC 7239 Forwarded `for=` — modern standard; bracket-stripped
-//      IPv6 + port-stripped form.
-//   3. X-Forwarded-For rightmost — legacy; right-trusted only when
-//      behind a known reverse proxy (and the previous rightmost-XFF
-//      pattern that this method replaces is exactly the bypass the
-//      audit fix closes).
-//   4. fasthttp's RemoteAddr — last-resort so the bucket key isn't blank.
+//  1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header;
+//     mathematically unspoofable from the outside because Fly's edge
+//     strips any inbound copy.
+//  2. RFC 7239 Forwarded `for=` — modern standard; bracket-stripped
+//     IPv6 + port-stripped form.
+//  3. X-Forwarded-For rightmost — legacy; right-trusted only when
+//     behind a known reverse proxy (and the previous rightmost-XFF
+//     pattern that this method replaces is exactly the bypass the
+//     audit fix closes).
+//  4. fasthttp's RemoteAddr — last-resort so the bucket key isn't blank.
 //
 // Audit: `clientIpSpoof` 🟠 P1.
 func ClientIP(c *fiber.Ctx) string {
@@ -531,10 +535,11 @@ func ClientIP(c *fiber.Ctx) string {
 }
 
 // stripAddrPort normalises RFC-7239 `for=` payloads:
-//   • `[2001:db8::1]:443` → `2001:db8::1` (bracketed IPv6 with :port)
-//   • `2001:db8::1`       → `2001:db8::1` (bare IPv6, kept)
-//   • `192.0.2.1:443`     → `192.0.2.1` (IPv4 with :port)
-//   • `192.0.2.1`         → `192.0.2.1` (bare IPv4, kept)
+//   - `[2001:db8::1]:443` → `2001:db8::1` (bracketed IPv6 with :port)
+//   - `2001:db8::1`       → `2001:db8::1` (bare IPv6, kept)
+//   - `192.0.2.1:443`     → `192.0.2.1` (IPv4 with :port)
+//   - `192.0.2.1`         → `192.0.2.1` (bare IPv4, kept)
+//
 // Quoted-obfuscation forms (`for="_foo"`) are stripped by the caller.
 func stripAddrPort(id string) string {
 	if id == "" {
@@ -619,3 +624,20 @@ func bodyDecode(c *fiber.Ctx, v any) error {
 
 // ── Reindex Collection ──────────────────────────────────────────────────────
 
+// rpcOrigins renders the configured RPC rotation as CSP origins.
+func rpcOrigins() string {
+	seen := map[string]bool{}
+	var out []string
+	for _, raw := range config.C.RPCURLs {
+		u, err := url.Parse(raw)
+		if err != nil || u.Host == "" {
+			continue
+		}
+		o := u.Scheme + "://" + u.Host
+		if !seen[o] {
+			seen[o] = true
+			out = append(out, o)
+		}
+	}
+	return strings.Join(out, " ")
+}

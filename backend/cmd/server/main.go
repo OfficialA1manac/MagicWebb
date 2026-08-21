@@ -90,8 +90,12 @@ func main() {
 	// Verify deployment config matches env vars. Prevents the indexer from
 	// mixing events from old and new contract instances after a redeploy.
 	// Creates the initial row on first deploy; refuses to start on mismatch.
-	if err := verifyDeploymentConfig(ctx, pool); err != nil {
-		log.Fatal().Err(err).Msg("deployment config mismatch — contract addresses changed since last deploy; truncate on-chain data first")
+	// Skipped in read-only network mode: recording empty addresses would make
+	// the eventual real deploy look like a mismatch on an empty database.
+	if config.C.ContractsDeployed() {
+		if err := verifyDeploymentConfig(ctx, pool); err != nil {
+			log.Fatal().Err(err).Msg("deployment config mismatch — contract addresses changed since last deploy; truncate on-chain data first")
+		}
 	}
 
 	// Optional read-replica pool for query offloading. When READ_POOL_URL is
@@ -245,21 +249,29 @@ func main() {
 			}, nil
 		})
 	indexerDone := make(chan struct{})
-	go func() {
-		defer close(indexerDone)
-		log.Info().Msg("indexer starting")
-		runner.Run(ctx)
-		log.Info().Msg("indexer stopped")
-	}()
+	if config.C.ContractsDeployed() {
+		go func() {
+			defer close(indexerDone)
+			log.Info().Msg("indexer starting")
+			runner.Run(ctx)
+			log.Info().Msg("indexer stopped")
+		}()
 
-	// Collection badge sweeper. Recomputes `collections.verified` from
-	// supportsInterface plus resolved metadata — the on-chain replacement for
-	// the admin curation removed in 3d2010d.
-	go func() {
-		log.Info().Msg("collection verifier starting")
-		verifier.New(q, eth).Run(ctx)
-		log.Info().Msg("collection verifier stopped")
-	}()
+		// Collection badge sweeper. Recomputes `collections.verified` from
+		// supportsInterface plus resolved metadata — the on-chain replacement for
+		// the admin curation removed in 3d2010d.
+		go func() {
+			log.Info().Msg("collection verifier starting")
+			verifier.New(q, eth).Run(ctx)
+			log.Info().Msg("collection verifier stopped")
+		}()
+	} else {
+		// Read-only network mode (no contracts on this chain yet): nothing to
+		// index, nothing to keep. The HTTP layer still serves so the network
+		// exists for the switcher and health checks.
+		close(indexerDone)
+		log.Warn().Uint64("chain_id", config.C.ChainID).Msg("read-only network mode: indexer, keepers and verifier are idle (no contract addresses)")
+	}
 
 	// Fiber app. ProxyHeader=Fly-Client-IP plus EnableTrustedProxyCheck=false
 	// makes `c.IP()` (and our api.rest clientIP helper) trust Fly.io's

@@ -91,10 +91,10 @@ func TestNewRedisOrMemory_EmptyURL(t *testing.T) {
 }
 
 func TestNewRedisOrMemory_ConfiguredURL_FallbackToMemory(t *testing.T) {
-	// The default build (without -tags redis) always returns *Cache
-	// regardless of the URL value, because newRedisClient returns an error.
-	// With -tags redis, this test would still pass on connection failure.
-	c := NewRedisOrMemory("redis://localhost:6379", 10*time.Second)
+	// Redis support is always compiled in; an unreachable server must fall
+	// back to the in-memory cache. Port 1 is closed on every sane host (a dev
+	// box may well have a real Redis on 6379).
+	c := NewRedisOrMemory("redis://127.0.0.1:1", 10*time.Second)
 	if c == nil {
 		t.Fatal("expected non-nil cache")
 	}

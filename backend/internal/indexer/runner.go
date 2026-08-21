@@ -83,9 +83,9 @@ type Runner struct {
 
 	// KPR-2: cached gas price to avoid repeated SuggestGasPrice RPC calls.
 	// Only the leader refreshes this; followers reuse the cached value.
-	gasPriceMu        sync.Mutex
-	cachedGasPrice    *big.Int
-	lastGasPriceAt    time.Time
+	gasPriceMu     sync.Mutex
+	cachedGasPrice *big.Int
+	lastGasPriceAt time.Time
 
 	// KPR-3: tracks the last nonce sent per keeper address to avoid
 	// re-submitting identical transactions that are already pending.
@@ -256,7 +256,27 @@ func (r *Runner) Run(ctx context.Context) {
 // and near-zero reorg risk past 2 blocks; Coston2 (testnet) can reorg deeper.
 // 12 blocks ≈ 24 seconds of finalisation on Coston2 — conservative for all
 // three target chains.
+//
+// The value now comes from the chain profile (internal/chain/profile):
+// 3 on Coston2, 2 on Songbird/Flare. This constant is the fallback when a
+// Runner is built without config (tests).
 const reorgSafetyBlocks = 12
+
+// reorgSafety returns the profile's finality depth for this chain.
+func (r *Runner) reorgSafety() uint64 {
+	if r.cfg != nil && r.cfg.Profile.ReorgSafety > 0 {
+		return r.cfg.Profile.ReorgSafety
+	}
+	return reorgSafetyBlocks
+}
+
+// pollInterval returns the head-poll cadence for this chain.
+func (r *Runner) pollInterval() time.Duration {
+	if r.cfg != nil && r.cfg.Profile.PollInterval > 0 {
+		return r.cfg.Profile.PollInterval
+	}
+	return 2 * time.Second
+}
 
 // headLag keeps the indexer this many blocks behind the reported head: cheap
 // reorg tolerance, and tolerance for a mid-iteration failover to an endpoint
@@ -394,7 +414,7 @@ func (r *Runner) runWatcher(ctx context.Context) {
 	}
 	backfilled := false
 
-	ticker := time.NewTicker(2 * time.Second)
+	ticker := time.NewTicker(r.pollInterval())
 	defer ticker.Stop()
 	for {
 		select {
@@ -406,7 +426,7 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				log.Warn().Err(err).Msg("watcher: block poll failed")
 				continue
 			}
-			if head <= reorgSafetyBlocks {
+			if head <= r.reorgSafety() {
 				continue
 			}
 			target := head - headLag
@@ -427,10 +447,10 @@ func (r *Runner) runWatcher(ctx context.Context) {
 							Str("expected_parent", lastBlockHash.Hex()).
 							Str("actual_parent", targetHeader.ParentHash.Hex()).
 							Uint64("head", head).
-							Uint64("rewind_to", lastBlock-reorgSafetyBlocks).
+							Uint64("rewind_to", lastBlock-r.reorgSafety()).
 							Msg("watcher: reorg detected — rewinding indexer")
-						if lastBlock > reorgSafetyBlocks {
-							lastBlock -= reorgSafetyBlocks
+						if lastBlock > r.reorgSafety() {
+							lastBlock -= r.reorgSafety()
 						} else {
 							lastBlock = 0
 						}
@@ -469,8 +489,8 @@ func (r *Runner) runWatcher(ctx context.Context) {
 						Uint64("head", head).
 						Uint64("last_block", lastBlock).
 						Msg("watcher: chain continuity break — reorg detected before new range; rewinding")
-					if lastBlock > reorgSafetyBlocks {
-						lastBlock -= reorgSafetyBlocks
+					if lastBlock > r.reorgSafety() {
+						lastBlock -= r.reorgSafety()
 					} else {
 						lastBlock = 0
 					}
@@ -992,7 +1012,7 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				}
 				if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
 					log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
-					Msg("keeper: cancel-inactive tx receipt not confirmed; will retry on next tick")
+						Msg("keeper: cancel-inactive tx receipt not confirmed; will retry on next tick")
 					continue
 				}
 				log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: cancel-inactive confirmed")
@@ -1581,4 +1601,13 @@ func (r *Runner) waitMined(ctx context.Context, h common.Hash, timeout time.Dura
 		case <-time.After(3 * time.Second):
 		}
 	}
+}
+
+// tick returns the profile cadence when set, else the historical default.
+// Keeps test Runners (built with a nil/zero config) on their old timings.
+func (r *Runner) tick(fromProfile, fallback time.Duration) time.Duration {
+	if r.cfg != nil && fromProfile > 0 {
+		return fromProfile
+	}
+	return fallback
 }
