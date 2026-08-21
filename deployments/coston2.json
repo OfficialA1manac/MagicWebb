@@ -1,0 +1,27 @@
+{
+  "$schema": "./schema.json",
+  "network": "coston2",
+  "chainId": 114,
+  "status": "deployed",
+  "deployedAt": "2026-08-17",
+  "indexFromBlock": 32544000,
+  "contracts": {
+    "marketplace": "0x34b53209eC694Ce243e28606233CFc72D0673436",
+    "auctionHouse": "0x93627Ca0032bc1B8eE0D9134a7c9c4f74d97d04C",
+    "offerBook": "0x918bF8748c9950Dc6aDbB2796dE6DfFaf3f44d5E",
+    "marketplaceManager": "0xCb4424999B04f7e747cc33Aa3f99fdeB36Cd9E4F",
+    "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
+  },
+  "trackedCollections": ["0x832d74Cfbb4617B50C32cD110dfe16837A359B35"],
+  "rpc": {
+    "primary": "https://coston2-api.flare.network/ext/C/rpc",
+    "fallbacks": ["https://coston2.enosys.global/ext/C/rpc", "https://rpc.ankr.com/flare_coston2"]
+  },
+  "explorer": "https://coston2-explorer.flare.network",
+  "app": { "flyApp": "magicwebb", "origin": "https://magicwebb.fly.dev" },
+  "superseded": [
+    { "note": "v3 2026-06-10 set, still on-chain, no longer indexed", "marketplace": "0x06BF7BA62B51DCE7BE24acBdB906Af9ed8853906", "auctionHouse": "0xA890008cc572809f255934aD8c1De2994B015CBF", "offerBook": "0x53e27c0fEeA6ADb38D6D420c4CE009bc62cA89C1", "nft": "0xe96Afb7b664Ab90d74b778AdFE47D8342495807F" },
+    { "note": "v2 2026-06-10 set", "marketplace": "0x6E5d2332a30bE3aBC35a0dC795583a06cfedFc9C", "auctionHouse": "0xAF76199b6BB77fEB1E1D8541C30557f3231F6F5c", "offerBook": "0x9D38CB500551BfDD106CA8052C9Bfd146A5f6CbA", "marketplaceManager": "0xFDcAE06C12d5E54Ff3304B29C415F006B553627F" },
+    { "note": "e2e script set (pre-v2)", "marketplace": "0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37", "auctionHouse": "0x9452518e29DEA185dA392e16be03982c1511753C", "offerBook": "0x0C6EdB481BC73B4b817A2E7235B309276D703906" }
+  ]
+}

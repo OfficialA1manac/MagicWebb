@@ -24,11 +24,8 @@ dev: ## run backend (:8080) + Astro frontend (:4321) together
 	cd app && npm run dev & FRONTEND_PID=$$!; \
 	wait $$BACKEND_PID $$FRONTEND_PID
 
-build: ## compile single binary -> bin/magicwebb (auto-rebuilds tailwind.css + appkit-bridge first)
+build: ## compile single binary -> bin/magicwebb (Astro UI is built separately: cd app && npm run build)
 	@mkdir -p bin
-	cd backend && go run ./cmd/buildtailwindcss || echo 'warning: tailwind rebuild failed (offline?); using committed tailwind.css'
-	cd app && npm run build:bridge
-	@cp app/dist/static/appkit-bridge.js frontend/static/appkit-bridge.js
 	$(eval MW_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown))
 	cd backend && go build -ldflags "-X github.com/OfficialA1manac/MagicWebb/backend/internal/api.MWServerBuildSHA=$(MW_GIT_SHA)" -o ../$(BINARY) $(SERVER:./backend/%=./%)
 	@echo "  built: $(BINARY)  sha=$(MW_GIT_SHA)"
@@ -73,7 +70,7 @@ load-addrs: ## sync deployed contract addresses into .env
 
 regen-abi: ## regenerate wallet.js ABIs from forge build
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
-	@echo "  ABIs embedded in frontend/static/wallet.js - update manually if needed"
+	@echo "  ABIs live in app/src/lib/abi/ (P1) - regenerate from contracts/out"
 
 # ---- Zig Accelerated Libraries (sha256, keccak256, image sniffing) --------
 
@@ -139,6 +136,9 @@ check-test-files: ## fail if .test.* files exist in app/src/pages/
 
 test: ## run Go test suite with the race detector
 	cd backend && go test ./... -race -count=1 -timeout 120s
+
+check-deployments: ## validate deployments/*.json and find stray addresses
+	bash tools/check-deployments.sh
 
 check-fly-sync: ## verify magicwebb.fly.dev X-MW-Build-SHA matches origin/main
 	@./tools/check-fly-sync.sh

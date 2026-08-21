@@ -1,15 +1,17 @@
 #!/usr/bin/env bash
-# LIVE Coston2 end-to-end playthrough against the v2 deployment, with the
+# LIVE Coston2 end-to-end playthrough against the live deployment (deployments/coston2.json), with the
 # backend's keeper handling settlement/refunds AUTONOMOUSLY (this script never
 # calls settle/refundLosers — it only watches them happen).
 # Run AFTER the backend is up with KEEPER_KEY set.
 set -euo pipefail
 
 RPC="${RPC:-https://coston2-api.flare.network/ext/C/rpc}"
-MP=0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37
-AH=0x9452518e29DEA185dA392e16be03982c1511753C
-OB=0x0C6EdB481BC73B4b817A2E7235B309276D703906
-NFT="${NFT_ADDR:-0xe96Afb7b664Ab90d74b778AdFE47D8342495807F}"
+# Addresses: SOURCE OF TRUTH is deployments/coston2.json (live set, 2026-08-17).
+DEP="$(dirname "$0")/../../deployments/coston2.json"
+MP="${MARKETPLACE_ADDR:-$(jq -r .contracts.marketplace "$DEP")}"
+AH="${AUCTION_ADDR:-$(jq -r .contracts.auctionHouse "$DEP")}"
+OB="${OFFERBOOK_ADDR:-$(jq -r .contracts.offerBook "$DEP")}"
+NFT="${NFT_ADDR:-$(jq -r .contracts.nft "$DEP")}"
 
 PK_SELLER=$DEPLOYER_KEY                      # deployer doubles as seller (testnet)
 # ── WARNING: Do not hardcode private keys in this file. ────────────

@@ -359,7 +359,7 @@ async function initAppKit(): Promise<void> {
       // own host, and announcing magicwebb.fly.dev from the Songbird or Flare
       // app is exactly the origin mismatch the relay rejects (see the init
       // failure path in frontend/static/wallet.js). icons must be absolute for
-      // the same reason. Matches appkit-bridge.js and wallet.js.
+      // the same reason. Same rule the legacy wallet.js followed.
       metadata: {
         name: 'MagicWebb',
         description: 'Non-custodial NFT marketplace on ' + targetChain.name,

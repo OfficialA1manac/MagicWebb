@@ -166,53 +166,44 @@ jobs:
 
       - name: Flatten + verify each contract on FlareScan
         # Verifies deployed contracts on FlareScan (blockscout) using forge
-        # verify-contract. Contract addresses and chain ID come from GitHub
-        # repository variables (vars.*) — the same source as the fly.toml
-        # generation step. No addresses are hardcoded in this file.
+        # verify-contract. Addresses and chain ID come from
+        # deployments/<network>.json — the repo's single source of truth —
+        # never from repository variables, so a tag can only verify what the
+        # repo says is deployed.
         #
         # EXPLORER_API_KEY is a GitHub Actions secret. FlareScan requires
         # an API key obtained from https://coston2-explorer.flare.network/.
+        working-directory: contracts
         env:
           EXPLORER_API_KEY: ${{ secrets.EXPLORER_API_KEY }}
-          CHAIN_ID: ${{ vars.CHAIN_ID }}
-          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
-          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
-          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
-          NFT_ADDR: ${{ vars.NFT_ADDR }}
-          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
+          NETWORK: ${{ vars.NETWORK }}
         run: |
           set -euo pipefail
-
-          # Map chain ID to explorer URL
-          case "$CHAIN_ID" in
-            14) EXPLORER_URL="https://flare-explorer.flare.network" ;;
-            19) EXPLORER_URL="https://songbird-explorer.flare.network" ;;
-            114) EXPLORER_URL="https://coston2-explorer.flare.network" ;;
-            *) echo "Unknown CHAIN_ID=$CHAIN_ID"; exit 1 ;;
-          esac
-
+          NETWORK="${NETWORK:-coston2}"
+          DEP="../deployments/${NETWORK}.json"
+          [ -f "$DEP" ] || { echo "::error::no deployments/${NETWORK}.json"; exit 1; }
+          if [ "$(jq -r .status "$DEP")" != "deployed" ]; then
+            echo "${NETWORK} has no deployed contracts (deployments/${NETWORK}.json status=not-deployed); nothing to verify."
+            exit 0
+          fi
+          CHAIN_ID=$(jq -r .chainId "$DEP")
+          EXPLORER_URL=$(jq -r .explorer "$DEP")
           echo "Verifying contracts on $EXPLORER_URL (chain $CHAIN_ID)..."
 
           verify() {
-            local name="$1" addr="$2" file="$3"
+            local name="$1" key="$2" file="$3"
+            local addr; addr=$(jq -r ".contracts.${key}" "$DEP")
             echo "--- Verifying $name at $addr ---"
             forge flatten "src/$file" -o "/tmp/${name}_flat.sol"
-            forge verify-contract \
-              "$addr" \
-              "src/$file" \
-              --chain "$CHAIN_ID" \
-              --verifier blockscout \
-              --verifier-url "${EXPLORER_URL}/api/" \
-              --etherscan-api-key "$EXPLORER_API_KEY" \
-              --watch || echo "⚠  $name verification skipped or failed (check explorer)"
+            forge verify-contract               "$addr"               "src/$file"               --chain "$CHAIN_ID"               --verifier blockscout               --verifier-url "${EXPLORER_URL}/api/"               --etherscan-api-key "$EXPLORER_API_KEY"               --watch || echo "⚠  $name verification skipped or failed (check explorer)"
           }
 
-          # Verify marketplace contracts (all are MarketplaceCore derivations)
-          verify "MarketplaceManager" "$MARKETPLACE_MANAGER_ADDR" "MarketplaceManager.sol"
-          verify "Marketplace"       "$MARKETPLACE_ADDR" "Marketplace.sol"
-          verify "AuctionHouse"      "$AUCTION_ADDR" "AuctionHouse.sol"
-          verify "OfferBook"         "$OFFERBOOK_ADDR" "OfferBook.sol"
-          verify "MagicWebbNFT"      "$NFT_ADDR" "MagicWebbNFT.sol"
+          # The NFT at contracts.nft is a third-party/test collection, not a
+          # contract in this repo (src/MagicWebbNFT.sol was removed in 3867c0c).
+          verify "MarketplaceManager" "marketplaceManager" "MarketplaceManager.sol"
+          verify "Marketplace"       "marketplace"        "Marketplace.sol"
+          verify "AuctionHouse"      "auctionHouse"       "AuctionHouse.sol"
+          verify "OfferBook"         "offerBook"          "OfferBook.sol"
 
   deploy:
     name: fly deploy --remote-only --strategy rolling
@@ -262,6 +253,34 @@ jobs:
         run: |
           echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
           echo "  stamped backend/internal/api/build_sha_gen.go → $GITHUB_SHA"
+      - name: Check repository variables against deployments/<network>.json
+        # deployments/ is the source of truth. CI fills fly.toml from
+        # repository variables (so secrets never land in the repo), but those
+        # variables must agree with the committed record or the deploy stops.
+        env:
+          NETWORK: ${{ vars.NETWORK }}
+          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
+          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
+          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
+          NFT_ADDR: ${{ vars.NFT_ADDR }}
+          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
+          INDEX_FROM_BLOCK: ${{ vars.INDEX_FROM_BLOCK }}
+        run: |
+          set -euo pipefail
+          bash tools/check-deployments.sh
+          NETWORK="${NETWORK:-coston2}"; DEP="deployments/${NETWORK}.json"
+          lc() { echo "$1" | tr 'A-F' 'a-f'; }
+          fail=0
+          for pair in marketplace:MARKETPLACE_ADDR auctionHouse:AUCTION_ADDR offerBook:OFFERBOOK_ADDR nft:NFT_ADDR marketplaceManager:MARKETPLACE_MANAGER_ADDR; do
+            key="${pair%%:*}"; var="${pair##*:}"
+            want=$(lc "$(jq -r ".contracts.$key" "$DEP")"); have=$(lc "${!var:-}")
+            if [ "$want" != "$have" ]; then echo "::error::vars.$var=${!var:-<unset>} but $DEP says $want"; fail=1; fi
+          done
+          want=$(jq -r .indexFromBlock "$DEP")
+          [ "$want" = "${INDEX_FROM_BLOCK:-}" ] || { echo "::error::vars.INDEX_FROM_BLOCK=${INDEX_FROM_BLOCK:-<unset>} but $DEP says $want"; fail=1; }
+          [ $fail = 0 ] && echo "repository variables match $DEP"
+          exit $fail
+
       - name: Generate fly.toml from template
         # fly.toml is gitignored and never committed. It is generated here from
         # the public per-network template (fly.<network>.toml.example) by

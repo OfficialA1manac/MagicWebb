@@ -22,11 +22,9 @@ RUN npm install --legacy-peer-deps
 # Copy source files
 COPY app/ ./
 
-# Build Astro + AppKit bridge → static output to /astro/dist/
-# `npm run build` runs `astro build` first (clears dist/, builds pages),
-# then `npm run build:bridge` (appends the self-hosted AppKit bundle to
-# dist/static/). Astro clears dist/ on every build, so the bridge MUST be
-# built after Astro. The Go stage copies the bridge from here (next stage).
+# Build Astro → static output to /astro/dist/
+# `npm run build` runs `astro build` (clears dist/, builds pages).
+# No separate bridge bundle: AppKit ships inside the WalletConnect island.
 RUN npm run build
 
 # ── Go builder ───────────────────────────────────────────────────────────────────
@@ -41,23 +39,12 @@ WORKDIR /src
 
 # Copy go.mod files first (layer caching)
 COPY backend/go.mod backend/go.sum ./backend/
-COPY frontend/go.mod ./frontend/
 
-# Download backend modules (frontend has zero external deps)
+# Download backend modules
 RUN cd backend && go mod download
 
 # Copy all source files
 COPY backend/ ./backend/
-COPY frontend/ ./frontend/
-
-# ── Wire self-hosted AppKit bridge from Astro stage ──
-# The bridge is built by `npm run build:bridge` (from the astro-build stage)
-# and output to /astro/dist/static/appkit-bridge.js. The Go embed
-# (frontend/embed.go) expects it at frontend/static/appkit-bridge.js, so we
-# copy it here BEFORE go build. If the file doesn't exist (bridge build
-# failed), this COPY fails the build — we WANT a hard failure because the
-# self-hosted bridge is required for wallet pairing on the HTMX pages.
-COPY --from=astro-build /astro/dist/static/appkit-bridge.js ./frontend/static/
 
 # ── Install Zig compiler for zigmedia acceleration ──
 # Download Zig 0.13.0 official release (Linux x86_64) — the same version

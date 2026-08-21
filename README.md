@@ -73,7 +73,8 @@ backend/
     media/        IPFS/ar:// URI resolution + SSRF-safe fetcher
     sse/          Real-time event hub
     ui/           Embedded templates + static assets (HTMX/Alpine/ethers/wallet.js)
-docs/             Project documentation (user guide, whitepaper, FAQ)
+docs/             Ops docs (deploy, checklist, monitoring, immutability); user docs live in app/src/pages/docs
+deployments/      Per-network contract addresses — the single source of truth
 ```
 
 ## Prerequisites
@@ -182,11 +183,17 @@ See [`docs/DEPLOY_FLY.md`](docs/DEPLOY_FLY.md) for Fly.io deployment instruction
 
 ## Documentation
 
-See [`docs/`](docs/):
-- **`USER_GUIDE.md`** — how to use the marketplace (list, bid, offer, buy)
-- **`WHITEPAPER.md`** — economics & design philosophy
-- **`WHITEPAPER_TECHNICAL.md`** — technical architecture deep-dive
-- **`FAQ.md`** — frequently asked questions
+User docs are served by the app at `/docs` (source: `app/src/pages/docs/`):
+user guide, whitepaper, technical architecture, FAQ, token hooks, API (`/docs/api.yaml`).
+
+Operator docs in [`docs/`](docs/):
+- **`DEPLOY_FLY.md`** — one Fly app per network, CI flow, bringing up Songbird/Flare
+- **`DEPLOY_CHECKLIST.md`** — contract deployment gates (audit + multisig on mainnet)
+- **`IMMUTABILITY_TRANSITION.md`** — time-locked UUPS upgrades, role handover
+- **`MONITORING.md`** — health endpoints, metrics, alerts
+
+Contract addresses: [`deployments/`](deployments/) is the single source of truth.
+Migration numbering note: `backend/internal/db/migrations` skips 031 on purpose — never renumber goose files.
 
 ## License
 

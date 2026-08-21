@@ -88,13 +88,9 @@ jobs:
         run: |
           export LD_LIBRARY_PATH="$PWD/zigsha256:$PWD/zigcrypto:$PWD/zigsniff:$LD_LIBRARY_PATH"
           CGO_ENABLED=1 go test -tags zigmedia ./...
-      # `frontend` is its own Go module, so `go test ./...` inside backend/
-      # never reaches it. That gap let a template deleted in 3d2010d stay
-      # listed in pagePaths — template.Must would have panicked the server on
-      # startup, at deploy time, with the build green.
-      - name: Test (frontend module)
-        working-directory: frontend
-        run: go test ./...
+      - name: Check deployments/ source of truth
+        working-directory: .
+        run: bash tools/check-deployments.sh
 
   contracts:
     name: Contracts (Foundry)

@@ -49,7 +49,7 @@ The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or 
 
 **Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-Deploy scripts accept `CREATOR_ADDR` as the `feeRecipient`. After deploy, the `CONTRACT_ADMIN` role (managed via `MarketplaceManager`) is granted to a multisig, and the deployer must call `renounceRole` to complete the immutability transition — see [`IMMUTABILITY_TRANSITION.md`](../../docs/IMMUTABILITY_TRANSITION.md) for the exact sequence. No `FEE_BPS` variable exists — the rate is fixed in code.
+Deploy scripts accept `CREATOR_ADDR` as the `feeRecipient`. After deploy, the `CONTRACT_ADMIN` role (managed via `MarketplaceManager`) is granted to a multisig, and the deployer must call `renounceRole` to complete the immutability transition — see [`docs/IMMUTABILITY_TRANSITION.md`](https://github.com/OfficialA1manac/MagicWebb/blob/main/docs/IMMUTABILITY_TRANSITION.md) for the exact sequence. No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
