@@ -44,14 +44,12 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/keeper"
-	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/rpcpool"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/verifier"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
-	"github.com/OfficialA1manac/MagicWebb/frontend"
 	"google.golang.org/grpc/health/grpc_health_v1"
 )
 
@@ -1414,51 +1412,13 @@ func registerSLOHealthRoutes(app *fiber.App, q *db.Q, eth indexer.EthClient, get
 	})
 }
 
-// ── UI (HTMX pages + static) ──────────────────────────────────────────────────
+// ── UI (Astro static pages) ──────────────────────────────────────────────────
 
 func mountUI(app *fiber.App, q *db.Q, serverTimeMs *int64) {
-	// Initialize frontend templates with media URL function.
-	// Must happen before any template rendering.
-	frontend.Init(media.ProxyURL)
-
-	// Static files from embedded FS
-	mountStatic(app)
-
-	// Astro-built Svelte/React pages from app/dist/ at /app/* URL prefix.
-	// Set ASTRO_DIST_DIR env var to the build output path (defaults to
-	// "../app/dist" for dev; use "/app/dist" in the Docker image).
+	// Astro-built pages from app/dist/. This is the entire user-facing UI:
+	// the Go server renders no HTML of its own. Set ASTRO_DIST_DIR to the build
+	// output path ("../app/dist" for dev, "/app/dist" in the Docker image).
 	mountAstro(app)
-
-	// HTMX pages — server-rendered HTML
-	app.Get("/", uiHome(q))
-	app.Get("/listings", uiListings(q))
-	app.Get("/auctions", uiAuctions(q))
-	app.Get("/auction/:id", uiAuctionDetail(q))
-	app.Get("/offers", uiOffers(q))
-	app.Get("/profile/:addr", uiProfile(q))
-	// /profile (no addr) — rescue route. Resolves to /profile/<own addr>
-	// when a valid SIWE session cookie is present, else /listings. See
-	// uiProfileRedirect for the security rationale.
-	app.Get("/profile", uiProfileRedirect)
-	app.Get("/collection/:addr", uiCollection(q))
-	app.Get("/token/:addr/:id", uiToken(q))
-	app.Get("/search", uiSearch(q))
-	app.Get("/metrics", uiMetrics(q))
-	app.Get("/metrics/gas", uiGasMetrics(q))
-	app.Get("/docs", uiDocsIndex())
-	app.Get("/docs/:slug", uiDoc())
-
-	// HTMX partials (return HTML fragments for hx-get). New per-page live
-	// partials render the same data shape as their page handler so htmx
-	// can swap them into `[data-live]` outerHTML every 1s OR on the SSE
-	// event types each page subscribes to.
-	app.Get("/partials/listings", partialListings(q))
-	app.Get("/partials/auctions", partialAuctions(q))
-	app.Get("/partials/activity", partialActivity(q))
-	app.Get("/partials/token/:addr/:id", partialToken(q))
-	app.Get("/partials/auction/:id", partialAuctionDetail(q))
-	app.Get("/partials/offers", partialOffers(q))
-	app.Get("/partials/profile/:addr", partialProfile(q))
 
 	// v35: /api/v1/server-time moved to the rate-limited api group in rest.go.
 	// Previously registered on the bare app, bypassing rateLimitMiddleware entirely.

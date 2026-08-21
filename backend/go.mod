@@ -13,7 +13,6 @@ require (
 	connectrpc.com/connect v1.20.0
 	connectrpc.com/grpcreflect v1.3.0
 	github.com/99designs/gqlgen v0.17.66
-	github.com/OfficialA1manac/MagicWebb/frontend v0.0.0
 	github.com/andybalholm/brotli v1.1.1
 	github.com/deepteams/webp v1.2.7
 	github.com/ethereum/go-ethereum v1.17.0
@@ -34,7 +33,6 @@ require (
 	github.com/testcontainers/testcontainers-go/modules/redis v0.43.0
 	github.com/valyala/fasthttp v1.58.0
 	github.com/vektah/gqlparser/v2 v2.5.22
-	github.com/yuin/goldmark v1.8.2
 	go.opentelemetry.io/otel v1.44.0
 	go.opentelemetry.io/otel/exporters/otlp/otlptrace/otlptracegrpc v1.44.0
 	go.opentelemetry.io/otel/sdk v1.44.0
