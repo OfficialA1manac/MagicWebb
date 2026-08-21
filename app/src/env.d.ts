@@ -1,5 +1,6 @@
 /// <reference types="astro/client" />
 /// <reference types="vite/client" />
+/// <reference types="svelte" />
 
 // ── Server-injected window globals ──────────────────────────────────────────
 // The Go backend injects these via layout.html / Astro page templates so the
@@ -34,4 +35,16 @@ interface Window {
   __MW_APPKIT_OPEN__?: () => void;
   __MW_APPKIT_DISCONNECT__?: () => void;
   __MW_APPKIT_READY__?: boolean;
+
+  // ── Multi-network ────────────────────────────────────────────────────────
+  /** chainId=origin,… list of sibling deployments (mirrors backend NETWORK_URLS). */
+  MW_NETWORK_URLS?: string;
+
+  // ── Typed runtime bridges (app/src/lib) ──────────────────────────────────
+  /** wagmi Config published by WalletConnect.tsx; consumed by lib/tx/client.ts. */
+  __MW_WAGMI_CONFIG__?: import('@wagmi/core').Config;
+  /** Shared WebSocket singleton (lib/ws/client.ts). */
+  __MW_WS__?: import('./lib/ws/client').MwSocket;
+  /** The page-script API installed by MwRuntime.svelte (lib/mw.ts). */
+  MW?: import('./lib/mw').MwApi;
 }

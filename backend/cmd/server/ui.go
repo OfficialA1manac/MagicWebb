@@ -171,6 +171,7 @@ window.MW_WC_PROJECT_ID='%s';
 window.MW_MARKETPLACE='%s';
 window.MW_AUCTION='%s';
 window.MW_OFFERBOOK='%s';
+window.MW_NETWORK_URLS='%s';
 </script>`,
 		config.C.ChainID,
 		jsStringEscape(config.C.RPCURL),
@@ -181,7 +182,21 @@ window.MW_OFFERBOOK='%s';
 		jsStringEscape(config.C.MarketplaceAddr),
 		jsStringEscape(config.C.AuctionAddr),
 		jsStringEscape(config.C.OfferBookAddr),
+		jsStringEscape(networkURLs()),
 	)
+}
+
+// networkURLs renders config.Networks back into the NETWORK_URLS wire format
+// (chainID=origin,…) so the browser knows which sibling deployments exist —
+// the wrong-network banner links to them, the switcher greys out the rest.
+func networkURLs() string {
+	parts := make([]string, 0, len(config.C.Networks))
+	for _, n := range config.C.Networks {
+		if n.URL != "" {
+			parts = append(parts, fmt.Sprintf("%d=%s", n.ChainID, n.URL))
+		}
+	}
+	return strings.Join(parts, ",")
 }
 
 // sendHTMLWithConfig serves an Astro-built HTML file with the server's

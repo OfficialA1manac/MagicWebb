@@ -351,6 +351,11 @@ async function initAppKit(): Promise<void> {
   try {
     const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
+    // Publish for the non-React world (Astro page scripts, Svelte islands):
+    // app/src/lib/tx/client.ts reads window.__MW_WAGMI_CONFIG__ and waits on
+    // the mw-wagmi-ready event. One wagmi config == one wallet session.
+    window.__MW_WAGMI_CONFIG__ = adapter.wagmiConfig;
+    window.dispatchEvent(new CustomEvent('mw-wagmi-ready'));
     createAppKit({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- chains matches AppKitNetwork structurally but type defs differ
       adapters: [adapter], networks: chains as any, defaultNetwork: targetAppKitNetwork, projectId,

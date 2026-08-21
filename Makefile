@@ -68,9 +68,9 @@ load-addrs: ## sync deployed contract addresses into .env
 	    echo "  $$k=$$v"; \
 	  done
 
-regen-abi: ## regenerate wallet.js ABIs from forge build
+regen-abi: ## regenerate app/src/lib/abi from forge build
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
-	@echo "  ABIs live in app/src/lib/abi/ (P1) - regenerate from contracts/out"
+	cd app && npm run gen:abi
 
 # ---- Zig Accelerated Libraries (sha256, keccak256, image sniffing) --------
 
