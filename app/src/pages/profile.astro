@@ -1,12 +1,14 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
+import RefundsPanel from '../components/RefundsPanel.svelte';
 ---
 
 <BaseLayout title="Profile" description="Your MagicWebb profile — NFTs, listings, auctions, and activity" activeNav="/profile">
   <WalletConnect slot="wallet" client:only="react" />
 
-  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
+  <section style="max-width:80rem;margin:0 auto;padding:1.5rem 1rem 3rem;">
+    <RefundsPanel client:load />
     <div id="profile-root">
       <!-- Loading skeleton -->
       <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);">
@@ -439,7 +441,7 @@ import WalletConnect from '../components/WalletConnect';
                 statusEl.style.display = 'none';
 
                 try {
-                  const res = await fetch('/api/v1/profile/'+encAddr, {
+                  const res = await (window.MW?window.MW.authFetch:fetch)('/api/v1/profile/'+encAddr, {
                 method: 'PUT',
                 headers: {
                   'Content-Type': 'application/json'

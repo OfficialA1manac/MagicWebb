@@ -72,8 +72,6 @@ gas-report.txt
 app/node_modules/
 app/dist/
 app/.astro/
-frontend/static/appkit-bridge.js
-frontend/static/svggen/
 
 # ── Build artifacts ─────────────────────────────────────────────────────────
 bin/

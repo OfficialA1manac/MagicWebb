@@ -1,5 +1,7 @@
 <script>
   import { onMount } from 'svelte';
+  import { ws } from '../lib/ws/client';
+  import { ACTIVITY_CHANNEL } from '../lib/ws/channels';
   import NFTCard from './NFTCard.svelte';
 
   let items = [];
@@ -46,6 +48,16 @@
 
   onMount(() => {
     fetchListings();
+    // Live: any marketplace activity (sale, new listing, cancel) refreshes the
+    // grid, debounced so a burst of events is one refetch.
+    let t = null;
+    const offWs = ws.on('*', (_d, meta) => {
+      if (meta.type === 'notification') return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { t = null; fetchListings(); }, 400);
+    });
+    ws.subscribe(ACTIVITY_CHANNEL);
+    return () => { offWs(); ws.unsubscribe(ACTIVITY_CHANNEL); if (t) clearTimeout(t); };
   });
 
   function handleSortChange(e) {

@@ -6,6 +6,7 @@ import { runWithModal } from './stores/txmodal.svelte';
 import * as M from './tx/marketplace';
 import * as A from './tx/auction';
 import * as O from './tx/offers';
+import * as C from './tx/core';
 import type { TxResult } from './tx/runner';
 import { connectedAddress, connectedChainId, onAccountChange, requireWallet } from './tx/client';
 import { authFetch, authenticate, getSession, logout } from './auth/siwe';
@@ -66,6 +67,11 @@ export const MW = {
   withdrawRefund: (p: { amountWei?: string } = {}) => flow('Withdraw refund', undefined, false, (h) => A.withdrawRefund({ amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
   minimumTopUp: (p: { currentHighestWei: string; reserveWei: string; myCumulativeWei?: string }) =>
     A.minimumTopUp({ currentHighestWei: big(p.currentHighestWei), reserveWei: big(p.reserveWei), myCumulativeWei: big(p.myCumulativeWei ?? 0) }).toString(),
+
+  // ── refunds (all cores) ────────────────────────────────────────────────
+  pendingReturns: (who: string) => C.pendingReturns(addr(who)),
+  withdrawRefundFrom: (p: { core: string; label?: string; amountWei?: string }) =>
+    flow(`Withdraw refund${p.label ? ' · ' + p.label : ''}`, undefined, false, (h) => C.withdrawRefundFrom({ core: addr(p.core), label: p.label, amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
 
   // ── offers ─────────────────────────────────────────────────────────────
   isOfferEligible: (nft: string) => O.isOfferEligible(addr(nft)),
