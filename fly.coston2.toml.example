@@ -60,6 +60,10 @@ primary_region = "iad"
 [env]
   ENV = "production"
   HTTP_ADDR = ":8080"
+  # NETWORK_URLS (sibling deployments) is inserted here by CI from deployments/*.json.
+  # REDIS_URL: set via `fly secrets set` to share cache/rate-limit state across
+  # machines of THIS network. Unset = per-instance memory. Never share across networks.
+  # GRPC_PORT/GRPC_PEERS: enable when running 2+ machines (event mesh + keeper election).
 
   # ── Network identity (Coston2 testnet) ──
   CHAIN_ID = "114"

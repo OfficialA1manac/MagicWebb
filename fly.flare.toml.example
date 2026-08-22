@@ -60,6 +60,10 @@ primary_region = "iad"
 [env]
   ENV = "production"
   HTTP_ADDR = ":8080"
+  # NETWORK_URLS (sibling deployments) is inserted here by CI from deployments/*.json.
+  # REDIS_URL: set via `fly secrets set` to share cache/rate-limit state across
+  # machines of THIS network. Unset = per-instance memory. Never share across networks.
+  # GRPC_PORT/GRPC_PEERS: enable when running 2+ machines (event mesh + keeper election).
 
   # ── Network identity (Flare mainnet) ──
   CHAIN_ID = "14"
@@ -72,12 +76,10 @@ primary_region = "iad"
   FRONTEND_URL = "https://magicwebb-flare.fly.dev"
 
 
-  # ── Per-deployment values ──
-  # Contract addresses from forge deployment (lowercase).
-  # NOTHING IS DEPLOYED ON THIS CHAIN YET. eth_getCode returns 0x for every
-  # address below; contracts/script/DeployFlareMainnet.s.sol has never been run.
-  # Until it is, this app will start, index nothing, and serve empty pages —
-  # which is why the frontend network switcher marks it unavailable rather
+  # Contract addresses come from deployments/<network>.json (CI fills them).
+  # While that record says "not-deployed" they are filled with "" and the
+  # backend boots in READ-ONLY NETWORK MODE: UI + API serve, no indexer or
+  # keepers. The switcher on other networks links here only once deployed.
   # than linking to it.
   MARKETPLACE_ADDR = "CHANGE_ME_MARKETPLACE_ADDR"
   AUCTION_ADDR = "CHANGE_ME_AUCTION_ADDR"

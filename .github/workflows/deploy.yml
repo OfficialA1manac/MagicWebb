@@ -44,18 +44,24 @@
 #   FLY_API_TOKEN      — Fly API token with deploy scope.
 #                        Create once with:  fly tokens create deploy
 #   REOWN_PROJECT_ID   — WalletConnect/Reown project ID from cloud.reown.com
+#   WC_PROJECT_ID      — same id, injected into fly.toml [env] for the runtime
 #
 # Repository variables (GitHub → Settings → Secrets and variables → Actions → Variables):
-#   NETWORK            — coston2 | songbird | flare. Selects which
-#                        fly.<network>.toml.example is deployed. Unset =
-#                        coston2, the only network with contracts deployed.
-#   MARKETPLACE_ADDR, AUCTION_ADDR, OFFERBOOK_ADDR, NFT_ADDR, MARKETPLACE_MANAGER_ADDR
-#   TRACKED_COLLECTIONS, INDEX_FROM_BLOCK
+#   COSTON2_ENABLED    — default true.  } One Fly app per network; a network
+#   SONGBIRD_ENABLED   — default false. } deploys when its flag is "true".
+#   FLARE_ENABLED      — default false. } Enable only after the Fly app, Neon
+#                                         project and secrets for it exist.
 #
-# CHAIN_ID, RPC_URL, RPC_URLS, SIWE_DOMAIN and FRONTEND_URL are no longer
-# repository variables: they are properties of the network, not of a
-# deployment, so they live in the per-network template. Point an app at a
-# private RPC provider with `fly secrets set RPC_URL=...`, which overrides
+# Everything else a deploy needs (contract addresses, tracked collections,
+# index start block, RPC set, Fly app name, public origin) is read from
+# deployments/<network>.json — the repository's single source of truth —
+# so there is nothing per-network to maintain in GitHub settings. A network
+# whose record says "not-deployed" boots in read-only mode (UI + API, no
+# indexer) until its addresses are filled in.
+#
+# CHAIN_ID, RPC_URL, RPC_URLS, SIWE_DOMAIN and FRONTEND_URL are properties of
+# the network and live in the per-network template. Point an app at a
+# private RPC provider with `fly secrets set RPC_URL=<url>`, which overrides
 # the [env] value at runtime without putting the URL in a public repo.
 #
 # fly.toml is generated in CI from the selected template + the above
@@ -205,213 +211,141 @@ jobs:
           verify "AuctionHouse"      "auctionHouse"       "AuctionHouse.sol"
           verify "OfferBook"         "offerBook"          "OfferBook.sol"
 
-  deploy:
-    name: fly deploy --remote-only --strategy rolling
+  plan:
+    name: Which networks deploy
     needs: [test, frontend-lint]
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    timeout-minutes: 15
+    outputs:
+      networks: ${{ steps.pick.outputs.networks }}
+    steps:
+      - uses: actions/checkout@v4.2.0
+      - name: Pick enabled networks
+        # One Fly app per network. A network deploys when its repository
+        # variable <NET>_ENABLED is "true" (COSTON2_ENABLED defaults to true
+        # for the network that has always deployed). Everything else a deploy
+        # needs — addresses, tracked collections, index start block, RPCs,
+        # Fly app name — comes from deployments/<network>.json, the single
+        # source of truth, so there is nothing per-network to keep in sync in
+        # GitHub settings. A network whose JSON says "not-deployed" boots in
+        # read-only mode (UI + API, no indexer) — enable it only once its app,
+        # Neon project and secrets exist.
+        id: pick
+        env:
+          COSTON2_ENABLED: ${{ vars.COSTON2_ENABLED }}
+          SONGBIRD_ENABLED: ${{ vars.SONGBIRD_ENABLED }}
+          FLARE_ENABLED: ${{ vars.FLARE_ENABLED }}
+        run: |
+          set -euo pipefail
+          nets=()
+          [ "${COSTON2_ENABLED:-true}" = "true" ] && nets+=("coston2")
+          [ "${SONGBIRD_ENABLED:-false}" = "true" ] && nets+=("songbird")
+          [ "${FLARE_ENABLED:-false}" = "true" ] && nets+=("flare")
+          if [ ${#nets[@]} -eq 0 ]; then echo "::error::no network enabled (COSTON2_ENABLED/SONGBIRD_ENABLED/FLARE_ENABLED)"; exit 1; fi
+          json=$(printf '%s\n' "${nets[@]}" | jq -R . | jq -cs .)
+          echo "networks=$json" >> "$GITHUB_OUTPUT"
+          echo "deploying: $json"
+
+  deploy:
+    name: fly deploy (${{ matrix.network }})
+    needs: [plan]
+    runs-on: ubuntu-latest
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        network: ${{ fromJson(needs.plan.outputs.networks) }}
     steps:
       - uses: actions/checkout@v4.2.0
         with:
           fetch-depth: 0
       - name: Install flyctl
-        # v35: flyctl is a single static binary installed from fly.io.
-        # The install.sh script is served over HTTPS from Fly's CDN.
-        # Previous implementation used the same curl pipe (well-known
-        # Fly docs pattern). The supply-chain risk is bounded by HTTPS
-        # transport integrity and Fly's own CDN security. If flyctl
-        # needs stronger verification in the future, the recommended
-        # path is: pin a known-good flyctl binary checksum from a
-        # previous release and verify it here.
-        #
-        # The install is verified rather than assumed. `curl | sh` reports
-        # success even when the script only partially writes its binary, and
-        # the failure then surfaces one step later as a bare `exit 126`
-        # ("found but not executable") from `fly deploy` with nothing to go on
-        # — which is exactly how run 31955011882 died. Checking `flyctl
-        # version` here fails at the point of breakage, with the directory
-        # listing attached.
+        # flyctl is a single static binary served over HTTPS from Fly's CDN.
+        # The install is verified rather than assumed: `curl | sh` reports
+        # success even when the binary is only partially written.
         run: |
           set -euo pipefail
           curl -fsSL https://fly.io/install.sh | sh
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
-          echo "  contents of $HOME/.fly/bin:"
-          ls -l "$HOME/.fly/bin" || true
           chmod +x "$HOME/.fly/bin/"* 2>/dev/null || true
           if ! "$HOME/.fly/bin/flyctl" version; then
-            echo "::error title=flyctl install failed::flyctl is not executable after install.sh; see the directory listing above"
+            echo "::error title=flyctl install failed::flyctl is not executable after install.sh"
             exit 1
           fi
       - name: Stamp build SHA into Go source
-        # v38 — generate a Go source file with the commit SHA. Fly's remote
-        # builder may ignore in-place mutations of tracked files (like sed on
-        # the Dockerfile), but it CANNOT ignore a new file in the build context.
-        # This file's init() runs at startup and assigns MWServerBuildSHA,
-        # overriding the "unknown" default in rest.go. No build args, no mounts,
-        # no sed — just a Go file that compiles like any other.
+        # A generated Go file the remote builder cannot ignore; its init()
+        # sets MWServerBuildSHA, which /healthz echoes as X-MW-Build-SHA.
         run: |
           echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
-          echo "  stamped backend/internal/api/build_sha_gen.go → $GITHUB_SHA"
-      - name: Check repository variables against deployments/<network>.json
-        # deployments/ is the source of truth. CI fills fly.toml from
-        # repository variables (so secrets never land in the repo), but those
-        # variables must agree with the committed record or the deploy stops.
+      - name: Validate deployments/ (source of truth)
+        run: bash tools/check-deployments.sh
+      - name: Generate fly.toml from template + deployments/${{ matrix.network }}.json
+        # fly.toml is gitignored. It is generated from the public per-network
+        # template by replacing CHANGE_ME_* placeholders with values from the
+        # committed deployment record. Null addresses (status: not-deployed)
+        # become empty strings, which the backend treats as read-only mode.
         env:
-          NETWORK: ${{ vars.NETWORK }}
-          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
-          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
-          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
-          NFT_ADDR: ${{ vars.NFT_ADDR }}
-          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
-          INDEX_FROM_BLOCK: ${{ vars.INDEX_FROM_BLOCK }}
-        run: |
-          set -euo pipefail
-          bash tools/check-deployments.sh
-          NETWORK="${NETWORK:-coston2}"; DEP="deployments/${NETWORK}.json"
-          lc() { echo "$1" | tr 'A-F' 'a-f'; }
-          fail=0
-          for pair in marketplace:MARKETPLACE_ADDR auctionHouse:AUCTION_ADDR offerBook:OFFERBOOK_ADDR nft:NFT_ADDR marketplaceManager:MARKETPLACE_MANAGER_ADDR; do
-            key="${pair%%:*}"; var="${pair##*:}"
-            want=$(lc "$(jq -r ".contracts.$key" "$DEP")"); have=$(lc "${!var:-}")
-            if [ "$want" != "$have" ]; then echo "::error::vars.$var=${!var:-<unset>} but $DEP says $want"; fail=1; fi
-          done
-          want=$(jq -r .indexFromBlock "$DEP")
-          [ "$want" = "${INDEX_FROM_BLOCK:-}" ] || { echo "::error::vars.INDEX_FROM_BLOCK=${INDEX_FROM_BLOCK:-<unset>} but $DEP says $want"; fail=1; }
-          [ $fail = 0 ] && echo "repository variables match $DEP"
-          exit $fail
-
-      - name: Generate fly.toml from template
-        # fly.toml is gitignored and never committed. It is generated here from
-        # the public per-network template (fly.<network>.toml.example) by
-        # replacing CHANGE_ME_* placeholders with values from GitHub repository
-        # variables (vars.*) and secrets (secrets.*). This keeps real
-        # deployment config out of the public repository while preserving a
-        # readable, self-documenting template for contributors.
-        env:
-          # Selects which per-network template to deploy. Unset = coston2,
-          # which is the only network with contracts deployed — a missing
-          # variable must not silently deploy a chain that serves empty pages.
-          NETWORK: ${{ vars.NETWORK }}
-          MARKETPLACE_ADDR: ${{ vars.MARKETPLACE_ADDR }}
-          AUCTION_ADDR: ${{ vars.AUCTION_ADDR }}
-          OFFERBOOK_ADDR: ${{ vars.OFFERBOOK_ADDR }}
-          NFT_ADDR: ${{ vars.NFT_ADDR }}
-          MARKETPLACE_MANAGER_ADDR: ${{ vars.MARKETPLACE_MANAGER_ADDR }}
-          TRACKED_COLLECTIONS: ${{ vars.TRACKED_COLLECTIONS }}
-          INDEX_FROM_BLOCK: ${{ vars.INDEX_FROM_BLOCK }}
+          NETWORK: ${{ matrix.network }}
           WC_PROJECT_ID: ${{ secrets.WC_PROJECT_ID }}
         run: |
           set -euo pipefail
-          NETWORK="${NETWORK:-coston2}"
+          DEP="deployments/${NETWORK}.json"
           TEMPLATE="fly.${NETWORK}.toml.example"
-          if [ ! -f "$TEMPLATE" ]; then
-            echo "::error::NETWORK=${NETWORK} has no template ($TEMPLATE). Expected one of: coston2, songbird, flare."
-            exit 1
-          fi
-          # Validate BEFORE substituting. An unset repository variable arrives
-          # as the empty string, so sed would happily resolve the placeholder
-          # to nothing and leave a syntactically valid fly.toml with a blank
-          # contract address — which config.go accepts and the indexer then
-          # matches no events against. Checking the placeholders after the fact
-          # cannot see that; checking the inputs first can.
-          REQUIRED="MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR TRACKED_COLLECTIONS INDEX_FROM_BLOCK WC_PROJECT_ID"
-          MISSING=""
-          for key in $REQUIRED; do
-            eval "value=\${$key:-}"
-            [ -n "$value" ] || MISSING="$MISSING $key"
-          done
-          if [ -n "$MISSING" ]; then
-            echo "::error::missing repository variables/secrets for NETWORK=${NETWORK}:${MISSING}"
-            exit 1
+          [ -f "$DEP" ] || { echo "::error::no $DEP"; exit 1; }
+          [ -f "$TEMPLATE" ] || { echo "::error::no $TEMPLATE"; exit 1; }
+          [ -n "${WC_PROJECT_ID:-}" ] || { echo "::error::secret WC_PROJECT_ID is not set"; exit 1; }
+          j() { jq -r "$1 // empty" "$DEP"; }
+          STATUS=$(j .status)
+          MARKETPLACE_ADDR=$(j .contracts.marketplace)
+          AUCTION_ADDR=$(j .contracts.auctionHouse)
+          OFFERBOOK_ADDR=$(j .contracts.offerBook)
+          NFT_ADDR=$(j .contracts.nft)
+          MARKETPLACE_MANAGER_ADDR=$(j .contracts.marketplaceManager)
+          TRACKED_COLLECTIONS=$(jq -r '(.trackedCollections // []) | join(",")' "$DEP")
+          INDEX_FROM_BLOCK=$(j .indexFromBlock)
+          NETWORK_URLS=$(jq -r '[inputs | select(.status=="deployed") | "\(.chainId)=\(.app.origin)"] | join(",")' -n deployments/coston2.json deployments/songbird.json deployments/flare.json)
+          if [ "$STATUS" = "deployed" ]; then
+            for v in MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR INDEX_FROM_BLOCK; do
+              [ -n "${!v}" ] || { echo "::error::$DEP is 'deployed' but $v is empty"; exit 1; }
+            done
+          else
+            echo "::notice::${NETWORK} has no contracts (status=$STATUS) — deploying in read-only network mode"
+            INDEX_FROM_BLOCK=0
           fi
           cp "$TEMPLATE" fly.toml
-          for key in $REQUIRED; do
-            eval "value=\${$key}"
-            sed -i "s|CHANGE_ME_${key}|${value}|g" fly.toml
+          for key in MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR TRACKED_COLLECTIONS INDEX_FROM_BLOCK WC_PROJECT_ID; do
+            sed -i "s|CHANGE_ME_${key}|${!key}|g" fly.toml
           done
-          # Belt and braces: a placeholder the loop does not know about (a new
-          # key added to the template without a matching variable) still fails
-          # here rather than reaching production. Comments are skipped — the
-          # header documents the placeholder syntax and READ_POOL_URL is a
-          # commented-out optional key. `|| true` because the happy path is
-          # grep finding nothing, which exits 1 and would trip `set -e`;
-          # xargs collapses the remaining matches onto one line.
+          # NETWORK_URLS lists every deployed sibling so the switcher and the
+          # wrong-network banner can link to them. Inserted into [env] right
+          # after HTTP_ADDR (templates keep it out so forks do not advertise
+          # apps that may not exist).
+          sed -i "s|^  HTTP_ADDR = \":8080\"|  HTTP_ADDR = \":8080\"\n  NETWORK_URLS = \"${NETWORK_URLS}\"|" fly.toml
           UNRESOLVED=$(grep -v '^[[:space:]]*#' fly.toml | grep -o 'CHANGE_ME_[A-Z_]*' | sort -u | xargs || true)
-          if [ -n "$UNRESOLVED" ]; then
-            echo "::error::unresolved placeholders in generated fly.toml: ${UNRESOLVED}"
-            exit 1
-          fi
-          echo "  generated fly.toml from $TEMPLATE"
+          if [ -n "$UNRESOLVED" ]; then echo "::error::unresolved placeholders in fly.toml: ${UNRESOLVED}"; exit 1; fi
+          echo "  generated fly.toml for ${NETWORK} (app $(jq -r .app.flyApp "$DEP"), status ${STATUS})"
+          grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS)\s*=' fly.toml
       - name: Deploy (Fly remote build → rolling release)
-        # FLY_API_TOKEN scoped to this single step — narrower blast
-        # radius than a job-level env if a future step ever leaks $GITHUB_ENV.
-        # REOWN_PROJECT_ID passed as --build-arg so the Dockerfile can inject
-        # PUBLIC_REOWN_PROJECT_ID into the Astro build.
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
-        #
-        # Failures are echoed back as a check annotation. Actions log
-        # downloads need an authenticated token, but check-run annotations are
-        # public, so this is what makes a broken deploy diagnosable at all.
-        # Newlines are percent-encoded because workflow commands are one line.
         run: |
           set -o pipefail
-          echo "  deploying commit $GITHUB_SHA"
+          echo "  deploying commit $GITHUB_SHA to ${{ matrix.network }}"
           if fly deploy --remote-only --strategy rolling --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }} 2>&1 | tee /tmp/fly-deploy.log; then
             exit 0
           fi
-          echo "::error title=fly deploy failed::$(tail -c 3000 /tmp/fly-deploy.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
+          echo "::error title=fly deploy failed (${{ matrix.network }})::$(tail -c 3000 /tmp/fly-deploy.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
           exit 1
-      - name: Post-deploy smoke check (curl /healthz)
-        # Catches the class of failure where `fly deploy` succeeds
-        # (image pushes, machine replaces) but the new binary boots
-        # into a broken state — first deploy after a bad migration, a
-        # failing HTTP check inside the new release, etc.
+      - name: Post-deploy smoke check (/readyz)
         if: success()
         run: |
-          # v23.1.1 — bump 5s → 30s grace.
-          # `fly deploy --strategy rolling` keeps the OLD machine serving
-          # until the NEW machine's Fly-side health-check passes. During
-          # the swap window both machines can respond to /healthz; a
-          # shorter sleep can land the smoke check on the OLD machine,
-          # which then surfaces an OUT-OF-DATE SHA to the next sync-gate
-          # step (false-positive DRIFT, gates a healthy deploy RED).
-          # 30s comfortably covers the rolling-swap transition on a
-          # single-machine app — the OLD machine is destroyed and the
-          # NEW machine is the sole responder by the time the curl
-          # below fires. If you tighten this below ~25s, audit the
-          # rolling-strategy swap window on a real OpsGenie-style
-          # incident simulation first.
+          # rolling keeps the old machine serving until the new one passes its
+          # health check; 30s covers the swap on a single-machine app.
           sleep 30
-          curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors \
-            https://magicwebb.fly.dev/readyz
+          ORIGIN=$(jq -r .app.origin "deployments/${{ matrix.network }}.json")
+          curl -fsS --retry 10 --retry-delay 3 --retry-connrefused --retry-all-errors "$ORIGIN/readyz"
       - name: Post-deploy sync gate (origin/main SHA == live X-MW-Build-SHA)
-        # v23.1 — belt-and-braces against the v74-class deploy-drift bug.
-        # Closes the gap where Fly records a new release "complete" but
-        # the Docker layer cache pinned the previous binary's static
-        # assets — origin/main advances, the served wallet.js /
-        # tailwind.css / templates silently fall behind. The script
-        # reads Fly's X-MW-Build-SHA header (linker-injected via
-        # Makefile -ldflags) and asserts equality with origin/main. A
-        # mismatch exit-codes 1 and the deploy is marked failed in the
-        # GitHub Actions UI even though Fly itself reported success.
-        # This step is the contract that future drift can never again
-        # be silently observed by a user on the live URL.
-        #
-        # v23.1.1 — `if: always()` (not `if: success()`).
-        # If the previous `curl /healthz` smoke step failed (binary
-        # returned 503, network blip, machine still warming up), the
-        # original gating made the sync gate SKIP silently — so a deploy
-        # that broke the binary OR left Fly serving a stale-SHA binary
-        # both reported GREEN to the v23.1 series. Switching to
-        # `if: always()` means the drift check runs in every terminal
-        # state: success / failure / cancelled. check-fly-sync.sh
-        # already handles degraded `/healthz` (curl 000 / non-200 / no
-        # header) by exiting 2 — so a smoke-check failure today ALSO
-        # lights up the sync gate with a loud `no X-MW-Build-SHA
-        # header` output. Operators see exactly which class of bug
-        # the deploy had (binary-broken vs SHA-drift) instead of
-        # ambiguous green.
+        # Runs in every terminal state so a broken binary and a stale-SHA
+        # deploy both surface loudly (see tools/check-fly-sync.sh).
         if: always()
-        run: ./tools/check-fly-sync.sh
+        run: LIVE_URL=$(jq -r .app.origin "deployments/${{ matrix.network }}.json") ./tools/check-fly-sync.sh
