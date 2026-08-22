@@ -1,0 +1,165 @@
+# MagicWebb — system architecture
+
+Open, non-custodial NFT marketplace on the Flare family of networks. No admin, no login:
+anyone with a wallet on a supported network can list, bid, offer and buy. This document is
+the map; `USER_CAPABILITIES.md` is what each kind of user can do; `NETWORKS.md` is how a
+network is provisioned.
+
+## 1. One stack per network
+
+```mermaid
+flowchart LR
+  subgraph Browser
+    UI[Astro pages + Svelte islands<br/>window.MW · MwSocket · TxModal]
+    WAL[Wallet via Reown AppKit / wagmi]
+  end
+  subgraph Coston2 ["Coston2 (114) · magicwebb.fly.dev"]
+    A1[Go binary<br/>REST · GraphQL · Connect/gRPC · /ws<br/>indexer · keepers · verifier]
+    D1[(Neon Postgres)]
+    R1[(Redis · optional)]
+    A1 --- D1
+    A1 -.-> R1
+  end
+  subgraph Songbird ["Songbird (19) · magicwebb-songbird.fly.dev"]
+    A2[Go binary · read-only until contracts exist]
+    D2[(Neon Postgres)]
+    A2 --- D2
+  end
+  subgraph Flare ["Flare (14) · magicwebb-flare.fly.dev"]
+    A3[Go binary · read-only until contracts exist]
+    D3[(Neon Postgres)]
+    A3 --- D3
+  end
+  UI -->|same-origin HTTP + WS| A1
+  UI -.->|network switcher = navigate to other origin| A2
+  UI -.-> A3
+  WAL -->|eth_sendTransaction| C1[Marketplace · AuctionHouse · OfferBook<br/>MarketplaceManager]
+  A1 -->|RPC rotation · getLogs| C1
+```
+
+One process serves exactly one chain (`CHAIN_ID` validated against
+`backend/internal/chain/profile`). Switching network is a navigation to another origin —
+the wallet, API, database and socket are all scoped to that origin. `NETWORK_URLS`
+(generated in CI from `deployments/*.json`) tells each app which siblings exist.
+
+Per-network tuning (finality depth, poll cadence, keeper tickers, getLogs caps, gas caps,
+default RPCs, identity) lives in one table: `backend/internal/chain/profile`. Shared code
+(`internal/chain`, `rpcpool`, `indexer`, `keeper`, `ws`, `sse`) reads the active profile.
+The browser mirror is `app/src/lib/chains.ts`; a Go test keeps the two and
+`deployments/<key>.json` in agreement.
+
+## 2. Request & event flow inside one network
+
+```mermaid
+flowchart TB
+  subgraph Contracts
+    MP[Marketplace]:::c
+    AH[AuctionHouse]:::c
+    OB[OfferBook]:::c
+  end
+  subgraph Backend
+    RPC[rpcpool<br/>failover rotation]
+    IDX[indexer watcher<br/>profile.ReorgSafety behind head]
+    OBS[instant lane<br/>POST /api/v1/tx/observe]
+    KEEP[keepers: settle · refund · fee sweep<br/>single-flight via gRPC election]
+    VER[verifier: ERC-165 + metadata ⇒ verified badge]
+    DB[(Postgres · goose migrations at boot)]
+    BC[(sse.Broadcaster<br/>seq-numbered · replay ring · gRPC mesh)]
+    WS[/ws hub<br/>token: collection: user: tx: activity/]
+    GQL[/graphql + /graphql/ws/]
+    CN[Connect / gRPC<br/>MarketplaceService]
+    REST[/api/v1 REST/]
+    WH[webhooks]
+  end
+  MP & AH & OB -->|logs| RPC --> IDX --> DB
+  IDX -->|Publish| BC
+  OBS -->|receipt logs, same handlers| DB
+  OBS -->|tx-indexed| BC
+  KEEP -->|tx via keeper key| RPC
+  VER --> DB
+  BC --> WS & GQL & CN & WH
+  DB --> REST & GQL & CN
+  classDef c fill:#2a2340,stroke:#a78bfa,color:#fff
+```
+
+## 3. A transaction, end to end (the instant lane)
+
+```mermaid
+sequenceDiagram
+  participant U as User (browser)
+  participant M as TxModal / runTx
+  participant W as Wallet
+  participant C as Contract
+  participant B as Backend
+  participant S as WS hub
+  U->>M: click Buy
+  M->>M: requireWallet() – connect, switch chain
+  M->>C: simulateContract (decodes custom errors early)
+  M->>W: writeContract → "Confirm in your wallet"
+  W-->>M: tx hash → "Pending on Coston2"
+  M->>S: subscribe tx:<hash>
+  C-->>M: receipt (1 confirmation) → "Done"
+  M->>B: POST /api/v1/tx/observe {hash}
+  B->>C: eth_getTransactionReceipt + header
+  B->>B: dispatch logs through the same idempotent handlers as the watcher
+  B->>S: Publish tx-indexed {tx_hash}
+  S-->>M: tx-indexed → "Live on the marketplace"
+  Note over B: watcher re-dispatches the same logs profile.ReorgSafety blocks later — upserts, no-op
+```
+
+Every page flips the affected region to an optimistic "… · syncing" state at "Done" and
+clears it on `tx-indexed` (or on the next REST refresh). Nothing waits 30 seconds.
+
+## 4. Contracts (Foundry, UUPS proxies)
+
+| Contract | Purpose | Key rules |
+|---|---|---|
+| `MarketplaceCore` | base: fee math, pull-payment refunds, time-locked upgrades | `PLATFORM_FEE_BPS = 150` (1.5%, **seller pays, only on sale**) · `MIN_PRICE = 1 ether` · `_expiryFor(duration)` — six durations 3m/15m/30m/1h/4h/24h, expiry computed on-chain · `withdrawRefund()` |
+| `Marketplace` | fixed-price listings | `list / list1155 / batchList(≤50) / cancel / editPrice / buy` · `buy` requires `msg.value == price` · listing is free |
+| `AuctionHouse` | English auctions, cumulative bids | `create / create1155 / bid / settle / cancelEarly / refundLosers / withdrawLoserFunds` · min increment 1 native · anti-snipe +3 min, 30 min cap · settle permissionless after end |
+| `OfferBook` | escrowed offers | `makeOffer / makeOffer1155 / acceptOffer / cancelOffer / rejectOffer / refundExpiredOffer` · collection must be opted in via `setOfferEligible` (ERC-173 owner) |
+| `MarketplaceManager` | roles + circuit breaker | `pauseEntries()` blocks *new* listings/bids/offers; exits (cancel, settle, withdraw) are never pausable |
+
+Deployed addresses: `deployments/<network>.json` (single source of truth).
+
+## 5. Data
+
+Neon Postgres, one project per network, 34 goose migrations applied at boot
+(`backend/internal/db/migrations`; 031 intentionally skipped — never renumber). Row-level
+security policies exist for direct PostgREST-style access; the Go service connects as an
+owner role. `chain_id` is a label column on every indexed table. Idempotency: every indexed
+write is an upsert keyed on `(tx_hash, log_index, …)`, which is what lets the instant lane
+and the watcher process the same log twice safely.
+
+Redis (optional, per network): shared cache + rate-limit counters across machines. Unset
+means per-instance memory; an unreachable Redis degrades to memory with a warning.
+
+## 6. Real-time (P3 target: one spine, three faces)
+
+`sse.Broadcaster` is the only publisher path. Today the WS hub and webhooks are fed from
+it; GraphQL subscriptions and the Connect `StreamEvents` mesh exist as separate plumbing.
+P3 unifies them: `/ws` for the product UI (channels + `?since` replay), GraphQL
+subscriptions for third-party dashboards (hydrated objects), Connect `WatchEvents` server
+streams for bots and keepers, and a generated event catalog that keeps all three in sync.
+
+## 7. Repository layout
+
+```
+app/                 Astro 7 UI (static) · Svelte 5 islands · React wallet island
+  src/lib/tx         contract write flows (viem) · runner state machine · builders (tested)
+  src/lib/ws         MwSocket · channels
+  src/lib/auth       SIWE
+  src/lib/abi        generated from contracts/out (npm run gen:abi)
+  src/components     TxModal · TokenPage · AuctionPage · OffersPage · RefundsPanel · …
+backend/             Go 1.26 · Fiber
+  cmd/server         boot sequence (migrate → connect → guard → indexer → http)
+  internal/chain/profile   per-network tuning table
+  internal/indexer   watcher · observe (instant lane) · keepers · metadata
+  internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier
+  zigsha256 · zigcrypto · zigsniff   Zig libraries (CGO, -tags zigmedia)
+contracts/           Foundry · src/ · test/ (118) · script/Deploy*.s.sol
+deployments/         per-network address records (source of truth)
+docs/                operator docs (deploy, checklist, monitoring, immutability, networks)
+fly.<net>.toml.example   per-network Fly templates · CI fills placeholders
+.github/workflows    ci (zig/go/forge/slither/astro/vitest/gitleaks) · deploy (matrix) · nightly · audit · codeql
+```
