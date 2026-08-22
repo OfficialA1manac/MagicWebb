@@ -11,6 +11,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 )
 
 // TxObserver is satisfied by *indexer.Runner. Wired by main via SetTxObserver
@@ -62,5 +63,24 @@ func registerTxObserve(api fiber.Router, rl *ratelimit.Limiter) {
 			return c.Status(fiber.StatusBadGateway).JSON(fiber.Map{"error": "could not index transaction", "hash": body.Hash})
 		}
 		return c.JSON(res)
+	})
+}
+
+// registerEventCatalog mounts GET /api/v1/events/catalog — the machine-readable
+// list of real-time event types and which transport carries each (WS,
+// GraphQL subscriptions, Connect streams, webhooks). Source of truth is
+// sse.EventCatalog; a test keeps every transport in agreement with it.
+func registerEventCatalog(api fiber.Router) {
+	api.Get("/events/catalog", func(c *fiber.Ctx) error {
+		c.Set("Cache-Control", "public, max-age=300")
+		return c.JSON(fiber.Map{
+			"transports": fiber.Map{
+				"ws":      "/ws (subscribe to channels; replay with {type:retry,data:{from_seq}})",
+				"graphql": "/graphql/ws (subscriptions: listingUpdated, auctionUpdated, activityUpdated, notificationUpdated)",
+				"connect": "Connect/gRPC MarketplaceService Subscribe* server streams",
+				"webhook": "/api/v1/webhooks (outbound POST per event)",
+			},
+			"events": sse.EventCatalog,
+		})
 	})
 }

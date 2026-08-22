@@ -339,6 +339,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	// Domain-specific route registrations.
 	registerTxObserve(api, rl) // instant lane (tx_observe.go)
+	registerEventCatalog(api)  // real-time event catalog (tx_observe.go)
 	NewListingsService(q, eth).RegisterRoutes(api)
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
