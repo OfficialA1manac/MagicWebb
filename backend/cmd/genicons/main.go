@@ -8,8 +8,8 @@
 //
 // Output:
 //
-//	internal/ui/static/icon-192.png
-//	internal/ui/static/icon-512.png
+//	app/public/icon-192.png
+//	app/public/icon-512.png
 //
 // The output paths are picked up by the embedded static FS
 // (internal/ui/embed.go's `//go:embed all:static`) and served at
@@ -171,7 +171,8 @@ func main() {
 	root := repoRoot()
 	for _, sz := range outputSizes {
 		img := makeIcon(sz)
-		outPath := filepath.Join(root, "internal", "ui", "static",
+		// app/public is served at / by Astro; the old internal/ui embed is gone.
+		outPath := filepath.Join(root, "..", "app", "public",
 			fmt.Sprintf("icon-%d.png", sz))
 		f, err := os.Create(outPath)
 		if err != nil {

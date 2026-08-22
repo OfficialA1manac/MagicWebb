@@ -30,7 +30,7 @@ func genIconPath(t *testing.T, size int) string {
 	dir := filepath.Dir(thisFile)
 	for {
 		if _, err := os.Stat(filepath.Join(dir, "go.mod")); err == nil {
-			return filepath.Join(dir, "internal", "ui", "static",
+			return filepath.Join(dir, "..", "app", "public",
 				fmt.Sprintf("icon-%d.png", size))
 		}
 		parent := filepath.Dir(dir)
@@ -163,16 +163,14 @@ func TestGeniconsOffCornerIsBodyColor(t *testing.T) {
 }
 
 // TestGeniconsPathsResolveViaStaticFS verifies the genicons outputs live
-// under internal/ui/static so embed.go's `//go:embed all:static` catches
+// under app/public so embed.go's `//go:embed all:static` catches
 // them and the Fiber filesystem middleware can serve them at
-// `/static/icon-{192,512}.png`. A future move to e.g. internal/ui/static/
+// `/static/icon-{192,512}.png`. A future move to e.g. app/public/
 // icons/ would silently break the wallet.js WC metadata wire without a
 // test failure here.
 func TestGeniconsPathsResolveViaStaticFS(t *testing.T) {
-	const want = string(filepath.Separator) + "internal" +
-		string(filepath.Separator) + "ui" +
-		string(filepath.Separator) + "static" +
-		string(filepath.Separator)
+	const want = string(filepath.Separator) + "app" + string(filepath.Separator) + "public" + string(filepath.Separator)
+
 	for _, sz := range outputSizes {
 		path := genIconPath(t, sz)
 		if !bytes.Contains([]byte(path), []byte(want)) {
