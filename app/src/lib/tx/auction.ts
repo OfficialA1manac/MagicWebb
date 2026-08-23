@@ -93,7 +93,7 @@ export function bid(a: BidArgs, hooks?: TxHooks): Promise<TxResult> {
 }
 
 export const settle = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Settle ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildSettle(a.auctionId), summary: [['What happens', 'NFT goes to the winner, proceeds (minus 1.5%) to the seller']] }, hooks);
+  runTx({ title: `Settle ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildSettle(a.auctionId), summary: [['Who can settle', 'The keeper (automatic), the winner, or the seller'], ['What happens', 'NFT to the winner, proceeds (minus 1.5%) to the seller']] }, hooks);
 
 export const cancelEarly = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
   runTx({ title: `Cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildCancelEarly(a.auctionId), summary: [['Allowed when', 'No bids yet · NFT stays with you']] }, hooks);

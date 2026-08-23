@@ -440,7 +440,7 @@ contract AuctionHouse is MarketplaceCore {
 
         // Three-tier settlement gate:
         // 1. KEEPER_ROLE — settles immediately after endsAt (1s ticker).
-        // 2. Seller or auction winner — settles after endsAt + 5 minutes.
+        // 2. Seller or auction winner — settles any time after endsAt.
         // 3. Permissionless — anyone settles after endsAt + DURATION_24HR + 1hr.
         // When no manager is deployed (address(0)), settlement is permissionless
         // immediately — funds are never trapped.
@@ -454,7 +454,7 @@ contract AuctionHouse is MarketplaceCore {
             // settlement timing without waiting for the keeper or the full
             // 25-hour permissionless fallback.
             bool isSellerOrWinner = (msg.sender == a.seller || msg.sender == a.leader);
-            bool canSettle = isKeeper || (isSellerOrWinner && block.timestamp >= a.endsAt + 5 minutes);
+            bool canSettle = isKeeper || isSellerOrWinner;
             // Permissionless fallback: after DURATION_24HR + 1 hour past endsAt,
             // anyone can settle.
             if (!canSettle && block.timestamp < a.endsAt + DURATION_24HR + 1 hours) {

@@ -447,7 +447,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertTrue(settled);
     }
 
-    function test_settle_sellerBlockedBefore5Min() public {
+    function test_settle_sellerAllowedImmediately() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
         gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
@@ -458,12 +458,16 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
-        vm.warp(block.timestamp + 3 minutes + 3 minutes);
-        vm.prank(seller);
+        // Product rule 2026-08-23: seller and winner settle any time after
+        // endsAt — no cooldown. A third party still cannot.
+        vm.warp(block.timestamp + 3 minutes + 1);
+        vm.prank(address(0xD00D));
         vm.expectRevert(NotKeeper.selector);
         gated.settle(id);
+        vm.prank(seller);
+        gated.settle(id);
         (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
-        assertFalse(settled);
+        assertTrue(settled);
     }
 
     function test_settle_sellerAllowedAfter5Min() public {

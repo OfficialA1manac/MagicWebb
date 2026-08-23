@@ -116,8 +116,12 @@
             </div>
           {/if}
         {:else if ended}
-          <button class="btn gold" onclick={doSettle}>Settle auction</button>
-          <p class="ap-hint">Anyone can settle. NFT to the winner, proceeds (minus 1.5%) to the seller, losers refunded.</p>
+          {#if amLeader || isSeller}
+            <button class="btn gold" onclick={doSettle}>Settle now</button>
+            <p class="ap-hint">The keeper settles automatically within seconds; as {amLeader ? 'the winner' : 'the seller'} you can also settle yourself.</p>
+          {:else}
+            <p class="ap-hint">Auction ended — settling automatically. NFT to the winner, proceeds (minus 1.5%) to the seller, losing bids refundable.</p>
+          {/if}
         {:else if isLive && isSeller}
           {#if highest === 0n}<button class="btn g" onclick={doCancel}>Cancel auction</button>{:else}<p class="ap-hint">Your auction has bids and will settle when it ends.</p>{/if}
         {/if}

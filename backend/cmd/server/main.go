@@ -743,6 +743,33 @@ func verifyDeploymentConfig(ctx context.Context, pool db.PgxPool) error {
 		diffs = append(diffs, fmt.Sprintf("nft_addr: stored=%s env=%s", nftAddr, config.C.NFTAddr))
 	}
 	if len(diffs) > 0 {
+		// RESET_ON_ADDRESS_CHANGE=true (set only in the Coston2 TESTNET
+		// template) turns an address change into an automatic chain-data
+		// wipe — the same truncation cmd/chainwipe performs — so a contract
+		// redeploy is a config change, not an operator runbook. Mainnets
+		// leave this unset: there the mismatch stays fatal and the operator
+		// runs chainwipe deliberately.
+		if os.Getenv("RESET_ON_ADDRESS_CHANGE") == "true" {
+			log.Warn().Strs("diffs", diffs).Msg("deployment config mismatch — RESET_ON_ADDRESS_CHANGE=true, wiping chain-derived tables and re-seeding")
+			for _, t := range []string{
+				"trending_scores", "bids", "sales", "offers", "listings", "auctions",
+				"nft_attributes", "nft_metadata", "nft_ownership", "nft_tokens",
+				"tracked_collections", "collections", "indexer_state", "deployment_config",
+			} {
+				if _, err := pool.Exec(ctx, "TRUNCATE TABLE "+t+" CASCADE"); err != nil {
+					return fmt.Errorf("reset-on-address-change: truncate %s: %w", t, err)
+				}
+			}
+			if _, err := pool.Exec(ctx,
+				`INSERT INTO deployment_config(chain_id, marketplace_addr, auction_addr, offerbook_addr, nft_addr, marketplace_manager_addr)
+				 VALUES($1,$2,$3,$4,$5,$6)`,
+				config.C.ChainID, config.C.MarketplaceAddr, config.C.AuctionAddr,
+				config.C.OfferBookAddr, config.C.NFTAddr, config.C.MarketplaceManagerAddr); err != nil {
+				return fmt.Errorf("reset-on-address-change: reseed deployment config: %w", err)
+			}
+			log.Info().Msg("deployment config: reset complete — indexer starts from INDEX_FROM_BLOCK")
+			return nil
+		}
 		return fmt.Errorf("deployment mismatch:\n  %s", strings.Join(diffs, "\n  "))
 	}
 

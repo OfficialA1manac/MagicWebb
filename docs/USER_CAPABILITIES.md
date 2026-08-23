@@ -32,7 +32,7 @@ offering are free (gas only). Every amount you escrow is refundable.
 | Create auction (reserve ≥ 1 native, duration 3m–24h, optional min-increment %) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
-| Settle after it ends (NFT → winner, proceeds → seller minus 1.5%) | — | ✓ anyone | ✓ |
+| Settle after it ends (keeper does it automatically within seconds) | — | ✓ winner only | ✓ seller |
 | Cancel early | — | — | ✓ only while there are no bids |
 | Last 3 minutes: every bid extends the end by 3 min (max 30 min total) | rule | rule | rule |
 

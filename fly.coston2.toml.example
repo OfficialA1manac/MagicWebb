@@ -59,6 +59,9 @@ primary_region = "iad"
 # committed file.
 [env]
   ENV = "production"
+  # Testnet convenience: a contract-address change wipes chain-derived tables
+  # automatically at boot (mainnet templates leave this unset — manual chainwipe).
+  RESET_ON_ADDRESS_CHANGE = "true"
   HTTP_ADDR = ":8080"
   # NETWORK_URLS (sibling deployments) is inserted here by CI from deployments/*.json.
   # REDIS_URL: set via `fly secrets set` to share cache/rate-limit state across

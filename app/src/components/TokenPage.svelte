@@ -183,8 +183,12 @@
               <div class="tp-inrow"><input id="bid-in" class="tp-input mono" inputmode="decimal" placeholder={fmtPrice(minBid)} bind:value={bidIn} /><button class="btn p" onclick={doBid}>Place bid</button></div>
             </div>
           {:else if auctionEnded}
-            <button class="btn p" onclick={doSettle}>Settle auction</button>
-            <p class="tp-hint">Anyone can settle. The NFT goes to the winner and the seller is paid (minus 1.5%).</p>
+            {#if isAuctionSeller || (me && auction && auction.highest_bidder?.toLowerCase() === me.toLowerCase())}
+              <button class="btn p" onclick={doSettle}>Settle now</button>
+              <p class="tp-hint">The keeper settles automatically within seconds; you can also settle yourself.</p>
+            {:else}
+              <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 1.5%.</p>
+            {/if}
           {:else if isAuctionSeller && BigInt(auction.highest_bid_wei || '0') === 0n}
             <button class="btn g" onclick={doCancelAuction}>Cancel auction</button>
           {:else if isAuctionSeller}
