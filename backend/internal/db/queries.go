@@ -1082,7 +1082,7 @@ func (q *Q) GetTokenActivity(ctx context.Context, collection, tokenID string, li
 		SELECT 'BidPlaced', b.amount_wei::text, b.bidder, '', b.placed_at, b.tx_hash
 		  FROM bids b JOIN auctions a ON a.auction_id=b.auction_id
 		 WHERE a.collection=$1 AND a.token_id=$2
-	ORDER BY ts DESC LIMIT $4
+	ORDER BY ts DESC LIMIT $3
 `, collection, tokenID, limit)
 	if err != nil {
 		return nil, err
@@ -1121,7 +1121,7 @@ func (q *Q) GetTokenActivityByAddress(ctx context.Context, collection, tokenID, 
 		SELECT 'BidPlaced', b.amount_wei::text, b.bidder, '', b.placed_at, b.tx_hash
 		  FROM bids b JOIN auctions a ON a.auction_id=b.auction_id
 		 WHERE a.collection=$1 AND a.token_id=$2 AND b.bidder=$3
-	ORDER BY ts DESC LIMIT $5
+	ORDER BY ts DESC LIMIT $4
 `, collection, tokenID, address, limit)
 	if err != nil {
 		return nil, err

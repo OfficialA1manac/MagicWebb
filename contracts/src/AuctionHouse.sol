@@ -38,7 +38,7 @@ error CannotCancel();
 ///
 /// Settlement (three-tier gate, so funds are never trapped):
 ///   1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
-///   2. Seller OR auction winner — settles after `endsAt + 5 minutes`.
+///   2. Seller OR auction winner — settles any time after `endsAt`.
 ///   3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
 ///   NFT → winner; 1.5% fee → feeRecipient; winningBid−fee → seller.
 ///   The winner's escrow is consumed.
@@ -277,11 +277,11 @@ contract AuctionHouse is MarketplaceCore {
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
         // v21 — INC floor: when both minIncrementBps and minIncrementFlat are
-        // 0, the bid() path now falls through to MIN_BID_INCREMENT (0.001
+        // 0, the bid() path now falls through to MIN_BID_INCREMENT (1
         // ether) instead of the legacy +1 wei rule. The previous 1-wei
         // fall-through let two colluding wallets perpetually trade 1-wei
         // leads and stall an auction indefinitely via repeated anti-snipe
-        // extensions (audit-#5). 0.001 ETH per flip is economically unviable
+        // extensions (audit-#5). 1 ETH per flip is economically unviable
         // for griefing while remaining trivial for any legitimate bidder.
         // Existing auctions are unaffected — this only governs auctions
         // created after the redeploy.
@@ -363,7 +363,7 @@ contract AuctionHouse is MarketplaceCore {
             uint256 inc     = incPct > a.minIncrementFlat ? incPct : a.minIncrementFlat;
             // Floor at MIN_BID_INCREMENT so a 0/0 increment config cannot be
             // reduced to a 1-wei griefing loop (audit-#5). Per-cycle
-            // gas cost vs. 0.001 ETH flip cost makes the attack uneconomic.
+            // gas cost vs. the 1 ETH flip cost makes the attack uneconomic.
             if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
             // L-11 fix: keep the min-next comparison in uint256 to avoid
             // silent truncation when leaderTotal + inc exceeds uint128 max.
@@ -421,7 +421,7 @@ contract AuctionHouse is MarketplaceCore {
 
     /// @notice Finalize a finished auction. Three-tier settlement gate:
     ///         1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
-    ///         2. Seller OR auction winner — settles after `endsAt + 5 minutes`.
+    ///         2. Seller OR auction winner — settles any time after `endsAt`.
     ///         3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable via
@@ -449,7 +449,7 @@ contract AuctionHouse is MarketplaceCore {
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );
             bool isKeeper = ok && data.length == 32 && abi.decode(data, (bool));
-            // Seller or auction winner can settle after a 5-minute cooldown
+            // Seller or auction winner can settle 
             // post-auction. This gives the primary parties control over
             // settlement timing without waiting for the keeper or the full
             // 25-hour permissionless fallback.

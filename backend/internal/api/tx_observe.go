@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"regexp"
+	"sync/atomic"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -20,10 +21,18 @@ type TxObserver interface {
 	ObserveTx(ctx context.Context, hash common.Hash) (indexer.ObserveResult, error)
 }
 
-var txObserver TxObserver
+var txObserver atomic.Pointer[TxObserver]
 
 // SetTxObserver installs the instant-lane indexer used by POST /api/v1/tx/observe.
-func SetTxObserver(o TxObserver) { txObserver = o }
+// Atomic because main sets it while Fiber may already be serving.
+func SetTxObserver(o TxObserver) { txObserver.Store(&o) }
+
+func getTxObserver() TxObserver {
+	if p := txObserver.Load(); p != nil {
+		return *p
+	}
+	return nil
+}
 
 var txHashRE = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
 
@@ -42,7 +51,8 @@ var txHashRE = regexp.MustCompile(`^0x[0-9a-fA-F]{64}$`)
 //	204                            — mined but touches no marketplace contract
 func registerTxObserve(api fiber.Router, rl *ratelimit.Limiter) {
 	api.Post("/tx/observe", tieredRateLimitMiddleware(rl, "observe", 60, time.Minute), func(c *fiber.Ctx) error {
-		if txObserver == nil {
+		obs := getTxObserver()
+		if obs == nil {
 			return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{"error": "indexer not running"})
 		}
 		var body struct {
@@ -53,7 +63,7 @@ func registerTxObserve(api fiber.Router, rl *ratelimit.Limiter) {
 		}
 		ctx, cancel := context.WithTimeout(c.Context(), 12*time.Second)
 		defer cancel()
-		res, err := txObserver.ObserveTx(ctx, common.HexToHash(body.Hash))
+		res, err := obs.ObserveTx(ctx, common.HexToHash(body.Hash))
 		switch {
 		case errors.Is(err, indexer.ErrTxPending):
 			return c.Status(fiber.StatusAccepted).JSON(fiber.Map{"status": "pending", "hash": body.Hash})

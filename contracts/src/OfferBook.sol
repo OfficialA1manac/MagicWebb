@@ -137,23 +137,10 @@ contract OfferBook is MarketplaceCore {
                 authorized = true;
             }
         }
-        // Graceful fallback: if ERC-173 is not available (the staticcall
-        // reverted or returned unexpected data), try IERC721.ownerOf(0).
-        // This handles collections that only implement ERC-721 without
-        // ERC-173/Ownable. The `ownerOf(0)` path is less secure (token 0
-        // ownership conflates with contract admin) but is a reasonable
-        // fallback for non-Ownable contracts.
-        if (!authorized) {
-            (bool ok721, bytes memory data721) = coll.staticcall(
-                abi.encodeWithSelector(IERC721.ownerOf.selector, uint256(0))
-            );
-            if (ok721 && data721.length == 32) {
-                address tokenZeroOwner = abi.decode(data721, (address));
-                if (msg.sender == tokenZeroOwner) {
-                    authorized = true;
-                }
-            }
-        }
+        // No ownerOf(0) fallback: owning token 0 is NOT contract ownership,
+        // and using it here let a lucky token holder flip a collection-wide
+        // flag (CodeRabbit review 2026-08-23). Collections without ERC-173
+        // owner() are enabled by the MarketplaceManager admin path below.
         // If neither ERC-173 nor ERC-721 ownerOf(0) worked, check if the
         // caller has DEFAULT_ADMIN_ROLE via the MarketplaceManager.
         // OpenZeppelin AccessControl defines DEFAULT_ADMIN_ROLE as

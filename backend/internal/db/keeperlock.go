@@ -52,7 +52,9 @@ func WaitKeeperLock(ctx context.Context, dsn string) (lockCtx context.Context, r
 				// Liveness monitor: lock ownership is only as alive as this
 				// session. A failed ping means Postgres has (or may have)
 				// released the lock — stop the keepers immediately.
+				monitorDone := make(chan struct{})
 				go func() {
+					defer close(monitorDone)
 					t := time.NewTicker(pingEvery)
 					defer t.Stop()
 					for {
@@ -66,6 +68,10 @@ func WaitKeeperLock(ctx context.Context, dsn string) (lockCtx context.Context, r
 							if perr != nil && lctx.Err() == nil {
 								log.Warn().Err(perr).Msg("keeper lock: lost (ping failed) — stopping keepers")
 								cancel()
+								// The caller may never invoke release after a
+								// lock loss; close the session here so each
+								// loss does not leak one backend connection.
+								_ = conn.Close(context.Background())
 								return
 							}
 						}
@@ -74,6 +80,9 @@ func WaitKeeperLock(ctx context.Context, dsn string) (lockCtx context.Context, r
 
 				rel := func() {
 					cancel()
+					// *pgx.Conn is not safe for concurrent use: wait for the
+					// liveness monitor to exit before touching the session.
+					<-monitorDone
 					// Best-effort unlock; closing the session releases the
 					// lock server-side regardless.
 					uctx, ucancel := context.WithTimeout(context.Background(), 5*time.Second)

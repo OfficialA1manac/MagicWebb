@@ -4,12 +4,12 @@
   "chainId": 114,
   "status": "deployed",
   "deployedAt": "2026-08-23",
-  "indexFromBlock": 34403155,
+  "indexFromBlock": 34406504,
   "contracts": {
-    "marketplace": "0x59838731d46d57F902040Df6D608456043dF0daC",
-    "auctionHouse": "0x8976AfC3CC46409803FE5dAF0B99359D05Ee29C8",
-    "offerBook": "0x7DcfB427A80A7D2C2aA66Bc3B5177D288e470BdA",
-    "marketplaceManager": "0xCd5FB5d30813B869fc99DAa35539e411C8DE9Cb7",
+    "marketplace": "0x49B3dA6A0D5C31994c3A52d41416c6BC0A6200F3",
+    "auctionHouse": "0xfD39174B8FD906249257d3b28fBed9DB22A9136e",
+    "offerBook": "0x17564fd5BB2eb8c40DAc24684f4988237CC88eeF",
+    "marketplaceManager": "0xf070bD812de875EdD29D05F1932340BFAFB1057F",
     "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
   },
   "trackedCollections": [
@@ -28,6 +28,14 @@
     "origin": "https://magicwebb.fly.dev"
   },
   "superseded": [
+    {
+      "note": "2026-08-23 settle-rule set, replaced same day by CodeRabbit auth-fix set",
+      "marketplace": "0x59838731d46d57F902040Df6D608456043dF0daC",
+      "auctionHouse": "0x8976AfC3CC46409803FE5dAF0B99359D05Ee29C8",
+      "offerBook": "0x7DcfB427A80A7D2C2aA66Bc3B5177D288e470BdA",
+      "marketplaceManager": "0xCd5FB5d30813B869fc99DAa35539e411C8DE9Cb7",
+      "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
+    },
     {
       "note": "2026-08-23 first duration-fix set, replaced same day by settle-rule set",
       "marketplace": "0x56CbDf14eeF1d8e191b045906027cD22DA4d65c7",

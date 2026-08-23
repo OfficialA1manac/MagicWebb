@@ -40,7 +40,7 @@ func (s *ListingsService) RegisterRoutes(api fiber.Router) {
 
 func (s *ListingsService) handleList(c *fiber.Ctx) error {
 	f := db.ListingsFilter{
-		Collection: c.Query("collection"),
+		Collection: strings.ToLower(c.Query("collection")),
 		Seller:     c.Query("seller"),
 		Sort:       c.Query("sort", "recent"),
 	}

@@ -2,6 +2,7 @@
 package api
 
 import (
+	"net"
 	"context"
 	"encoding/json"
 	"net/http"
@@ -497,40 +498,13 @@ func tieredRateLimitMiddleware(rl *ratelimit.Limiter, keyPrefix string, limit in
 //
 // Audit: `clientIpSpoof` 🟠 P1.
 func ClientIP(c *fiber.Ctx) string {
-	if v := strings.TrimSpace(c.Get("Fly-Client-IP")); v != "" {
-		return v
-	}
-	if v := strings.TrimSpace(c.Get("Forwarded")); v != "" {
-		// RFC 7239: `Forwarded: for=192.0.2.1;by=...;proto=https` or
-		// quoted `for="[2001:db8::1]:443"`. Split on `;` then pick the
-		// `for=` segment, strip any quotes / brackets / port suffix.
-		for _, part := range strings.Split(v, ";") {
-			p := strings.TrimSpace(part)
-			low := strings.ToLower(p)
-			if !strings.HasPrefix(low, "for=") {
-				continue
-			}
-			id := strings.Trim(p[4:], " \"")
-			id = stripAddrPort(id)
-			if id != "" {
-				return id
-			}
-		}
-	}
-	if v := strings.TrimSpace(c.Get("X-Forwarded-For")); v != "" {
-		// Right-trusted (RFC 7239 rightmost entry semantics). The header
-		// may carry `client, proxy1, proxy2`; the most-recent hop is
-		// rightmost because compliant proxies APPEND. Spoofability is
-		// bounded by trusting only this path behind the explicit
-		// Fiber ProxyHeader configuration (Fly-Client-IP).
-		if i := strings.LastIndex(v, ","); i >= 0 {
-			v = strings.TrimSpace(v[i+1:])
-		} else {
-			v = strings.TrimSpace(v)
-		}
-		if v != "" {
-			return v
-		}
+	// Trust ONLY headers the edge proxy sets. On Fly.io, Fly-Client-IP is
+	// stamped by the edge for every request and cannot be forged by the
+	// client; Forwarded / X-Forwarded-For are attacker-controlled input and
+	// previously allowed per-request rate-limit buckets (and log poisoning)
+	// by sending a fresh spoofed value each time.
+	if ip := strings.TrimSpace(c.Get("Fly-Client-IP")); ip != "" && net.ParseIP(ip) != nil {
+		return ip
 	}
 	return c.IP()
 }
