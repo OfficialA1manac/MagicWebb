@@ -1,6 +1,7 @@
 package graphql
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"net"
@@ -45,9 +46,9 @@ var AuthCtxKey = authCtxKeyType{}
 // GQL-2 cache hit/miss/set/eviction counters alongside the existing in-memory
 // cache metrics (CACHE-4).
 type GraphQLServer struct {
-	srv  *handler.Server
-	q    *db.Q  // retained for DataLoader creation per-request
-	cfg  *config.Config // GQL-4: JWT secret for WS auth
+	srv *handler.Server
+	q   *db.Q          // retained for DataLoader creation per-request
+	cfg *config.Config // GQL-4: JWT secret for WS auth
 
 	// GQL-2: Tiered response cache with Prometheus-compatible Stats().
 	// Set by NewGraphQLServer; nil before construction.
@@ -145,9 +146,12 @@ func (s *GraphQLServer) HandlePOST(c *fiber.Ctx) error {
 	defer cancel()
 
 	// Build an http.Request from Fiber's context so gqlgen can parse
-	// the query body. The body stream is consumed by gqlgen's POST
-	// transport (JSON decoding).
-	req, err := http.NewRequestWithContext(ctx, "POST", "/graphql", c.Request().BodyStream())
+	// the query body. c.Body() (not BodyStream) — Fiber buffers request
+	// bodies in memory unless StreamRequestBody is enabled, and fasthttp's
+	// BodyStream() returns nil for a buffered body, which gqlgen's POST
+	// transport dereferences (panic on every production request). c.Body()
+	// also transparently decompresses gzipped requests.
+	req, err := http.NewRequestWithContext(ctx, "POST", "/graphql", bytes.NewReader(c.Body()))
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"errors": []map[string]any{{"message": "internal server error"}},
@@ -255,7 +259,7 @@ type depthValidator struct {
 	maxDepth int
 }
 
-func (d *depthValidator) ExtensionName() string { return "DepthValidator" }
+func (d *depthValidator) ExtensionName() string                          { return "DepthValidator" }
 func (d *depthValidator) Validate(schema graphql.ExecutableSchema) error { return nil }
 
 func (d *depthValidator) InterceptOperation(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
