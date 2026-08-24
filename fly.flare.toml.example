@@ -60,6 +60,9 @@ primary_region = "iad"
 [env]
   ENV = "production"
   HTTP_ADDR = ":8080"
+  # Soft memory limit for the Go runtime: GC works harder near the cap instead
+  # of the 512mb machine OOM-killing the process. ~80% of [[vm]] memory.
+  GOMEMLIMIT = "400MiB"
   # NETWORK_URLS (sibling deployments) is inserted here by CI from deployments/*.json.
   # REDIS_URL: set via `fly secrets set` to share cache/rate-limit state across
   # machines of THIS network. Unset = per-instance memory. Never share across networks.
