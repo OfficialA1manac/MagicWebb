@@ -50,7 +50,8 @@ error PrincipalChanged();
 ///     (keeper, after expiry) returns the FULL principal to the bidder — an offer
 ///     that never sells costs nothing.
 ///
-/// Non-custodial. No royalties. No off-chain signatures. No pause. Unstoppable once deployed.
+/// Non-custodial. No royalties. No off-chain signatures. Pausable entries
+/// (makeOffer via manager entryGate), unstoppable exits (accept/reject/cancel/refund).
 contract OfferBook is MarketplaceCore {
     /// @notice A bidder's offer on one NFT — one position per (coll, tokenId, bidder).
     ///         Calling makeOffer again edits the position (refunds old principal,
@@ -117,11 +118,9 @@ contract OfferBook is MarketplaceCore {
     ///         any secondary-market buyer of token 0 could otherwise toggle offers
     ///         for the entire collection.
     ///
-    ///         Graceful fallback: if ERC-173 owner() is not available (the
-    ///         collection doesn't implement it), falls back to IERC721.ownerOf(0)
-    ///         for backwards compatibility with mocks and non-Ownable contracts.
-    ///         Non-ERC721 / non-Ownable collections fall through to the
-    ///         admin-only path via MarketplaceManager.
+    ///         There is deliberately NO ownerOf(0) fallback: collections that
+    ///         don't expose ERC-173 owner() can only be enabled through the
+    ///         MarketplaceManager admin path (mocks included).
     /// @param coll     Collection address.
     /// @param eligible True to allow offers on this collection.
     function setOfferEligible(address coll, bool eligible) external nonReentrant {

@@ -222,24 +222,10 @@ func TestListingsService_HandleGet_NotFound(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT l\.collection, l\.token_id::text`).
 		WithArgs("0xcol1", "1").
-		WillReturnError(fiber.ErrNotFound) // isNotFound checks for "not found" in error string
+		WillReturnError(pgx.ErrNoRows) // GetListing maps this to "listing not found"
 
 	svc := NewListingsService(db.New(mock), nil)
 	app := newAppForService(t, func(app *fiber.App) {
-		app.Get("/api/v1/listings/:collection/:id", svc.handleGet)
-	})
-
-	// The actual pgx.ErrNoRows would trigger a real "not found" from GetListing
-	// But fiber.ErrNotFound doesn't contain "not found" string - let's use the correct error
-	// Reset mock expectations
-	mock, _ = pgxmock.NewPool()
-	defer mock.Close()
-	mock.ExpectQuery(`SELECT l\.collection, l\.token_id::text`).
-		WithArgs("0xcol1", "1").
-		WillReturnError(pgx.ErrNoRows) // This should be handled as "listing not found"
-
-	svc = NewListingsService(db.New(mock), nil)
-	app = newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id", svc.handleGet)
 	})
 

@@ -25,7 +25,8 @@ error BatchTooLarge();
 ///      No exclusivity: the same NFT may also sit in the AuctionHouse / OfferBook —
 ///      first settle wins, the rest revert when the token has moved.
 ///      Once `buy` settles the trade is FINAL — no reverse, refund, or admin override.
-///      Unstoppable: no pause, no admin. Runs forever.
+///      Pausable entries, unstoppable exits: the manager entryGate can halt new
+///      listings, but buys, cancels and withdrawals always run.
 contract Marketplace is MarketplaceCore {
     /// @notice Listing record. Two storage slots:
     ///   slot 0: seller(20) + expiresAt(8) + standard(1) [3 bytes padding]

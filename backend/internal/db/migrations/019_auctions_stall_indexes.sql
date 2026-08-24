@@ -14,9 +14,11 @@
 -- 2. inactive_no_bids  →  idx_auctions_inactive_no_bids  (this migration)
 --    (starts_at) WHERE status='active' AND highest_bidder IS NULL
 --    Covers: WHERE status='active' AND highest_bidder IS NULL
---            AND starts_at + interval '30 minutes' < now()
---    The starts_at column is the leading key so Postgres can quickly seek
---    past rows that started >30 min ago (the common case for dormant auctions).
+--            AND starts_at < now() - interval '30 minutes'
+--    The consumer predicate keeps starts_at bare on the left side so the
+--    planner can use this index as a range Index Cond; the arithmetic lives
+--    on the now() side. (The inverted form `starts_at + interval < now()`
+--    is NOT indexable against a bare starts_at key.)
 
 CREATE INDEX IF NOT EXISTS idx_auctions_inactive_no_bids
     ON auctions (starts_at)

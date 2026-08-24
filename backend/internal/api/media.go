@@ -28,6 +28,9 @@ type MediaService struct {
 	rl       *ratelimit.Limiter // v35: per-IP rate limit on image-retry endpoint
 	fetch    imageRetryFetcher
 	imgStore imagestore.Store // IMG-3: blob store backend (Postgres BYTEA by default)
+	// allowCheck is the SSRF gate (media.ProxyAllowedContext by default).
+	// Injected so tests don't depend on live DNS resolution of gateway hosts.
+	allowCheck func(ctx context.Context, uri string) bool
 }
 
 // imageRetryFetcher is the signature of media.FetchBytes.
@@ -160,9 +163,11 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 			return writeErr(c, fiber.StatusBadRequest, "size must be 128, 256, or 512")
 		}
 		preferWebP := strings.Contains(c.Get("Accept"), "image/webp")
-		if preferWebP {
-			c.Append("Vary", "Accept") // merges with compress middleware's Accept-Encoding
-		}
+		// The body depends on Accept for both branches (WebP vs JPEG), and
+		// serveBlob marks the response immutable-cacheable, so Vary: Accept
+		// must be present on every response from this path — including the
+		// full-size fall-through below.
+		c.Append("Vary", "Accept") // merges with compress middleware's Accept-Encoding
 		blob, err := s.store().GetImageByParent(c.Context(), sha, size, preferWebP)
 		if err != nil {
 			if imagestore.IsNoRows(err) {

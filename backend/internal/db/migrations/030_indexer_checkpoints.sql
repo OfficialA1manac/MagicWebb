@@ -16,39 +16,19 @@
 -- DO block makes this idempotent.
 -- +goose Up
 -- +goose StatementBegin
-DO $$
-BEGIN
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'tracked_collections' AND column_name = 'last_scanned_block'
-    ) THEN
-        ALTER TABLE tracked_collections ADD COLUMN last_scanned_block BIGINT NOT NULL DEFAULT 0;
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'tracked_collections' AND column_name = 'last_scanned_hash'
-    ) THEN
-        ALTER TABLE tracked_collections ADD COLUMN last_scanned_hash BYTEA;
-    END IF;
-    -- `tracked` and `updated_at` are required by the indexer checkpoint queries
-    -- (GetCollectionCheckpoints / GetMinCollectionCheckpoint filter WHERE
-    -- tracked = true; SetCollectionCheckpoint writes updated_at). They were
-    -- never created by an earlier migration, so add them here. Default
-    -- tracked = true means every enrolled collection is swept unless soft-disabled.
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'tracked_collections' AND column_name = 'tracked'
-    ) THEN
-        ALTER TABLE tracked_collections ADD COLUMN tracked BOOLEAN NOT NULL DEFAULT true;
-    END IF;
-    IF NOT EXISTS (
-        SELECT 1 FROM information_schema.columns
-        WHERE table_name = 'tracked_collections' AND column_name = 'updated_at'
-    ) THEN
-        ALTER TABLE tracked_collections ADD COLUMN updated_at TIMESTAMPTZ NOT NULL DEFAULT now();
-    END IF;
-END
-$$;
+-- ADD COLUMN IF NOT EXISTS resolves the table through search_path directly.
+-- (The previous information_schema probe filtered on table_name only — a
+-- same-named table in ANY visible schema could skip the ALTER and break the
+-- index/COMMENT statements below.)
+-- `tracked` and `updated_at` are required by the indexer checkpoint queries
+-- (GetCollectionCheckpoints / GetMinCollectionCheckpoint filter WHERE
+-- tracked = true; SetCollectionCheckpoint writes updated_at). Default
+-- tracked = true means every enrolled collection is swept unless soft-disabled.
+ALTER TABLE tracked_collections
+  ADD COLUMN IF NOT EXISTS last_scanned_block BIGINT NOT NULL DEFAULT 0,
+  ADD COLUMN IF NOT EXISTS last_scanned_hash  BYTEA,
+  ADD COLUMN IF NOT EXISTS tracked            BOOLEAN NOT NULL DEFAULT true,
+  ADD COLUMN IF NOT EXISTS updated_at         TIMESTAMPTZ NOT NULL DEFAULT now();
 
 -- Index for the sweeper query that picks collections needing catch-up.
 -- The indexer's transfer scan reads tracked_collections ordered by

@@ -95,7 +95,9 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 }
 
 func (s *ListingsService) handleGet(c *fiber.Ctx) error {
-	collection := c.Params("collection")
+	// Addresses are stored lower-cased; normalize so EIP-55 checksummed
+	// URLs match (parity with preflight and collections handlers).
+	collection := strings.ToLower(c.Params("collection"))
 	id := c.Params("id")
 	row, err := s.q.GetListing(c.Context(), collection, id)
 	if err != nil {
@@ -114,7 +116,7 @@ func (s *ListingsService) handlePreflight(c *fiber.Ctx) error {
 // handleTokenView increments the view counter for a token (fire-and-forget).
 // This is a lightweight POST — no auth required, no response body beyond 204.
 func (s *ListingsService) handleTokenView(c *fiber.Ctx) error {
-	collection := c.Params("collection")
+	collection := strings.ToLower(c.Params("collection"))
 	id := c.Params("id")
 	_ = s.q.IncrementTokenViews(c.Context(), collection, id)
 	return c.SendStatus(fiber.StatusNoContent)

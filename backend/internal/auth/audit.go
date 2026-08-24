@@ -48,7 +48,14 @@ type PgAuditLogger struct {
 	pool *pgxpool.Pool
 	ch   chan AuditEntry
 	done chan struct{}
+	quit chan struct{}
 }
+
+// auditRetention is how long auth audit rows (wallet_addr + ip + user_agent —
+// personal data under GDPR/CCPA) are kept before the retention sweeper
+// deletes them. 90 days balances incident-response needs against data
+// minimization; migration 028's created_at index makes the delete cheap.
+const auditRetention = "90 days"
 
 // NewPgAuditLogger starts a background goroutine that drains the audit
 // channel and batch-inserts into auth_audit_log. The caller must call
@@ -58,9 +65,37 @@ func NewPgAuditLogger(pool *pgxpool.Pool) *PgAuditLogger {
 		pool: pool,
 		ch:   make(chan AuditEntry, 1024),
 		done: make(chan struct{}),
+		quit: make(chan struct{}),
 	}
 	go l.worker()
+	go l.retentionSweeper()
 	return l
+}
+
+// retentionSweeper enforces the documented retention window: rows older than
+// auditRetention are deleted shortly after boot and then once a day. Without
+// this the table grows without bound and retains identifiable data forever.
+func (l *PgAuditLogger) retentionSweeper() {
+	sweep := func() {
+		ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+		defer cancel()
+		_, _ = l.pool.Exec(ctx,
+			`DELETE FROM auth_audit_log WHERE created_at < now() - interval '`+auditRetention+`'`)
+	}
+	first := time.NewTimer(time.Minute)
+	defer first.Stop()
+	daily := time.NewTicker(24 * time.Hour)
+	defer daily.Stop()
+	for {
+		select {
+		case <-l.quit:
+			return
+		case <-first.C:
+			sweep()
+		case <-daily.C:
+			sweep()
+		}
+	}
 }
 
 func (l *PgAuditLogger) Log(entry AuditEntry) {
@@ -73,6 +108,7 @@ func (l *PgAuditLogger) Log(entry AuditEntry) {
 }
 
 func (l *PgAuditLogger) Close() {
+	close(l.quit)
 	close(l.ch)
 	<-l.done
 }

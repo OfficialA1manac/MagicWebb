@@ -1084,6 +1084,7 @@ func (q *Q) GetWebhookConfigsForEvent(ctx context.Context, eventType webhook.Mar
 		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &events, &r.Active, &r.CreatedAt); err != nil {
 			return nil, err
 		}
+		r.Secret = decryptWebhookSecret(r.Secret)
 		// Convert string events to typed events.
 		for _, e := range events {
 			r.Events = append(r.Events, webhook.MarketplaceEventType(e))
@@ -1103,16 +1104,32 @@ func (q *Q) LogDelivery(ctx context.Context, configID int64, eventType webhook.M
 	return err
 }
 
+// ErrWebhookLimit is returned by CreateWebhookConfig when the caller already
+// has the maximum number of active webhook configs.
+var ErrWebhookLimit = fmt.Errorf("webhook config limit reached")
+
 // CreateWebhookConfig inserts a new webhook config for a user. Returns the
-// inserted row ID. Enforces a per-user limit of 10 active configs.
+// inserted row ID. Enforces a per-user limit of 10 active configs atomically:
+// a per-user advisory xact lock serializes concurrent creates, and the
+// conditional INSERT re-counts under that lock, so two concurrent requests
+// can never both slip past the cap. Upserting an existing URL is always
+// allowed (it doesn't raise the active count).
 func (q *Q) CreateWebhookConfig(ctx context.Context, userAddr, urlStr, secret string, events []string) (int64, error) {
 	var id int64
 	err := q.writer().QueryRow(ctx,
-		`INSERT INTO webhook_configs(user_addr, url, secret, events, active)
-		 VALUES($1,$2,$3,$4,true)
+		`WITH cap_lock AS (
+		    SELECT pg_advisory_xact_lock(hashtextextended('webhook_cap:' || $1, 0))
+		 )
+		 INSERT INTO webhook_configs(user_addr, url, secret, events, active)
+		 SELECT $1, $2, $3, $4, true FROM cap_lock
+		  WHERE (SELECT COUNT(*) FROM webhook_configs
+		          WHERE user_addr = $1 AND active AND url <> $2) < 10
 		 ON CONFLICT(user_addr, url) DO UPDATE
 		   SET secret = EXCLUDED.secret, events = EXCLUDED.events, active = true
-		 RETURNING id`, userAddr, urlStr, secret, events).Scan(&id)
+		 RETURNING id`, userAddr, urlStr, encryptWebhookSecret(secret), events).Scan(&id)
+	if err == pgx.ErrNoRows {
+		return 0, ErrWebhookLimit
+	}
 	return id, err
 }
 
@@ -1133,6 +1150,7 @@ func (q *Q) ListWebhookConfigs(ctx context.Context, userAddr string) ([]WebhookC
 		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &r.Events, &r.Active); err != nil {
 			return nil, err
 		}
+		r.Secret = decryptWebhookSecret(r.Secret)
 		out = append(out, r)
 	}
 	return out, rows.Err()

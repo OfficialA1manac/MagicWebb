@@ -54,9 +54,13 @@
   // ── 3D tilt state ──
   let tiltStyle = $state('');
   let cardRef = $state<HTMLAnchorElement | null>(null);
+  const reducedMotion =
+    typeof window !== 'undefined' &&
+    window.matchMedia &&
+    window.matchMedia('(prefers-reduced-motion: reduce)').matches;
 
   function handleMouseMove(e: MouseEvent) {
-    if (!cardRef) return;
+    if (!cardRef || reducedMotion) return;
     const rect = cardRef.getBoundingClientRect();
     const x = e.clientX - rect.left;
     const y = e.clientY - rect.top;
@@ -79,7 +83,7 @@
   style:transform={tiltStyle}
   onmousemove={handleMouseMove}
   onmouseleave={handleMouseLeave}
-  transition:fly={{ y: 20, duration: 400, delay: (function() { try { return Number(BigInt(item.token_id || '0') % 10n) * 30; } catch(_) { return 0; } })() }}
+  transition:fly={{ y: reducedMotion ? 0 : 20, duration: reducedMotion ? 0 : 400, delay: reducedMotion ? 0 : (function() { try { return Number(BigInt(item.token_id || '0') % 10n) * 30; } catch(_) { return 0; } })() }}
 >
   <div class="image-wrapper">
     {#if imageSrc && !imageError}
@@ -309,5 +313,16 @@
 
   .nft-card:hover .buy-btn {
     box-shadow: 0 0 24px -2px rgba(56, 189, 248, 0.55), 0 6px 14px -2px rgba(14, 165, 233, 0.35);
+  }
+
+  /* Touch devices: 44px tap target for the primary buy action, no hover
+     image zoom (there is no hover to undo it). */
+  @media (pointer: coarse) {
+    .buy-btn { min-height: 44px; padding: 0.5rem 1.125rem; font-size: 0.8125rem; }
+  }
+
+  @media (prefers-reduced-motion: reduce) {
+    .nft-card, .image-wrapper img { transition: none; }
+    .nft-card:hover .image-wrapper img { transform: none; }
   }
 </style>

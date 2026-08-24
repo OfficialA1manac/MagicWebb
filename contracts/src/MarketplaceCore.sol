@@ -52,8 +52,11 @@ interface IMarketplaceManager {
 /// @title MarketplaceCore
 /// @notice Shared base: immutable fee config, price floor, seller-pays fee math, NFT dispatch.
 /// @dev Single 1.5% platform fee, charged ONLY on a successful sale and DEDUCTED from the seller's
-///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient immutable
-///      post-deploy. No pause, no admin — contracts are unstoppable once deployed.
+///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient is
+///      upgradeable storage settable by the manager admin. Entry paths (list/bid/offer) can be
+///      halted via the MarketplaceManager entryGate; EXIT paths (buy-settle, cancel, refund,
+///      withdraw) can never be blocked — "pausable entries, unstoppable exits". Upgrades go
+///      through the UUPS path gated by _requireAdmin.
 abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, ERC1155HolderUpgradeable, UUPSUpgradeable {
     /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
     uint16 public constant PLATFORM_FEE_BPS = 150;

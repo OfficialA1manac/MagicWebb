@@ -82,14 +82,11 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 	// rather than the zero-value from our local struct.
 	saved, err := s.q.GetProfile(c.Context(), addr)
 	if err != nil {
-		// The upsert succeeded, so a read failure is transient. Return
+		// The upsert succeeded, so a read-back failure is transient. Return
 		// the local struct as a degraded response rather than 5xx.
-		// Preserve the input fields but re-fetch to keep verified
-		// truthful; if re-fetch fails, fall back gracefully.
-		oldProfile, getErr := s.q.GetProfile(c.Context(), addr)
-		if getErr == nil {
-			p.Verified = oldProfile.Verified
-		}
+		// `verified` stays at its zero value in this path.
+		log.Warn().Err(err).Str("address", addr).
+			Msg("profiles: read-back after upsert failed; returning degraded response")
 		return c.JSON(p)
 	}
 	return c.JSON(saved)

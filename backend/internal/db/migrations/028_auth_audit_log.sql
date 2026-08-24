@@ -7,7 +7,10 @@
 -- Indexes:
 --   wallet_addr + created_at: enables incident response queries ("all events
 --     for 0xABC in the last 24h") and brute-force pattern detection.
---   created_at: supports retention policies (DELETE WHERE created_at < ...).
+--   created_at: supports the retention policy. Retention window is 90 days,
+--     enforced daily by PgAuditLogger.retentionSweeper (internal/auth/audit.go)
+--     and caught up once by migration 035 — rows older than 90 days are
+--     deleted because wallet_addr+ip+user_agent is personal data (GDPR/CCPA).
 --   outcome: enables dashboard queries like "failed logins in the last hour".
 -- +goose Up
 -- +goose StatementBegin

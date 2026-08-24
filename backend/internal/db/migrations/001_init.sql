@@ -128,9 +128,14 @@ CREATE TABLE royalties (
     collection      CHAR(42)        NOT NULL REFERENCES collections(address),
     token_id        NUMERIC(78,0),  -- NULL = collection-level default
     receiver        CHAR(42)        NOT NULL,
-    fee_bps         INT             NOT NULL CHECK (fee_bps BETWEEN 0 AND 10000),
-    PRIMARY KEY (collection, token_id)
+    fee_bps         INT             NOT NULL CHECK (fee_bps BETWEEN 0 AND 10000)
 );
+-- A composite PRIMARY KEY would force token_id NOT NULL and make the
+-- documented collection-level default row (token_id IS NULL) impossible to
+-- insert. Partial unique indexes let both row kinds coexist:
+-- one row per (collection, token) plus at most one collection-level default.
+CREATE UNIQUE INDEX royalties_token_uq      ON royalties (collection, token_id) WHERE token_id IS NOT NULL;
+CREATE UNIQUE INDEX royalties_collection_uq ON royalties (collection)           WHERE token_id IS NULL;
 
 -- ── trending_scores ───────────────────────────────────────────────────────
 -- Materialized by the score worker (Zig hot-path) every minute.

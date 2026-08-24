@@ -25,6 +25,11 @@ ALTER TABLE offers ADD COLUMN fee_wei   NUMERIC(78,0)  NOT NULL DEFAULT 0;
 ALTER TABLE offers ADD COLUMN units     BIGINT         NOT NULL DEFAULT 1;
 ALTER TABLE offers ADD COLUMN standard  token_standard NOT NULL DEFAULT 'erc721';
 ALTER TABLE offers ADD COLUMN make_tx   CHAR(66);
+-- Collection-wide offers (token_id IS NULL, allowed by 001) have no
+-- equivalent in the on-chain stacked-position model. Remove them before the
+-- NOT NULL constraint, or this migration aborts on any DB that holds one.
+UPDATE offers SET status = 'cancelled' WHERE token_id IS NULL AND status = 'pending';
+DELETE FROM offers WHERE token_id IS NULL;
 ALTER TABLE offers ALTER COLUMN token_id SET NOT NULL;
 -- One compounded position per bidder per token.
 CREATE UNIQUE INDEX offers_position_uq ON offers (collection, token_id, bidder)

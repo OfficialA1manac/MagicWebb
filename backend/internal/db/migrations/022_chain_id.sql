@@ -34,6 +34,7 @@ ALTER TABLE offers              ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NUL
 ALTER TABLE sales               ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE trending_scores     ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE keeper_gas_logs     ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
+ALTER TABLE royalties           ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
 
 -- ── Backfill existing rows with the deployment chain_id ─────────────────
 DO $$
@@ -55,6 +56,7 @@ BEGIN
     UPDATE sales               SET chain_id = dc_chain_id WHERE chain_id = 0;
     UPDATE trending_scores     SET chain_id = dc_chain_id WHERE chain_id = 0;
     UPDATE keeper_gas_logs     SET chain_id = dc_chain_id WHERE chain_id = 0;
+    UPDATE royalties           SET chain_id = dc_chain_id WHERE chain_id = 0;
   END IF;
 END $$;
 

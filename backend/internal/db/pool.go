@@ -33,7 +33,11 @@ func ConnectReadReplica(ctx context.Context, dsn string) (*pgxpool.Pool, error) 
 		return nil, fmt.Errorf("db: parse read replica config: %w", err)
 	}
 	// Read replicas typically serve many concurrent queries, so we allow
-	// more connections than the primary (but still capped for Neon's free tier).
+	// more connections than the primary. NOTE: this assumes the replica DSN
+	// points at a SEPARATE Neon endpoint (read replica / pooled endpoint)
+	// with its own connection budget. If the replica DSN targets the same
+	// free-tier endpoint as the primary (10-connection limit), lower this
+	// via the pool settings or reuse the primary pool instead.
 	cfg.MaxConns = 20
 	cfg.MinConns = 0
 	cfg.MaxConnIdleTime = 4 * time.Minute

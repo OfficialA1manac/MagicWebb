@@ -60,8 +60,7 @@ const networks = KNOWN_NETWORKS.map((n) => {
     <meta property="og:type" content="website" />
     <link rel="preconnect" href="https://fonts.googleapis.com" />
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&display=swap" rel="stylesheet" />
-    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
     <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
 
     <script is:inline>
@@ -200,6 +199,14 @@ const networks = KNOWN_NETWORKS.map((n) => {
       .count-pop { animation: count-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
       @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
       .float { animation: float 4s ease-in-out infinite; } .float-delayed { animation: float 4s ease-in-out 1s infinite; } .float-slow { animation: float 6s ease-in-out infinite; }
+
+      @media (prefers-reduced-motion: reduce) {
+        .brand-text, .shimmer, .float, .float-delayed, .float-slow, .count-pop { animation: none; }
+        .reveal { opacity: 1; transform: none; transition: none; }
+        .anim-fade-in { animation: none; }
+        .cursor-glow { display: none; }
+        html { scroll-behavior: auto; }
+      }
     </style>
   </head>
   <body>
@@ -293,7 +300,7 @@ const networks = KNOWN_NETWORKS.map((n) => {
     </footer>
 
     <script>
-      (function(){if(typeof window==='undefined')return;const g=document.createElement('div');g.className='cursor-glow';g.style.opacity='0';document.body.prepend(g);let r=0;document.addEventListener('mousemove',function(e){if(r)cancelAnimationFrame(r);r=requestAnimationFrame(function(){g.style.left=e.clientX+'px';g.style.top=e.clientY+'px';g.style.opacity='1';});});document.addEventListener('mouseleave',function(){g.style.opacity='0';});})();
+      (function(){if(typeof window==='undefined')return;if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const g=document.createElement('div');g.className='cursor-glow';g.style.opacity='0';document.body.prepend(g);let r=0;document.addEventListener('mousemove',function(e){if(r)cancelAnimationFrame(r);r=requestAnimationFrame(function(){g.style.left=e.clientX+'px';g.style.top=e.clientY+'px';g.style.opacity='1';});});document.addEventListener('mouseleave',function(){g.style.opacity='0';});})();
       (function(){if(typeof window==='undefined')return;if(window.matchMedia&&window.matchMedia('(prefers-reduced-motion: reduce)').matches)return;const c=document.createElement('canvas');c.style.cssText='position:fixed;inset:0;z-index:-1;pointer-events:none;opacity:0.35;';document.body.prepend(c);const x=c.getContext('2d'),p=[],N=50,D=120;function R(){c.width=window.innerWidth;c.height=window.innerHeight;}R();window.addEventListener('resize',R);for(let i=0;i<N;i++)p.push({x:Math.random()*c.width,y:Math.random()*c.height,vx:(Math.random()-0.5)*0.4,vy:(Math.random()-0.5)*0.4,r:Math.random()*1.5+0.5,o:Math.random()*0.5+0.2});function dr(){x.clearRect(0,0,c.width,c.height);for(let i=0;i<p.length;i++){const a=p[i];a.x+=a.vx;a.y+=a.vy;if(a.x<0||a.x>c.width)a.vx*=-1;if(a.y<0||a.y>c.height)a.vy*=-1;x.beginPath();x.arc(a.x,a.y,a.r,0,Math.PI*2);x.fillStyle='rgba(125,211,252,'+a.o+')';x.fill();for(let j=i+1;j<p.length;j++){const b=p[j],dx=a.x-b.x,dy=a.y-b.y,ds=Math.sqrt(dx*dx+dy*dy);if(ds<D){x.beginPath();x.moveTo(a.x,a.y);x.lineTo(b.x,b.y);x.strokeStyle='rgba(167,139,250,'+(0.12*(1-ds/D))+')';x.lineWidth=0.5;x.stroke();}}}if(!document.hidden)requestAnimationFrame(dr);}dr();document.addEventListener('visibilitychange',function(){if(!document.hidden)requestAnimationFrame(dr);});})();
       (function(){if(typeof window==='undefined')return;const o=new IntersectionObserver(function(e){e.forEach(function(en){if(en.isIntersecting){en.target.classList.add('visible');o.unobserve(en.target);}});},{threshold:0.15,rootMargin:'0px 0px -40px 0px'});document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.reveal').forEach(function(el){o.observe(el);});});setTimeout(function(){document.querySelectorAll('.reveal:not(.visible)').forEach(function(el){o.observe(el);});},300);})();
       (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){const b=document.getElementById('mobile-menu-btn'),m=document.getElementById('mobile-menu');if(b&&m){b.addEventListener('click',function(){const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');});m.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){m.classList.remove('open');});});}});})();

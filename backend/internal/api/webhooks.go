@@ -3,6 +3,7 @@ package api
 import (
 	"crypto/rand"
 	"encoding/hex"
+	"net/url"
 	"sort"
 	"strconv"
 	"strings"
@@ -74,8 +75,8 @@ func (s *WebhookService) handleCreateWebhook(c *fiber.Ctx) error {
 	if len(req.URL) > 2048 {
 		return writeErr(c, fiber.StatusBadRequest, "url too long (max 2048 chars)")
 	}
-	if !strings.HasPrefix(req.URL, "https://") && !strings.HasPrefix(req.URL, "http://") {
-		return writeErr(c, fiber.StatusBadRequest, "url must start with https:// or http://")
+	if u, err := url.ParseRequestURI(req.URL); err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
+		return writeErr(c, fiber.StatusBadRequest, "url must be a valid http:// or https:// URL with a host")
 	}
 
 	// Validate events.
@@ -133,9 +134,14 @@ func (s *WebhookService) handleCreateWebhook(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusTooManyRequests, "maximum 10 active webhook configs per user")
 	}
 
-	// Create the config.
+	// Create the config. The DB layer enforces the 10-active cap atomically
+	// (advisory-lock + conditional insert), so the pre-check above is only a
+	// fast path — concurrent requests are caught here.
 	id, err := s.q.CreateWebhookConfig(c.Context(), addr, req.URL, secret, validated)
 	if err != nil {
+		if err == db.ErrWebhookLimit {
+			return writeErr(c, fiber.StatusTooManyRequests, "maximum 10 active webhook configs per user")
+		}
 		return writeErr(c, fiber.StatusInternalServerError, "webhook creation failed")
 	}
 

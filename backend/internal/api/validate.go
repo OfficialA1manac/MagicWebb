@@ -55,48 +55,43 @@ func ValidateQuery(schema QuerySchema) fiber.Handler {
 	}
 
 	return func(c *fiber.Ctx) error {
-		// 1. Collect all query param names from the request
-		var paramNames []string
+		// 1. Collect all query param names from the request (single pass).
+		present := make(map[string]struct{})
 		c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
 			if len(key) > 0 {
-				paramNames = append(paramNames, string(key))
+				present[string(key)] = struct{}{}
 			}
 		})
 
 		// 2. Check for unknown parameters (not in the schema)
-		for _, name := range paramNames {
+		for name := range present {
 			if _, ok := allowed[name]; !ok {
 				return writeErr(c, fiber.StatusBadRequest,
 					fmt.Sprintf("unknown query parameter: %s", name))
 			}
 		}
 
-	// 3. Validate each declared parameter
-	for _, p := range schema {
-		val := c.Query(p.Name)
-		// Determine if the param was present in the query string (even if empty).
-		present := false
-		c.Request().URI().QueryArgs().VisitAll(func(key, value []byte) {
-			if string(key) == p.Name {
-				present = true
+		// 3. Validate each declared parameter. An optional parameter that is
+		// present but empty (e.g. `?status=`) falls back to default behavior;
+		// only required parameters reject empty or missing values.
+		for _, p := range schema {
+			val := c.Query(p.Name)
+			if val == "" {
+				if p.Required {
+					if _, wasPresent := present[p.Name]; wasPresent {
+						return writeErr(c, fiber.StatusBadRequest,
+							fmt.Sprintf("query parameter %s is present but empty", p.Name))
+					}
+					return writeErr(c, fiber.StatusBadRequest,
+						fmt.Sprintf("required query parameter missing: %s", p.Name))
+				}
+				continue
 			}
-		})
-		if val == "" {
-			if present {
-				return writeErr(c, fiber.StatusBadRequest,
-					fmt.Sprintf("query parameter %s is present but empty", p.Name))
-			}
-			if p.Required {
-				return writeErr(c, fiber.StatusBadRequest,
-					fmt.Sprintf("required query parameter missing: %s", p.Name))
-			}
-			continue
-		}
 
-		if err := validateValue(p, val); err != nil {
-			return writeErr(c, fiber.StatusBadRequest, err.Error())
+			if err := validateValue(p, val); err != nil {
+				return writeErr(c, fiber.StatusBadRequest, err.Error())
+			}
 		}
-	}
 
 		return c.Next()
 	}

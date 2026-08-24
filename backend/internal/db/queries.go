@@ -736,7 +736,7 @@ func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 		`SELECT `+auctionSelectCols+auctionFromJoin+
 			` WHERE a.status='active'
 		   AND a.highest_bidder IS NULL
-		   AND a.starts_at + interval '30 minutes' < now()
+		   AND a.starts_at < now() - interval '30 minutes'
 		 ORDER BY a.starts_at ASC LIMIT 100`)
 	if err != nil {
 		return nil, err
@@ -1756,7 +1756,7 @@ func (q *Q) GetStalledAuctionCounts(ctx context.Context) (*StalledAuctionCounts,
 		SELECT
 			(SELECT COUNT(*) FROM auctions WHERE status='active' AND ends_at < now())::bigint,
 			(SELECT COUNT(*) FROM auctions WHERE status='active' AND highest_bidder IS NULL
-			   AND starts_at + interval '30 minutes' < now()
+			   AND starts_at < now() - interval '30 minutes'
 			   AND ends_at >= now())::bigint,
 			(SELECT COUNT(*) FROM auctions WHERE status IN ('settled','cancelled')
 			   AND NOT losers_refunded
@@ -1793,7 +1793,7 @@ func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctio
 		       CASE
 		         WHEN status='active' AND ends_at < now() THEN 'expired_unsettled'
 		         WHEN status='active' AND highest_bidder IS NULL
-		              AND starts_at + interval '30 minutes' < now() THEN 'inactive_no_bids'
+		              AND starts_at < now() - interval '30 minutes' THEN 'inactive_no_bids'
 		         WHEN status IN ('settled','cancelled') AND NOT losers_refunded
 		              AND (refund_attempt_at IS NULL
 		                   OR refund_attempt_at < now() - interval '2 minutes') THEN 'unrefunded'
@@ -1807,7 +1807,7 @@ func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctio
 		FROM auctions
 		WHERE (status='active' AND ends_at < now())
 		   OR (status='active' AND highest_bidder IS NULL
-		       AND starts_at + interval '30 minutes' < now())
+		       AND starts_at < now() - interval '30 minutes')
 		   OR (status IN ('settled','cancelled') AND NOT losers_refunded
 		       AND (refund_attempt_at IS NULL
 		            OR refund_attempt_at < now() - interval '2 minutes'))
@@ -1990,7 +1990,7 @@ func (q *Q) GetGasMetricsSummary(ctx context.Context) (*GasMetricsSummary, error
 			COUNT(*)::bigint,
 			COALESCE(SUM(effective_gas_cost_wei)::text, '0'),
 			COALESCE((SUM(effective_gas_cost_wei) / GREATEST(COUNT(*), 1))::text, '0'),
-			COALESCE(AVG(effective_gas_price_wei::numeric), 0),
+			COALESCE(AVG(effective_gas_price_wei::numeric) / 1e9, 0),
 			COALESCE(AVG(gas_used)::bigint, 0)
 		FROM keeper_gas_logs
 		WHERE created_at > now() - interval '24 hours'
