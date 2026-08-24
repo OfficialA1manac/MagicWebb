@@ -438,14 +438,21 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				// hash of target against lastBlockHash every tick (cheap: one
 				// HeaderByNumber call per tick when idle).
 				if lastBlock > 0 && lastBlockHash != (common.Hash{}) {
-					targetHeader, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target)))
-					if err == nil && targetHeader.ParentHash != lastBlockHash {
+					// Compare hash identity at the SAME height. Comparing
+					// target's parentHash against lastBlockHash is only valid
+					// when target == lastBlock+1, but this branch runs when
+					// target <= lastBlock — when target == lastBlock the
+					// parent is hash(lastBlock-1), which never equals
+					// hash(lastBlock), so the old check fired a phantom reorg
+					// (rewind, re-index, repeat) on every idle tick.
+					lastHeader, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock)))
+					if err == nil && lastHeader.Hash() != lastBlockHash {
 						// Reorg detected: the block the indexer thinks is the
 						// last indexed block no longer sits on the canonical chain.
 						// Rewind by reorgSafetyBlocks to re-index the affected range.
 						log.Warn().
-							Str("expected_parent", lastBlockHash.Hex()).
-							Str("actual_parent", targetHeader.ParentHash.Hex()).
+							Str("expected_hash", lastBlockHash.Hex()).
+							Str("actual_hash", lastHeader.Hash().Hex()).
 							Uint64("head", head).
 							Uint64("rewind_to", lastBlock-r.reorgSafety()).
 							Msg("watcher: reorg detected — rewinding indexer")
