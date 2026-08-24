@@ -879,3 +879,39 @@ func TestCacheKey_SameVarsDifferentOrder(t *testing.T) {
 		t.Error("json.Marshal should produce stable output for reordered map keys")
 	}
 }
+
+// ── Regression: gqlgen executor contract ───────────────────────────────
+//
+// gqlgen's DispatchOperation captures its inner context only while the
+// operation middleware chain runs; the transport then invokes the returned
+// ResponseHandler with that captured context. If InterceptOperation defers
+// next() into the ResponseHandler, the captured context is nil and the
+// handler is called with a nil context — which panicked in production on
+// every uncached query. next() must run during interception.
+func TestInterceptOperation_CallsNextDuringInterception(t *testing.T) {
+	c := NewResponseCacheExtension()
+	ctx := newOpCtx("query { listings }", ast.Query, "listings")
+
+	nextCalled := false
+	handler := c.InterceptOperation(ctx, func(opCtx context.Context) graphql.ResponseHandler {
+		nextCalled = true
+		if opCtx == nil {
+			t.Fatal("next called with nil context")
+		}
+		return func(rctx context.Context) *graphql.Response {
+			return &graphql.Response{Data: json.RawMessage(`{"ok":true}`)}
+		}
+	})
+
+	if !nextCalled {
+		t.Fatal("next() was not called during InterceptOperation — deferring it " +
+			"into the ResponseHandler leaves gqlgen's innerCtx nil")
+	}
+
+	// The transport may invoke the returned handler with a nil context when
+	// the operation chain produced no inner context; this must not panic.
+	resp := handler(nil) //nolint:staticcheck // deliberate nil-context regression check
+	if resp == nil || resp.Data == nil {
+		t.Fatalf("expected response with data, got %+v", resp)
+	}
+}

@@ -33,10 +33,10 @@ import (
 
 const (
 	// GQL-2: Tiered cache TTLs based on data volatility.
-	ttlSlow     = 60 * time.Second // metrics, collection(address:) — change rarely
-	ttlMedium   = 30 * time.Second // trending, collections list
-	ttlFast     = 15 * time.Second // listings, auctions, activity
-	ttlDefault  = 15 * time.Second // unknown queries
+	ttlSlow    = 60 * time.Second // metrics, collection(address:) — change rarely
+	ttlMedium  = 30 * time.Second // trending, collections list
+	ttlFast    = 15 * time.Second // listings, auctions, activity
+	ttlDefault = 15 * time.Second // unknown queries
 
 	maxCacheEntries = 500
 )
@@ -161,9 +161,16 @@ func (c *ResponseCacheExtension) InterceptOperation(ctx context.Context, next gr
 	}
 
 	// Cache miss — execute normally and cache the result.
+	//
+	// next(ctx) MUST run here, during operation interception, not inside the
+	// returned ResponseHandler: gqlgen's executor captures the inner context
+	// while the operation middleware chain runs (DispatchOperation's innerCtx)
+	// and then invokes the returned handler with that context. Deferring
+	// next() into the handler leaves innerCtx nil and the transport calls the
+	// handler with a nil context — panic on every uncached query.
 	c.MissesTotal.Add(1)
+	handler := next(ctx)
 	return func(ctx context.Context) *graphql.Response {
-		handler := next(ctx)
 		resp := handler(ctx)
 		if resp != nil && len(resp.Errors) == 0 && resp.Data != nil {
 			ttl := operationTTL(oc)

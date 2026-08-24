@@ -264,7 +264,7 @@ func (d *depthValidator) Validate(schema graphql.ExecutableSchema) error { retur
 
 func (d *depthValidator) InterceptOperation(ctx context.Context, next graphql.OperationHandler) graphql.ResponseHandler {
 	oc := graphql.GetOperationContext(ctx)
-	if oc == nil {
+	if oc == nil || oc.Operation == nil {
 		return next(ctx)
 	}
 	depth := countDepth(oc.Operation.SelectionSet, 0)
