@@ -117,9 +117,13 @@ const sortParam = urlParams.get('sort') || 'recent';
         try{
           var connected=window.MW&&window.MW.address&&window.MW.address();
           if(!connected&&window.MW&&window.MW.connect){
+            // Start connect() BEFORE preventDefault: if it throws
+            // synchronously, the outer catch falls through and the anchor's
+            // default navigation still happens.
+            var pending=window.MW.connect();
             e.preventDefault();
             b.style.opacity='0.7';
-            window.MW.connect().then(function(){location.href='/profile#nfts';})
+            Promise.resolve(pending).then(function(){location.href='/profile#nfts';})
               .catch(function(){b.style.opacity='1';});
           }
         }catch(_){/* fall through to the anchor */}

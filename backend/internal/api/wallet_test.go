@@ -219,3 +219,82 @@ func TestWalletNFTs_ExplorerDown(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// TestWalletNFTs_CachedSourceHeader verifies the second (cached) response
+// still carries X-MW-Wallet-Source.
+func TestWalletNFTs_CachedSourceHeader(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	// Only ONE db query expected — the second request must be served from cache.
+	mock.ExpectQuery(`SELECT n.collection, n.token_id::text, n.units::text`).
+		WithArgs(testOwner).
+		WillReturnRows(pgxmock.NewRows(walletNFTCols).
+			AddRow("0xcol1", "1", "1", "erc721", "Token One", "https://example.com/1.png"))
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	svc := NewWalletService(db.New(mock), "", "")
+	app.Get("/api/v1/wallet/:addr/nfts", svc.handleNFTs)
+
+	first := doGet(t, app, "/api/v1/wallet/"+testOwner+"/nfts")
+	if first.StatusCode != http.StatusOK || first.Header.Get("X-MW-Wallet-Source") != "db" {
+		t.Fatalf("first: status=%d source=%q", first.StatusCode, first.Header.Get("X-MW-Wallet-Source"))
+	}
+	second := doGet(t, app, "/api/v1/wallet/"+testOwner+"/nfts")
+	if second.StatusCode != http.StatusOK {
+		t.Fatalf("second status = %d", second.StatusCode)
+	}
+	if got := second.Header.Get("X-MW-Wallet-Source"); got != "db" {
+		t.Fatalf("cached response lost X-MW-Wallet-Source: %q", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// TestWalletNFTs_ExplorerPagination verifies next_page_params is followed and
+// an NFT that only appears on page two reaches the merged inventory.
+func TestWalletNFTs_ExplorerPagination(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+
+	mock.ExpectQuery(`SELECT n.collection, n.token_id::text, n.units::text`).
+		WithArgs(testOwner).
+		WillReturnRows(pgxmock.NewRows(walletNFTCols))
+
+	explorer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.Header().Set("Content-Type", "application/json")
+		if r.URL.Query().Get("token_id") == "" {
+			// page 1 with a continuation cursor
+			_, _ = w.Write([]byte(`{"items":[
+				{"id":"1","value":"1","metadata":{"name":"Page1"},"token":{"address":"0xaaa","type":"ERC-721"}}
+			],"next_page_params":{"token_id":"1","token_type":"ERC-721","items_count":50}}`))
+			return
+		}
+		// page 2, terminal
+		_, _ = w.Write([]byte(`{"items":[
+			{"id":"2","value":"1","metadata":{"name":"Page2"},"token":{"address":"0xbbb","type":"ERC-721"}}
+		],"next_page_params":null}`))
+	}))
+	defer explorer.Close()
+
+	app := fiber.New(fiber.Config{DisableStartupMessage: true})
+	svc := NewWalletService(db.New(mock), explorer.URL, "")
+	app.Get("/api/v1/wallet/:addr/nfts", svc.handleNFTs)
+
+	resp := doGet(t, app, "/api/v1/wallet/"+testOwner+"/nfts")
+	if resp.StatusCode != http.StatusOK {
+		t.Fatalf("status = %d", resp.StatusCode)
+	}
+	var nfts []db.OwnedNFT
+	decodeJSON(t, resp, &nfts)
+	if len(nfts) != 2 {
+		t.Fatalf("got %d nfts, want 2 (page 1 + page 2)", len(nfts))
+	}
+	if nfts[1].Collection != "0xbbb" || nfts[1].Name != "Page2" {
+		t.Fatalf("page-2 NFT missing or mismapped: %+v", nfts[1])
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

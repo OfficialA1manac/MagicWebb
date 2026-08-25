@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"strconv"
 	"strings"
 	"time"
 
@@ -57,6 +58,13 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 
 	if v, ok := s.merged.Get("wallet-nfts:" + addr); ok {
 		if body, ok2 := v.([]byte); ok2 {
+			src := "db"
+			if sv, ok3 := s.merged.Get("wallet-nfts-src:" + addr); ok3 {
+				if str, ok4 := sv.(string); ok4 {
+					src = str
+				}
+			}
+			c.Set("X-MW-Wallet-Source", src)
 			c.Set("Content-Type", "application/json")
 			return c.Send(body)
 		}
@@ -83,27 +91,35 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
 	s.merged.Set("wallet-nfts:"+addr, body)
+	s.merged.Set("wallet-nfts-src:"+addr, source)
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)
 }
 
-// blockscoutNFTPage is the subset of Blockscout's
-// /api/v2/addresses/{addr}/nft response the merge needs.
+// blockscoutNFTItem is one owned-NFT entry from Blockscout's
+// /api/v2/addresses/{addr}/nft response.
+type blockscoutNFTItem struct {
+	ID       string `json:"id"`
+	Value    string `json:"value"`
+	ImageURL string `json:"image_url"`
+	Metadata struct {
+		Name  string `json:"name"`
+		Image string `json:"image"`
+	} `json:"metadata"`
+	Token struct {
+		Address string `json:"address"`
+		Name    string `json:"name"`
+		Type    string `json:"type"` // "ERC-721" | "ERC-1155"
+	} `json:"token"`
+}
+
+// blockscoutNFTPage is the subset of Blockscout's paginated response the
+// merge needs.
 type blockscoutNFTPage struct {
-	Items []struct {
-		ID       string `json:"id"`
-		Value    string `json:"value"`
-		ImageURL string `json:"image_url"`
-		Metadata struct {
-			Name  string `json:"name"`
-			Image string `json:"image"`
-		} `json:"metadata"`
-		Token struct {
-			Address string `json:"address"`
-			Name    string `json:"name"`
-			Type    string `json:"type"` // "ERC-721" | "ERC-1155"
-		} `json:"token"`
-	} `json:"items"`
+	Items []blockscoutNFTItem `json:"items"`
+	// NextPageParams is Blockscout's keyset cursor: append its key/values as
+	// query parameters to fetch the next page; null when done.
+	NextPageParams map[string]any `json:"next_page_params"`
 }
 
 // mergeExplorerNFTs unions the DB inventory with the explorer's view of the
@@ -115,26 +131,52 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 		return dbRows, "db"
 	}
 
-	reqURL := s.explorerURL + "/api/v2/addresses/" + url.PathEscape(addr) + "/nft?type=" + url.QueryEscape("ERC-721,ERC-1155")
-	req, err := http.NewRequestWithContext(ctx, http.MethodGet, reqURL, nil)
-	if err != nil {
-		return dbRows, "db"
-	}
-	resp, err := s.httpc.Do(req)
-	if err != nil {
-		log.Debug().Err(err).Msg("wallet-nfts: explorer fetch failed, serving db-only")
-		return dbRows, "db"
-	}
-	defer resp.Body.Close()
-	if resp.StatusCode != http.StatusOK {
-		log.Debug().Int("status", resp.StatusCode).Msg("wallet-nfts: explorer non-200, serving db-only")
-		return dbRows, "db"
-	}
+	baseURL := s.explorerURL + "/api/v2/addresses/" + url.PathEscape(addr) + "/nft?type=" + url.QueryEscape("ERC-721,ERC-1155")
 
-	var page blockscoutNFTPage
-	if err := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&page); err != nil {
-		log.Debug().Err(err).Msg("wallet-nfts: explorer decode failed, serving db-only")
-		return dbRows, "db"
+	// Follow Blockscout's keyset pagination. Pages are ~50 items; cap the
+	// walk so one enormous wallet cannot stall the profile request — 4 pages
+	// (~200 NFTs) is far beyond what the grid renders anyway.
+	const maxPages = 4
+	var items []blockscoutNFTItem
+	pageURL := baseURL
+	for p := 0; p < maxPages && pageURL != ""; p++ {
+		req, err := http.NewRequestWithContext(ctx, http.MethodGet, pageURL, nil)
+		if err != nil {
+			return dbRows, "db"
+		}
+		resp, err := s.httpc.Do(req)
+		if err != nil {
+			log.Debug().Err(err).Msg("wallet-nfts: explorer fetch failed, serving db-only")
+			return dbRows, "db"
+		}
+		var page blockscoutNFTPage
+		decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&page)
+		resp.Body.Close()
+		if resp.StatusCode != http.StatusOK || decErr != nil {
+			log.Debug().Int("status", resp.StatusCode).Err(decErr).Msg("wallet-nfts: explorer page failed, serving db-only")
+			return dbRows, "db"
+		}
+		items = append(items, page.Items...)
+		pageURL = ""
+		if len(page.NextPageParams) > 0 {
+			q := url.Values{}
+			q.Set("type", "ERC-721,ERC-1155")
+			for k, v := range page.NextPageParams {
+				switch t := v.(type) {
+				case string:
+					q.Set(k, t)
+				case float64:
+					q.Set(k, strconv.FormatFloat(t, 'f', -1, 64))
+				case bool:
+					if t {
+						q.Set(k, "true")
+					} else {
+						q.Set(k, "false")
+					}
+				}
+			}
+			pageURL = s.explorerURL + "/api/v2/addresses/" + url.PathEscape(addr) + "/nft?" + q.Encode()
+		}
 	}
 
 	seen := make(map[string]bool, len(dbRows))
@@ -142,7 +184,7 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 		seen[strings.ToLower(r.Collection)+"/"+r.TokenID] = true
 	}
 	out := dbRows
-	for _, it := range page.Items {
+	for _, it := range items {
 		coll := strings.ToLower(it.Token.Address)
 		if coll == "" || it.ID == "" || seen[coll+"/"+it.ID] {
 			continue
