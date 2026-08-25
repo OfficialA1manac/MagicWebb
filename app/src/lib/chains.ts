@@ -84,3 +84,31 @@ export function networkOrigins(): Map<number, string> {
 }
 
 export function chainName(id: number): string { return STATIC[id]?.name ?? `chain ${id}`; }
+
+/**
+ * Whether trading is live on this deployment. False = read-only network mode
+ * (Songbird/Flare before contracts deploy): browsing, wallet and profile work,
+ * every trade surface points at the Coston2 origin instead.
+ */
+export function tradingLive(): boolean {
+  return currentChain().contracts.marketplace !== null;
+}
+
+/** Origin of the primary trading network, for read-only-mode CTAs. */
+export function tradingOrigin(): string | null {
+  return networkOrigins().get(114) ?? null;
+}
+
+/**
+ * One copy source for every read-only trade surface (banner + empty states).
+ * The CTA is a destination, not a "continue" — sessions do not cross origins.
+ */
+export function readOnlyCopy(): { heading: string; body: string; cta: string; ctaHref: string | null } {
+  const name = currentChain().name;
+  return {
+    heading: `Trading isn't live on ${name} yet`,
+    body: 'You can browse, connect your wallet, and view your profile. Trading opens after the security audit.',
+    cta: 'Trade on Flare Coston2',
+    ctaHref: tradingOrigin(),
+  };
+}

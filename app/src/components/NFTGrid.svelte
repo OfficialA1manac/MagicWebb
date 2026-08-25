@@ -3,6 +3,10 @@
   import { ws } from '../lib/ws/client';
   import { ACTIVITY_CHANNEL } from '../lib/ws/channels';
   import NFTCard from './NFTCard.svelte';
+  import { tradingLive, readOnlyCopy } from '../lib/chains';
+
+  const live = tradingLive();
+  const ro = readOnlyCopy();
 
   let items = [];
   let loading = true;
@@ -118,9 +122,18 @@
   {:else if items.length === 0}
     <div class="empty-card">
       <div style="font-size:3rem;margin-bottom:1rem;opacity:0.2;">✦</div>
-      <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
-      <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
-      <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+      {#if live}
+        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
+        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
+        <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+      {:else}
+        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">{ro.heading}</p>
+        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.25rem;">{ro.body}</p>
+        {#if ro.ctaHref}
+          <a href={ro.ctaHref} class="retry-btn" style="margin-top:0.75rem;display:inline-flex;align-items:center;min-height:44px;text-decoration:none;">{ro.cta}</a>
+        {/if}
+        <a href="/docs/faq" style="display:block;margin-top:0.5rem;font-size:0.75rem;color:#7dd3fc;">Learn more</a>
+      {/if}
     </div>
   {:else}
     <div class="nft-grid">

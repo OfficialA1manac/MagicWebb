@@ -71,7 +71,7 @@ import WalletConnect from '../components/WalletConnect';
               '<div style="display:flex;align-items:flex-start;gap:1rem;margin-bottom:2rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);">'+
                 '<div style="width:4rem;height:4rem;border-radius:1rem;background:linear-gradient(135deg,rgba(125,211,252,0.2),rgba(14,165,233,0.1));display:flex;align-items:center;justify-content:center;font-size:2rem;border:1px solid rgba(125,211,252,0.25);flex-shrink:0;">🗂</div>'+
                 '<div style="flex:1;min-width:0;">'+
-                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+esc(name)+(verified?' <span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.625rem;font-weight:800;">✓ Verified</span>':'')+'</h1>'+
+                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+esc(name)+(verified?' <a class="vb is-ok md" href="/docs/faq#verified" title="Verified NFT: standard NFT contract, metadata confirmed. Not a judgement of the art or the seller." aria-label="Verified NFT"><span class="vb-dot" aria-hidden="true">✓</span>Verified NFT</a>':'')+'</h1>'+
                   '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(addr)+' · '+esc(standard.toUpperCase())+(sym?' · '+esc(sym):'')+'</p>'+
                 '</div>'+
               '</div>'+

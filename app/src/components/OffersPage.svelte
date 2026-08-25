@@ -6,6 +6,10 @@
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
   import { MW } from '../lib/mw';
+  import { tradingLive, readOnlyCopy } from '../lib/chains';
+
+  const live = tradingLive();
+  const ro = readOnlyCopy();
   import { ws } from '../lib/ws/client';
   import { userChannel } from '../lib/ws/channels';
   import { currentChain } from '../lib/chains';
@@ -46,7 +50,9 @@
   let list = $derived((tab === 'received' ? received : made).filter(active));
 </script>
 
-{#if !me}
+{#if !live}
+  <EmptyState title={ro.heading} body={ro.body} cta={ro.ctaHref ? { label: ro.cta, href: ro.ctaHref } : undefined} />
+{:else if !me}
   <EmptyState title="Connect your wallet to see offers" body="Offers you make are held in escrow and fully refundable. Offers on NFTs you own show up here for you to accept or decline." cta={{ label: 'Connect wallet', onclick: () => MW.connect().catch(() => {}) }} />
 {:else}
   <div class="op-tabs" role="tablist">

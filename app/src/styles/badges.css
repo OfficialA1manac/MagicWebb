@@ -1,0 +1,13 @@
+/* Canonical verified-badge styles (D12). Global on purpose: VerifiedBadge.svelte
+ * renders these classes, and static .astro pages that build cards in string
+ * templates emit the exact same markup — one visual definition for both.
+ * Markup contract:
+ *   <a class="vb is-ok sm" href="/docs/faq#verified" title="…" aria-label="…">
+ *     <span class="vb-dot" aria-hidden="true">✓</span>Verified NFT</a>
+ */
+.vb { display: inline-flex; align-items: center; gap: .3rem; border-radius: 999px; font-weight: 700; text-decoration: none; line-height: 1; white-space: nowrap; min-height: 24px; padding: 0 .55rem; font-size: .6875rem; }
+.vb.md { min-height: 28px; padding: 0 .7rem; font-size: .75rem; }
+.vb.is-ok { color: #bae6fd; background: rgba(125,211,252,.12); border: 1px solid rgba(125,211,252,.35); }
+.vb.is-no { color: rgba(255,255,255,.55); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); font-weight: 600; }
+.vb-dot { width: 14px; height: 14px; border-radius: 50%; background: #7dd3fc; color: #09090b; font-size: 10px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; }
+.vb:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }

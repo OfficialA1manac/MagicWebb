@@ -113,7 +113,7 @@ Include the JWT in one of two ways:
 
 | Method | Path | Description |
 |--------|------|-------------|
-| GET | `/api/v1/metrics` | Aggregate marketplace statistics + SSE health counters |
+| GET | `/api/v1/metrics` | Aggregate marketplace statistics + event-stream health counters |
 | GET | `/api/v1/activity` | Recent marketplace events (Listed, Sold, etc.) |
 
 ### Indexer
@@ -128,7 +128,7 @@ Include the JWT in one of two ways:
 |--------|------|-------------|
 | GET | `/healthz` | Liveness probe (DB + RPC) |
 | GET | `/readyz` | Readiness probe (DB only) |
-| GET | `/events` | Server-Sent Events stream (real-time updates) |
+| GET | `/ws` | WebSocket stream (real-time updates: listings, auctions, offers, tx confirmations) |
 
 ## Response Shapes
 

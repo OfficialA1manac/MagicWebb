@@ -113,6 +113,8 @@ const sortParam = urlParams.get('sort') || 'recent';
     (function(){
       var b=document.getElementById('list-nft-btn');
       if(!b)return;
+      // Read-only network: listing is impossible, hide the CTA entirely.
+      if(!window.MW_MARKETPLACE){b.style.display='none';return;}
       b.addEventListener('click',function(e){
         try{
           var connected=window.MW&&window.MW.address&&window.MW.address();

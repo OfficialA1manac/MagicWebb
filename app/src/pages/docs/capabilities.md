@@ -16,6 +16,18 @@ Every write is a wallet transaction on the network you are viewing. The marketpl
 **1.5%, paid by the seller, only when something sells**. Listing, auctioning, bidding and
 offering are free (gas only). Every amount you escrow is refundable.
 
+## Which networks?
+
+| Capability | Coston2 | Songbird | Flare |
+|---|---|---|---|
+| Browse, search, collections, activity, docs | ✓ | ✓ | ✓ |
+| Connect wallet, view profile + balance | ✓ | ✓ | ✓ |
+| Trade (list, buy, auction, bid, offer, refunds) | ✓ | after audit | after audit |
+
+Songbird and Flare are **read-only** until the contracts pass the external security audit.
+Trade there once it ships; until then, trade on Flare Coston2. Switching network navigates
+to a different site, so you connect your wallet again on arrival.
+
 ## Listings (fixed price)
 
 | Action | Viewer | Buyer | Seller / owner |
