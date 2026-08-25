@@ -401,14 +401,19 @@ func Load() {
 	// v35: contract address validation — MARKETPLACE_ADDR, AUCTION_ADDR,
 	// OFFERBOOK_ADDR must be well-formed Ethereum addresses. Previously
 	// they were only lowercased; a typo in .env would deploy a broken site.
-	for _, pair := range [][2]string{
-		{"MARKETPLACE_ADDR", C.MarketplaceAddr},
-		{"AUCTION_ADDR", C.AuctionAddr},
-		{"OFFERBOOK_ADDR", C.OfferBookAddr},
-	} {
-		if !isValidEthAddr(pair[1]) {
-			fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
-			os.Exit(1)
+	// Skipped entirely in read-only network mode: the all-or-nothing check
+	// above already guaranteed the three cores are either all set or all
+	// empty, and empty is a supported state, not a typo.
+	if C.ContractsDeployed() {
+		for _, pair := range [][2]string{
+			{"MARKETPLACE_ADDR", C.MarketplaceAddr},
+			{"AUCTION_ADDR", C.AuctionAddr},
+			{"OFFERBOOK_ADDR", C.OfferBookAddr},
+		} {
+			if !isValidEthAddr(pair[1]) {
+				fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
+				os.Exit(1)
+			}
 		}
 	}
 

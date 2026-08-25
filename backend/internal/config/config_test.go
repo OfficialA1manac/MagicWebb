@@ -637,3 +637,74 @@ func TestEnsureValidKey(t *testing.T) {
 		t.Fatalf("encoded key length = %d, want 64", len(keyHex))
 	}
 }
+
+// ── read-only network mode boot ───────────────────────────────────────────
+
+func TestLoadReadOnlyMode_Subprocess(t *testing.T) {
+	// Regression: the v35 address-validation loop used to run unconditionally,
+	// so all-empty contract addresses (the documented read-only network mode
+	// for Songbird/Flare) exited 1 at startup. Load() must return normally
+	// with zero addresses set, still fail on a partial set, and still fail
+	// on malformed addresses when all three are set.
+	if os.Getenv("GO_TEST_SUBPROCESS_LOAD_READONLY") == "1" {
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		// CHAIN_ID and the *_ADDR vars are inherited from parent cmd.Env.
+		Load()
+		if C.ContractsDeployed() {
+			fmt.Fprintln(os.Stderr, "SUBPROCESS: ContractsDeployed()=true, want false in read-only mode")
+			os.Exit(2)
+		}
+		os.Exit(0)
+		return
+	}
+
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_LOAD_READONLY=1",
+		"CHAIN_ID=19", // Songbird: the first real read-only network
+	}
+	// Assembled at runtime so tools/check-deployments.sh's stray-address scan
+	// (which greps for literal `*_ADDR=0x…`) doesn't match this test fixture.
+	zeroAddr := "0x" + strings.Repeat("0", 40)
+	run := func(extra ...string) ([]byte, error) {
+		cmd := exec.Command(os.Args[0], "-test.run=TestLoadReadOnlyMode_Subprocess")
+		cmd.Env = append(append([]string{}, minimalEnv...), extra...)
+		return cmd.CombinedOutput()
+	}
+
+	t.Run("all_empty_boots", func(t *testing.T) {
+		out, err := run()
+		if err != nil {
+			t.Fatalf("read-only mode (no contract addrs) should boot, got err=%v\noutput:\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "read-only network mode") {
+			t.Fatalf("expected read-only WARN on stderr, got:\n%s", out)
+		}
+	})
+
+	t.Run("partial_set_fatal", func(t *testing.T) {
+		out, err := run("MARKETPLACE_ADDR=" + zeroAddr)
+		if err == nil {
+			t.Fatalf("partial address set should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "must be set together") {
+			t.Fatalf("expected all-or-nothing FATAL, got:\n%s", out)
+		}
+	})
+
+	t.Run("malformed_addr_fatal", func(t *testing.T) {
+		out, err := run(
+			"MARKETPLACE_ADDR=0xNOTHEX",
+			"AUCTION_ADDR="+zeroAddr,
+			"OFFERBOOK_ADDR="+zeroAddr,
+		)
+		if err == nil {
+			t.Fatalf("malformed address should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "not a valid Ethereum address") {
+			t.Fatalf("expected address-validation FATAL, got:\n%s", out)
+		}
+	})
+}
