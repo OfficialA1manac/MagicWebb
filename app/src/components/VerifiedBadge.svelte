@@ -17,7 +17,11 @@
     <span class="vb is-ok {size}" title={tip} aria-label={tip}><span class="vb-dot" aria-hidden="true">✓</span>Verified NFT</span>
   {/if}
 {:else if showUnverified}
-  <a class="vb is-no {size}" href="/docs/faq#verified" title={tip} aria-label={tip}>Unverified</a>
+  {#if link}
+    <a class="vb is-no {size}" href="/docs/faq#verified" title={tip} aria-label={tip}>Unverified</a>
+  {:else}
+    <span class="vb is-no {size}" title={tip} aria-label={tip}>Unverified</span>
+  {/if}
 {/if}
 
 <!-- Styles live in src/styles/badges.css (global) so static .astro string
