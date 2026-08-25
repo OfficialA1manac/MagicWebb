@@ -7,11 +7,9 @@
 // cache degrades gracefully to in-memory mode so a Redis outage doesn't
 // take down the application.
 //
-// Dependency: github.com/redis/go-redis/v9
-// The import is guarded by a build tag to avoid forcing the dependency on
-// deployments that don't use Redis. Add to go.mod:
-//
-//	require github.com/redis/go-redis/v9 v9.x.x
+// Dependency: github.com/redis/go-redis/v9 — always compiled in (no build
+// tag); the backend is selected at runtime by whether REDIS_URL is set, and
+// an empty/unreachable Redis degrades to the in-memory cache.
 //
 // The Cache interface is shared between in-memory (cache.go) and Redis
 // (redis.go) so callers use the same API regardless of backend.

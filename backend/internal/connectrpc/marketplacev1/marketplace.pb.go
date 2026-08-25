@@ -2347,7 +2347,6 @@ type GetProfileResponse struct {
 	BannerUri     string                 `protobuf:"bytes,5,opt,name=banner_uri,json=bannerUri,proto3" json:"banner_uri,omitempty"`
 	Twitter       string                 `protobuf:"bytes,6,opt,name=twitter,proto3" json:"twitter,omitempty"`
 	Website       string                 `protobuf:"bytes,7,opt,name=website,proto3" json:"website,omitempty"`
-	Verified      bool                   `protobuf:"varint,8,opt,name=verified,proto3" json:"verified,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -2429,13 +2428,6 @@ func (x *GetProfileResponse) GetWebsite() string {
 		return x.Website
 	}
 	return ""
-}
-
-func (x *GetProfileResponse) GetVerified() bool {
-	if x != nil {
-		return x.Verified
-	}
-	return false
 }
 
 type SearchRequest struct {
@@ -2973,7 +2965,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x15GetWalletNFTsResponse\x12,\n" +
 	"\x04nfts\x18\x01 \x03(\v2\x18.marketplace.v1.OwnedNFTR\x04nfts\"-\n" +
 	"\x11GetProfileRequest\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xf1\x01\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xe5\x01\n" +
 	"\x12GetProfileResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12!\n" +
 	"\fdisplay_name\x18\x02 \x01(\tR\vdisplayName\x12\x10\n" +
@@ -2983,8 +2975,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\n" +
 	"banner_uri\x18\x05 \x01(\tR\tbannerUri\x12\x18\n" +
 	"\atwitter\x18\x06 \x01(\tR\atwitter\x12\x18\n" +
-	"\awebsite\x18\a \x01(\tR\awebsite\x12\x1a\n" +
-	"\bverified\x18\b \x01(\bR\bverified\";\n" +
+	"\awebsite\x18\a \x01(\tR\awebsiteJ\x04\b\b\x10\tR\bverified\";\n" +
 	"\rSearchRequest\x12\x14\n" +
 	"\x05query\x18\x01 \x01(\tR\x05query\x12\x14\n" +
 	"\x05limit\x18\x02 \x01(\x05R\x05limit\"\x8e\x01\n" +

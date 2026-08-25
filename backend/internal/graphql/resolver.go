@@ -689,7 +689,7 @@ func (r *queryResolver) Profile(ctx context.Context, address string) (*Profile, 
 	return &Profile{
 		Address: row.Address, DisplayName: row.DisplayName, Bio: row.Bio,
 		AvatarURI: row.AvatarURI, BannerURI: row.BannerURI,
-		Twitter: row.Twitter, Website: row.Website, Verified: row.Verified,
+		Twitter: row.Twitter, Website: row.Website,
 	}, nil
 }
 
@@ -1356,7 +1356,6 @@ func profileFromProto(p *marketplacev1.GetProfileResponse) *Profile {
 		BannerURI:   p.BannerUri,
 		Twitter:     p.Twitter,
 		Website:     p.Website,
-		Verified:    p.Verified,
 	}
 }
 

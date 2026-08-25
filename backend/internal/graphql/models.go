@@ -139,7 +139,6 @@ type Profile struct {
 	BannerURI   string `json:"bannerURI"`
 	Twitter     string `json:"twitter"`
 	Website     string `json:"website"`
-	Verified    bool   `json:"verified"`
 }
 
 type Notification struct {

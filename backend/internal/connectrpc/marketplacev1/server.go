@@ -536,7 +536,6 @@ func (s *Server) GetProfile(ctx context.Context, req *connect.Request[GetProfile
 		BannerUri:   row.BannerURI,
 		Twitter:     row.Twitter,
 		Website:     row.Website,
-		Verified:    row.Verified,
 	}), nil
 }
 

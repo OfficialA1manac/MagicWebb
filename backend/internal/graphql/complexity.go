@@ -302,7 +302,6 @@ func ComplexityConfig() ComplexityRoot {
 			Bio         func(childComplexity int) int
 			DisplayName func(childComplexity int) int
 			Twitter     func(childComplexity int) int
-			Verified    func(childComplexity int) int
 			Website     func(childComplexity int) int
 		}{
 			Address:     func(c int) int { return costScalar },
@@ -311,7 +310,6 @@ func ComplexityConfig() ComplexityRoot {
 			Bio:         func(c int) int { return costScalar },
 			DisplayName: func(c int) int { return costScalar },
 			Twitter:     func(c int) int { return costScalar },
-			Verified:    func(c int) int { return costScalar },
 			Website:     func(c int) int { return costScalar },
 		},
 
@@ -468,14 +466,14 @@ func ComplexityConfig() ComplexityRoot {
 
 		// ── Subscription costs = 0 (no DB load — push-based) ──────────
 		Subscription: struct {
-			ListingUpdated      func(childComplexity int, collection *string, tokenID *string) int
-			AuctionUpdated      func(childComplexity int, auctionID *int) int
 			ActivityUpdated     func(childComplexity int) int
+			AuctionUpdated      func(childComplexity int, auctionID *int) int
+			ListingUpdated      func(childComplexity int, collection *string, tokenID *string) int
 			NotificationUpdated func(childComplexity int) int
 		}{
-			ListingUpdated:      func(_ int, _, _ *string) int { return 0 },
-			AuctionUpdated:      func(_ int, _ *int) int { return 0 },
 			ActivityUpdated:     func(_ int) int { return 0 },
+			AuctionUpdated:      func(_ int, _ *int) int { return 0 },
+			ListingUpdated:      func(_ int, _, _ *string) int { return 0 },
 			NotificationUpdated: func(_ int) int { return 0 },
 		},
 	}
