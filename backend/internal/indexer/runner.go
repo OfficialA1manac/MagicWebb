@@ -401,15 +401,21 @@ func (r *Runner) runWatcher(ctx context.Context) {
 	// a fully successful range — a failed/partial range is retried next tick,
 	// so RPC failures can delay events but never permanently drop them.
 	lastBlock := fromBlock
-	// lastBlockHash tracks the block hash of lastBlock for reorg detection.
-	// On each new range, we fetch the header of lastBlock+1 and check that its
-	// parentHash matches the stored hash. If it doesn't match, a reorg has
-	// occurred and we rewind lastBlock by reorgSafetyBlocks to re-index the
-	// affected range.
-	var lastBlockHash common.Hash
+	// lastBlockParent tracks the PARENT hash of lastBlock for reorg detection:
+	// re-fetching header(lastBlock) later and seeing a different parentHash
+	// means the block at that height was replaced — a reorg past our cursor.
+	//
+	// The parent hash is compared, not the block's own hash, because the
+	// node-reported field survives the round-trip while a recomputed hash does
+	// not: Flare's C-chain headers carry coreth-specific fields that
+	// go-ethereum's types.Header drops on JSON decode, so header.Hash()
+	// re-RLP-encodes a subset and NEVER equals the chain's real block hash.
+	// Comparing recomputed hashes declared a phantom reorg on every single
+	// tick (rewind, re-index, repeat — constant duplicate getLogs load).
+	var lastBlockParent common.Hash
 	if lastBlock > 0 {
 		if h, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock))); err == nil {
-			lastBlockHash = h.Hash()
+			lastBlockParent = h.ParentHash
 		}
 	}
 	backfilled := false
@@ -437,22 +443,18 @@ func (r *Runner) runWatcher(ctx context.Context) {
 				// processed. We verify chain continuity by checking the parent
 				// hash of target against lastBlockHash every tick (cheap: one
 				// HeaderByNumber call per tick when idle).
-				if lastBlock > 0 && lastBlockHash != (common.Hash{}) {
-					// Compare hash identity at the SAME height. Comparing
-					// target's parentHash against lastBlockHash is only valid
-					// when target == lastBlock+1, but this branch runs when
-					// target <= lastBlock — when target == lastBlock the
-					// parent is hash(lastBlock-1), which never equals
-					// hash(lastBlock), so the old check fired a phantom reorg
-					// (rewind, re-index, repeat) on every idle tick.
+				if lastBlock > 0 && lastBlockParent != (common.Hash{}) {
+					// Same-height lineage check: if header(lastBlock) now
+					// reports a different parentHash than when we indexed it,
+					// the block at our cursor height was replaced.
 					lastHeader, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock)))
-					if err == nil && lastHeader.Hash() != lastBlockHash {
+					if err == nil && lastHeader.ParentHash != lastBlockParent {
 						// Reorg detected: the block the indexer thinks is the
 						// last indexed block no longer sits on the canonical chain.
 						// Rewind by reorgSafetyBlocks to re-index the affected range.
 						log.Warn().
-							Str("expected_hash", lastBlockHash.Hex()).
-							Str("actual_hash", lastHeader.Hash().Hex()).
+							Str("expected_parent", lastBlockParent.Hex()).
+							Str("actual_parent", lastHeader.ParentHash.Hex()).
 							Uint64("head", head).
 							Uint64("rewind_to", lastBlock-r.reorgSafety()).
 							Msg("watcher: reorg detected — rewinding indexer")
@@ -461,8 +463,8 @@ func (r *Runner) runWatcher(ctx context.Context) {
 						} else {
 							lastBlock = 0
 						}
-						// Reset hash so continuity is re-established on the next tick.
-						lastBlockHash = common.Hash{}
+						// Reset so continuity is re-established on the next tick.
+						lastBlockParent = common.Hash{}
 						// Persist the rewind so the indexer resumes from the
 						// rewound position on restart.
 						if err := r.q.SetIndexedBlock(ctx, chainID, lastBlock); err != nil {
@@ -484,15 +486,16 @@ func (r *Runner) runWatcher(ctx context.Context) {
 			if !backfilled {
 				log.Info().Uint64("from", lastBlock+1).Uint64("to", target).Msg("watcher: backfill start")
 			}
-			// Verify chain continuity before processing the new range.
-			// Fetch the header of the first new block (lastBlock+1) and check
-			// its parentHash against the lastBlockHash we cached.
-			if lastBlock > 0 && lastBlockHash != (common.Hash{}) {
-				firstNew, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock+1)))
-				if err == nil && firstNew.ParentHash != lastBlockHash {
+			// Verify chain continuity before processing the new range:
+			// re-fetch header(lastBlock) and confirm its parentHash still
+			// matches the lineage we indexed. (Its own hash cannot be used —
+			// see the lastBlockParent comment above.)
+			if lastBlock > 0 && lastBlockParent != (common.Hash{}) {
+				cur, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(lastBlock)))
+				if err == nil && cur.ParentHash != lastBlockParent {
 					log.Warn().
-						Str("expected_parent", lastBlockHash.Hex()).
-						Str("actual_parent", firstNew.ParentHash.Hex()).
+						Str("expected_parent", lastBlockParent.Hex()).
+						Str("actual_parent", cur.ParentHash.Hex()).
 						Uint64("head", head).
 						Uint64("last_block", lastBlock).
 						Msg("watcher: chain continuity break — reorg detected before new range; rewinding")
@@ -501,7 +504,7 @@ func (r *Runner) runWatcher(ctx context.Context) {
 					} else {
 						lastBlock = 0
 					}
-					lastBlockHash = common.Hash{}
+					lastBlockParent = common.Hash{}
 					if err := r.q.SetIndexedBlock(ctx, chainID, lastBlock); err != nil {
 						log.Error().Err(err).Uint64("block", lastBlock).
 							Msg("watcher: persist rewind cursor failed")
@@ -516,15 +519,16 @@ func (r *Runner) runWatcher(ctx context.Context) {
 					Msg("watcher: range failed, will retry")
 				continue // lastBlock unchanged: the same range is retried next tick
 			}
-			// Cache the last block's hash for continuity checking on the next tick.
+			// Cache the last block's parent hash for continuity checking on
+			// the next tick.
 			if header, err := r.eth.HeaderByNumber(ctx, big.NewInt(int64(target))); err == nil {
-				lastBlockHash = header.Hash()
+				lastBlockParent = header.ParentHash
 				atomic.StoreInt64(r.serverTimeMs, int64(header.Time*1000))
 			} else {
-				// If we can't get the header, reset the hash so the next tick
+				// If we can't get the header, reset so the next tick
 				// re-establishes continuity conservatively (still processes the
 				// range that was already backfilled).
-				lastBlockHash = common.Hash{}
+				lastBlockParent = common.Hash{}
 			}
 			lastBlock = target
 			if !backfilled {
