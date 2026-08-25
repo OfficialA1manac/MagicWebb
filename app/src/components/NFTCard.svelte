@@ -106,7 +106,7 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      <VerifiedBadge verified={item.collection_verified} />
+      <VerifiedBadge verified={item.collection_verified} link={false} />
       {#if item.standard}
         <span class="standard-badge" title="Token standard">{item.standard}</span>
       {/if}

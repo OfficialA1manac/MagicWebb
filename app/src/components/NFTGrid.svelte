@@ -90,9 +90,11 @@
         <option value="price_asc">Price: Low to High</option>
         <option value="price_desc">Price: High to Low</option>
       </select>
-      <button on:click={openAppKit} class="list-btn">
-        ＋ List NFT
-      </button>
+      {#if live}
+        <button on:click={openAppKit} class="list-btn">
+          ＋ List NFT
+        </button>
+      {/if}
     </div>
   </div>
 

@@ -41,7 +41,7 @@ and indexer. Nothing is shared except the Docker image and the code.
 
 ## Bringing a network up read-only (no contracts yet)
 
-```
+```text
 1. Create the Neon project; note the pooled POSTGRES_URL (migrations run at boot)
 2. fly apps create magicwebb-<network>
 3. fly secrets set -a magicwebb-<network> POSTGRES_URL=… JWT_SECRET=… [REDIS_URL=…]
@@ -54,7 +54,7 @@ and indexer. Nothing is shared except the Docker image and the code.
 
 ## Enabling trading on a network
 
-```
+```text
 1. forge script contracts/script/Deploy<Network>.s.sol … --broadcast      (see DEPLOY_CHECKLIST.md)
 2. edit deployments/<network>.json: status deployed, addresses, indexFromBlock
 3. fly secrets set -a magicwebb-<network> KEEPER_KEY=…

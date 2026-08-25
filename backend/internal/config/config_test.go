@@ -694,6 +694,16 @@ func TestLoadReadOnlyMode_Subprocess(t *testing.T) {
 		}
 	})
 
+	t.Run("ancillary_in_readonly_fatal", func(t *testing.T) {
+		out, err := run("NFT_ADDR=" + zeroAddr)
+		if err == nil {
+			t.Fatalf("ancillary address with empty cores should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "read-only network mode") {
+			t.Fatalf("expected ancillary read-only FATAL, got:\n%s", out)
+		}
+	})
+
 	t.Run("malformed_addr_fatal", func(t *testing.T) {
 		out, err := run(
 			"MARKETPLACE_ADDR=0xNOTHEX",

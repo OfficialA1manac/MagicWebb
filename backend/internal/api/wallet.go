@@ -6,7 +6,6 @@ import (
 	"io"
 	"net/http"
 	"net/url"
-	"strconv"
 	"strings"
 	"time"
 
@@ -150,7 +149,11 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 			return dbRows, "db"
 		}
 		var page blockscoutNFTPage
-		decErr := json.NewDecoder(io.LimitReader(resp.Body, 2<<20)).Decode(&page)
+		dec := json.NewDecoder(io.LimitReader(resp.Body, 2<<20))
+		// Cursor values can be token IDs above 2^53-1; default float64 decoding
+		// would corrupt them before they are echoed back as query params.
+		dec.UseNumber()
+		decErr := dec.Decode(&page)
 		resp.Body.Close()
 		if resp.StatusCode != http.StatusOK || decErr != nil {
 			log.Debug().Int("status", resp.StatusCode).Err(decErr).Msg("wallet-nfts: explorer page failed, serving db-only")
@@ -165,8 +168,8 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 				switch t := v.(type) {
 				case string:
 					q.Set(k, t)
-				case float64:
-					q.Set(k, strconv.FormatFloat(t, 'f', -1, 64))
+				case json.Number:
+					q.Set(k, t.String())
 				case bool:
 					if t {
 						q.Set(k, "true")

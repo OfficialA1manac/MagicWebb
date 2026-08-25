@@ -417,6 +417,28 @@ func Load() {
 		}
 	}
 
+	// Ancillary contract addresses: whenever one is set it must be well-formed,
+	// and it may only be set when the core contracts are deployed — a lone
+	// NFT_ADDR on a read-only network is a misconfigured deploy, not a
+	// read-only one.
+	for _, pair := range [][2]string{
+		{"NFT_ADDR", C.NFTAddr},
+		{"MARKETPLACE_MANAGER_ADDR", C.MarketplaceManagerAddr},
+		{"ROYALTY_ADDR", C.RoyaltyAddr},
+	} {
+		if pair[1] == "" {
+			continue
+		}
+		if !C.ContractsDeployed() {
+			fmt.Fprintf(os.Stderr, "FATAL: %s is set but the core contract addresses are empty (read-only network mode); unset it or configure all core addresses\n", pair[0])
+			os.Exit(1)
+		}
+		if !isValidEthAddr(pair[1]) {
+			fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
+			os.Exit(1)
+		}
+	}
+
 	// v35: production SIWE guard — SIWE_DOMAIN=localhost in production
 	// means wallet sign-ins will fail because the signed message domain
 	// won't match. Fail fast to prevent broken sign-in in production.
