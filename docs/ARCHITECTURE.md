@@ -39,8 +39,14 @@ flowchart LR
 
 One process serves exactly one chain (`CHAIN_ID` validated against
 `backend/internal/chain/profile`). Switching network is a navigation to another origin —
-the wallet, API, database and socket are all scoped to that origin. `NETWORK_URLS`
-(generated in CI from `deployments/*.json`) tells each app which siblings exist.
+the wallet, API, database and socket are all scoped to that origin (sessions do not cross
+origins; the destination site prompts connect as usual). `NETWORK_URLS` (generated in CI
+from `deployments/*.json`) tells each app which siblings exist.
+
+A network's status in `deployments/<key>.json` follows `not-deployed → read-only →
+deployed` (see `NETWORKS.md`). In read-only mode the binary serves the UI, API, wallet
+and profile; the indexer, keepers and verifier idle until contracts exist, and the UI
+shows a dismissible banner plus read-only empty states pointing at the Coston2 origin.
 
 Per-network tuning (finality depth, poll cadence, keeper tickers, getLogs caps, gas caps,
 default RPCs, identity) lives in one table: `backend/internal/chain/profile`. Shared code
@@ -131,8 +137,11 @@ owner role. `chain_id` is a label column on every indexed table. Idempotency: ev
 write is an upsert keyed on `(tx_hash, log_index, …)`, which is what lets the instant lane
 and the watcher process the same log twice safely.
 
-Redis (optional, per network): shared cache + rate-limit counters across machines. Unset
-means per-instance memory; an unreachable Redis degrades to memory with a warning.
+Redis (optional, per network): shares the read caches across machines — trending (30s),
+activity (10s), merged wallet inventory (30s); see `internal/cache`. Rate-limit counters
+and SIWE nonces are Postgres-backed (`internal/ratelimit`, `internal/nonce`) so they hold
+across instances without Redis. Unset means per-instance memory caches; an unreachable
+Redis degrades to memory with a warning.
 
 ## 6. Real-time (P3 target: one spine, three faces)
 

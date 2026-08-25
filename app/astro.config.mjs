@@ -10,7 +10,16 @@ export default defineConfig({
   ],
   // Output static HTML + client-side JS islands
   output: 'static',
-  // In dev mode, proxy API/Auth/SSE calls to the Go Fiber backend on :8080
+  // Prefetch same-origin links on hover so navigation feels instant.
+  // (ViewTransitions/ClientRouter evaluated and deferred: every page's inline
+  // scripts key off DOMContentLoaded, which never re-fires after a client-side
+  // swap, and the client:only AppKit island would need transition:persist —
+  // a full retrofit. Prefetch gives most of the win at zero risk.)
+  prefetch: {
+    prefetchAll: true,
+    defaultStrategy: 'hover',
+  },
+  // In dev mode, proxy API/Auth calls to the Go Fiber backend on :8080
   server: {
     port: 4321,
   },
@@ -28,8 +37,8 @@ export default defineConfig({
           target: 'http://localhost:8080',
           changeOrigin: true,
         },
-        // SSE events (wallet updates, auction ticks)
-        '/events': {
+        // WebSocket hub
+        '/ws': {
           target: 'http://localhost:8080',
           changeOrigin: true,
           ws: true,

@@ -6,7 +6,10 @@
   "properties": {
     "network": { "enum": ["coston2", "songbird", "flare"] },
     "chainId": { "enum": [114, 19, 14] },
-    "status": { "enum": ["deployed", "not-deployed"] },
+    "status": {
+      "enum": ["deployed", "read-only", "not-deployed"],
+      "description": "deployed = contracts live, full stack. read-only = Fly app + DB exist but no contracts: browsing/wallet/profile work, indexer/keepers/verifier idle, network listed in every switcher. not-deployed = no app at all."
+    },
     "deployedAt": { "type": ["string", "null"] },
     "indexFromBlock": { "type": ["integer", "null"] },
     "contracts": {
