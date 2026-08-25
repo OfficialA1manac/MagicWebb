@@ -1049,10 +1049,12 @@ describe('Edit Profile Modal', () => {
     // Flush microtasks for the async fetch + rejection pipeline
     await vi.runAllTicks();
 
-    // Should show network error
+    // Surfaces the thrown error's actual message (a TxError from a failed
+    // sign-in reads e.g. 'Sign-in was rejected (HTTP 401).'), falling back
+    // to the generic copy only when the error carries no message.
     const statusEl = document.getElementById('edit-profile-status')!;
     expect(statusEl.style.display).toBe('block');
-    expect(statusEl.innerHTML).toContain('Network error');
+    expect(statusEl.innerHTML).toContain('Network failure');
 
     // Save button should be re-enabled
     const saveBtn = document.getElementById('edit-profile-save') as HTMLButtonElement;

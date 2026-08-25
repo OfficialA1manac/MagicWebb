@@ -16,7 +16,7 @@ import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 
 export function offerBookAddress(): Address {
   const a = currentChain().contracts.offerBook;
-  if (!a) throw new TxError('Invalid', `Offers are not deployed on ${currentChain().name} yet.`);
+  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to Coston2 to trade.`);
   return a;
 }
 

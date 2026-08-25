@@ -18,9 +18,25 @@ export function getSession(): Session | null {
 
 export function clearSession(): void { session = null; }
 
-function buildMessage(address: Address, nonce: string): string {
+export function buildMessage(address: Address, nonce: string): string {
+  // EIP-4361 (SIWE). The server's verifier parses this structurally:
+  // the first line's domain must equal SIWE_DOMAIN exactly (R-07), a
+  // "Chain ID: N" line must match the running chain (R-09/R-12), and the
+  // nonce must appear in the message. The pre-4361 legacy format
+  // ("Sign in to MagicWebb\nURI: ...") fails the domain check and gets
+  // 401 "domain mismatch" on every sign-in.
+  const host = typeof window !== 'undefined' ? window.location.host : '';
   const origin = typeof window !== 'undefined' ? window.location.origin : '';
-  return `Sign in to MagicWebb\nURI: ${origin}\nChain ID: ${currentChain().id}\nAddress: ${address}\nNonce: ${nonce}`;
+  return (
+    `${host} wants you to sign in with your Ethereum account:\n` +
+    `${address}\n` +
+    `\n` +
+    `URI: ${origin}\n` +
+    `Version: 1\n` +
+    `Chain ID: ${currentChain().id}\n` +
+    `Nonce: ${nonce}\n` +
+    `Issued At: ${new Date().toISOString()}`
+  );
 }
 
 /** Connect (if needed), sign the SIWE message, exchange it for a session. Deduplicated. */
