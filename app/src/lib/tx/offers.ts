@@ -90,4 +90,4 @@ export const refundExpiredOffer = (a: { nft: Address; tokenId: bigint; bidder: A
   runTx({ title: 'Refund expired offer', request: async () => buildRefundExpiredOffer(a.nft, a.tokenId, a.bidder) }, hooks);
 
 export const setOfferEligible = (a: { nft: Address; eligible: boolean; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `${a.eligible ? 'Enable' : 'Disable'} offers for ${a.name ?? 'collection'}`, request: async () => buildSetOfferEligible(a.nft, a.eligible), summary: [['Who can do this', 'The collection owner (ERC-173 owner())']] }, hooks);
+  runTx({ title: `${a.eligible ? 'Enable' : 'Disable'} offers for ${a.name ?? 'collection'}`, request: async () => buildSetOfferEligible(a.nft, a.eligible), summary: [['Who can do this', 'Only the collection owner']] }, hooks);

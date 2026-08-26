@@ -74,7 +74,7 @@
     <ul class="op-list">
       {#each list as o (o.offer_id)}
         <li class="op-row" class:is-expired={expired(o)}>
-          <a class="op-thumb" href={`/token/${o.collection}/${o.token_id}`} aria-label={label(o)}>{#if o.image_uri}<img src={o.image_uri.startsWith('/api') || o.image_uri.startsWith('data:') ? o.image_uri : `/api/v1/media?url=${encodeURIComponent(o.image_uri)}&id=${o.token_id}`} alt="" />{/if}</a>
+          <a class="op-thumb" href={`/token/${o.collection}/${o.token_id}`} aria-label={label(o)}>{#if o.image_uri}<img src={o.image_uri.startsWith('/api') || o.image_uri.startsWith('data:') ? o.image_uri : `/api/v1/media?url=${encodeURIComponent(o.image_uri)}&id=${o.token_id}`} alt={label(o)} loading="lazy" decoding="async" />{/if}</a>
           <div class="op-main">
             <a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a>
             <div class="op-dim">{tab === 'received' ? `from ${shortAddr(o.bidder)}` : `on ${shortAddr(o.collection)}`} · {expired(o) ? 'expired ' + timeAgo(o.expires_at) : 'expires in ' + fmtCountdown(new Date(o.expires_at).getTime() / 1000, now)}</div>

@@ -197,38 +197,6 @@ func TestKeeperKeyValidation_RoundTrip(t *testing.T) {
 	}
 }
 
-// ── v35: SERVICE_TOKEN minimum length ─────────────────────────────────────
-
-func TestServiceTokenMinLength(t *testing.T) {
-	// Load() requires SERVICE_TOKEN ≥ 32 chars when set.
-	// The guard:  if C.ServiceToken != "" && len(C.ServiceToken) < 32 { … os.Exit(1) }
-
-	// Boundary: 31 chars → too short, guard fires.
-	short := strings.Repeat("x", 31)
-	if short != "" && len(short) < 32 {
-		// guard fires — correct.
-	} else {
-		t.Fatal("31-char token should be detected as too short (guard should fire)")
-	}
-
-	// Boundary: 32 chars → just long enough, guard skips.
-	ok32 := strings.Repeat("x", 32)
-	if ok32 != "" && len(ok32) < 32 {
-		t.Fatal("32-char token should NOT trigger the guard")
-	}
-
-	// Boundary: 64 chars → well above minimum.
-	long := strings.Repeat("x", 64)
-	if long != "" && len(long) < 32 {
-		t.Fatal("64-char token should NOT trigger the guard")
-	}
-
-	// Empty token → guard is not reached (first condition short-circuits).
-	empty := ""
-	if empty != "" && len(empty) < 32 {
-		t.Fatal("empty token should NOT reach the guard")
-	}
-}
 
 // ── v35: optUint64 / optFloat64 parse warnings ────────────────────────────
 
@@ -591,17 +559,16 @@ func TestTrackedCollections_DevNoWarn(t *testing.T) {
 	}
 }
 
-// ── v35: ADMIN_ALLOWLIST entry validation (via isValidEthAddr) ────────────
+// ── parseAddrList + isValidEthAddr validation ─────────────────────────────
 
-func TestAdminAllowlistValidation(t *testing.T) {
-	// Load() iterates over C.AdminAllowlist and calls isValidEthAddr on
-	// each entry. Since parseAddrList lowercases, valid full-length
-	// addresses will pass.
+func TestParseAddrListValidation(t *testing.T) {
+	// parseAddrList lowercases entries, so valid full-length addresses
+	// pass isValidEthAddr afterwards.
 
 	entries := parseAddrList("0xAbCdef1234567890123456789012345678901234,0xDeF1234567890123456789012345678901234deF")
 	for _, entry := range entries {
 		if !isValidEthAddr(entry) {
-			t.Fatalf("admin allowlist entry %q should be valid after lowercasing", entry)
+			t.Fatalf("address list entry %q should be valid after lowercasing", entry)
 		}
 	}
 

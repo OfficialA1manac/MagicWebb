@@ -8,7 +8,6 @@ export interface TxModalState {
   title: string;
   summary: Array<[string, string]>;
   step: TxStep;
-  label: string;
   hash?: string;
   approvalHash?: string;
   explorerUrl?: string;
@@ -20,7 +19,7 @@ export interface TxModalState {
   successAction?: { label: string; href: string };
 }
 
-const initial: TxModalState = { open: false, title: '', summary: [], step: 'idle', label: '', hasApproval: false };
+const initial: TxModalState = { open: false, title: '', summary: [], step: 'idle', hasApproval: false };
 
 export const txModal = $state<TxModalState>({ ...initial });
 
@@ -47,13 +46,11 @@ export async function runWithModal<T extends TxResult>(
     summary: opts.summary ?? [],
     hasApproval: !!opts.hasApproval,
     step: 'sign',
-    label: 'Preparing…',
     successAction: opts.successAction,
   });
   const hooks: TxHooks = {
     onStep(step: TxStep, meta: TxStepMeta) {
       txModal.step = step;
-      txModal.label = meta.label;
       if (meta.hash) txModal.hash = meta.hash;
       if (meta.approvalHash) { txModal.approvalHash = meta.approvalHash; txModal.hasApproval = true; }
       if (meta.explorerUrl) txModal.explorerUrl = meta.explorerUrl;

@@ -637,7 +637,7 @@ describe('emptyWalletNotice', () => {
     await flushDebounce();
 
     const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('indexer hasn');
+    expect(root.innerHTML).toContain('no NFTs have been recorded');
   });
 
   it('does NOT show notice when NFTs are non-empty', async () => {
@@ -659,7 +659,7 @@ describe('emptyWalletNotice', () => {
     await flushDebounce();
 
     const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).not.toContain('indexer hasn');
+    expect(root.innerHTML).not.toContain('no NFTs have been recorded');
     expect(root.innerHTML).toContain('Test NFT');
   });
 
@@ -680,7 +680,7 @@ describe('emptyWalletNotice', () => {
     await flushDebounce();
 
     const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).not.toContain('indexer hasn');
+    expect(root.innerHTML).not.toContain('no NFTs have been recorded');
   });
 });
 

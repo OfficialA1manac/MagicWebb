@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Songbird canary-net — READ-ONLY until contracts deploy (gated on external
+# audit + fee-recipient multisig; see deployments/songbird.json). With no
+# contract addresses set, the server boots in read-only mode: API and UI
+# serve, indexer/keepers/verifier stay idle, and the UI points trading CTAs
+# at the Coston2 origin. To go live: fill the *_ADDR literals from the forge
+# deployment, mirror them into deployments/songbird.json, and redeploy.
+namespace: magicwebb-songbird
+nameSuffix: -songbird
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+configMapGenerator:
+  - name: mw-config
+    behavior: merge
+    literals:
+      - CHAIN_ID=19
+      - RPC_URL=https://songbird-api.flare.network/ext/C/rpc
+      - RPC_URLS=https://songbird-api.flare.network/ext/C/rpc
+      - SIWE_DOMAIN=magicwebb-songbird.fly.dev
+      - FRONTEND_URL=https://magicwebb-songbird.fly.dev
+      - NETWORK_URLS=114=https://magicwebb.fly.dev,19=https://magicwebb-songbird.fly.dev,14=https://magicwebb-flare.fly.dev

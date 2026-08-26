@@ -298,6 +298,11 @@
     box-shadow: 0 0 24px -2px rgba(56, 189, 248, 0.55), 0 6px 14px -2px rgba(14, 165, 233, 0.35);
   }
 
+  .buy-btn:active {
+    transform: scale(0.96);
+    box-shadow: 0 0 10px -3px rgba(56, 189, 248, 0.35);
+  }
+
   /* Touch devices: 44px tap target for the primary buy action, no hover
      image zoom (there is no hover to undo it). */
   @media (pointer: coarse) {

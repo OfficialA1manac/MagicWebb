@@ -1,0 +1,21 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: magicwebb
+  annotations:
+    # WebSockets (/ws, /graphql/ws) need long-lived connections.
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+spec:
+  ingressClassName: nginx
+  rules:
+    - host: coston2.magicwebb.example # CHANGE_ME: your DNS name for this network
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: magicwebb-coston2
+                port:
+                  name: http

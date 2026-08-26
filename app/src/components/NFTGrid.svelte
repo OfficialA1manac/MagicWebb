@@ -34,7 +34,7 @@
       if (maxPrice) params.set('max_price', maxPrice);
       if (traitFilters) params.set('traits', traitFilters);
       const res = await fetch(`/api/v1/listings?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error('The marketplace did not respond. It may be busy — try again in a moment.');
       if (gen !== _fetchGen) return;
 
       const data = await res.json();
@@ -43,7 +43,7 @@
       count = data.length;
     } catch (e) {
       if (gen !== _fetchGen) return;
-      error = e.message || 'Failed to load listings';
+      error = e.message || 'Could not load listings. Check your connection and try again.';
       items = [];
     } finally {
       if (gen === _fetchGen) loading = false;
@@ -117,8 +117,7 @@
       <p style="font-size:1rem;font-weight:700;color:#fca5a5;">Failed to load listings</p>
       <p class="error-detail">{error}</p>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-        <button class="retry-btn" on:click={fetchListings}>Retry</button>
-        <button class="retry-btn secondary" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
+        <button class="retry-btn" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
       </div>
     </div>
   {:else if items.length === 0}

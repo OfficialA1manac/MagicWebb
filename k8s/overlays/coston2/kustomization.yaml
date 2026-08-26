@@ -1,0 +1,32 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Coston2 testnet — the live trading network. Addresses mirror
+# deployments/coston2.json (the single source of truth); keep them in sync.
+namespace: magicwebb-coston2
+nameSuffix: -coston2
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+configMapGenerator:
+  - name: mw-config
+    behavior: merge
+    literals:
+      - CHAIN_ID=114
+      - RPC_URL=https://coston2-api.flare.network/ext/C/rpc
+      - RPC_URLS=https://coston2-api.flare.network/ext/C/rpc,https://coston2.enosys.global/ext/C/rpc,https://rpc.ankr.com/flare_coston2
+      - SIWE_DOMAIN=magicwebb.fly.dev
+      - FRONTEND_URL=https://magicwebb.fly.dev
+      - NETWORK_URLS=114=https://magicwebb.fly.dev,19=https://magicwebb-songbird.fly.dev,14=https://magicwebb-flare.fly.dev
+      - MARKETPLACE_ADDR=0x49b3da6a0d5c31994c3a52d41416c6bc0a6200f3
+      - AUCTION_ADDR=0xfd39174b8fd906249257d3b28fbed9db22a9136e
+      - OFFERBOOK_ADDR=0x17564fd5bb2eb8c40dac24684f4988237cc88eef
+      - NFT_ADDR=0x832d74cfbb4617b50c32cd110dfe16837a359b35
+      - MARKETPLACE_MANAGER_ADDR=0xf070bd812de875edd29d05f1932340bfafb1057f
+      - TRACKED_COLLECTIONS=0x832d74cfbb4617b50c32cd110dfe16837a359b35
+      - INDEX_FROM_BLOCK=34406504
+      # Testnet convenience: contract-address change wipes chain-derived tables
+      # at boot. Mainnet overlays leave this unset (manual chainwipe).
+      - RESET_ON_ADDRESS_CHANGE=true

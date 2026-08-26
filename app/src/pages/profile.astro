@@ -95,7 +95,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         if (_loading) return;
         _loading = true;
         const encAddr = encodeURIComponent(targetAddr);
-        root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+        // First paint already shows the server-rendered skeleton — keep it.
+        // Only swap in the lightweight loader on later reloads (wallet switch).
+        if (!root.querySelector('.shimmer')) root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
         try {
           const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
@@ -219,7 +221,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // the wallet may hold NFTs that aren't in tracked collections, or
           // the indexer hasn't processed recent transfers yet.
           var emptyWalletNotice = (!nfts || !nfts.length) && (listings.length + auctions.length > 0)
-            ? '<div style="margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(125,211,252,0.08);border:1px solid rgba(125,211,252,0.15);"><p style="font-size:0.75rem;color:rgba(255,255,255,0.45);">💡 Your wallet has active listings/auctions but the indexer hasn&rsquo;t recorded any NFTs for this address yet. If you recently transferred NFTs to this wallet, they will appear after the next indexer sweep (≈2&hairsp;–&hairsp;5&thinsp;min).</p></div>'
+            ? '<div style="margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(125,211,252,0.08);border:1px solid rgba(125,211,252,0.15);"><p style="font-size:0.75rem;color:rgba(255,255,255,0.45);">💡 Your wallet has active listings/auctions but no NFTs have been recorded for this address yet. If you recently moved NFTs into this wallet, they will show up here in about 2–5 minutes.</p></div>'
             : '';
 
           // Build the complete profile page

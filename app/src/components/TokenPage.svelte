@@ -97,7 +97,7 @@
     listing = l && l.price_wei ? l : null;
     collection = c; traits = t ?? {}; activity = a ?? []; offers = o ?? [];
     auction = (au ?? []).find((x) => String(x.token_id) === String(tid)) ?? null;
-    if (!c && !l && !auction) error = 'This NFT is not indexed yet. If it was just minted, give the indexer a moment.';
+    if (!c && !l && !auction) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
     await loadOwner();
     if (offerEligible === null) MW.isOfferEligible(coll).then((v) => (offerEligible = v)).catch(() => (offerEligible = null));
     loading = false;
@@ -185,7 +185,7 @@
           {:else if auctionEnded}
             {#if isAuctionSeller || (me && auction && auction.highest_bidder?.toLowerCase() === me.toLowerCase())}
               <button class="btn p" onclick={doSettle}>Settle now</button>
-              <p class="tp-hint">The keeper settles automatically within seconds; you can also settle yourself.</p>
+              <p class="tp-hint">The marketplace settles this automatically within seconds; you can also settle it yourself.</p>
             {:else}
               <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 1.5%.</p>
             {/if}
@@ -259,7 +259,7 @@
       <section class="tp-section">
         <h2>Offers {#if liveOffers.length}<span class="tp-count">{liveOffers.length}</span>{/if}</h2>
         {#if liveOffers.length === 0}
-          <p class="tp-hint">No open offers.</p>
+          <p class="tp-hint">No open offers yet. Connect a wallet to make the first one — your funds stay refundable until it's accepted.</p>
         {:else}
           <ul class="tp-list">
             {#each liveOffers as o (o.offer_id)}

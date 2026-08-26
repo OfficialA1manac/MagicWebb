@@ -69,8 +69,10 @@ contracts/lib/*
 gas-report.txt
 
 # ── Frontend / app ──────────────────────────────────────────────────────────
+node_modules/
 app/node_modules/
 app/dist/
+.astro/
 app/.astro/
 
 # ── Build artifacts ─────────────────────────────────────────────────────────

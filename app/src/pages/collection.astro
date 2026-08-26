@@ -102,7 +102,7 @@ import WalletConnect from '../components/WalletConnect';
                   }).join('')+'</div>')+
             '</div>';
         } catch(e) {
-          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load collection &mdash; '+esc(e.message||'')+'<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
+          if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load this collection. Check your connection and try again.<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
         }
       })();
     })();

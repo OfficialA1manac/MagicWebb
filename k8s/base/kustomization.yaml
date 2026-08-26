@@ -1,0 +1,19 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# One MagicWebb release per chain. This base is chain-agnostic; each overlay
+# (coston2 / songbird / flare) supplies CHAIN_ID, RPC endpoints, contract
+# addresses, and its OWN database/redis secrets. Never point two overlays at
+# the same Neon project or Redis instance.
+resources:
+  - deployment.yaml
+  - service.yaml
+
+configMapGenerator:
+  - name: mw-config
+    literals:
+      - ENV=production
+      - HTTP_ADDR=:8080
+      # ~80% of the container memory limit: GC works harder near the cap
+      # instead of the kubelet OOM-killing the process.
+      - GOMEMLIMIT=400MiB

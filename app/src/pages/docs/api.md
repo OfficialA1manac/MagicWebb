@@ -95,14 +95,6 @@ Include the JWT in one of two ways:
 | GET | `/api/v1/profile/:addr` | Get public profile |
 | PUT | `/api/v1/profile/:addr` 🔒 | Update profile (name, bio, avatar, links) |
 
-### Admin / Trust & Safety 🔒
-
-| Method | Path | Description |
-|--------|------|-------------|
-| POST | `/api/v1/reports` | Report a listing, collection, or user |
-| POST | `/api/v1/admin/verify` | Admin: verify user profile |
-| POST | `/api/v1/admin/collections/verify` | Admin: verify collection |
-
 ### Search
 
 | Method | Path | Description |

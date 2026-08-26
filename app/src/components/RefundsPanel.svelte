@@ -12,13 +12,21 @@
   let me = $state<string | null>(null);
   let rows = $state<Array<{ key: CoreKey; address: string; wei: bigint }>>([]);
   let loading = $state(false);
+  let loadError = $state(false);
   const sym = currentChain().currency;
   let total = $derived(rows.reduce((s, r) => s + r.wei, 0n));
 
   async function load() {
-    if (!me) { rows = []; return; }
+    if (!me) { rows = []; loadError = false; return; }
     loading = true;
-    try { rows = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string })); } catch { rows = []; }
+    try {
+      rows = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string }));
+      loadError = false;
+    } catch {
+      // Never hide silently: a failed read could be masking money the user can withdraw.
+      rows = [];
+      loadError = true;
+    }
     loading = false;
   }
   onMount(() => {
@@ -30,6 +38,14 @@
     try { await MW.withdrawRefundFrom({ core: r.address, label: CORE_LABEL[r.key], amountWei: r.wei.toString() }); setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal */ }
   }
 </script>
+
+{#if me && !loading && loadError}
+  <section class="rp rp-err" aria-labelledby="rp-err-h">
+    <div class="rp-head"><h2 id="rp-err-h">Couldn't check your refunds</h2></div>
+    <p class="rp-hint">We couldn't reach the network to see if you have funds waiting. Your money is safe on-chain.</p>
+    <button class="rp-btn" onclick={() => void load()}>Try again</button>
+  </section>
+{/if}
 
 {#if me && !loading && total > 0n}
   <section class="rp" aria-labelledby="rp-h">
@@ -45,6 +61,7 @@
 
 <style>
   .rp { padding: 16px; border-radius: 16px; background: rgba(74,222,128,.06); border: 1px solid rgba(74,222,128,.3); margin-bottom: 20px; }
+  .rp-err { background: rgba(252,165,165,.06); border-color: rgba(252,165,165,.3); }
   .rp-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; } h2 { font-size: 15px; font-weight: 800; margin: 0; }
   .rp-total { font-weight: 700; color: #bbf7d0; }
   .rp-hint { font-size: 12px; color: rgba(255,255,255,.55); margin: 6px 0 10px; }
