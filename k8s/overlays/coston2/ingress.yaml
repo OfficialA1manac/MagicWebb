@@ -6,10 +6,18 @@ metadata:
     # WebSockets (/ws, /graphql/ws) need long-lived connections.
     nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
     nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    # SIWE messages, sessions and WS traffic must never ride plain HTTP.
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    # Issue the certificate with cert-manager (adjust to your issuer):
+    cert-manager.io/cluster-issuer: letsencrypt-prod
 spec:
   ingressClassName: nginx
+  tls:
+    - hosts:
+        - coston2.magicwebb.example # CHANGE_ME: your DNS name for this network
+      secretName: magicwebb-coston2-tls
   rules:
-    - host: coston2.magicwebb.example # CHANGE_ME: your DNS name for this network
+    - host: coston2.magicwebb.example # CHANGE_ME: keep in sync with tls.hosts and the overlay's SIWE_DOMAIN/FRONTEND_URL/NETWORK_URLS
       http:
         paths:
           - path: /

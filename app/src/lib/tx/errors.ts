@@ -80,9 +80,9 @@ export function decodeRevert(e: unknown, _abis: Abi[] = []): TxError {
     }
     // Raw RPC strings ("execution reverted", "nonce too low", …) mean nothing
     // to users. Show a calm generic; the original error stays in `cause`.
-    return new TxError('RpcError', 'The network had trouble processing this. Your funds did not move. Wait a moment and try again.', { cause: e });
+    return new TxError('RpcError', 'The network had trouble processing this. Check your wallet\'s recent activity before trying again — the transaction may or may not have gone through.', { cause: e });
   }
   const msg = e instanceof Error ? e.message : String(e);
   if (/user rejected|denied/i.test(msg)) return new TxError('UserRejected', REJECTED, { cause: e });
-  return new TxError('RpcError', 'The network had trouble processing this. Your funds did not move. Wait a moment and try again.', { cause: e });
+  return new TxError('RpcError', 'The network had trouble processing this. Check your wallet\'s recent activity before trying again — the transaction may or may not have gone through.', { cause: e });
 }

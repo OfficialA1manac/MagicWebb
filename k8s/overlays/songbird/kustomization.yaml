@@ -21,6 +21,7 @@ configMapGenerator:
       - CHAIN_ID=19
       - RPC_URL=https://songbird-api.flare.network/ext/C/rpc
       - RPC_URLS=https://songbird-api.flare.network/ext/C/rpc
-      - SIWE_DOMAIN=magicwebb-songbird.fly.dev
-      - FRONTEND_URL=https://magicwebb-songbird.fly.dev
-      - NETWORK_URLS=114=https://magicwebb.fly.dev,19=https://magicwebb-songbird.fly.dev,14=https://magicwebb-flare.fly.dev
+      # CHANGE_ME: must match the Ingress hosts of your k8s releases.
+      - SIWE_DOMAIN=songbird.magicwebb.example
+      - FRONTEND_URL=https://songbird.magicwebb.example
+      - NETWORK_URLS=114=https://coston2.magicwebb.example,19=https://songbird.magicwebb.example,14=https://flare.magicwebb.example

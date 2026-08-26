@@ -4,6 +4,8 @@ metadata:
   name: magicwebb
 spec:
   type: ClusterIP
+  selector:
+    app.kubernetes.io/name: magicwebb
   ports:
     - name: http
       port: 80

@@ -7,7 +7,7 @@ mandate. Use it when traffic, compliance, or multi-region needs outgrow Fly.
 
 ## Layout
 
-```
+```text
 k8s/
   base/                 chain-agnostic Deployment + Service + common config
   overlays/coston2/     live trading network (contracts + indexer + keepers)
@@ -21,18 +21,21 @@ Redis, separate origin. Never point two overlays at the same database.
 ## Deploy one network
 
 ```bash
+# 0. Define once — used by the secret AND the Docker build arg below:
+export WC_PROJECT_ID='your_reown_project_id'
+
 # 1. Create the namespace + per-network secrets (never committed):
 kubectl create namespace magicwebb-coston2
 kubectl -n magicwebb-coston2 create secret generic mw-secrets \
   --from-literal=POSTGRES_URL='postgres://…neon…' \
   --from-literal=JWT_SECRET='…' \
   --from-literal=KEEPER_KEY='…' \
-  --from-literal=WC_PROJECT_ID='…' \
+  --from-literal=WC_PROJECT_ID="$WC_PROJECT_ID" \
   --from-literal=REDIS_URL='rediss://…'   # optional; omit for in-memory
 
 # 2. Build/push the image (same Dockerfile as Fly):
 docker build -t ghcr.io/officiala1manac/magicwebb:$(git rev-parse --short HEAD) \
-  --build-arg REOWN_PROJECT_ID=$WC_PROJECT_ID .
+  --build-arg REOWN_PROJECT_ID="$WC_PROJECT_ID" .
 docker push ghcr.io/officiala1manac/magicwebb:$(git rev-parse --short HEAD)
 
 # 3. Point the overlay at the tag and apply:
