@@ -3,6 +3,10 @@
   import { ws } from '../lib/ws/client';
   import { ACTIVITY_CHANNEL } from '../lib/ws/channels';
   import NFTCard from './NFTCard.svelte';
+  import { tradingLive, readOnlyCopy } from '../lib/chains';
+
+  const live = tradingLive();
+  const ro = readOnlyCopy();
 
   let items = [];
   let loading = true;
@@ -30,7 +34,7 @@
       if (maxPrice) params.set('max_price', maxPrice);
       if (traitFilters) params.set('traits', traitFilters);
       const res = await fetch(`/api/v1/listings?${params}`);
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
+      if (!res.ok) throw new Error('The marketplace did not respond. It may be busy — try again in a moment.');
       if (gen !== _fetchGen) return;
 
       const data = await res.json();
@@ -39,7 +43,7 @@
       count = data.length;
     } catch (e) {
       if (gen !== _fetchGen) return;
-      error = e.message || 'Failed to load listings';
+      error = e.message || 'Could not load listings. Check your connection and try again.';
       items = [];
     } finally {
       if (gen === _fetchGen) loading = false;
@@ -86,9 +90,11 @@
         <option value="price_asc">Price: Low to High</option>
         <option value="price_desc">Price: High to Low</option>
       </select>
-      <button on:click={openAppKit} class="list-btn">
-        ＋ List NFT
-      </button>
+      {#if live}
+        <button on:click={openAppKit} class="list-btn">
+          ＋ List NFT
+        </button>
+      {/if}
     </div>
   </div>
 
@@ -111,16 +117,24 @@
       <p style="font-size:1rem;font-weight:700;color:#fca5a5;">Failed to load listings</p>
       <p class="error-detail">{error}</p>
       <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-        <button class="retry-btn" on:click={fetchListings}>Retry</button>
-        <button class="retry-btn secondary" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
+        <button class="retry-btn" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
       </div>
     </div>
   {:else if items.length === 0}
     <div class="empty-card">
       <div style="font-size:3rem;margin-bottom:1rem;opacity:0.2;">✦</div>
-      <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
-      <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
-      <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+      {#if live}
+        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
+        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
+        <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+      {:else}
+        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">{ro.heading}</p>
+        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.25rem;">{ro.body}</p>
+        {#if ro.ctaHref}
+          <a href={ro.ctaHref} class="retry-btn" style="margin-top:0.75rem;display:inline-flex;align-items:center;min-height:44px;text-decoration:none;">{ro.cta}</a>
+        {/if}
+        <a href="/docs/faq" style="display:block;margin-top:0.5rem;font-size:0.75rem;color:#7dd3fc;">Learn more</a>
+      {/if}
     </div>
   {:else}
     <div class="nft-grid">

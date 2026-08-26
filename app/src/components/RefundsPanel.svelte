@@ -10,15 +10,24 @@
   import { CORE_LABEL, type CoreKey } from '../lib/tx/core';
 
   let me = $state<string | null>(null);
-  let rows = $state<Array<{ key: CoreKey; address: string; wei: bigint }>>([]);
+  let rows = $state<Array<{ key: CoreKey; address: string; wei: bigint; ok: boolean }>>([]);
   let loading = $state(false);
+  let loadError = $state(false);
   const sym = currentChain().currency;
-  let total = $derived(rows.reduce((s, r) => s + r.wei, 0n));
+  let total = $derived(rows.filter((r) => r.ok).reduce((s, r) => s + r.wei, 0n));
 
   async function load() {
-    if (!me) { rows = []; return; }
+    if (!me) { rows = []; loadError = false; return; }
     loading = true;
-    try { rows = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string })); } catch { rows = []; }
+    try {
+      rows = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string }));
+      // Never hide silently: even one failed core read could be masking money
+      // the user can withdraw, so any partial failure surfaces the error card.
+      loadError = rows.some((r) => !r.ok);
+    } catch {
+      rows = [];
+      loadError = true;
+    }
     loading = false;
   }
   onMount(() => {
@@ -31,12 +40,20 @@
   }
 </script>
 
+{#if me && !loading && loadError}
+  <section class="rp rp-err" aria-labelledby="rp-err-h">
+    <div class="rp-head"><h2 id="rp-err-h">Couldn't check your refunds</h2></div>
+    <p class="rp-hint">We couldn't reach the network to see if you have funds waiting. Your money is safe on-chain.</p>
+    <button class="rp-btn" onclick={() => void load()}>Try again</button>
+  </section>
+{/if}
+
 {#if me && !loading && total > 0n}
   <section class="rp" aria-labelledby="rp-h">
     <div class="rp-head"><h2 id="rp-h">Refunds waiting for you</h2><span class="rp-total mono">{fmtPrice(total)} {sym}</span></div>
     <p class="rp-hint">Outbid or declined? Funds come back here, never lost. Withdraw any time — gas only.</p>
     <ul class="rp-list">
-      {#each rows.filter((r) => r.wei > 0n) as r (r.key)}
+      {#each rows.filter((r) => r.ok && r.wei > 0n) as r (r.key)}
         <li><span>{CORE_LABEL[r.key]}</span><span class="mono">{fmtPrice(r.wei)} {sym}</span><button class="rp-btn" onclick={() => withdraw(r)}>Withdraw</button></li>
       {/each}
     </ul>
@@ -45,6 +62,7 @@
 
 <style>
   .rp { padding: 16px; border-radius: 16px; background: rgba(74,222,128,.06); border: 1px solid rgba(74,222,128,.3); margin-bottom: 20px; }
+  .rp-err { background: rgba(252,165,165,.06); border-color: rgba(252,165,165,.3); }
   .rp-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; } h2 { font-size: 15px; font-weight: 800; margin: 0; }
   .rp-total { font-weight: 700; color: #bbf7d0; }
   .rp-hint { font-size: 12px; color: rgba(255,255,255,.55); margin: 6px 0 10px; }

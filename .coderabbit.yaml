@@ -1,0 +1,38 @@
+# CodeRabbit configuration — https://docs.coderabbit.ai/reference/configuration
+# Goal: review the code we write, not vendored submodules or generated output.
+
+reviews:
+  auto_review:
+    enabled: true
+    base_branches:
+      - main
+  path_filters:
+    # Vendored Foundry/OpenZeppelin submodules
+    - "!contracts/lib/**"
+    # Generated code — regenerated from .proto / schema.graphql, never hand-edited
+    - "!**/*.pb.go"
+    - "!**/marketplacev1connect/**"
+    - "!backend/internal/connectrpc/marketplacev1/*.pb.go"
+    - "!backend/internal/graphql/generated.go"
+    - "!backend/internal/graphql/models_gen.go"
+    - "!app/src/lib/abi/**"
+    # Lockfiles and build output
+    - "!app/package-lock.json"
+    - "!backend/go.sum"
+    - "!app/dist/**"
+  path_instructions:
+    - path: "contracts/src/**"
+      instructions: >-
+        Immutable once deployed. Flag any change that alters storage layout,
+        breaks the "pausable entries, unstoppable exits" invariant (settle,
+        cancel and withdraw paths must never depend on MarketplaceManager),
+        or changes PLATFORM_FEE_BPS/MIN_PRICE semantics.
+    - path: "backend/internal/db/migrations/**"
+      instructions: >-
+        Migrations are append-only and never renumbered (031 is intentionally
+        missing). Flag edits to existing migration files.
+    - path: "deployments/**"
+      instructions: >-
+        Single source of truth for contract addresses. status follows
+        not-deployed -> read-only -> deployed; read-only requires null
+        addresses and a real app.flyApp/app.origin.

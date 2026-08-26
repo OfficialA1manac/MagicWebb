@@ -342,7 +342,11 @@ message GetProfileResponse {
   string banner_uri = 5;
   string twitter = 6;
   string website = 7;
-  bool verified = 8;
+  // Field 8 was `bool verified` — user-profile verification was removed with
+  // the admin surface (no writer existed). Collection verification is the
+  // on-chain derived `collection_verified` / Collection.verified instead.
+  reserved 8;
+  reserved "verified";
 }
 
 // ── Search ─────────────────────────────────────────────────────────────────────

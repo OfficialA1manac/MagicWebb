@@ -17,7 +17,7 @@ const U128 = (1n << 128n) - 1n;
 
 export function marketplaceAddress(): Address {
   const a = currentChain().contracts.marketplace;
-  if (!a) throw new TxError('Invalid', `The marketplace is not deployed on ${currentChain().name} yet.`);
+  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to Coston2 to trade.`);
   return a;
 }
 

@@ -1,0 +1,26 @@
+apiVersion: kustomize.config.k8s.io/v1beta1
+kind: Kustomization
+
+# Flare mainnet — READ-ONLY until contracts deploy (gated on external audit +
+# fee-recipient multisig; see deployments/flare.json). Same enable procedure
+# as Songbird: fill the *_ADDR literals, mirror deployments/flare.json,
+# redeploy. RESET_ON_ADDRESS_CHANGE stays unset on mainnet — address changes
+# require a deliberate, manual chainwipe.
+namespace: magicwebb-flare
+nameSuffix: -flare
+
+resources:
+  - ../../base
+  - ingress.yaml
+
+configMapGenerator:
+  - name: mw-config
+    behavior: merge
+    literals:
+      - CHAIN_ID=14
+      - RPC_URL=https://flare-api.flare.network/ext/C/rpc
+      - RPC_URLS=https://flare-api.flare.network/ext/C/rpc
+      # CHANGE_ME: must match the Ingress hosts of your k8s releases.
+      - SIWE_DOMAIN=flare.magicwebb.example
+      - FRONTEND_URL=https://flare.magicwebb.example
+      - NETWORK_URLS=114=https://coston2.magicwebb.example,19=https://songbird.magicwebb.example,14=https://flare.magicwebb.example

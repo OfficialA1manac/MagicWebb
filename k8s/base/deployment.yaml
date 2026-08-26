@@ -1,0 +1,75 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: magicwebb
+  labels:
+    app.kubernetes.io/name: magicwebb
+spec:
+  # One replica per chain by default. Running 2+ replicas requires the gRPC
+  # event mesh + keeper leader election: set GRPC_PORT and GRPC_PEERS (or a
+  # headless Service) in the overlay before scaling, and point REDIS_URL at a
+  # shared Redis so rate limits and cache stay consistent across pods.
+  replicas: 1
+  strategy:
+    type: RollingUpdate
+    rollingUpdate:
+      maxSurge: 1
+      maxUnavailable: 0
+  selector:
+    matchLabels:
+      app.kubernetes.io/name: magicwebb
+  template:
+    metadata:
+      labels:
+        app.kubernetes.io/name: magicwebb
+    spec:
+      securityContext:
+        runAsNonRoot: true
+        runAsUser: 65532
+        seccompProfile:
+          type: RuntimeDefault
+      containers:
+        - name: magicwebb
+          # CI stamps the real tag; :latest is only a placeholder for kustomize
+          # `images:` overrides in the overlays.
+          image: ghcr.io/officiala1manac/magicwebb:latest
+          ports:
+            - name: http
+              containerPort: 8080
+          envFrom:
+            - configMapRef:
+                name: mw-config
+            # Per-network secrets, created out-of-band (never committed):
+            #   kubectl create secret generic mw-secrets \
+            #     --from-literal=POSTGRES_URL=... \
+            #     --from-literal=JWT_SECRET=... \
+            #     --from-literal=KEEPER_KEY=... \
+            #     --from-literal=REDIS_URL=...
+            - secretRef:
+                name: mw-secrets
+          # /healthz is liveness only (no DB/RPC calls) — a slow chain never
+          # restarts the pod. /readyz gates traffic on DB + RPC + head lag.
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: http
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            failureThreshold: 3
+          resources:
+            requests:
+              cpu: 250m
+              memory: 256Mi
+            limits:
+              memory: 512Mi
+          securityContext:
+            allowPrivilegeEscalation: false
+            readOnlyRootFilesystem: true
+            capabilities:
+              drop: ["ALL"]

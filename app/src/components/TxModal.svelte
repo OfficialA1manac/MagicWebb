@@ -2,6 +2,7 @@
   // Approved wireframe (design review 2026-08-20, D8): bottom sheet < 480px,
   // centered dialog otherwise; 4-step rail; cost summary; plain-language errors.
   import { onMount } from 'svelte';
+  import { fade, fly } from 'svelte/transition';
   import { txModal, closeTxModal } from '../lib/stores/txmodal.svelte';
   import { shortAddr } from '../lib/format';
   import { currentChain } from '../lib/chains';
@@ -66,8 +67,8 @@
 <svelte:window onkeydown={txModal.open ? onKey : undefined} />
 
 {#if txModal.open}
-  <div class="mw-tx-scrim" role="presentation" onclick={() => { if (!busy) closeTxModal(); }}></div>
-  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" bind:this={dialog}>
+  <div class="mw-tx-scrim" role="presentation" transition:fade={{ duration: 150 }} onclick={() => { if (!busy) closeTxModal(); }}></div>
+  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" bind:this={dialog} transition:fly={{ y: 24, duration: 220 }}>
     <div class="mw-tx-grab" aria-hidden="true"></div>
     <h2 id="mw-tx-title">{txModal.title}</h2>
 

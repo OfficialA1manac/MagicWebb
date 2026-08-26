@@ -59,7 +59,7 @@ describe('marketplace builders (ABI: list(coll,id,uint128 price,uint64 duration)
   });
   it('throws a clear error when the chain has no marketplace', () => {
     window.MW_MARKETPLACE = ''; _resetChainCache();
-    expect(() => buildBuy(NFT, 1n, SELLER, E)).toThrowError(/not deployed/);
+    expect(() => buildBuy(NFT, 1n, SELLER, E)).toThrowError(/not live/);
   });
 });
 

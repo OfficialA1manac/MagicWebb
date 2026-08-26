@@ -10,6 +10,12 @@
 //
 // app/src/lib/chains.ts mirrors the identity half of this table for the
 // browser; profile_test.go asserts the two stay in sync.
+//
+// Rule: any future per-network behavior (gas strategy, explorer API quirks,
+// finality tweaks) is a new FIELD in this table, never a forked package or a
+// chain-ID branch in shared code. A new field forces a value for all three
+// chains at compile time, and read-only networks inherit correct metadata
+// for free.
 package profile
 
 import (

@@ -8,6 +8,7 @@ import (
 	"embed"
 	"errors"
 	"fmt"
+	"io"
 	"strconv"
 	"sync"
 	"sync/atomic"
@@ -188,7 +189,6 @@ type ComplexityRoot struct {
 		Bio         func(childComplexity int) int
 		DisplayName func(childComplexity int) int
 		Twitter     func(childComplexity int) int
-		Verified    func(childComplexity int) int
 		Website     func(childComplexity int) int
 	}
 
@@ -221,13 +221,6 @@ type ComplexityRoot struct {
 		WalletNFTs          func(childComplexity int, owner string) int
 	}
 
-	Subscription struct {
-		ListingUpdated   func(childComplexity int, collection *string, tokenID *string) int
-		AuctionUpdated   func(childComplexity int, auctionID *int) int
-		ActivityUpdated  func(childComplexity int) int
-		NotificationUpdated func(childComplexity int) int
-	}
-
 	SavedSearch struct {
 		CreatedAt func(childComplexity int) int
 		ID        func(childComplexity int) int
@@ -243,6 +236,13 @@ type ComplexityRoot struct {
 		Kind       func(childComplexity int) int
 		Name       func(childComplexity int) int
 		TokenID    func(childComplexity int) int
+	}
+
+	Subscription struct {
+		ActivityUpdated     func(childComplexity int) int
+		AuctionUpdated      func(childComplexity int, auctionID *int) int
+		ListingUpdated      func(childComplexity int, collection *string, tokenID *string) int
+		NotificationUpdated func(childComplexity int) int
 	}
 
 	TokenActivity struct {
@@ -323,7 +323,6 @@ type QueryResolver interface {
 	CountCollections(ctx context.Context) (int, error)
 	TotalVolume24h(ctx context.Context) (string, error)
 }
-
 type SubscriptionResolver interface {
 	ListingUpdated(ctx context.Context, collection *string, tokenID *string) (<-chan *Listing, error)
 	AuctionUpdated(ctx context.Context, auctionID *int) (<-chan *Auction, error)
@@ -1074,13 +1073,6 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.Profile.Twitter(childComplexity), true
 
-	case "Profile.verified":
-		if e.complexity.Profile.Verified == nil {
-			break
-		}
-
-		return e.complexity.Profile.Verified(childComplexity), true
-
 	case "Profile.website":
 		if e.complexity.Profile.Website == nil {
 			break
@@ -1452,6 +1444,44 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.SearchResult.TokenID(childComplexity), true
 
+	case "Subscription.activityUpdated":
+		if e.complexity.Subscription.ActivityUpdated == nil {
+			break
+		}
+
+		return e.complexity.Subscription.ActivityUpdated(childComplexity), true
+
+	case "Subscription.auctionUpdated":
+		if e.complexity.Subscription.AuctionUpdated == nil {
+			break
+		}
+
+		args, err := ec.field_Subscription_auctionUpdated_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Subscription.AuctionUpdated(childComplexity, args["auctionId"].(*int)), true
+
+	case "Subscription.listingUpdated":
+		if e.complexity.Subscription.ListingUpdated == nil {
+			break
+		}
+
+		args, err := ec.field_Subscription_listingUpdated_args(context.TODO(), rawArgs)
+		if err != nil {
+			return 0, false
+		}
+
+		return e.complexity.Subscription.ListingUpdated(childComplexity, args["collection"].(*string), args["tokenID"].(*string)), true
+
+	case "Subscription.notificationUpdated":
+		if e.complexity.Subscription.NotificationUpdated == nil {
+			break
+		}
+
+		return e.complexity.Subscription.NotificationUpdated(childComplexity), true
+
 	case "TokenActivity.amountWei":
 		if e.complexity.TokenActivity.AmountWei == nil {
 			break
@@ -1606,44 +1636,6 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 
 		return e.complexity.TrendingScore.Window(childComplexity), true
 
-	case "Subscription.listingUpdated":
-		if e.complexity.Subscription.ListingUpdated == nil {
-			break
-		}
-
-		args, err := ec.field_Subscription_listingUpdated_args(context.TODO(), rawArgs)
-		if err != nil {
-			return 0, false
-		}
-
-		return e.complexity.Subscription.ListingUpdated(childComplexity, args["collection"].(*string), args["tokenID"].(*string)), true
-
-	case "Subscription.auctionUpdated":
-		if e.complexity.Subscription.AuctionUpdated == nil {
-			break
-		}
-
-		args, err := ec.field_Subscription_auctionUpdated_args(context.TODO(), rawArgs)
-		if err != nil {
-			return 0, false
-		}
-
-		return e.complexity.Subscription.AuctionUpdated(childComplexity, args["auctionId"].(*int)), true
-
-	case "Subscription.activityUpdated":
-		if e.complexity.Subscription.ActivityUpdated == nil {
-			break
-		}
-
-		return e.complexity.Subscription.ActivityUpdated(childComplexity), true
-
-	case "Subscription.notificationUpdated":
-		if e.complexity.Subscription.NotificationUpdated == nil {
-			break
-		}
-
-		return e.complexity.Subscription.NotificationUpdated(childComplexity), true
-
 	}
 	return 0, false
 }
@@ -1685,24 +1677,22 @@ func (e *executableSchema) Exec(ctx context.Context) graphql.ResponseHandler {
 
 			return &response
 		}
-
-	// GQL-4: Subscription dispatch — feeds gqlgen's transport.Websocket with
-	// streamable results. The _Subscription method returns a closure that
-	// produces graphql.Marshaler values; ReadResponse reads from the closure
-	// until it returns nil (channel closed / context cancelled).
 	case ast.Subscription:
 		next := ec._Subscription(ctx, opCtx.Operation.SelectionSet)
-		if next == nil {
-			return nil
-		}
+
+		var buf bytes.Buffer
 		return func(ctx context.Context) *graphql.Response {
+			buf.Reset()
 			data := next(ctx)
+
 			if data == nil {
 				return nil
 			}
-			var buf bytes.Buffer
 			data.MarshalGQL(&buf)
-			return &graphql.Response{Data: buf.Bytes()}
+
+			return &graphql.Response{
+				Data: buf.Bytes(),
+			}
 		}
 
 	default:
@@ -3199,6 +3189,85 @@ func (ec *executionContext) field_Query_walletNFTs_argsOwner(
 	}
 
 	var zeroVal string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Subscription_auctionUpdated_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Subscription_auctionUpdated_argsAuctionID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["auctionId"] = arg0
+	return args, nil
+}
+func (ec *executionContext) field_Subscription_auctionUpdated_argsAuctionID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*int, error) {
+	if _, ok := rawArgs["auctionId"]; !ok {
+		var zeroVal *int
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("auctionId"))
+	if tmp, ok := rawArgs["auctionId"]; ok {
+		return ec.unmarshalOInt2ᚖint(ctx, tmp)
+	}
+
+	var zeroVal *int
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Subscription_listingUpdated_args(ctx context.Context, rawArgs map[string]any) (map[string]any, error) {
+	var err error
+	args := map[string]any{}
+	arg0, err := ec.field_Subscription_listingUpdated_argsCollection(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["collection"] = arg0
+	arg1, err := ec.field_Subscription_listingUpdated_argsTokenID(ctx, rawArgs)
+	if err != nil {
+		return nil, err
+	}
+	args["tokenID"] = arg1
+	return args, nil
+}
+func (ec *executionContext) field_Subscription_listingUpdated_argsCollection(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["collection"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("collection"))
+	if tmp, ok := rawArgs["collection"]; ok {
+		return ec.unmarshalOString2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
+	return zeroVal, nil
+}
+
+func (ec *executionContext) field_Subscription_listingUpdated_argsTokenID(
+	ctx context.Context,
+	rawArgs map[string]any,
+) (*string, error) {
+	if _, ok := rawArgs["tokenID"]; !ok {
+		var zeroVal *string
+		return zeroVal, nil
+	}
+
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("tokenID"))
+	if tmp, ok := rawArgs["tokenID"]; ok {
+		return ec.unmarshalOString2ᚖstring(ctx, tmp)
+	}
+
+	var zeroVal *string
 	return zeroVal, nil
 }
 
@@ -7992,50 +8061,6 @@ func (ec *executionContext) fieldContext_Profile_website(_ context.Context, fiel
 	return fc, nil
 }
 
-func (ec *executionContext) _Profile_verified(ctx context.Context, field graphql.CollectedField, obj *Profile) (ret graphql.Marshaler) {
-	fc, err := ec.fieldContext_Profile_verified(ctx, field)
-	if err != nil {
-		return graphql.Null
-	}
-	ctx = graphql.WithFieldContext(ctx, fc)
-	defer func() {
-		if r := recover(); r != nil {
-			ec.Error(ctx, ec.Recover(ctx, r))
-			ret = graphql.Null
-		}
-	}()
-	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
-		ctx = rctx // use context from middleware stack in children
-		return obj.Verified, nil
-	})
-	if err != nil {
-		ec.Error(ctx, err)
-		return graphql.Null
-	}
-	if resTmp == nil {
-		if !graphql.HasFieldError(ctx, fc) {
-			ec.Errorf(ctx, "must not be null")
-		}
-		return graphql.Null
-	}
-	res := resTmp.(bool)
-	fc.Result = res
-	return ec.marshalNBoolean2bool(ctx, field.Selections, res)
-}
-
-func (ec *executionContext) fieldContext_Profile_verified(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
-	fc = &graphql.FieldContext{
-		Object:     "Profile",
-		Field:      field,
-		IsMethod:   false,
-		IsResolver: false,
-		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
-			return nil, errors.New("field of type Boolean does not have child fields")
-		},
-	}
-	return fc, nil
-}
-
 func (ec *executionContext) _Query_collection(ctx context.Context, field graphql.CollectedField) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Query_collection(ctx, field)
 	if err != nil {
@@ -9076,8 +9101,6 @@ func (ec *executionContext) fieldContext_Query_profile(ctx context.Context, fiel
 				return ec.fieldContext_Profile_twitter(ctx, field)
 			case "website":
 				return ec.fieldContext_Profile_website(ctx, field)
-			case "verified":
-				return ec.fieldContext_Profile_verified(ctx, field)
 			}
 			return nil, fmt.Errorf("no field named %q was found under type Profile", field.Name)
 		},
@@ -10403,6 +10426,352 @@ func (ec *executionContext) fieldContext_SearchResult_imageURI(_ context.Context
 		IsResolver: false,
 		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
 			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Subscription_listingUpdated(ctx context.Context, field graphql.CollectedField) (ret func(ctx context.Context) graphql.Marshaler) {
+	fc, err := ec.fieldContext_Subscription_listingUpdated(ctx, field)
+	if err != nil {
+		return nil
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = nil
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Subscription().ListingUpdated(rctx, fc.Args["collection"].(*string), fc.Args["tokenID"].(*string))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return nil
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return nil
+	}
+	return func(ctx context.Context) graphql.Marshaler {
+		select {
+		case res, ok := <-resTmp.(<-chan *Listing):
+			if !ok {
+				return nil
+			}
+			return graphql.WriterFunc(func(w io.Writer) {
+				w.Write([]byte{'{'})
+				graphql.MarshalString(field.Alias).MarshalGQL(w)
+				w.Write([]byte{':'})
+				ec.marshalNListing2ᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐListing(ctx, field.Selections, res).MarshalGQL(w)
+				w.Write([]byte{'}'})
+			})
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (ec *executionContext) fieldContext_Subscription_listingUpdated(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Subscription",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "collection":
+				return ec.fieldContext_Listing_collection(ctx, field)
+			case "tokenID":
+				return ec.fieldContext_Listing_tokenID(ctx, field)
+			case "seller":
+				return ec.fieldContext_Listing_seller(ctx, field)
+			case "priceWei":
+				return ec.fieldContext_Listing_priceWei(ctx, field)
+			case "amount":
+				return ec.fieldContext_Listing_amount(ctx, field)
+			case "standard":
+				return ec.fieldContext_Listing_standard(ctx, field)
+			case "expiresAt":
+				return ec.fieldContext_Listing_expiresAt(ctx, field)
+			case "listedAt":
+				return ec.fieldContext_Listing_listedAt(ctx, field)
+			case "txHash":
+				return ec.fieldContext_Listing_txHash(ctx, field)
+			case "name":
+				return ec.fieldContext_Listing_name(ctx, field)
+			case "imageURI":
+				return ec.fieldContext_Listing_imageURI(ctx, field)
+			case "collectionVerified":
+				return ec.fieldContext_Listing_collectionVerified(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Listing", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Subscription_listingUpdated_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Subscription_auctionUpdated(ctx context.Context, field graphql.CollectedField) (ret func(ctx context.Context) graphql.Marshaler) {
+	fc, err := ec.fieldContext_Subscription_auctionUpdated(ctx, field)
+	if err != nil {
+		return nil
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = nil
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Subscription().AuctionUpdated(rctx, fc.Args["auctionId"].(*int))
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return nil
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return nil
+	}
+	return func(ctx context.Context) graphql.Marshaler {
+		select {
+		case res, ok := <-resTmp.(<-chan *Auction):
+			if !ok {
+				return nil
+			}
+			return graphql.WriterFunc(func(w io.Writer) {
+				w.Write([]byte{'{'})
+				graphql.MarshalString(field.Alias).MarshalGQL(w)
+				w.Write([]byte{':'})
+				ec.marshalNAuction2ᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐAuction(ctx, field.Selections, res).MarshalGQL(w)
+				w.Write([]byte{'}'})
+			})
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (ec *executionContext) fieldContext_Subscription_auctionUpdated(ctx context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Subscription",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "auctionID":
+				return ec.fieldContext_Auction_auctionID(ctx, field)
+			case "collection":
+				return ec.fieldContext_Auction_collection(ctx, field)
+			case "tokenID":
+				return ec.fieldContext_Auction_tokenID(ctx, field)
+			case "seller":
+				return ec.fieldContext_Auction_seller(ctx, field)
+			case "standard":
+				return ec.fieldContext_Auction_standard(ctx, field)
+			case "reservePriceWei":
+				return ec.fieldContext_Auction_reservePriceWei(ctx, field)
+			case "highestBidWei":
+				return ec.fieldContext_Auction_highestBidWei(ctx, field)
+			case "highestBidder":
+				return ec.fieldContext_Auction_highestBidder(ctx, field)
+			case "minIncrementBps":
+				return ec.fieldContext_Auction_minIncrementBps(ctx, field)
+			case "startsAt":
+				return ec.fieldContext_Auction_startsAt(ctx, field)
+			case "endsAt":
+				return ec.fieldContext_Auction_endsAt(ctx, field)
+			case "status":
+				return ec.fieldContext_Auction_status(ctx, field)
+			case "createTx":
+				return ec.fieldContext_Auction_createTx(ctx, field)
+			case "name":
+				return ec.fieldContext_Auction_name(ctx, field)
+			case "imageURI":
+				return ec.fieldContext_Auction_imageURI(ctx, field)
+			case "bids":
+				return ec.fieldContext_Auction_bids(ctx, field)
+			case "effectiveBids":
+				return ec.fieldContext_Auction_effectiveBids(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Auction", field.Name)
+		},
+	}
+	defer func() {
+		if r := recover(); r != nil {
+			err = ec.Recover(ctx, r)
+			ec.Error(ctx, err)
+		}
+	}()
+	ctx = graphql.WithFieldContext(ctx, fc)
+	if fc.Args, err = ec.field_Subscription_auctionUpdated_args(ctx, field.ArgumentMap(ec.Variables)); err != nil {
+		ec.Error(ctx, err)
+		return fc, err
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Subscription_activityUpdated(ctx context.Context, field graphql.CollectedField) (ret func(ctx context.Context) graphql.Marshaler) {
+	fc, err := ec.fieldContext_Subscription_activityUpdated(ctx, field)
+	if err != nil {
+		return nil
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = nil
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Subscription().ActivityUpdated(rctx)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return nil
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return nil
+	}
+	return func(ctx context.Context) graphql.Marshaler {
+		select {
+		case res, ok := <-resTmp.(<-chan *Activity):
+			if !ok {
+				return nil
+			}
+			return graphql.WriterFunc(func(w io.Writer) {
+				w.Write([]byte{'{'})
+				graphql.MarshalString(field.Alias).MarshalGQL(w)
+				w.Write([]byte{':'})
+				ec.marshalNActivity2ᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐActivity(ctx, field.Selections, res).MarshalGQL(w)
+				w.Write([]byte{'}'})
+			})
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (ec *executionContext) fieldContext_Subscription_activityUpdated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Subscription",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "type":
+				return ec.fieldContext_Activity_type(ctx, field)
+			case "collection":
+				return ec.fieldContext_Activity_collection(ctx, field)
+			case "tokenID":
+				return ec.fieldContext_Activity_tokenID(ctx, field)
+			case "amountWei":
+				return ec.fieldContext_Activity_amountWei(ctx, field)
+			case "timestamp":
+				return ec.fieldContext_Activity_timestamp(ctx, field)
+			case "txHash":
+				return ec.fieldContext_Activity_txHash(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Activity", field.Name)
+		},
+	}
+	return fc, nil
+}
+
+func (ec *executionContext) _Subscription_notificationUpdated(ctx context.Context, field graphql.CollectedField) (ret func(ctx context.Context) graphql.Marshaler) {
+	fc, err := ec.fieldContext_Subscription_notificationUpdated(ctx, field)
+	if err != nil {
+		return nil
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = nil
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return ec.resolvers.Subscription().NotificationUpdated(rctx)
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return nil
+	}
+	if resTmp == nil {
+		if !graphql.HasFieldError(ctx, fc) {
+			ec.Errorf(ctx, "must not be null")
+		}
+		return nil
+	}
+	return func(ctx context.Context) graphql.Marshaler {
+		select {
+		case res, ok := <-resTmp.(<-chan *Notification):
+			if !ok {
+				return nil
+			}
+			return graphql.WriterFunc(func(w io.Writer) {
+				w.Write([]byte{'{'})
+				graphql.MarshalString(field.Alias).MarshalGQL(w)
+				w.Write([]byte{':'})
+				ec.marshalNNotification2ᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐNotification(ctx, field.Selections, res).MarshalGQL(w)
+				w.Write([]byte{'}'})
+			})
+		case <-ctx.Done():
+			return nil
+		}
+	}
+}
+
+func (ec *executionContext) fieldContext_Subscription_notificationUpdated(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Subscription",
+		Field:      field,
+		IsMethod:   true,
+		IsResolver: true,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			switch field.Name {
+			case "id":
+				return ec.fieldContext_Notification_id(ctx, field)
+			case "kind":
+				return ec.fieldContext_Notification_kind(ctx, field)
+			case "title":
+				return ec.fieldContext_Notification_title(ctx, field)
+			case "body":
+				return ec.fieldContext_Notification_body(ctx, field)
+			case "link":
+				return ec.fieldContext_Notification_link(ctx, field)
+			case "read":
+				return ec.fieldContext_Notification_read(ctx, field)
+			case "createdAt":
+				return ec.fieldContext_Notification_createdAt(ctx, field)
+			}
+			return nil, fmt.Errorf("no field named %q was found under type Notification", field.Name)
 		},
 	}
 	return fc, nil
@@ -14517,11 +14886,6 @@ func (ec *executionContext) _Profile(ctx context.Context, sel ast.SelectionSet, 
 			if out.Values[i] == graphql.Null {
 				out.Invalids++
 			}
-		case "verified":
-			out.Values[i] = ec._Profile_verified(ctx, field, obj)
-			if out.Values[i] == graphql.Null {
-				out.Invalids++
-			}
 		default:
 			panic("unknown field " + strconv.Quote(field.Name))
 		}
@@ -14546,10 +14910,6 @@ func (ec *executionContext) _Profile(ctx context.Context, sel ast.SelectionSet, 
 }
 
 var queryImplementors = []string{"Query"}
-
-// GQL-4: subscriptionImplementors lists the GraphQL type names that implement
-// the Subscription root type. Used by CollectFields to resolve fragment spreads.
-var subscriptionImplementors = []string{"Subscription"}
 
 func (ec *executionContext) _Query(ctx context.Context, sel ast.SelectionSet) graphql.Marshaler {
 	fields := graphql.CollectFields(ec.OperationContext, sel, queryImplementors)
@@ -15294,6 +15654,32 @@ func (ec *executionContext) _SearchResult(ctx context.Context, sel ast.Selection
 	return out
 }
 
+var subscriptionImplementors = []string{"Subscription"}
+
+func (ec *executionContext) _Subscription(ctx context.Context, sel ast.SelectionSet) func(ctx context.Context) graphql.Marshaler {
+	fields := graphql.CollectFields(ec.OperationContext, sel, subscriptionImplementors)
+	ctx = graphql.WithFieldContext(ctx, &graphql.FieldContext{
+		Object: "Subscription",
+	})
+	if len(fields) != 1 {
+		ec.Errorf(ctx, "must subscribe to exactly one stream")
+		return nil
+	}
+
+	switch fields[0].Name {
+	case "listingUpdated":
+		return ec._Subscription_listingUpdated(ctx, fields[0])
+	case "auctionUpdated":
+		return ec._Subscription_auctionUpdated(ctx, fields[0])
+	case "activityUpdated":
+		return ec._Subscription_activityUpdated(ctx, fields[0])
+	case "notificationUpdated":
+		return ec._Subscription_notificationUpdated(ctx, fields[0])
+	default:
+		panic("unknown field " + strconv.Quote(fields[0].Name))
+	}
+}
+
 var tokenActivityImplementors = []string{"TokenActivity"}
 
 func (ec *executionContext) _TokenActivity(ctx context.Context, sel ast.SelectionSet, obj *TokenActivity) graphql.Marshaler {
@@ -15909,6 +16295,10 @@ func (ec *executionContext) ___Type(ctx context.Context, sel ast.SelectionSet, o
 
 // region    ***************************** type.gotpl *****************************
 
+func (ec *executionContext) marshalNActivity2githubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐActivity(ctx context.Context, sel ast.SelectionSet, v Activity) graphql.Marshaler {
+	return ec._Activity(ctx, sel, &v)
+}
+
 func (ec *executionContext) marshalNActivity2ᚕᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐActivityᚄ(ctx context.Context, sel ast.SelectionSet, v []*Activity) graphql.Marshaler {
 	ret := make(graphql.Array, len(v))
 	var wg sync.WaitGroup
@@ -16352,6 +16742,10 @@ func (ec *executionContext) marshalNMarketMetrics2ᚖgithubᚗcomᚋOfficialA1ma
 		return graphql.Null
 	}
 	return ec._MarketMetrics(ctx, sel, v)
+}
+
+func (ec *executionContext) marshalNNotification2githubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐNotification(ctx context.Context, sel ast.SelectionSet, v Notification) graphql.Marshaler {
+	return ec._Notification(ctx, sel, &v)
 }
 
 func (ec *executionContext) marshalNNotification2ᚕᚖgithubᚗcomᚋOfficialA1manacᚋMagicWebbᚋbackendᚋinternalᚋgraphqlᚐNotificationᚄ(ctx context.Context, sel ast.SelectionSet, v []*Notification) graphql.Marshaler {

@@ -115,7 +115,9 @@ describe('WalletConnect', () => {
     expect(screen.getByText('Disconnect')).toBeInTheDocument();
   });
 
-  it('shows wrong network warning and switches on click', async () => {
+  it('shows a compact wrong-network warning dot (banner owns the message)', async () => {
+    // NetworkMismatchBanner is the single wrong-network messaging surface with
+    // the switch action; the wallet chip only carries an amber warning dot.
     accountState = {
       address: '0x1234567890abcdef1234567890abcdef12345678',
       isConnected: true,
@@ -124,10 +126,13 @@ describe('WalletConnect', () => {
     networkState = { chainId: 999 }; // wrong network — target chain is 114
     const WalletConnect = (await import('./WalletConnect')).default;
     render(<WalletConnect />);
-    expect(await screen.findByText(/Wrong Network/, {}, { timeout: 3000 })).toBeInTheDocument();
-    const switchBtn = screen.getByText(/Switch to Flare/);
-    fireEvent.click(switchBtn);
-    expect(mockFns.switchNetwork).toHaveBeenCalled();
+    // Chip still renders normally (address + disconnect stay reachable).
+    expect(await screen.findByText(/0x1234.*5678/, {}, { timeout: 3000 })).toBeInTheDocument();
+    // The warning dot carries the explanation as its title.
+    expect(screen.getByTitle(/wrong network/i)).toBeInTheDocument();
+    // The old inline pill and switch button are gone.
+    expect(screen.queryByText(/Wrong Network/)).toBeNull();
+    expect(screen.queryByText(/Switch to Flare/)).toBeNull();
   });
 
   it('shows reconnect button when stored wallet is in localStorage', async () => {

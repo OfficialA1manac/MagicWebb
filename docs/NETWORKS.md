@@ -19,31 +19,54 @@ and indexer. Nothing is shared except the Docker image and the code.
    read-only branch for `READ_POOL_URL`. Never point two networks at one database: the
    indexer's `deployment_config` guard and `chain_id` columns assume one chain.
 2. **Redis (optional)** — Upstash or Fly Redis in the app's region. Set `REDIS_URL` as a Fly
-   secret. Shares cache, rate-limit counters and SIWE nonces across machines *of that
-   network*. Unset = per-instance memory (fine for one machine).
+   secret. Shares the read caches across machines *of that network*: trending (30s),
+   activity (10s) and the merged wallet inventory (30s) — see `internal/cache`. Rate-limit
+   counters and SIWE nonces are **Postgres-backed** (`internal/ratelimit`, `internal/nonce`)
+   and never touch Redis. Unset = per-instance memory caches (fine for one machine).
 3. **Fly secrets** — `POSTGRES_URL`, `JWT_SECRET`, `KEEPER_KEY`, `WC_PROJECT_ID`; optional
    `REDIS_URL`, `READ_POOL_URL`, `RPC_URL`/`RPC_URLS` (private provider), `SAFE_ADDR`,
    `PERSONAL_WALLET_ADDR`, `DISCORD_WEBHOOK_URL`, `SENTRY_DSN`.
 4. **Keeper wallet** — the `KEEPER_KEY` address needs native balance
    (`KEEPER_MIN_BALANCE_WEI`); the profile caps its gas (`MaxFeeCapGwei`).
-5. **Contracts** — `deployments/<network>.json`. `status: "not-deployed"` ⇒ the app runs in
-   read-only network mode (UI + API, no indexer/keepers).
+5. **Contracts** — `deployments/<network>.json`. Status lifecycle:
 
-## Enabling a network
+   `not-deployed → read-only → deployed`
 
+   - `not-deployed`: no app exists. The network renders as "Unavailable" in switchers.
+   - `read-only`: the Fly app + Neon DB exist, contracts are null. The backend boots in
+     read-only network mode (UI, API, wallet, profile; indexer/keepers/verifier idle),
+     the frontend shows the read-only banner + empty states, and the origin appears in
+     every sibling's switcher via NETWORK_URLS.
+   - `deployed`: contracts live, full stack (indexer, keepers, verifier, trading).
+
+## Bringing a network up read-only (no contracts yet)
+
+```text
+1. Create the Neon project; note the pooled POSTGRES_URL (migrations run at boot)
+2. fly apps create magicwebb-<network>
+3. fly secrets set -a magicwebb-<network> POSTGRES_URL=… JWT_SECRET=… [REDIS_URL=…]
+   (no KEEPER_KEY — keepers are idle in read-only mode)
+4. GitHub → Variables → <NETWORK>_ENABLED = true
+5. edit deployments/<network>.json: status "read-only" (contracts stay null)
+6. push to main (or run the Deploy workflow manually) → CI deploys every enabled
+   network and regenerates every app's NETWORK_URLS to include the new origin
 ```
+
+## Enabling trading on a network
+
+```text
 1. forge script contracts/script/Deploy<Network>.s.sol … --broadcast      (see DEPLOY_CHECKLIST.md)
 2. edit deployments/<network>.json: status deployed, addresses, indexFromBlock
-3. fly apps create magicwebb-<network>; fly secrets set … -a magicwebb-<network>
-4. GitHub → Variables → <NETWORK>_ENABLED = true
-5. push to main → CI deploys every enabled network; siblings learn the new origin via NETWORK_URLS
+3. fly secrets set -a magicwebb-<network> KEEPER_KEY=…
+4. push to main → CI redeploys; indexer/keepers/verifier start on the next boot
 ```
 
 ## Scaling a network to 2+ machines
 
 Set `GRPC_PORT=9090` and `GRPC_PEERS=<fly 6PN addresses>` so the instances form the event
 mesh (every WebSocket client sees every event) and elect a single keeper. Set `REDIS_URL`
-so rate limits and nonces are shared. Keep `auto_stop_machines = "off"`.
+so the read caches are shared (rate limits and nonces are already shared via Postgres).
+Keep `auto_stop_machines = "off"`.
 
 ## What must never vary between networks
 

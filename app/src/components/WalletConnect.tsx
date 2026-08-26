@@ -58,7 +58,7 @@ function WalletButton() {
   const { open } = useAppKit();
   const { disconnect } = useDisconnect();
   const { address, isConnected, status } = useAppKitAccount();
-  const { chainId, switchNetwork } = useAppKitNetwork();
+  const { chainId } = useAppKitNetwork();
 
   const connecting = (status as string) === 'connecting' || (status as string) === 'reconnecting' || (status as string) === 'initializing';
   const wrongNetwork = isConnected && chainId !== undefined && chainId !== targetChain.id;
@@ -254,36 +254,14 @@ function WalletButton() {
     );
   }
 
-  if (wrongNetwork) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.5rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(251,191,36,0.1)', border: '1px solid rgba(251,191,36,0.3)', boxShadow: '0 0 18px -4px rgba(251,191,36,0.45)' }}>
-        <span style={{ fontSize: '0.625rem', fontWeight: 700, color: '#fde68a', textTransform: 'uppercase', letterSpacing: '0.05em' }}>⚠ Wrong Network</span>
-        <button
-          onClick={() => switchNetwork(targetAppKitNetwork)}
-          style={{
-            padding: '0.375rem 0.75rem',
-            borderRadius: '0.5rem',
-            background: 'linear-gradient(135deg, #fcd34d, #f59e0b)',
-            color: '#09090b',
-            fontWeight: 700,
-            fontSize: '0.6875rem',
-            border: 'none',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            boxShadow: '0 0 14px -3px rgba(251,191,36,0.45)',
-          }}
-        >
-          Switch to {targetChain.name}
-        </button>
-      </div>
-    );
-  }
-
+  // Wrong network: no separate pill here — NetworkMismatchBanner is the single
+  // messaging surface with the switch action. The wallet chip only carries a
+  // compact amber warning dot so the state is still visible in the nav.
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
+    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: wrongNetwork ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-        <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#7dd3fc', boxShadow: '0 0 8px rgba(125,211,252,0.5)', position: 'relative' }}>
-          <span style={{ position: 'absolute', inset: '-3px', borderRadius: '50%', background: 'rgba(125,211,252,0.2)', animation: 'pulse-ring 1.5s ease-out infinite' }} />
+        <span title={wrongNetwork ? `Wallet is on the wrong network — switch to ${targetChain.name}` : undefined} style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: wrongNetwork ? '#fcd34d' : '#7dd3fc', boxShadow: wrongNetwork ? '0 0 8px rgba(251,191,36,0.6)' : '0 0 8px rgba(125,211,252,0.5)', position: 'relative' }}>
+          <span style={{ position: 'absolute', inset: '-3px', borderRadius: '50%', background: wrongNetwork ? 'rgba(251,191,36,0.25)' : 'rgba(125,211,252,0.2)', animation: 'pulse-ring 1.5s ease-out infinite' }} />
         </span>
         <span style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
         <span style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>

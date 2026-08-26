@@ -12,7 +12,7 @@ description: "Contracts, escrow flows, and the indexer pipeline in depth."
 
 ## 1. Abstract
 
-MagicWebb is a non-custodial NFT marketplace shipped as a **single Go binary** (Go Fiber server + server-rendered HTMX/Alpine UI + an on-chain event indexer) talking to **immutable on-chain contracts**. It supports fixed-price listings, English auctions, and fully on-chain escrowed offers across ERC-721 and ERC-1155 assets.
+MagicWebb is a non-custodial NFT marketplace shipped as a **single Go binary** (Go Fiber server + an embedded static Astro/Svelte UI + an on-chain event indexer) talking to **immutable on-chain contracts**. It supports fixed-price listings, English auctions, and fully on-chain escrowed offers across ERC-721 and ERC-1155 assets.
 
 ## 2. Design goals
 
@@ -29,7 +29,7 @@ MagicWebb is a non-custodial NFT marketplace shipped as a **single Go binary** (
 
 ```
 Wallet (ethers.js) --writes--> Flare RPC --> Contracts --events--> Indexer
-   --> Postgres --> Go Fiber server (HTMX UI + SSE) --reads--> Wallet / Browser
+   --> Postgres --> Go Fiber server (static Astro UI + WebSocket) --reads--> Wallet / Browser
 ```
 
 ### 3.1 Contract roles

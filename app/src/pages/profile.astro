@@ -8,7 +8,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
   <WalletConnect slot="wallet" client:only="react" />
 
   <section style="max-width:80rem;margin:0 auto;padding:1.5rem 1rem 3rem;">
-    <RefundsPanel client:load />
+    <RefundsPanel client:visible />
     <div id="profile-root">
       <!-- Loading skeleton -->
       <div class="shimmer" style="display:flex;align-items:center;gap:1rem;margin-bottom:1.5rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);">
@@ -95,7 +95,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         if (_loading) return;
         _loading = true;
         const encAddr = encodeURIComponent(targetAddr);
-        root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+        // First paint already shows the server-rendered skeleton — keep it.
+        // Only swap in the lightweight loader on later reloads (wallet switch).
+        if (!root.querySelector('.shimmer')) root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
         try {
           const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
@@ -130,7 +132,6 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           const displayName = (profile && profile.display_name) || shortAddr(targetAddr);
           const bio         = (profile && profile.bio) || '';
           const avatar      = (profile && profile.avatar_uri) || '';
-          const verified    = profile && profile.verified;
 
           // Compute user's total earnings from listings + auctions
           const totalListedWei = listings.reduce(function(s,l){try{return s+BigInt(l.price_wei||'0');}catch(_){return s;}},0n);
@@ -149,7 +150,11 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           }
 
           function renderNFTGrid(items){
-            if(!items||!items.length) return '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">No items</div>';
+            if(!items||!items.length) return '<div style="padding:4rem 2rem;text-align:center;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">'+
+              '<div style="font-size:2rem;margin-bottom:0.75rem;" aria-hidden="true">🖼</div>'+
+              '<p style="color:rgba(255,255,255,0.55);font-size:0.875rem;font-weight:600;margin:0;">Nothing here yet</p>'+
+              '<p style="color:rgba(255,255,255,0.3);font-size:0.75rem;margin-top:0.375rem;max-width:26rem;margin-left:auto;margin-right:auto;line-height:1.5;">This shows every NFT this wallet holds on <span class="mw-net-name">this network</span> — from any collection. New mints and transfers can take a minute to appear.</p>'+
+            '</div>';
             return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(220px,1fr));gap:1rem;">'+items.map(function(it){
               const coll=it.collection||''; const tid=it.token_id||it.tokenID||'';
               const nm=it.name||('#'+esc(tid));
@@ -216,7 +221,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // the wallet may hold NFTs that aren't in tracked collections, or
           // the indexer hasn't processed recent transfers yet.
           var emptyWalletNotice = (!nfts || !nfts.length) && (listings.length + auctions.length > 0)
-            ? '<div style="margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(125,211,252,0.08);border:1px solid rgba(125,211,252,0.15);"><p style="font-size:0.75rem;color:rgba(255,255,255,0.45);">💡 Your wallet has active listings/auctions but the indexer hasn&rsquo;t recorded any NFTs for this address yet. If you recently transferred NFTs to this wallet, they will appear after the next indexer sweep (≈2&hairsp;–&hairsp;5&thinsp;min).</p></div>'
+            ? '<div style="margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.75rem;background:rgba(125,211,252,0.08);border:1px solid rgba(125,211,252,0.15);"><p style="font-size:0.75rem;color:rgba(255,255,255,0.45);">💡 Your wallet has active listings/auctions but no NFTs have been recorded for this address yet. If you recently moved NFTs into this wallet, they will show up here in about 2–5 minutes.</p></div>'
             : '';
 
           // Build the complete profile page
@@ -258,11 +263,11 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               '<div style="flex:1;min-width:0;">'+
                 '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+
                   '<h1 style="font-size:1.5rem;font-weight:800;color:#fafafa;">'+esc(displayName)+'</h1>'+
-                  (verified?'<span style="padding:0.125rem 0.5rem;border-radius:2rem;background:rgba(167,139,250,0.15);border:1px solid rgba(167,139,250,0.3);color:#c4b5fd;font-size:0.625rem;font-weight:800;">✓ Verified</span>':'')+
                 '</div>'+
                 '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(targetAddr)+'</p>'+
                 (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;">'+esc(bio)+'</p>':'')+
-                '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+allNFTsCount+' NFT'+(allNFTsCount!==1?'s':'')+' — '+nfts.length+' in wallet, '+(listings.length+auctions.length)+' on market</p>'+
+                '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+allNFTsCount+' NFT'+(allNFTsCount!==1?'s':'')+' — '+nfts.length+' in wallet, '+(listings.length+auctions.length)+' on market'+
+                  ' · <span id="wallet-balance" style="color:#fde68a;">…</span> <span class="mw-cur" style="color:rgba(253,224,138,0.7);">C2FLR</span></p>'+
               '</div>'+
               '<div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">'+
                 (isOwnProfileFor(targetAddr)?'<button id="edit-profile-btn" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(125,211,252,0.25);color:#7dd3fc;font-size:0.8125rem;font-weight:700;transition:all 0.2s;background:rgba(125,211,252,0.1);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:0.375rem;">✎ Edit Profile</button>':'')+
@@ -345,6 +350,26 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             const first = tabBar.querySelector('.profile-tab');
             if(first) first.click();
           }
+
+          // ── Native balance (wallet value) — read straight from the RPC so
+          // it is true on any network, including read-only ones with no
+          // contracts or indexer. Fire-and-forget; the placeholder stays on
+          // failure.
+          (function loadBalance(){
+            const el = document.getElementById('wallet-balance');
+            if(!el) return;
+            const rpc = window.MW_RPC_URL;
+            if(!rpc){ el.textContent='—'; return; }
+            fetch(rpc, {method:'POST', headers:{'Content-Type':'application/json'},
+              body: JSON.stringify({jsonrpc:'2.0',id:1,method:'eth_getBalance',params:[targetAddr,'latest']})
+            }).then(function(r){return r.json();}).then(function(d){
+              if(!d || !d.result){ el.textContent='—'; return; }
+              const wei = BigInt(d.result);
+              const whole = wei / 1000000000000000000n;
+              const frac = ((wei % 1000000000000000000n) / 100000000000000n).toString().padStart(4,'0').slice(0,2);
+              el.textContent = whole.toString()+'.'+frac;
+            }).catch(function(){ el.textContent='—'; });
+          })();
 
           // ── Edit Profile Modal ─────────────────────────────────────────────
           const editBtn = document.getElementById('edit-profile-btn');
@@ -471,7 +496,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
                   }
                 } catch(err) {
                   statusEl.style.display = 'block';
-                  statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;font-weight:600;">✗ Network error — please try again</p>';
+                  var msg = (err && err.message) ? String(err.message) : 'Network error — please try again';
+                  statusEl.innerHTML = '<p style="color:#fca5a5;font-size:0.75rem;font-weight:600;">✗ '+esc(msg)+'</p>';
                   saveBtn.disabled = false;
                   saveBtn.textContent = 'Save Changes';
                   saveBtn.style.opacity = '1';

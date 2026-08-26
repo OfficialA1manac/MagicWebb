@@ -74,6 +74,9 @@ name: Deploy (push to main)
 on:
   push:
     branches: [main]
+  # Manual re-deploy after flipping <NETWORK>_ENABLED repo variables or
+  # rotating secrets — no empty commit needed.
+  workflow_dispatch:
 
 # Repo-wide default: deny everything except contents:read. Each job
 # can request additional permissions if needed; both jobs in this
@@ -214,7 +217,7 @@ jobs:
   plan:
     name: Which networks deploy
     needs: [test, frontend-lint]
-    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    if: (github.event_name == 'push' || github.event_name == 'workflow_dispatch') && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     outputs:
       networks: ${{ steps.pick.outputs.networks }}
@@ -303,7 +306,9 @@ jobs:
           MARKETPLACE_MANAGER_ADDR=$(j .contracts.marketplaceManager)
           TRACKED_COLLECTIONS=$(jq -r '(.trackedCollections // []) | join(",")' "$DEP")
           INDEX_FROM_BLOCK=$(j .indexFromBlock)
-          NETWORK_URLS=$(jq -r '[inputs | select(.status=="deployed") | "\(.chainId)=\(.app.origin)"] | join(",")' -n deployments/coston2.json deployments/songbird.json deployments/flare.json)
+          # read-only networks are real origins (browse/wallet/profile) and must
+          # appear in every sibling's switcher; only not-deployed stays hidden.
+          NETWORK_URLS=$(jq -r '[inputs | select(.status=="deployed" or .status=="read-only") | "\(.chainId)=\(.app.origin)"] | join(",")' -n deployments/coston2.json deployments/songbird.json deployments/flare.json)
           if [ "$STATUS" = "deployed" ]; then
             for v in MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR INDEX_FROM_BLOCK; do
               [ -n "${!v}" ] || { echo "::error::$DEP is 'deployed' but $v is empty"; exit 1; }

@@ -4,3 +4,6 @@ package graphql
 
 type Query struct {
 }
+
+type Subscription struct {
+}

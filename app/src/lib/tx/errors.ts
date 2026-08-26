@@ -68,7 +68,9 @@ export function decodeRevert(e: unknown, _abis: Abi[] = []): TxError {
       const name = rev.data?.errorName ?? rev.reason ?? '';
       const hit = revertCopy(name);
       if (hit) return new TxError(hit[0], hit[1], { revertName: name, cause: e });
-      return new TxError('ContractRevert', name ? `The contract rejected this (${name}).` : 'The contract rejected this transaction.', { revertName: name || undefined, cause: e });
+      // Unknown revert: keep the raw name in revertName for debugging, but show
+      // plain language — non-technical users can't act on a Solidity error name.
+      return new TxError('ContractRevert', 'The blockchain rejected this transaction, so nothing changed and no funds moved. Refresh the page and try again.', { revertName: name || undefined, cause: e });
     }
     const short = e.shortMessage || e.message;
     if (/user rejected|denied|rejected the request/i.test(short)) return new TxError('UserRejected', REJECTED, { cause: e });
@@ -76,9 +78,11 @@ export function decodeRevert(e: unknown, _abis: Abi[] = []): TxError {
     if (/chain|network/i.test(short) && /mismatch|switch|does not match/i.test(short)) {
       return new TxError('WrongChain', `Your wallet is on a different network. Switch it to ${currentChain().name}.`, { cause: e });
     }
-    return new TxError('RpcError', short, { cause: e });
+    // Raw RPC strings ("execution reverted", "nonce too low", …) mean nothing
+    // to users. Show a calm generic; the original error stays in `cause`.
+    return new TxError('RpcError', 'The network had trouble processing this. Check your wallet\'s recent activity before trying again — the transaction may or may not have gone through.', { cause: e });
   }
   const msg = e instanceof Error ? e.message : String(e);
   if (/user rejected|denied/i.test(msg)) return new TxError('UserRejected', REJECTED, { cause: e });
-  return new TxError('RpcError', msg || 'Something went wrong talking to the network.', { cause: e });
+  return new TxError('RpcError', 'The network had trouble processing this. Check your wallet\'s recent activity before trying again — the transaction may or may not have gone through.', { cause: e });
 }

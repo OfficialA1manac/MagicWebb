@@ -146,7 +146,6 @@ type Profile {
   bannerURI:   String!
   twitter:     String!
   website:     String!
-  verified:    Boolean!
 }
 
 """A notification for a user."""

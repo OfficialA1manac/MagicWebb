@@ -119,8 +119,8 @@ On-chain (Flare Coston2)
 
 Off-chain (single Go binary)
    ├── Indexer (Go)        — listens to events, populates Postgres
-   ├── Server (Go Fiber)   — REST + server-rendered HTMX UI, SSE live updates, SIWE auth
-   └── UI (HTMX + Alpine + ethers.js) — embedded in the binary; wallet writes go direct to chain
+   ├── Server (Go Fiber)   — REST + GraphQL + Connect-RPC APIs, WebSocket live updates, SIWE auth
+   └── UI (Astro + Svelte islands + wagmi/viem) — static build served by the binary; wallet writes go direct to chain
 ```
 
 The off-chain layer is a convenience layer for fast browsing. Trading is on-chain; the off-chain layer cannot censor, freeze, or front-run a trade.

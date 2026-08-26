@@ -598,23 +598,25 @@ type ProfileRow struct {
 	BannerURI   string `json:"banner_uri"`
 	Twitter     string `json:"twitter"`
 	Website     string `json:"website"`
-	Verified    bool   `json:"verified"`
 }
 
 func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
 	p := &ProfileRow{Address: strings.ToLower(addr)}
 	err := q.reader().QueryRow(ctx,
 		`SELECT display_name, bio, COALESCE(avatar_uri,''), COALESCE(banner_uri,''),
-		        COALESCE(twitter,''), COALESCE(website,''), verified
+		        COALESCE(twitter,''), COALESCE(website,'')
 		 FROM profiles WHERE address=$1`, strings.ToLower(addr)).
-		Scan(&p.DisplayName, &p.Bio, &p.AvatarURI, &p.BannerURI, &p.Twitter, &p.Website, &p.Verified)
+		Scan(&p.DisplayName, &p.Bio, &p.AvatarURI, &p.BannerURI, &p.Twitter, &p.Website)
 	if err == pgx.ErrNoRows {
 		return p, nil // empty profile is valid
 	}
 	return p, err
 }
 
-// UpsertProfile writes user-editable fields only; `verified` is admin-controlled.
+// UpsertProfile writes user-editable fields only. The profiles.verified column
+// is legacy (its admin writer was removed with the admin surface) and is no
+// longer read or exposed anywhere; collection verification is the on-chain
+// derived badge in SetCollectionVerification.
 func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
 	_, err := q.writer().Exec(ctx,
 		`INSERT INTO profiles(address, display_name, bio, avatar_uri, banner_uri, twitter, website, updated_at)

@@ -15,15 +15,17 @@ export function coreAddresses(): Array<[CoreKey, Address]> {
   return (['marketplace', 'auctionHouse', 'offerBook'] as CoreKey[]).filter((k) => c[k]).map((k) => [k, c[k] as Address]);
 }
 
-/** Refundable balance held for `who` on each core (outbid, rejected offers, failed pushes). */
-export async function pendingReturns(who: Address): Promise<Array<{ key: CoreKey; address: Address; wei: bigint }>> {
+/** Refundable balance held for `who` on each core (outbid, rejected offers, failed pushes).
+ * A failed read is reported with `ok: false` rather than a fake zero, so callers
+ * can distinguish "no refunds" from "could not check" (money must never hide). */
+export async function pendingReturns(who: Address): Promise<Array<{ key: CoreKey; address: Address; wei: bigint; ok: boolean }>> {
   const pub = await publicClient();
-  const out: Array<{ key: CoreKey; address: Address; wei: bigint }> = [];
+  const out: Array<{ key: CoreKey; address: Address; wei: bigint; ok: boolean }> = [];
   for (const [key, address] of coreAddresses()) {
     try {
       const wei = (await pub.readContract({ address, abi: coreAbi, functionName: 'pendingReturns', args: [who] })) as bigint;
-      out.push({ key, address, wei });
-    } catch { out.push({ key, address, wei: 0n }); }
+      out.push({ key, address, wei, ok: true });
+    } catch { out.push({ key, address, wei: 0n, ok: false }); }
   }
   return out;
 }

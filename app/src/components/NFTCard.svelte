@@ -1,5 +1,6 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
+  import VerifiedBadge from './VerifiedBadge.svelte';
 
   interface ListingItem {
     collection: string;
@@ -105,11 +106,7 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      {#if item.collection_verified}
-        <div class="verified-badge" title="Verified NFT: standard NFT contract, metadata confirmed. Not a judgement of the art or the seller." aria-label="Verified NFT">
-          <svg width="10" height="10" viewBox="0 0 20 20" fill="currentColor"><path fill-rule="evenodd" d="M6.267 3.455a3.066 3.066 0 001.745-.723 3.066 3.066 0 013.976 0 3.066 3.066 0 001.745.723 3.066 3.066 0 012.812 2.812c.051.643.304 1.254.723 1.745a3.066 3.066 0 010 3.976 3.066 3.066 0 00-.723 1.745 3.066 3.066 0 01-2.812 2.812 3.066 3.066 0 00-1.745.723 3.066 3.066 0 01-3.976 0 3.066 3.066 0 00-1.745-.723 3.066 3.066 0 01-2.812-2.812 3.066 3.066 0 00-.723-1.745 3.066 3.066 0 010-3.976 3.066 3.066 0 00.723-1.745 3.066 3.066 0 012.812-2.812zm7.44 5.252a1 1 0 00-1.414-1.414L9 10.586 7.707 9.293a1 1 0 00-1.414 1.414l2 2a1 1 0 001.414 0l4-4z" clip-rule="evenodd"/></svg>
-        </div>
-      {/if}
+      <VerifiedBadge verified={item.collection_verified} link={false} />
       {#if item.standard}
         <span class="standard-badge" title="Token standard">{item.standard}</span>
       {/if}
@@ -193,20 +190,6 @@
     display: flex;
     flex-direction: column;
     gap: 0.375rem;
-  }
-
-  .verified-badge {
-    width: 1.5rem;
-    height: 1.5rem;
-    border-radius: 50%;
-    background: rgba(124, 58, 237, 0.25);
-    border: 1px solid rgba(167, 139, 250, 0.35);
-    display: flex;
-    align-items: center;
-    justify-content: center;
-    color: #c4b5fd;
-    backdrop-filter: blur(4px);
-    box-shadow: 0 0 14px -4px rgba(167, 139, 250, 0.4);
   }
 
   .standard-badge {
@@ -313,6 +296,11 @@
 
   .nft-card:hover .buy-btn {
     box-shadow: 0 0 24px -2px rgba(56, 189, 248, 0.55), 0 6px 14px -2px rgba(14, 165, 233, 0.35);
+  }
+
+  .buy-btn:active {
+    transform: scale(0.96);
+    box-shadow: 0 0 10px -3px rgba(56, 189, 248, 0.35);
   }
 
   /* Touch devices: 44px tap target for the primary buy action, no hover

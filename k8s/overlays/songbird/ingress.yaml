@@ -1,0 +1,26 @@
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: magicwebb
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "3600"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "3600"
+    nginx.ingress.kubernetes.io/force-ssl-redirect: "true"
+    cert-manager.io/cluster-issuer: letsencrypt-prod
+spec:
+  ingressClassName: nginx
+  tls:
+    - hosts:
+        - songbird.magicwebb.example # CHANGE_ME: your DNS name for this network
+      secretName: magicwebb-songbird-tls
+  rules:
+    - host: songbird.magicwebb.example # CHANGE_ME: keep in sync with tls.hosts and the overlay's SIWE_DOMAIN/FRONTEND_URL/NETWORK_URLS
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: magicwebb-songbird
+                port:
+                  name: http

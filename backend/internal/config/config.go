@@ -401,11 +401,38 @@ func Load() {
 	// v35: contract address validation — MARKETPLACE_ADDR, AUCTION_ADDR,
 	// OFFERBOOK_ADDR must be well-formed Ethereum addresses. Previously
 	// they were only lowercased; a typo in .env would deploy a broken site.
+	// Skipped entirely in read-only network mode: the all-or-nothing check
+	// above already guaranteed the three cores are either all set or all
+	// empty, and empty is a supported state, not a typo.
+	if C.ContractsDeployed() {
+		for _, pair := range [][2]string{
+			{"MARKETPLACE_ADDR", C.MarketplaceAddr},
+			{"AUCTION_ADDR", C.AuctionAddr},
+			{"OFFERBOOK_ADDR", C.OfferBookAddr},
+		} {
+			if !isValidEthAddr(pair[1]) {
+				fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
+				os.Exit(1)
+			}
+		}
+	}
+
+	// Ancillary contract addresses: whenever one is set it must be well-formed,
+	// and it may only be set when the core contracts are deployed — a lone
+	// NFT_ADDR on a read-only network is a misconfigured deploy, not a
+	// read-only one.
 	for _, pair := range [][2]string{
-		{"MARKETPLACE_ADDR", C.MarketplaceAddr},
-		{"AUCTION_ADDR", C.AuctionAddr},
-		{"OFFERBOOK_ADDR", C.OfferBookAddr},
+		{"NFT_ADDR", C.NFTAddr},
+		{"MARKETPLACE_MANAGER_ADDR", C.MarketplaceManagerAddr},
+		{"ROYALTY_ADDR", C.RoyaltyAddr},
 	} {
+		if pair[1] == "" {
+			continue
+		}
+		if !C.ContractsDeployed() {
+			fmt.Fprintf(os.Stderr, "FATAL: %s is set but the core contract addresses are empty (read-only network mode); unset it or configure all core addresses\n", pair[0])
+			os.Exit(1)
+		}
 		if !isValidEthAddr(pair[1]) {
 			fmt.Fprintf(os.Stderr, "FATAL: %s is not a valid Ethereum address: %q\n", pair[0], pair[1])
 			os.Exit(1)

@@ -17,7 +17,7 @@ export const MAX_MIN_INCREMENT_BPS = 5000;
 
 export function auctionAddress(): Address {
   const a = currentChain().contracts.auctionHouse;
-  if (!a) throw new TxError('Invalid', `Auctions are not deployed on ${currentChain().name} yet.`);
+  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to Coston2 to trade.`);
   return a;
 }
 

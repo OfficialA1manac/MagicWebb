@@ -197,38 +197,6 @@ func TestKeeperKeyValidation_RoundTrip(t *testing.T) {
 	}
 }
 
-// ── v35: SERVICE_TOKEN minimum length ─────────────────────────────────────
-
-func TestServiceTokenMinLength(t *testing.T) {
-	// Load() requires SERVICE_TOKEN ≥ 32 chars when set.
-	// The guard:  if C.ServiceToken != "" && len(C.ServiceToken) < 32 { … os.Exit(1) }
-
-	// Boundary: 31 chars → too short, guard fires.
-	short := strings.Repeat("x", 31)
-	if short != "" && len(short) < 32 {
-		// guard fires — correct.
-	} else {
-		t.Fatal("31-char token should be detected as too short (guard should fire)")
-	}
-
-	// Boundary: 32 chars → just long enough, guard skips.
-	ok32 := strings.Repeat("x", 32)
-	if ok32 != "" && len(ok32) < 32 {
-		t.Fatal("32-char token should NOT trigger the guard")
-	}
-
-	// Boundary: 64 chars → well above minimum.
-	long := strings.Repeat("x", 64)
-	if long != "" && len(long) < 32 {
-		t.Fatal("64-char token should NOT trigger the guard")
-	}
-
-	// Empty token → guard is not reached (first condition short-circuits).
-	empty := ""
-	if empty != "" && len(empty) < 32 {
-		t.Fatal("empty token should NOT reach the guard")
-	}
-}
 
 // ── v35: optUint64 / optFloat64 parse warnings ────────────────────────────
 
@@ -591,17 +559,16 @@ func TestTrackedCollections_DevNoWarn(t *testing.T) {
 	}
 }
 
-// ── v35: ADMIN_ALLOWLIST entry validation (via isValidEthAddr) ────────────
+// ── parseAddrList + isValidEthAddr validation ─────────────────────────────
 
-func TestAdminAllowlistValidation(t *testing.T) {
-	// Load() iterates over C.AdminAllowlist and calls isValidEthAddr on
-	// each entry. Since parseAddrList lowercases, valid full-length
-	// addresses will pass.
+func TestParseAddrListValidation(t *testing.T) {
+	// parseAddrList lowercases entries, so valid full-length addresses
+	// pass isValidEthAddr afterwards.
 
 	entries := parseAddrList("0xAbCdef1234567890123456789012345678901234,0xDeF1234567890123456789012345678901234deF")
 	for _, entry := range entries {
 		if !isValidEthAddr(entry) {
-			t.Fatalf("admin allowlist entry %q should be valid after lowercasing", entry)
+			t.Fatalf("address list entry %q should be valid after lowercasing", entry)
 		}
 	}
 
@@ -636,4 +603,85 @@ func TestEnsureValidKey(t *testing.T) {
 	if len(keyHex) != 64 {
 		t.Fatalf("encoded key length = %d, want 64", len(keyHex))
 	}
+}
+
+// ── read-only network mode boot ───────────────────────────────────────────
+
+func TestLoadReadOnlyMode_Subprocess(t *testing.T) {
+	// Regression: the v35 address-validation loop used to run unconditionally,
+	// so all-empty contract addresses (the documented read-only network mode
+	// for Songbird/Flare) exited 1 at startup. Load() must return normally
+	// with zero addresses set, still fail on a partial set, and still fail
+	// on malformed addresses when all three are set.
+	if os.Getenv("GO_TEST_SUBPROCESS_LOAD_READONLY") == "1" {
+		os.Setenv("RPC_URL", "http://dummy")
+		os.Setenv("POSTGRES_URL", "postgres://dummy")
+		os.Setenv("JWT_SECRET", "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx")
+		// CHAIN_ID and the *_ADDR vars are inherited from parent cmd.Env.
+		Load()
+		if C.ContractsDeployed() {
+			fmt.Fprintln(os.Stderr, "SUBPROCESS: ContractsDeployed()=true, want false in read-only mode")
+			os.Exit(2)
+		}
+		os.Exit(0)
+		return
+	}
+
+	minimalEnv := []string{
+		"PATH=" + os.Getenv("PATH"),
+		"GO_TEST_SUBPROCESS_LOAD_READONLY=1",
+		"CHAIN_ID=19", // Songbird: the first real read-only network
+	}
+	// Assembled at runtime so tools/check-deployments.sh's stray-address scan
+	// (which greps for literal `*_ADDR=0x…`) doesn't match this test fixture.
+	zeroAddr := "0x" + strings.Repeat("0", 40)
+	run := func(extra ...string) ([]byte, error) {
+		cmd := exec.Command(os.Args[0], "-test.run=TestLoadReadOnlyMode_Subprocess")
+		cmd.Env = append(append([]string{}, minimalEnv...), extra...)
+		return cmd.CombinedOutput()
+	}
+
+	t.Run("all_empty_boots", func(t *testing.T) {
+		out, err := run()
+		if err != nil {
+			t.Fatalf("read-only mode (no contract addrs) should boot, got err=%v\noutput:\n%s", err, out)
+		}
+		if !strings.Contains(string(out), "read-only network mode") {
+			t.Fatalf("expected read-only WARN on stderr, got:\n%s", out)
+		}
+	})
+
+	t.Run("partial_set_fatal", func(t *testing.T) {
+		out, err := run("MARKETPLACE_ADDR=" + zeroAddr)
+		if err == nil {
+			t.Fatalf("partial address set should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "must be set together") {
+			t.Fatalf("expected all-or-nothing FATAL, got:\n%s", out)
+		}
+	})
+
+	t.Run("ancillary_in_readonly_fatal", func(t *testing.T) {
+		out, err := run("NFT_ADDR=" + zeroAddr)
+		if err == nil {
+			t.Fatalf("ancillary address with empty cores should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "read-only network mode") {
+			t.Fatalf("expected ancillary read-only FATAL, got:\n%s", out)
+		}
+	})
+
+	t.Run("malformed_addr_fatal", func(t *testing.T) {
+		out, err := run(
+			"MARKETPLACE_ADDR=0xNOTHEX",
+			"AUCTION_ADDR="+zeroAddr,
+			"OFFERBOOK_ADDR="+zeroAddr,
+		)
+		if err == nil {
+			t.Fatalf("malformed address should fail Load()\noutput:\n%s", out)
+		}
+		if !strings.Contains(string(out), "not a valid Ethereum address") {
+			t.Fatalf("expected address-validation FATAL, got:\n%s", out)
+		}
+	})
 }

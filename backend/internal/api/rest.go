@@ -348,7 +348,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	ms := NewMediaService(q, eth, rl)
 	ms.imgStore = imgStore // IMG-3: wire S3/blob store backend to media service
 	ms.RegisterRoutes(api)
-	NewWalletService(q).RegisterRoutes(api)
+	NewWalletService(q, cfg.ExplorerURL, cfg.RedisURL).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
 	NewProfilesService(q).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(apiSearch)

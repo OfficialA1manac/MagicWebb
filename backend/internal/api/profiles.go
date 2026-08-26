@@ -77,9 +77,8 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 	if err := s.q.UpsertProfile(c.Context(), p); err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	// Fetch the canonical stored row so the response includes the
-	// authoritative `verified` field (set by admin via a separate endpoint)
-	// rather than the zero-value from our local struct.
+	// Fetch the canonical stored row so the response reflects exactly what
+	// was persisted rather than the zero-values from our local struct.
 	saved, err := s.q.GetProfile(c.Context(), addr)
 	if err != nil {
 		// The upsert succeeded, so a read-back failure is transient. Return
