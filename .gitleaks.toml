@@ -1,0 +1,15 @@
+# gitleaks configuration — extends the default ruleset.
+#
+# The only customization is excluding .gitleaksignore itself from scanning.
+# Its fingerprint lines (<40-hex-commit>:<path>:<rule>:<line>) pattern-match
+# the generic-api-key rule, so every commit touching the ignore file would
+# otherwise produce a new "leak" pointing at the suppression list — and
+# suppressing that finding would mint a new fingerprint, recursively.
+# The file contains only commit hashes and repo paths, never secret material.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Fingerprint lines in .gitleaksignore look like generic API keys"
+paths = ['''\.gitleaksignore$''']
