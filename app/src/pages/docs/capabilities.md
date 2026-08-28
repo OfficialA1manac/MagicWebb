@@ -81,9 +81,10 @@ you in the contract. **Profile → "Refunds waiting for you" → Withdraw.** Nev
 - Freeze, move or take your NFT or funds (non-custodial; contracts hold only what you escrow).
 - Curate or approve listings — the Verified NFT badge is computed from on-chain facts.
 - Change the fee.
-- Pause anything. Nothing on the protocol is pausable — there is no circuit breaker, no
-  operator role, and no entry gate. Every action (list, bid, offer, buy, cancel, settle,
-  withdraw) always works.
+- Pause anything administratively. There is no circuit breaker, no operator role, and no
+  entry gate — no role can halt listings, bids, offers, buys, cancels, settlements, or
+  withdrawals. Normal contract rules (ownership, expiry, authorization, escrow) still
+  apply to every action.
 - Log in to an admin page. There is none.
 
 ## Why durations instead of dates?

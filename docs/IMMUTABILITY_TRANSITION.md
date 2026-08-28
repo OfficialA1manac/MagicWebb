@@ -11,7 +11,8 @@ the same queue/delay/window discipline (v3 — previously a bare role check).
 Sequence already performed by every deploy script (`contracts/script/Deploy*.s.sol`):
 1. `manager.setCoreContracts(marketplace, auction, offerBook)`
 2. `grantRole(KEEPER_ROLE, keeper)`, `grantRole(DEFAULT_ADMIN_ROLE, creator)`
-3. `renounceRole(DEFAULT_ADMIN_ROLE, deployer)`
+3. `renounceRole(DEFAULT_ADMIN_ROLE, deployer)` — only when `creator != deployer`; the
+   creator admin account should be a multisig on mainnet
 4. On-chain `require`s confirm the handover before the script exits.
 
 After deploy the only privileged actors are the **creator multisig** (admin: roles and

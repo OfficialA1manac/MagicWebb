@@ -24,7 +24,7 @@
 
   type Listing = { collection: string; token_id: string; seller: string; price_wei: string; amount: number; standard: string; expires_at: string; name: string; image_uri: string; collection_verified: boolean };
   type Collection = { address: string; name: string; symbol: string; standard: string; verified: boolean; creator_addr?: string };
-  type Auction = { auction_id: number; collection: string; token_id: string; seller: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; ends_at: string; status: string; name: string; image_uri: string; collection_verified: boolean };
+  type Auction = { auction_id: number; collection: string; token_id: string; seller: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps?: number; ends_at: string; status: string; name: string; image_uri: string; collection_verified: boolean };
   type Offer = { offer_id: string; bidder: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string };
   type Activity = { type: string; amountWei: string; timestamp: string; txHash: string };
 
@@ -74,7 +74,7 @@
   let auctionEnded = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() <= now);
   let myOffer = $derived(me ? offers.find((o) => o.bidder.toLowerCase() === me!.toLowerCase() && o.status === 'active') ?? null : null);
   let liveOffers = $derived(offers.filter((o) => o.status === 'active' && new Date(o.expires_at).getTime() > now));
-  let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: myCumWei }) : 0n);
+  let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: myCumWei, minIncrementBps: auction.min_increment_bps }) : 0n);
 
   // Read the caller's cumulative escrow so the min top-up is the real amount
   // still owed, not the full leader total (matches AuctionPage behaviour).
@@ -150,10 +150,12 @@
   }
   function parseQty(): string | null {
     if (std !== 'erc1155') return '1';
-    const n = Number(qtyIn);
-    if (!Number.isInteger(n) || n < 1) { formErr = 'Quantity must be a whole number of at least 1.'; return null; }
-    if (myBalance1155 > 0n && BigInt(n) > myBalance1155) { formErr = `You hold ${myBalance1155} unit${myBalance1155 === 1n ? '' : 's'}.`; return null; }
-    return String(n);
+    const t = qtyIn.trim();
+    if (!/^\d+$/.test(t)) { formErr = 'Quantity must be a whole number of at least 1.'; return null; }
+    const n = BigInt(t); // bigint end-to-end: Number() silently rounds > 2^53
+    if (n < 1n) { formErr = 'Quantity must be a whole number of at least 1.'; return null; }
+    if (myBalance1155 > 0n && n > myBalance1155) { formErr = `You hold ${myBalance1155} unit${myBalance1155 === 1n ? '' : 's'}.`; return null; }
+    return n.toString();
   }
   function parseIncPct(): number | undefined {
     if (!incPctIn.trim()) return undefined;
@@ -229,21 +231,21 @@
           <div class="tp-card-head"><span id="au-h">{auctionLive ? 'Live auction' : 'Auction ended — awaiting settlement'}</span><span class="mono">{fmtCountdown(new Date(auction.ends_at).getTime() / 1000, now)}</span></div>
           <div class="tp-price mono">{fmtPrice(BigInt(auction.highest_bid_wei || '0') > 0n ? auction.highest_bid_wei : auction.reserve_price_wei)} <small>{sym}</small></div>
           <div class="tp-sub">{BigInt(auction.highest_bid_wei || '0') > 0n ? `Highest bid by ${shortAddr(auction.highest_bidder)}` : 'No bids yet · reserve shown'} · bids in the last 3 min extend the auction</div>
-          {#if auctionLive && !isAuctionSeller}
+          {#if canTrade && auctionLive && !isAuctionSeller}
             <div class="tp-form">
               <label class="tp-label" for="bid-in">Your bid ({sym}) · min {fmtPrice(minBid)}</label>
               <div class="tp-inrow"><input id="bid-in" class="tp-input mono" inputmode="decimal" placeholder={fmtPrice(minBid)} bind:value={bidIn} /><button class="btn p" onclick={doBid}>Place bid</button></div>
             </div>
-          {:else if auctionEnded}
+          {:else if canTrade && auctionEnded}
             {#if isAuctionSeller || (me && auction && auction.highest_bidder?.toLowerCase() === me.toLowerCase())}
               <button class="btn p" onclick={doSettle}>Settle now</button>
               <p class="tp-hint">The marketplace settles this automatically within seconds; you can also settle it yourself.</p>
             {:else}
               <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 1.5%.</p>
             {/if}
-          {:else if isAuctionSeller && BigInt(auction.highest_bid_wei || '0') === 0n}
+          {:else if canTrade && isAuctionSeller && BigInt(auction.highest_bid_wei || '0') === 0n}
             <button class="btn g" onclick={doCancelAuction}>Cancel auction</button>
-          {:else if isAuctionSeller}
+          {:else if canTrade && isAuctionSeller}
             <p class="tp-hint">Your auction has bids and will settle when it ends.</p>
           {/if}
         </section>
@@ -253,8 +255,8 @@
           <div class="tp-price mono">{fmtPrice(listing.price_wei)} <small>{sym}</small></div>
           <div class="tp-sub">Seller {isSeller ? 'you' : shortAddr(listing.seller)} · 1.5% fee paid by the seller</div>
           {#if isSeller}
-            <div class="tp-btnrow"><button class="btn g" onclick={() => openPanel('edit')}>Change price</button><button class="btn g" onclick={doCancel}>Cancel listing</button></div>
-          {:else}
+            {#if canTrade}<div class="tp-btnrow"><button class="btn g" onclick={() => openPanel('edit')}>Change price</button><button class="btn g" onclick={doCancel}>Cancel listing</button></div>{/if}
+          {:else if canTrade}
             <button class="btn p" onclick={doBuy}>{me ? `Buy now · ${fmtPrice(listing.price_wei)} ${sym}` : `Connect to buy · ${fmtPrice(listing.price_wei)} ${sym}`}</button>
           {/if}
         </section>

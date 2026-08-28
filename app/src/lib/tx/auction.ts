@@ -50,8 +50,14 @@ export function buildRefundLosers(id: bigint, batch: Address[]): TxRequest {
  * Bids are cumulative per bidder. To lead, your total must be ≥ reserve and
  * ≥ current leader + 1 native. Returns the extra amount to send this time.
  */
-export function minimumTopUp(opts: { currentHighestWei: bigint; reserveWei: bigint; myCumulativeWei: bigint }): bigint {
-  const target = opts.currentHighestWei > 0n ? opts.currentHighestWei + MIN_BID_INCREMENT_WEI : opts.reserveWei;
+export function minimumTopUp(opts: { currentHighestWei: bigint; reserveWei: bigint; myCumulativeWei: bigint; minIncrementBps?: number }): bigint {
+  // Mirrors AuctionHouse.bid(): overtaking needs leader + max(leader*bps/10000, 1 ether).
+  let inc = MIN_BID_INCREMENT_WEI;
+  if (opts.minIncrementBps && opts.currentHighestWei > 0n) {
+    const pct = (opts.currentHighestWei * BigInt(opts.minIncrementBps)) / 10_000n;
+    if (pct > inc) inc = pct;
+  }
+  const target = opts.currentHighestWei > 0n ? opts.currentHighestWei + inc : opts.reserveWei;
   const need = target - opts.myCumulativeWei;
   return need > 0n ? need : 0n;
 }

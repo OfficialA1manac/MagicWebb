@@ -130,7 +130,7 @@
       {#if live}
         <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
         <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
-        <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+        <button on:click={goListNFT} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
       {:else}
         <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">{ro.heading}</p>
         <p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.25rem;">{ro.body}</p>

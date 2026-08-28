@@ -41,7 +41,7 @@
   let highest = $derived(BigInt(a?.highest_bid_wei || '0'));
   let myCumulative = $derived(me ? bids.filter((b) => b.bidder.toLowerCase() === me!.toLowerCase()).reduce((s, b) => s + BigInt(b.amount_wei), 0n) : 0n);
   let amLeader = $derived(!!me && !!a && a.highest_bidder?.toLowerCase() === me.toLowerCase());
-  let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative }) : 0n);
+  let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative, minIncrementBps: a.min_increment_bps }) : 0n);
   let name = $derived(a?.name || `#${a?.token_id ?? ''}`);
   let img = $derived(resolveImageUri(a?.image_uri, a?.token_id));
   let antiSnipe = $derived(isLive && endsMs - now < 3 * 60 * 1000);

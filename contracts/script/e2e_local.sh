@@ -96,8 +96,16 @@ B1=$(bal "$BOB")
 check "expired offer refunded" "1000000000000000000" "$(sub $B1 $B0)"
 
 echo "== E. pause-free protocol: no circuit breaker exists =="
-PK_CREATOR=0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6
-cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null 2>&1   && { echo "  FAIL  pauseEntries selector should not exist"; fail=1; }   || echo "  PASS  protocol has no pause (pauseEntries reverts for everyone)"
+# A revert alone doesn't prove the selector is gone (it could be an auth
+# revert) -- inspect the implementation bytecode for the 4-byte selector.
+MGR_IMPL=$(cast implementation "$MGR" --rpc-url "$RPC")
+PAUSE_SEL=$(cast sig "pauseEntries()")
+if cast code "$MGR_IMPL" --rpc-url "$RPC" | grep -qi "${PAUSE_SEL#0x}"; then
+  echo "  FAIL  pauseEntries selector present in manager implementation"; fail=1
+else
+  echo "  PASS  protocol has no pause (pauseEntries selector absent from bytecode)"
+fi
+cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null 2>&1   && { echo "  FAIL  pauseEntries call should revert"; fail=1; }   || echo "  PASS  pauseEntries reverts for the creator too"
 # Entries must always work -- nothing can halt them.
 cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 echo "  PASS  entries always live"

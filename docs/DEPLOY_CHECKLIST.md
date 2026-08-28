@@ -21,7 +21,8 @@ forge script script/Deploy<Network>.s.sol --rpc-url <rpc> --broadcast -vvvv
 ```
 The script itself asserts, on-chain, after deploying:
 `feeRecipient == creator` on all three market contracts, `manager` wiring,
-creator holds `DEFAULT_ADMIN_ROLE`, deployer has renounced it, keeper holds
+creator holds `DEFAULT_ADMIN_ROLE`, deployer has renounced it (when
+`creator != deployer`; a self-deploying creator keeps it), keeper holds
 `KEEPER_ROLE` (load-bearing: the keeper is a settlement authority).
 
 ## After

@@ -107,8 +107,8 @@ late snipes can't end an auction before others can respond.
 ### Who settles an auction?
 The platform's keeper bot settles **instantly** the moment the auction expires — you
 normally never have to do anything. If the keeper hasn't settled yet, the **auction
-winner or the seller** (only those two) can call `settle` themselves; no third party can
-ever settle someone else's auction. The NFT goes to the winner, and the seller receives
+winner or the seller** can call `settle` themselves. Apart from addresses holding the
+platform's `KEEPER_ROLE`, no one else can settle someone else's auction. The NFT goes to the winner, and the seller receives
 the winning bid minus the 1.5% fee. If the seller has moved the NFT or revoked approval,
 the winner is refunded in full and the auction finalises without a sale.
 

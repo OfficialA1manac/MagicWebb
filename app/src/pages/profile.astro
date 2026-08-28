@@ -382,7 +382,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             if(!tc) return;
             switch(id){
               case 'nfts': {
-                var own = isOwnProfileFor(targetAddr);
+                // Read-only deployments have no marketplace contract: no List/batch UI.
+                var own = isOwnProfileFor(targetAddr) && !!window.MW_MARKETPLACE;
                 tc.innerHTML = (own ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:0.5rem;">Tick unlisted NFTs to list several at once (max 50), or use each card\u2019s List \u2192 link.</p>'+renderBatchBar() : '') + renderNFTGrid(combinedNFTs, own);
                 if(own) wireBatchBar(tc);
                 break;
