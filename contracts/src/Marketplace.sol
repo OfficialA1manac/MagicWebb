@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, BelowMinPrice, InvalidDuration, DURATION_3MIN, DURATION_15MIN, DURATION_30MIN, DURATION_1HR, DURATION_4HR, DURATION_24HR} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, BelowMinPrice, InvalidDuration} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -25,8 +25,8 @@ error BatchTooLarge();
 ///      No exclusivity: the same NFT may also sit in the AuctionHouse / OfferBook —
 ///      first settle wins, the rest revert when the token has moved.
 ///      Once `buy` settles the trade is FINAL — no reverse, refund, or admin override.
-///      Pausable entries, unstoppable exits: the manager entryGate can halt new
-///      listings, but buys, cancels and withdrawals always run.
+///      Nothing is pausable: no entry or exit path can ever be halted — listings,
+///      buys, cancels and withdrawals always run.
 contract Marketplace is MarketplaceCore {
     /// @notice Listing record. Two storage slots:
     ///   slot 0: seller(20) + expiresAt(8) + standard(1) [3 bytes padding]
@@ -84,8 +84,8 @@ contract Marketplace is MarketplaceCore {
     ///      still cause unexpected state reads mid-call. The modifier costs
     ///      ~2.3k gas on the first call and zero on re-entry (revert); the
     ///      invariant is cheap insurance.
-    /// @param duration One of the six shared durations (3m/15m/30m/1h/4h/24h); expiry is computed on-chain.
-    function list(address coll, uint256 id, uint128 price, uint64 duration) external nonReentrant entryGate {
+    /// @param duration One of the fifteen shared durations (1m–24h); expiry is computed on-chain.
+    function list(address coll, uint256 id, uint128 price, uint64 duration) external nonReentrant {
         _list(TokenStandard.ERC721, coll, id, 1, price, _expiryFor(duration));
     }
 
@@ -93,7 +93,7 @@ contract Marketplace is MarketplaceCore {
     /// @dev Defense-in-depth: nonReentrant added per L-09 invariant.
     ///      Same rationale as list() — a malicious ERC-1155 collection could
     ///      re-enter during the balanceOf or isApprovedForAll probes.
-    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 duration) external nonReentrant entryGate {
+    function list1155(address coll, uint256 id, uint128 amount, uint128 price, uint64 duration) external nonReentrant {
         if (amount == 0) revert InvalidAmount();
         _list(TokenStandard.ERC1155, coll, id, amount, price, _expiryFor(duration));
     }
@@ -104,7 +104,7 @@ contract Marketplace is MarketplaceCore {
         address coll;
         uint256 id;
         uint128 price;
-        uint64  duration; // one of the six shared durations
+        uint64  duration; // one of the fifteen shared durations
     }
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
@@ -128,7 +128,7 @@ contract Marketplace is MarketplaceCore {
     ///      nonReentrant was a defense-in-depth gap that broke the
     ///      invariant "every state-changing external on the cores is
     ///      nonReentrant". Cheap, mechanical, conservative. Added.
-    function batchList(BatchItem[] calldata items) external nonReentrant entryGate {
+    function batchList(BatchItem[] calldata items) external nonReentrant {
         if (items.length == 0 || items.length > 50) revert BatchTooLarge();
         for (uint256 i; i < items.length; ++i) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, _expiryFor(items[i].duration));
@@ -151,7 +151,7 @@ contract Marketplace is MarketplaceCore {
             revert NotOwner(); // seller must cancel first to relist at a different price
         }
         // expiresAt was produced by _expiryFor(): strictly in the future and one
-        // of the six shared durations away. Kept as a cheap invariant check.
+        // of the fifteen shared durations away. Kept as a cheap invariant check.
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
 
         if (standard == TokenStandard.ERC721) {
@@ -194,7 +194,7 @@ contract Marketplace is MarketplaceCore {
     ///         must not have expired and the new price must be ≥ MIN_PRICE.
     ///         Emits a Listed event with the updated price so off-chain
     ///         indexers refresh without a full re-scan.
-    function editPrice(address coll, uint256 id, uint128 newPrice) external nonReentrant entryGate {
+    function editPrice(address coll, uint256 id, uint128 newPrice) external nonReentrant {
         Listing storage l = listings[coll][id][msg.sender];
         if (l.seller != msg.sender) revert NotOwner();
         if (block.timestamp > l.expiresAt) revert Expired();
@@ -244,7 +244,7 @@ contract Marketplace is MarketplaceCore {
     // ReentrancyGuard status also blocks re-entering withdrawRefund mid-buy, so the
     // cross-function path slither reports is not reachable.
     // slither-disable-next-line reentrancy-eth
-    function buy(address coll, uint256 id, address seller) external payable nonReentrant entryGate {
+    function buy(address coll, uint256 id, address seller) external payable nonReentrant {
         Listing memory l = listings[coll][id][seller];
         if (l.seller == address(0)) revert NotListed();
         if (block.timestamp > l.expiresAt) revert Expired();

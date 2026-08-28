@@ -18,8 +18,8 @@ import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 ///
 /// Mainnet safety notes:
 ///   - CREATOR_ADDR MUST be a multisig (Safe or equivalent), NOT an EOA.
-///     Compromise of a single EOA with DEFAULT_ADMIN_ROLE + OPERATOR_ROLE
-///     can halt new listings/bids/auctions/offers indefinitely.
+///     Compromise of a single EOA with DEFAULT_ADMIN_ROLE controls roles and
+///     timelocked upgrades (nothing on the protocol is pausable).
 ///   - Verify PLATFORM_FEE_BPS / MIN_PRICE against live SGB price before launch.
 contract DeploySongbird is Script {
     function run() external {
@@ -67,9 +67,7 @@ contract DeploySongbird is Script {
             manager.grantRole(manager.KEEPER_ROLE(), keeper);
         }
         manager.grantRole(manager.DEFAULT_ADMIN_ROLE(), creator);
-        manager.grantRole(manager.OPERATOR_ROLE(), creator);
         if (creator != deployer) {
-            manager.renounceRole(manager.OPERATOR_ROLE(), deployer);
             manager.renounceRole(manager.DEFAULT_ADMIN_ROLE(), deployer);
         }
 
@@ -90,12 +88,9 @@ contract DeploySongbird is Script {
         require(marketplace.manager() == address(manager), "MARKETPLACE manager mismatch");
         require(auction.manager()     == address(manager), "AUCTION manager mismatch");
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
-        require(manager.entriesAllowed(), "manager must deploy unpaused");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
-        require(manager.hasRole(manager.OPERATOR_ROLE(), creator),        "creator must hold operator");
         if (creator != deployer) {
             require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
-            require(!manager.hasRole(manager.OPERATOR_ROLE(), deployer),      "deployer must have renounced operator");
         }
         if (keeper != address(0)) {
             require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");

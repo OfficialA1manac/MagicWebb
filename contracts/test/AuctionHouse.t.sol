@@ -2,7 +2,7 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel, BidOverflow, NotKeeper} from "../src/AuctionHouse.sol";
+import {AuctionHouse, BidTooLow, AuctionLive, AuctionEnded, NotSeller, NotActive, NotSettled, InvalidAmount, CannotCancel, BidOverflow, NotAuthorized} from "../src/AuctionHouse.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {MockERC721} from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
@@ -171,6 +171,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 30 hours);
         uint256 sellerBefore = seller.balance;
         uint256 vaultBefore = feeRecipient.balance;
+        vm.prank(seller);
         ah.settle(id);
         assertEq(nft.ownerOf(tid), bob);
         assertEq(feeRecipient.balance, vaultBefore + _fee(3 ether));
@@ -179,11 +180,32 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertEq(ah.cumulative(id, alice), 1 ether, "loser escrow awaits refund");
     }
 
-    function test_settlePermissionlessByAnyone() public {
+    function test_settle_noManager_thirdPartyReverts() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + 30 hours);
         vm.prank(carol);
+        vm.expectRevert(NotAuthorized.selector);
+        ah.settle(id);
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        assertFalse(settled);
+    }
+
+    function test_settle_noManager_winnerAllowed() public {
+        (uint256 id,) = _create();
+        _bid(id, alice, 1 ether);
+        vm.warp(block.timestamp + 30 hours);
+        vm.prank(alice); // winner settles with no manager configured
+        ah.settle(id);
+        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        assertTrue(settled);
+    }
+
+    function test_settle_noManager_sellerAllowed() public {
+        (uint256 id,) = _create();
+        _bid(id, bob, 1 ether);
+        vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller); // seller settles with no manager configured
         ah.settle(id);
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
@@ -199,6 +221,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settleNoBidsCancels() public {
         (uint256 id,) = _create();
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
         assertTrue(settled);
@@ -208,8 +231,10 @@ contract AuctionHouseTest is Test, TestHelpers {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         vm.expectRevert(NotActive.selector);
+        vm.prank(seller);
         ah.settle(id);
     }
 
@@ -219,6 +244,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         _bid(id, bob, 2 ether);
         _bid(id, carol, 3 ether);
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         uint256 aBefore = alice.balance;
         uint256 bBefore = bob.balance;
@@ -296,6 +322,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         _bid(id, alice, 2 ether);
         vm.warp(block.timestamp + 30 hours);
         uint256 sellerBefore = seller.balance;
+        vm.prank(seller);
         ah.settle(id);
         assertEq(multi.balanceOf(alice, 7), 5);
         assertEq(seller.balance, sellerBefore + 2 ether - _fee(2 ether));
@@ -312,6 +339,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         _bid(id, alice, amt);
         vm.warp(block.timestamp + 30 hours);
         uint256 sb = seller.balance; uint256 vb = feeRecipient.balance;
+        vm.prank(seller);
         ah.settle(id);
         assertEq(feeRecipient.balance - vb, _fee(amt));
         assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
@@ -380,7 +408,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertEq(l, bob, "bob leads after meeting min increment floor");
     }
 
-    // ── 3-tier settle() gate ────────────────────────────────────────────────
+    // ── settle() gate: keeper + seller/winner only ────────────────────────────────────────────────
 
     function test_settle_keeperAlwaysAllowed() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
@@ -400,7 +428,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertTrue(settled);
     }
 
-    function test_settle_nonKeeperBlockedBeforeGrace() public {
+    function test_settle_thirdPartyBlocked() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
         gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
@@ -413,38 +441,10 @@ contract AuctionHouseTest is Test, TestHelpers {
         gated.bid{value: 1 ether}(id);
         vm.warp(block.timestamp + 10 minutes);
         vm.prank(carol);
-        vm.expectRevert(NotKeeper.selector);
+        vm.expectRevert(NotAuthorized.selector);
         gated.settle(id);
         (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
         assertFalse(settled);
-    }
-
-    function test_settle_nonKeeperAllowedAfterGrace() public {
-        MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
-        AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
-        vm.startPrank(seller);
-        uint256 tid = nft.mint(seller);
-        nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(24 hours), 500, 0);
-        vm.stopPrank();
-        vm.prank(alice);
-        gated.bid{value: 1 ether}(id);
-        vm.warp(block.timestamp + 24 hours + 24 hours + 2 hours);
-        vm.prank(carol);
-        gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
-        assertTrue(settled);
-    }
-
-    function test_settle_permissionlessWithNoManager() public {
-        (uint256 id,) = _create();
-        _bid(id, alice, 1 ether);
-        vm.warp(block.timestamp + 30 hours);
-        vm.prank(carol);
-        ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
-        assertTrue(settled);
     }
 
     function test_settle_sellerAllowedImmediately() public {
@@ -462,7 +462,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         // endsAt — no cooldown. A third party still cannot.
         vm.warp(block.timestamp + 3 minutes + 1);
         vm.prank(address(0xD00D));
-        vm.expectRevert(NotKeeper.selector);
+        vm.expectRevert(NotAuthorized.selector);
         gated.settle(id);
         vm.prank(seller);
         gated.settle(id);
@@ -509,7 +509,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertEq(nft.ownerOf(tid), alice);
     }
 
-    function test_settle_randomBlockedBefore25Hr() public {
+    function test_settle_randomBlockedForever() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
         gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
@@ -520,9 +520,10 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
-        vm.warp(block.timestamp + 24 hours + 10 hours);
+        // No time ever unlocks third-party settlement — not 25h, not 30 days.
+        vm.warp(block.timestamp + 30 days);
         vm.prank(carol);
-        vm.expectRevert(NotKeeper.selector);
+        vm.expectRevert(NotAuthorized.selector);
         gated.settle(id);
         (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
         assertFalse(settled);

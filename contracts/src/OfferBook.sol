@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, BelowMinPrice, InvalidDuration, DURATION_3MIN, DURATION_15MIN, DURATION_30MIN, DURATION_1HR, DURATION_4HR, DURATION_24HR} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, BelowMinPrice, InvalidDuration} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -50,8 +50,8 @@ error PrincipalChanged();
 ///     (keeper, after expiry) returns the FULL principal to the bidder — an offer
 ///     that never sells costs nothing.
 ///
-/// Non-custodial. No royalties. No off-chain signatures. Pausable entries
-/// (makeOffer via manager entryGate), unstoppable exits (accept/reject/cancel/refund).
+/// Non-custodial. No royalties. No off-chain signatures. Nothing is pausable —
+/// no entry or exit path (makeOffer/accept/reject/cancel/refund) can ever be halted.
 contract OfferBook is MarketplaceCore {
     /// @notice A bidder's offer on one NFT — one position per (coll, tokenId, bidder).
     ///         Calling makeOffer again edits the position (refunds old principal,
@@ -59,7 +59,7 @@ contract OfferBook is MarketplaceCore {
     struct Position {
         uint128       principal; // escrowed ETH (fees already removed)
         uint128       units;     // ERC-1155 units desired (1 for ERC-721)
-        uint64        expiresAt; // set on creation or edit; validated against 6 fixed durations
+        uint64        expiresAt; // set on creation or edit; validated against 15 fixed durations
         TokenStandard standard;  // token kind this offer targets
     }
 
@@ -165,8 +165,8 @@ contract OfferBook is MarketplaceCore {
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
-    /// @param duration   One of the six shared durations (3m–24h). Ignored when topping up an existing position.
-    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 duration) external payable nonReentrant entryGate {
+    /// @param duration   One of the fifteen shared durations (1m–24h). Ignored when topping up an existing position.
+    function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 duration) external payable nonReentrant {
         if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, duration);
     }
@@ -175,7 +175,7 @@ contract OfferBook is MarketplaceCore {
     ///         The target collection must be offer-eligible (setOfferEligible).
     /// @param units  Number of ERC-1155 units desired (replaces any previous position).
     function makeOffer1155(address coll, uint256 tokenId, uint128 principal, uint128 units, uint64 duration)
-        external payable nonReentrant entryGate
+        external payable nonReentrant
     {
         if (units == 0) revert InvalidAmount();
         if (!offerEligible[coll]) revert OffersNotEligible();
@@ -245,7 +245,7 @@ contract OfferBook is MarketplaceCore {
     // nonReentrant blocks both direct and cross-function re-entry.
     // slither-disable-next-line reentrancy-eth
     function acceptOffer(address coll, uint256 tokenId, address bidder, uint128 expectedPrincipal)
-        external nonReentrant entryGate
+        external nonReentrant
     {
         Position memory p = positions[coll][tokenId][bidder];
         if (p.principal == 0) revert NoOffer();

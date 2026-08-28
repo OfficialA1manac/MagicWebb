@@ -201,6 +201,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 sellerBefore = seller.balance;
         vm.expectEmit(true, true, false, true, address(ah));
         emit AuctionSettlementFailed(id, alice, 2 ether);
+        vm.prank(seller);
         ah.settle(id);
         // Settlement is final on seller default: no keeper retry, no 3-day
         // forceCancel wait. The winner's escrow comes straight back.
@@ -218,6 +219,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         nft.transferFrom(seller, address(0x999), tid);
         uint256 aliceBefore  = alice.balance;
         uint256 sellerBefore = seller.balance;
+        vm.prank(seller);
         ah.settle(id);
         assertTrue(_settled(id), "settled - seller default finalises the auction");
         assertEq(alice.balance - aliceBefore, 2 ether, "winner escrow returned");
@@ -263,6 +265,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         n = bound(n, 0, 1000);
         (uint256 id,) = _auction7d();
         _bid(id, alice, 1 ether);       vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         address[] memory batch = new address[](n);
         for (uint256 i; i < n; ++i) batch[i] = alice;
@@ -295,6 +298,7 @@ contract AuditFuzzTest is Test, TestHelpers {
             ah.bid{value: bidAmt}(id);
         }
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         assertTrue(_settled(id));
         assertEq(ah.cumulative(id, address(greedies[99])), 0, "winner escrow consumed");
@@ -434,6 +438,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
         vm.warp(block.timestamp + 2 days);
+        vm.prank(seller);
         ah2.settle(id2);
         address[] memory batch = new address[](1);
         batch[0] = address(griefer);
@@ -454,6 +459,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         ah.bid{value: 1 ether}(id);
         _bid(id, alice, 2 ether);
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         address[] memory batch = new address[](1);
         batch[0] = address(gr);
@@ -487,6 +493,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 fee = uint256(2 ether) * 150 / 10_000;
         vm.expectEmit(true, false, false, true, address(ah2));
         emit PushFailed(address(badFee), fee);
+        vm.prank(seller);
         ah2.settle(id2);
         assertTrue(ah2.getAuction(id2).settled, "settled");
         assertEq(ah2.pendingReturns(address(badFee)), fee, "fee credited to badFee");
@@ -510,6 +517,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 proceeds = uint256(winBid) - fee;
         vm.expectEmit(true, false, false, true, address(ah));
         emit PushFailed(address(badSeller), proceeds);
+        vm.prank(alice); // winner settles (seller is a no-receive contract)
         ah.settle(id2);
         assertTrue(ah.getAuction(id2).settled);
         assertEq(ah.pendingReturns(address(badSeller)), proceeds, "proceeds credited");
@@ -529,6 +537,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 aliceBefore = alice.balance;
         vm.expectEmit(true, true, false, true, address(ah));
         emit AuctionSettlementFailed(id, alice, 2 ether);
+        vm.prank(seller);
         ah.settle(id);
         assertTrue(_settled(id), "settled - a moved NFT is seller default, not a retry");
         assertEq(alice.balance - aliceBefore, 2 ether, "winner refunded on the spot");
@@ -547,6 +556,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         }
         _bid(id, alice, 4 ether);
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         address[] memory batch = new address[](3);
         for (uint256 i; i < 3; ++i) batch[i] = address(greedies[i]);
@@ -831,6 +841,7 @@ contract AuditFuzzTest is Test, TestHelpers {
 
         vm.expectEmit(true, true, false, true, address(ah));
         emit AuctionSettlementFailed(id, bob, 3 ether);
+        vm.prank(seller);
         ah.settle(id);
 
         assertTrue(_settled(id), "settled - failed delivery still finalises");
@@ -890,6 +901,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         (uint256 id,) = _auction7d();
         // settle() cancels this immediately (no leader → cancelled).
         vm.warp(block.timestamp + 30 hours);
+        vm.prank(seller);
         ah.settle(id);
         assertTrue(_settled(id), "settled - settle cancelled no-leader auction");
         // forceCancel on already-settled auction reverts.

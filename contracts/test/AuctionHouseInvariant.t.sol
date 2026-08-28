@@ -56,6 +56,10 @@ contract AuctionHouseHandler is Test {
         if (block.timestamp < endsAt) {
             vm.warp(uint256(endsAt) + 1 + (warp % 100));
         }
+        // v3: settle is keeper/seller/winner-only. Prank the seller so the
+        // handler keeps real settle coverage — a bare call would revert
+        // NotAuthorized and the try/catch would silently swallow it.
+        vm.prank(seller);
         try ah.settle(auctionId) {
             settled = true;
             (,,,,,,,,,,,,uint128 leaderTotal,) = ah.auctions(auctionId);

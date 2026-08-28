@@ -55,9 +55,10 @@ contract MarketplaceCoreTest is Test, TestHelpers {
 
     // ── Upgrade timelock ────────────────────────────────────────────────────
 
-    function test_upgradeDelay_isSixHoursOnLocalChain() public view {
-        // forge's default chainid is 31337 — a dev chain, so the short delay.
-        assertEq(mp.upgradeDelay(), 6 hours);
+    function test_upgradeDelay_isZeroOnLocalChain() public view {
+        // forge's default chainid is 31337 — a dev/test chain, so upgrades are
+        // instant while the marketplace is in its testing phase.
+        assertEq(mp.upgradeDelay(), 0);
     }
 
     function test_upgradeDelay_isFortyEightHoursOnUnknownChain() public {
@@ -96,6 +97,9 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     // delegatecalls into the new implementation's (nonexistent) fallback and
     // reverts. Real upgrades either carry migration calldata or use upgradeTo.
     function test_upgrade_requiresQueueAndDelay() public {
+        // Pin a mainnet chain id: local 31337 has delay 0, which makes the
+        // UpgradeNotReady leg unreachable. Flare (14) keeps the 48h delay.
+        vm.chainId(14);
         Marketplace gated = _gatedMarketplace();
         Marketplace next = new Marketplace();
         address before = _implOf(address(gated));
@@ -106,14 +110,14 @@ contract MarketplaceCoreTest is Test, TestHelpers {
 
         gated.queueUpgrade(address(next));
         assertEq(gated.pendingImplementation(), address(next));
-        assertEq(gated.upgradeEta(), uint64(block.timestamp) + 6 hours);
+        assertEq(gated.upgradeEta(), uint64(block.timestamp) + 48 hours);
 
         // Queued, but the timer has not run out.
         vm.expectRevert(UpgradeNotReady.selector);
         gated.upgradeTo(address(next));
 
         // A different implementation cannot ride the queued slot.
-        vm.warp(block.timestamp + 6 hours);
+        vm.warp(block.timestamp + 48 hours);
         Marketplace other = new Marketplace();
         vm.expectRevert(UpgradeNotQueued.selector);
         gated.upgradeTo(address(other));
@@ -130,12 +134,24 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     }
 
     function test_upgrade_staleQueueExpires() public {
+        vm.chainId(14); // 48h delay chain — see test_upgrade_requiresQueueAndDelay
         Marketplace gated = _gatedMarketplace();
         Marketplace next = new Marketplace();
         gated.queueUpgrade(address(next));
-        vm.warp(block.timestamp + 6 hours + 7 days + 1);
+        vm.warp(block.timestamp + 48 hours + 7 days + 1);
         vm.expectRevert(UpgradeExpired.selector);
         gated.upgradeTo(address(next));
+    }
+
+    function test_upgrade_zeroDelay_sameBlockInstall() public {
+        // Testnet/dev chains (31337 here) have delay 0: queue then install in
+        // the same block. Gate is block.timestamp < upgradeEta, false when
+        // eta == now.
+        Marketplace gated = _gatedMarketplace();
+        Marketplace next = new Marketplace();
+        gated.queueUpgrade(address(next));
+        gated.upgradeTo(address(next));
+        assertEq(_implOf(address(gated)), address(next));
     }
 
     function test_cancelUpgrade_clearsQueue() public {
@@ -151,7 +167,6 @@ contract MarketplaceCoreTest is Test, TestHelpers {
         assertEq(gated.pendingImplementation(), address(0));
         assertEq(gated.upgradeEta(), 0);
 
-        vm.warp(block.timestamp + 6 hours);
         vm.expectRevert(UpgradeNotQueued.selector);
         gated.upgradeTo(address(next));
     }
