@@ -86,19 +86,18 @@ contract AuctionHouse is MarketplaceCore {
     ///         (lost seller + dead keeper) — permissionless, so escrow is
     ///         recoverable by anyone driving refundLosers() afterwards.
     uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
-    /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
-    ///         the current leader. The user's new cumulative bid must exceed the
-    ///         leader's total by at least this amount. The percentage-based
-    ///         `minIncrementBps` and `minIncrementFlat` parameters are still
-    ///         accepted at creation for backward-compatibility but the bid() logic
-    ///         uses only this flat value — guaranteeing a +1 C2FLR/FLR/SGB floor
-    ///         across all chains.
+    /// @notice Flat FLOOR on the overtaking increment: 1 FLR/C2FLR/SGB (1
+    ///         ether). The seller's percentage increment (`minIncrementBps`,
+    ///         capped at MAX_MIN_INCREMENT_BPS = 50%) can RAISE the required
+    ///         step above this floor but never lower it. `minIncrementFlat`
+    ///         is deprecated and ignored by bid() — it was uncapped and let a
+    ///         seller make the first leader unbeatable.
     uint128 public constant MIN_BID_INCREMENT  = 1 ether;
 
     struct Auction {
         address       seller;
         uint64        startsAt;
-        uint16        minIncrementBps;   // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
+        uint16        minIncrementBps;   // seller's min-raise %, capped 50%; bid() floors the step at MIN_BID_INCREMENT
         bool          settled;
         bool          active;            // seller activates after creation; bids only when true
         TokenStandard standard;
@@ -109,7 +108,7 @@ contract AuctionHouse is MarketplaceCore {
         uint128       amount;            // token amount (1 for ERC-721)
         address       leader;            // current highest-cumulative bidder
         uint128       leaderTotal;       // leader's cumulative escrow
-        uint128       minIncrementFlat;  // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
+        uint128       minIncrementFlat;  // DEPRECATED + IGNORED by bid(): uncapped flat was a griefing vector
     }
 
     uint256 public nextAuctionId;
@@ -234,10 +233,9 @@ contract AuctionHouse is MarketplaceCore {
     // ── Create (free) ───────────────────────────────────────────────────────────
 
     /// @notice Create an ERC-721 auction. Starts immediately.
-    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
+    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000 =
+    ///                   0–50%). bid() uses max(leader*bps/10000, 1 ether).
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
     /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
     function create(address coll, uint256 tokenId, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant returns (uint256 id)
@@ -246,8 +244,8 @@ contract AuctionHouse is MarketplaceCore {
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
-    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
+    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000). See create().
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
     function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
         external nonReentrant returns (uint256 id)
     {
@@ -284,15 +282,11 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
-        // v21 — INC floor: when both minIncrementBps and minIncrementFlat are
-        // 0, the bid() path now falls through to MIN_BID_INCREMENT (1
-        // ether) instead of the legacy +1 wei rule. The previous 1-wei
-        // fall-through let two colluding wallets perpetually trade 1-wei
-        // leads and stall an auction indefinitely via repeated anti-snipe
-        // extensions (audit-#5). 1 ETH per flip is economically unviable
-        // for griefing while remaining trivial for any legitimate bidder.
-        // Existing auctions are unaffected — this only governs auctions
-        // created after the redeploy.
+        // Increment rule (v3): bid() requires max(leader*minIncBps/10000,
+        // MIN_BID_INCREMENT) to overtake — the 1-ether floor kills 1-wei
+        // griefing loops (audit-#5) and the 50% bps cap (checked above)
+        // bounds seller-chosen increments. minIncFlat is stored for ABI
+        // compatibility but never consulted by bid().
         a.minIncrementBps = minIncBps;
         a.standard        = standard;
         a.collection      = coll;
@@ -367,11 +361,15 @@ contract AuctionHouse is MarketplaceCore {
         } else if (newTotal > a.leaderTotal) {
             // Overtaking the leader requires clearing the min increment — a bidder
             // may not sit above the leader without taking the lead.
-            uint256 incPct  = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
-            uint256 inc     = incPct > a.minIncrementFlat ? incPct : a.minIncrementFlat;
-            // Floor at MIN_BID_INCREMENT so a 0/0 increment config cannot be
-            // reduced to a 1-wei griefing loop (audit-#5). Per-cycle
-            // gas cost vs. the 1 ETH flip cost makes the attack uneconomic.
+            // v3 rule: the increment is the seller's percentage (capped at
+            // MAX_MIN_INCREMENT_BPS by _create) floored at MIN_BID_INCREMENT.
+            // minIncrementFlat is DEPRECATED and fully IGNORED: it was
+            // uncapped, so a hostile seller could set uint128.max and make
+            // the first leader unbeatable (every overtake would revert
+            // BidOverflow). The percentage path cannot do that: at the 50%
+            // cap, minNext = 1.5x leader, always reachable below uint128.max
+            // until leaderTotal is astronomically large.
+            uint256 inc = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
             if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
             // L-11 fix: keep the min-next comparison in uint256 to avoid
             // silent truncation when leaderTotal + inc exceeds uint128 max.

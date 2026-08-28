@@ -345,6 +345,36 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
     }
 
+    function test_bid_percentIncrementHonored() public {
+        // 50% min-raise: overtaking 10 ether requires >= 15 ether (pct > 1-ether floor).
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 5000, 0);
+        vm.stopPrank();
+        _bid(id, alice, 10 ether);
+        vm.prank(bob);
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 14 ether}(id);
+        _bid(id, bob, 15 ether);
+        (address l,) = _leader(id);
+        assertEq(l, bob, "bob overtakes at exactly leader + 50%");
+    }
+
+    function test_bid_flatIncrementIgnored() public {
+        // A hostile flat of uint128.max must not brick overtaking: bid() ignores
+        // minIncrementFlat entirely (it is deprecated, kept only for ABI shape).
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 0, type(uint128).max);
+        vm.stopPrank();
+        _bid(id, alice, 1 ether);
+        _bid(id, bob, 2 ether); // leader + 1-ether floor, no BidOverflow
+        (address l,) = _leader(id);
+        assertEq(l, bob, "flat increment is ignored; 1-ether floor applies");
+    }
+
     function test_exactReserveMatchTakesLead() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);

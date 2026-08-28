@@ -70,6 +70,29 @@ contract OfferBookTest is Test, TestHelpers {
         assertEq(seller.balance, sb + 2 ether - _fee(2 ether));
     }
 
+    function test_acceptOffer_expired_reverts() public {
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ob), true);
+        vm.stopPrank();
+
+        vm.prank(alice);
+        ob.makeOffer{value: 2 ether}(address(nft), tid, 2 ether, uint64(3 minutes));
+
+        // Past expiry the position belongs to the refund path: the owner must
+        // not be able to force the trade (e.g. front-running refundExpiredOffer).
+        vm.warp(block.timestamp + 3 minutes);
+        vm.prank(seller);
+        vm.expectRevert(OfferExpired.selector);
+        ob.acceptOffer(address(nft), tid, alice, 2 ether);
+
+        // The bidder's escrow is still fully recoverable via the refund path.
+        uint256 ab = alice.balance;
+        vm.prank(alice); // bidder can always reclaim their own expired escrow
+        ob.refundExpiredOffer(address(nft), tid, alice);
+        assertEq(alice.balance, ab + 2 ether);
+    }
+
     function test_rejectOfferRefundsFull() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);

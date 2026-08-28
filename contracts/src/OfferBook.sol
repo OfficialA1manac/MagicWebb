@@ -256,6 +256,12 @@ contract OfferBook is MarketplaceCore {
         // a fraction of the agreed amount. Same guard Marketplace.buy() gets
         // from its msg.value == price check.
         if (p.principal != expectedPrincipal) revert PrincipalChanged();
+        // An expired position belongs to the refund path, not to a new trade.
+        // Without this, the bidder cannot cancel (cancelOffer reverts
+        // OfferExpired) while the owner can still accept — even front-running
+        // the keeper's refundExpiredOffer — forcing a trade the bidder
+        // reasonably believed was dead.
+        if (block.timestamp >= p.expiresAt) revert OfferExpired();
 
         if (p.standard == TokenStandard.ERC721) {
             if (IERC721(coll).ownerOf(tokenId) != msg.sender) revert NotOwner();
