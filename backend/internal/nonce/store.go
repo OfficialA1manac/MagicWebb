@@ -55,7 +55,8 @@ func (s *MemStore) GetDel(address string) (string, bool) {
 	defer s.mu.Unlock()
 
 	r, ok := s.entries[address]
-	if !ok || time.Now().After(r.expiresAt) {
+	// Expiry rule everywhere: valid only while now < expiresAt (exact-boundary expired).
+	if !ok || !time.Now().Before(r.expiresAt) {
 		delete(s.entries, address)
 		return "", false
 	}
@@ -70,7 +71,7 @@ func (s *MemStore) cleanup() {
 		now := time.Now()
 		s.mu.Lock()
 		for k, r := range s.entries {
-			if now.After(r.expiresAt) {
+			if !now.Before(r.expiresAt) {
 				delete(s.entries, k)
 			}
 		}
