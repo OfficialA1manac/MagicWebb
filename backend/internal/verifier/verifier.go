@@ -23,6 +23,7 @@ type Store interface {
 	ListCollectionsForVerification(ctx context.Context, staleBefore time.Time, limit int) ([]string, error)
 	SetCollectionVerification(ctx context.Context, addr string, standardVerified bool) error
 	SetCollectionInfo(ctx context.Context, addr, name, symbol string) error
+	SetCollectionCreator(ctx context.Context, addr, creator string) error
 }
 
 // Defaults chosen to stay invisible next to the indexer's RPC load: 25 calls
@@ -110,6 +111,15 @@ func (r *Runner) SweepOnce(ctx context.Context) (int, error) {
 				if err := r.q.SetCollectionInfo(ctx, addr, name, symbol); err != nil {
 					log.Warn().Err(err).Str("collection", addr).Msg("verifier info write failed")
 				}
+			}
+		}
+		// The creator rides the same batch: one more eth_call per collection,
+		// still far under the sweep's RPC budget. An empty or failed read is
+		// dropped here — and SetCollectionCreator additionally guards in SQL —
+		// so a stored creator is never blanked by a blip or a renounce.
+		if owner, oerr := chain.Owner(ctx, r.eth, addr); oerr == nil && owner != "" {
+			if err := r.q.SetCollectionCreator(ctx, addr, owner); err != nil {
+				log.Warn().Err(err).Str("collection", addr).Msg("verifier creator write failed")
 			}
 		}
 

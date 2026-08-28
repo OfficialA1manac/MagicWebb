@@ -761,9 +761,9 @@ func TestCollectionsService_HandleList_Success(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT address, name, symbol, standard::text, deploy_block`).
 		WithArgs(50).
-		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block"}).
-			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(100)).
-			AddRow("0xcol2", "Collection Two", "COL2", "erc1155", uint64(200)))
+		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block", "verified", "creator_addr"}).
+			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(100), true, "0xcreator1").
+			AddRow("0xcol2", "Collection Two", "COL2", "erc1155", uint64(200), false, ""))
 
 	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -837,11 +837,11 @@ func TestCollectionsService_HandleGet_Success(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	// GetCollection: 6 columns
+	// GetCollection: 7 columns
 	mock.ExpectQuery(`SELECT address, name, symbol, standard::text, deploy_block, verified`).
 		WithArgs("0xcol1").
-		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block", "verified"}).
-			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(1000), true))
+		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block", "verified", "creator_addr"}).
+			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(1000), true, "0xcreator1"))
 
 	// GetFloorPrice
 	mock.ExpectQuery(`SELECT COALESCE\(MIN\(price_wei\)::text,'0'\)`).
@@ -916,8 +916,8 @@ func TestCollectionsService_HandleGet_StatsFallback(t *testing.T) {
 
 	mock.ExpectQuery(`SELECT address, name, symbol, standard::text, deploy_block, verified`).
 		WithArgs("0xcol1").
-		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block", "verified"}).
-			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(1000), false))
+		WillReturnRows(pgxmock.NewRows([]string{"address", "name", "symbol", "standard", "deploy_block", "verified", "creator_addr"}).
+			AddRow("0xcol1", "Collection One", "COL1", "erc721", uint64(1000), false, ""))
 
 	// Floor price returns 0 (no active listings)
 	mock.ExpectQuery(`SELECT COALESCE\(MIN\(price_wei\)::text,'0'\)`).

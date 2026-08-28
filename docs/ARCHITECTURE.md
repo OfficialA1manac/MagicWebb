@@ -120,11 +120,11 @@ clears it on `tx-indexed` (or on the next REST refresh). Nothing waits 30 second
 
 | Contract | Purpose | Key rules |
 |---|---|---|
-| `MarketplaceCore` | base: fee math, pull-payment refunds, time-locked upgrades | `PLATFORM_FEE_BPS = 150` (1.5%, **seller pays, only on sale**) · `MIN_PRICE = 1 ether` · `_expiryFor(duration)` — six durations 3m/15m/30m/1h/4h/24h, expiry computed on-chain · `withdrawRefund()` |
+| `MarketplaceCore` | base: fee math, pull-payment refunds, time-locked upgrades | `PLATFORM_FEE_BPS = 150` (1.5%, **seller pays, only on sale**) · `MIN_PRICE = 1 ether` · `_expiryFor(duration)` — fifteen durations 1m/3m/5m/10m/15m/30m/45m/1h/2h/4h/8h/12h/16h/20h/24h, expiry computed on-chain · `withdrawRefund()` |
 | `Marketplace` | fixed-price listings | `list / list1155 / batchList(≤50) / cancel / editPrice / buy` · `buy` requires `msg.value == price` · listing is free |
-| `AuctionHouse` | English auctions, cumulative bids | `create / create1155 / bid / settle / cancelEarly / refundLosers / withdrawLoserFunds` · min increment 1 native · anti-snipe +3 min, 30 min cap · settle permissionless after end |
+| `AuctionHouse` | English auctions, cumulative bids | `create / create1155 / bid / settle / cancelEarly / refundLosers / withdrawLoserFunds` · min increment 1 native · anti-snipe +3 min, 30 min cap · settle: keeper (instant) or seller/winner only; forceCancel (+3d, permissionless) is the never-stuck escrow backstop |
 | `OfferBook` | escrowed offers | `makeOffer / makeOffer1155 / acceptOffer / cancelOffer / rejectOffer / refundExpiredOffer` · collection must be opted in via `setOfferEligible` (ERC-173 owner) |
-| `MarketplaceManager` | roles + circuit breaker | `pauseEntries()` blocks *new* listings/bids/offers; exits (cancel, settle, withdraw) are never pausable |
+| `MarketplaceManager` | role registry + timelocked upgrades | `KEEPER_ROLE` (instant settlement + refund sweeps), `DEFAULT_ADMIN_ROLE` (roles, queueUpgrade). Nothing is pausable — no entry or exit path can ever be halted |
 
 Deployed addresses: `deployments/<network>.json` (single source of truth).
 
@@ -172,3 +172,11 @@ docs/                operator docs (deploy, checklist, monitoring, immutability,
 fly.<net>.toml.example   per-network Fly templates · CI fills placeholders
 .github/workflows    ci (zig/go/forge/slither/astro/vitest/gitleaks) · deploy (matrix) · nightly · audit · codeql
 ```
+
+## Listing expiry (cleanExpired)
+
+`Marketplace.cleanExpired(coll, id, seller)` exists on-chain (keeper-gated) but is
+deliberately **unwired**: listings are non-custodial, so an expired listing holds no
+on-chain state that needs cleanup — `buy` simply reverts `Expired`. Off-chain, the
+indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decision
+2026-08-28: keep the function as a dormant escape hatch, do not call it from the keeper.

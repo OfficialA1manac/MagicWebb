@@ -27,5 +27,5 @@ Anchor contract: `contracts/src/MarketplaceManager.sol`.
 
 ## Off-chain integration points
 
-- `MANAGER_ADDR` is exported by both deploy scripts; add to `backend/.env` when the backend needs role/pause introspection (e.g. surfacing "marketplace paused" in the UI via `entriesAllowed()`).
+- `MANAGER_ADDR` is exported by both deploy scripts; add to `backend/.env` when the backend needs role introspection (e.g. checking `hasRole(KEEPER_ROLE, addr)`). There is no pause state to surface — nothing on the protocol is pausable.
 - Indexer: `ModuleSet` / `AuditLog` / `EntriesPaused` events are uniform and indexed — extend `coreTopics()` in `backend/internal/indexer/abis.go` when token modules ship.

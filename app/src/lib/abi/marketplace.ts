@@ -801,11 +801,6 @@ export const marketplaceAbi = [
   },
   {
     "type": "error",
-    "name": "EntriesHalted",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "Expired",
     "inputs": []
   },

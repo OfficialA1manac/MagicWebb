@@ -69,10 +69,14 @@
     fetchListings();
   }
 
-  function openAppKit() {
-    if (typeof window !== 'undefined' && window.__MW_APPKIT_OPEN__) {
-      window.__MW_APPKIT_OPEN__();
-    }
+  function goListNFT() {
+    // Route to the profile's My NFTs tab (real scroll target) where every
+    // held NFT has a List action + batch listing. Connect first if needed.
+    if (typeof window === 'undefined') return;
+    const mw = window.MW;
+    const connected = (() => { try { return !!mw?.address?.(); } catch { return false; } })();
+    if (!connected && window.__MW_APPKIT_OPEN__) { window.__MW_APPKIT_OPEN__(); return; }
+    location.href = '/profile#nfts';
   }
 </script>
 
@@ -91,7 +95,7 @@
         <option value="price_desc">Price: High to Low</option>
       </select>
       {#if live}
-        <button on:click={openAppKit} class="list-btn">
+        <button on:click={goListNFT} class="list-btn">
           ＋ List NFT
         </button>
       {/if}

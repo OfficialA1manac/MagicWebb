@@ -198,6 +198,7 @@ func (s *Server) ListCollections(ctx context.Context, req *connect.Request[ListC
 			Standard:    rows[i].Standard,
 			DeployBlock: int64(rows[i].DeployBlock),
 			Verified:    rows[i].Verified,
+			CreatorAddr: rows[i].CreatorAddr,
 		})
 		addrs = append(addrs, rows[i].Address)
 	}
@@ -265,6 +266,7 @@ func (s *Server) GetCollection(ctx context.Context, req *connect.Request[GetColl
 		Standard:    row.Standard,
 		DeployBlock: int64(row.DeployBlock),
 		Verified:    row.Verified,
+		CreatorAddr: row.CreatorAddr,
 	}
 
 	// CACHE-3: Check the process-wide TTL cache before hitting the DB.

@@ -85,7 +85,7 @@ attempts revert because the token has moved. No fee is taken on a reverted purch
 
 ### How do I list an NFT?
 Approve the marketplace contract for your collection once, then list with a price and
-expiry (one of 6 fixed durations: 3min, 15min, 30min, 1hr, 4hr, or 24hr). Listing is free. You keep the NFT in your wallet until someone buys it.
+expiry (one of 15 fixed durations: 1min, 3min, 5min, 10min, 15min, 30min, 45min, 1hr, 2hr, 4hr, 8hr, 12hr, 16hr, 20hr, or 24hr). Listing is free. You keep the NFT in your wallet until someone buys it.
 
 ### How much do I receive on a sale?
 98.5% of the sale price. The 1.5% platform fee is deducted at settlement.
@@ -98,24 +98,33 @@ Yes, anytime before it sells, for the cost of gas.
 ## Auctions
 
 ### How do auctions work?
-English (ascending) auctions, up to 24 hours (one of 6 fixed durations: 3min, 15min, 30min, 1hr, 4hr, 24hr). The seller sets a reserve. Bidders bid for free; bids must overtake the current leader by at least +1 native token (FLR/SGB/C2FLR). Losers can withdraw early; keeper auto-settles instantly.
+English (ascending) auctions, up to 24 hours (one of 15 fixed durations, 1min–24hr). The seller sets a reserve. Bidders bid for free; bids must overtake the current leader by at least +1 native token (FLR/SGB/C2FLR). Losers can withdraw early; keeper auto-settles instantly.
 
 ### What is anti-snipe protection?
 A bid placed within the final 3 minutes extends the auction end time by 3 minutes, so
 late snipes can't end an auction before others can respond.
 
 ### Who settles an auction?
-After the auction ends, anyone (typically the platform's keeper bot) calls `settle`. The
-NFT goes to the winner, and the seller receives the winning bid minus the 1.5% fee. If
-the seller has moved the NFT or revoked approval, the winner is refunded in full and the
-auction cancels — funds are never locked.
+The platform's keeper bot settles **instantly** the moment the auction expires — you
+normally never have to do anything. If the keeper hasn't settled yet, the **auction
+winner or the seller** (only those two) can call `settle` themselves; no third party can
+ever settle someone else's auction. The NFT goes to the winner, and the seller receives
+the winning bid minus the 1.5% fee. If the seller has moved the NFT or revoked approval,
+the winner is refunded in full and the auction finalises without a sale.
+
+### Can an auction get stuck? Can the seller cancel it?
+No, and no. Once any bid clears the reserve the seller can **never** cancel — bidders
+committed capital in good faith. And an auction can never be stuck: losing bidders can
+withdraw at any time, and if both the seller and the keeper vanish, after 3 days anyone
+can call the permissionless `forceCancel` to unlock every bidder's escrow. Nothing on
+the protocol is pausable, so no one can freeze an auction either.
 
 ---
 
 ## Offers
 
 ### How do offers work?
-Make an offer on any NFT with an amount and an expiry (one of 6 fixed durations: 3min–24hr). The offer amount is escrowed in the contract — it's free to make and fully refundable. Multiple offers from the same wallet on the same NFT stack into one position. Top-ups do not refresh the expiry timer.
+Make an offer on any NFT with an amount and an expiry (one of 15 fixed durations: 1min–24hr). The offer amount is escrowed in the contract — it's free to make and fully refundable. Multiple offers from the same wallet on the same NFT stack into one position. Top-ups do not refresh the expiry timer.
 
 ### When am I charged?
 Never as an offerer. If the owner accepts your offer, you receive the NFT and the seller
@@ -160,8 +169,23 @@ It does **not** mean MagicWebb vouches for the art, the creator, or the seller. 
 means one of the two checks has not passed yet — often just a brand-new collection whose
 metadata has not loaded. Anyone can list from any collection either way.
 
+<a id="creator"></a>
+### What does the "★ Creator" badge mean?
+The address shown is the **on-chain owner of the collection contract** (ERC-173
+`owner()`), detected automatically by the verifier sweep. It appears on the collection
+page, on token pages, and on that address's profile. When a collection is Verified AND
+its creator is known, token pages upgrade the checkmark to **"✓ Authentic — {collection}
+by {creator}"** so you can tie an NFT to its collection and creator. Like the Verified
+badge, it is computed from on-chain facts — not a curation or endorsement.
+
+<a id="holder-badge"></a>
+### What is the collector badge next to an owner's name?
+A fun, deterministic label (e.g. *SharinganHodl*, *PirateKingHodl*) derived purely from
+the wallet address — the same wallet always gets the same name. It carries no on-chain
+meaning, no privileges, and no judgement; it just makes owners easier to recognise.
+
 ### Why did my listing, auction or offer need a duration instead of a date?
-The contracts accept six fixed durations (3 min, 15 min, 30 min, 1 h, 4 h, 24 h) and compute
+The contracts accept fifteen fixed durations (1 min – 24 h) and compute
 the expiry on-chain from the block that mines your transaction. Picking a duration is the
 only way a wallet can satisfy that rule; the exact expiry is shown once the transaction
 confirms.

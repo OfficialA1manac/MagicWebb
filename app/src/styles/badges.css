@@ -9,5 +9,10 @@
 .vb.md { min-height: 28px; padding: 0 .7rem; font-size: .75rem; }
 .vb.is-ok { color: #bae6fd; background: rgba(125,211,252,.12); border: 1px solid rgba(125,211,252,.35); }
 .vb.is-no { color: rgba(255,255,255,.55); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); font-weight: 600; }
+.vb.is-creator { color: #fde68a; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); }
+.vb.is-holder { color: #ddd6fe; background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); font-weight: 600; }
 .vb-dot { width: 14px; height: 14px; border-radius: 50%; background: #7dd3fc; color: #09090b; font-size: 10px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; }
+.vb-star { color: #fbbf24; font-size: 11px; line-height: 1; }
 .vb:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+.vb.is-creator:focus-visible { outline-color: #fbbf24; }
+.vb.is-holder:focus-visible { outline-color: #a78bfa; }

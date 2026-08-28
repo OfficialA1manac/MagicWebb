@@ -817,11 +817,6 @@ export const offerBookAbi = [
   },
   {
     "type": "error",
-    "name": "EntriesHalted",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "InvalidAmount",
     "inputs": []
   },

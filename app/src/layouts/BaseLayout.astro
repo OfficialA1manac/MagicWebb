@@ -209,10 +209,13 @@ const networks = KNOWN_NETWORKS.map((n) => {
     </style>
   </head>
   <body>
-    <!-- Testnet banner: static (not sticky) so it never fights the sticky nav for the top edge. -->
-    <div class="mw-devbanner" role="note">
-      Test network — <span class="mw-net-name">Flare Coston2</span>. Assets and <span class="mw-cur">C2FLR</span> here have no real-world value.
-    </div>
+    <!-- Testnet banner: static (not sticky) so it never fights the sticky nav for the top edge.
+         Rendered only on test networks (Coston2 114 / Coston 16) — mainnets show nothing. -->
+    {(currentChainId === 114 || currentChainId === 16) && (
+      <div class="mw-devbanner" role="note">
+        Test network — <span class="mw-net-name">Flare Coston2</span>. Assets and <span class="mw-cur">C2FLR</span> here have no real-world value.
+      </div>
+    )}
     <!-- Installs window.MW, opens /ws, hosts the transaction modal + wrong-network banner. -->
     <MwRuntime client:load />
     <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;"></div>

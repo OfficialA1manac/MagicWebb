@@ -4,6 +4,8 @@
   // offer). Owner-aware: what you can do depends on who you are. Live via WS.
   import { onMount } from 'svelte';
   import VerifiedBadge from './VerifiedBadge.svelte';
+  import CreatorBadge from './CreatorBadge.svelte';
+  import { holderBadgeName, HOLDER_BADGE_TIP } from '../lib/holderBadge';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
@@ -11,17 +13,17 @@
   import { MW } from '../lib/mw';
   import { ws } from '../lib/ws/client';
   import { tokenChannel } from '../lib/ws/channels';
-  import { currentChain, explorerAddress } from '../lib/chains';
+  import { currentChain, explorerAddress, tradingLive, readOnlyCopy } from '../lib/chains';
   import { fmtPrice, shortAddr, timeAgo, fmtCountdown, toWei } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
   import { onAccountChange, publicClient } from '../lib/tx/client';
-  import { erc721Abi, erc1155Abi } from '../lib/abi';
+  import { erc721Abi, erc1155Abi, auctionHouseAbi } from '../lib/abi';
   import { DEFAULT_DURATION } from '../lib/tx/durations';
   import { minimumTopUp } from '../lib/tx/auction';
   import type { Address } from 'viem';
 
   type Listing = { collection: string; token_id: string; seller: string; price_wei: string; amount: number; standard: string; expires_at: string; name: string; image_uri: string; collection_verified: boolean };
-  type Collection = { address: string; name: string; symbol: string; standard: string; verified: boolean };
+  type Collection = { address: string; name: string; symbol: string; standard: string; verified: boolean; creator_addr?: string };
   type Auction = { auction_id: number; collection: string; token_id: string; seller: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; ends_at: string; status: string; name: string; image_uri: string; collection_verified: boolean };
   type Offer = { offer_id: string; bidder: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string };
   type Activity = { type: string; amountWei: string; timestamp: string; txHash: string };
@@ -49,7 +51,13 @@
   let priceIn = $state('');
   let duration = $state<number>(DEFAULT_DURATION);
   let bidIn = $state('');
+  let qtyIn = $state('1');   // ERC-1155 units for list/auction/offer panels
+  let incPctIn = $state(''); // optional auction minimum-raise % (0-50)
   let formErr = $state('');
+  let myCumWei = $state(0n); // caller's cumulative escrow on the live auction
+
+  const canTrade = tradingLive();
+  const roCopy = readOnlyCopy();
 
   const chain = currentChain();
   const sym = chain.currency;
@@ -58,6 +66,7 @@
   let name = $derived(listing?.name || auction?.name || (collection?.name ? `${collection.name} #${tid}` : `#${tid}`));
   let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || '', tid));
   let verified = $derived(!!(collection?.verified ?? listing?.collection_verified ?? auction?.collection_verified));
+  let creatorAddr = $derived(collection?.creator_addr || '');
   let isOwner = $derived(!!me && (std === 'erc1155' ? myBalance1155 > 0n : owner?.toLowerCase() === me.toLowerCase()));
   let isSeller = $derived(!!me && !!listing && listing.seller.toLowerCase() === me.toLowerCase());
   let isAuctionSeller = $derived(!!me && !!auction && auction.seller.toLowerCase() === me.toLowerCase());
@@ -65,7 +74,21 @@
   let auctionEnded = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() <= now);
   let myOffer = $derived(me ? offers.find((o) => o.bidder.toLowerCase() === me!.toLowerCase() && o.status === 'active') ?? null : null);
   let liveOffers = $derived(offers.filter((o) => o.status === 'active' && new Date(o.expires_at).getTime() > now));
-  let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: 0n }) : 0n);
+  let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: myCumWei }) : 0n);
+
+  // Read the caller's cumulative escrow so the min top-up is the real amount
+  // still owed, not the full leader total (matches AuctionPage behaviour).
+  async function loadMyCumulative() {
+    myCumWei = 0n;
+    if (!me || !auction) return;
+    try {
+      const pub = await publicClient();
+      const ahAddr = chain.contracts.auctionHouse;
+      if (!ahAddr) return;
+      myCumWei = (await pub.readContract({ address: ahAddr as Address, abi: auctionHouseAbi, functionName: 'cumulative', args: [BigInt(auction.auction_id), me as Address] })) as bigint;
+    } catch { /* stays 0n; user just tops up the full amount */ }
+  }
+  $effect(() => { if (me && auction) void loadMyCumulative(); });
 
   async function j<T>(url: string): Promise<T | null> {
     try { const r = await fetch(url); return r.ok ? (await r.json()) as T : null; } catch { return null; }
@@ -99,6 +122,8 @@
     auction = (au ?? []).find((x) => String(x.token_id) === String(tid)) ?? null;
     if (!c && !l && !auction) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
     await loadOwner();
+    // Deep link from profile "List →": open the list panel once ownership confirms.
+    if (initial && location.hash === '#list' && isOwner && !listing && !auctionLive) panel = 'list';
     if (offerEligible === null) MW.isOfferEligible(coll).then((v) => (offerEligible = v)).catch(() => (offerEligible = null));
     loading = false;
     syncing = '';
@@ -123,19 +148,32 @@
     formErr = '';
     try { await run(); afterTx(label); } catch (e) { /* TxModal already showed it */ void e; }
   }
+  function parseQty(): string | null {
+    if (std !== 'erc1155') return '1';
+    const n = Number(qtyIn);
+    if (!Number.isInteger(n) || n < 1) { formErr = 'Quantity must be a whole number of at least 1.'; return null; }
+    if (myBalance1155 > 0n && BigInt(n) > myBalance1155) { formErr = `You hold ${myBalance1155} unit${myBalance1155 === 1n ? '' : 's'}.`; return null; }
+    return String(n);
+  }
+  function parseIncPct(): number | undefined {
+    if (!incPctIn.trim()) return undefined;
+    const n = Number(incPctIn);
+    if (!Number.isFinite(n) || n < 0 || n > 50) { formErr = 'Minimum raise must be 0-50%.'; return -1 as never; }
+    return Math.round(n * 100); // percent -> bps
+  }
   function parsePrice(): string | null {
     try { const w = toWei(priceIn); if (w < 10n ** 18n) { formErr = `Minimum is 1 ${sym}.`; return null; } return w.toString(); } catch { formErr = 'Enter a number like 12.5'; return null; }
   }
 
   const doBuy = () => listing && act(() => MW.buy({ nft: coll, tokenId: tid, seller: listing!.seller, priceWei: listing!.price_wei, name }), 'Just bought · syncing');
-  const doList = () => { const p = parsePrice(); if (p) act(() => MW.list({ nft: coll, tokenId: tid, priceWei: p, duration, std, name }), 'Listed · syncing'); };
+  const doList = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.list({ nft: coll, tokenId: tid, priceWei: p, duration, std, amount: q, name }), 'Listed · syncing'); };
   const doEdit = () => { const p = parsePrice(); if (p) act(() => MW.editPrice({ nft: coll, tokenId: tid, newPriceWei: p, name }), 'Price updated · syncing'); };
   const doCancel = () => act(() => MW.cancelListing({ nft: coll, tokenId: tid, name }), 'Listing cancelled · syncing');
-  const doAuction = () => { const p = parsePrice(); if (p) act(() => MW.createAuction({ nft: coll, tokenId: tid, reserveWei: p, duration, std, name }), 'Auction created · syncing'); };
-  const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name }), 'Bid placed · syncing'); };
+  const doAuction = () => { const p = parsePrice(); const q = p && parseQty(); const inc = parseIncPct(); if ((inc as unknown as number) === -1) return; if (p && q) act(() => MW.createAuction({ nft: coll, tokenId: tid, reserveWei: p, duration, std, amount: q, minIncBps: inc, name }), 'Auction created · syncing'); };
+  const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumWei.toString() }), 'Bid placed · syncing'); };
   const doSettle = () => auction && act(() => MW.settle({ auctionId: String(auction!.auction_id), name }), 'Settled · syncing');
   const doCancelAuction = () => auction && act(() => MW.cancelAuction({ auctionId: String(auction!.auction_id), name }), 'Auction cancelled · syncing');
-  const doOffer = () => { const p = parsePrice(); if (p) act(() => MW.makeOffer({ nft: coll, tokenId: tid, principalWei: p, duration, std, name }), 'Offer placed · syncing'); };
+  const doOffer = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.makeOffer({ nft: coll, tokenId: tid, principalWei: p, duration, std, units: q, name }), 'Offer placed · syncing'); };
   const doAccept = (o: Offer) => act(() => MW.acceptOffer({ nft: coll, tokenId: tid, bidder: o.bidder, principalWei: o.amount_wei, std, name }), 'Offer accepted · syncing');
   const doReject = (o: Offer) => act(() => MW.rejectOffer({ nft: coll, tokenId: tid, bidder: o.bidder, name }), 'Offer declined · syncing');
   const doCancelOffer = () => act(() => MW.cancelOffer({ nft: coll, tokenId: tid, name }), 'Offer cancelled · syncing');
@@ -160,16 +198,30 @@
     <div class="tp-side">
       <div class="tp-coll">
         <a href={`/collection/${coll}`}>{collection?.name || shortAddr(coll)}</a>
-        <VerifiedBadge {verified} showUnverified={true} network={chain.name} />
+        <VerifiedBadge {verified} showUnverified={true} network={chain.name} collectionName={collection?.name || ''} {creatorAddr} />
         {#if live}<span class="tp-live" title="Live updates connected">● live</span>{/if}
       </div>
       <h1 class="tp-title">{name}</h1>
       <div class="tp-meta mono">
         <a href={explorerAddress(coll)} target="_blank" rel="noopener">{shortAddr(coll)}</a> · #{tid} · {std.toUpperCase()}
-        {#if owner} · owner <a href={`/profile/${owner}`}>{isOwner ? 'you' : shortAddr(owner)}</a>{/if}
+        {#if owner} · owner <a href={`/profile/${owner}`}>{isOwner ? 'you' : shortAddr(owner)}</a> <span class="vb is-holder sm" title={HOLDER_BADGE_TIP}>{holderBadgeName(owner)}</span>{/if}
       </div>
+      {#if creatorAddr}
+        <div class="tp-meta mono">
+          creator <a href={explorerAddress(creatorAddr)} target="_blank" rel="noopener">{shortAddr(creatorAddr)}</a>
+          <CreatorBadge name={collection?.name || ''} />
+        </div>
+      {/if}
 
       {#if syncing}<div class="tp-sync" role="status"><span class="tp-spin" aria-hidden="true"></span>{syncing}</div>{/if}
+
+      {#if !canTrade}
+        <section class="tp-card" aria-label="Read-only network">
+          <div class="tp-card-head"><span>{roCopy.heading}</span></div>
+          <p class="tp-hint">{roCopy.body}</p>
+          {#if roCopy.ctaHref}<a class="btn p" href={roCopy.ctaHref}>{roCopy.cta}</a>{/if}
+        </section>
+      {/if}
 
       <!-- ── price / auction block ─────────────────────────────────── -->
       {#if auction && (auctionLive || auctionEnded)}
@@ -213,16 +265,17 @@
       {/if}
 
       <!-- ── owner actions ─────────────────────────────────────────── -->
-      {#if isOwner && !listing && !auctionLive}
+      {#if canTrade && isOwner && !listing && !auctionLive}
         <div class="tp-btnrow">
           <button class="btn p" onclick={() => openPanel('list')}>List for sale</button>
           <button class="btn v" onclick={() => openPanel('auction')}>Start auction</button>
         </div>
       {/if}
-      {#if !isOwner && !isSeller}
+      {#if canTrade && !isOwner && !isSeller}
         <div class="tp-btnrow">
           {#if myOffer}
-            <button class="btn g" onclick={doCancelOffer}>Cancel my offer ({fmtPrice(myOffer.amount_wei)} {sym})</button>
+            <button class="btn gold" onclick={() => openPanel('offer')}>Change offer ({fmtPrice(myOffer.amount_wei)} {sym})</button>
+            <button class="btn g" onclick={doCancelOffer}>Cancel my offer</button>
           {:else if offerEligible === false}
             <span class="tp-hint">Offers are off for this collection.{isOwner ? '' : ' The collection owner can enable them.'}</span>
           {:else}
@@ -230,18 +283,26 @@
           {/if}
         </div>
       {/if}
-      {#if offerEligible === false && isOwner}
+      {#if canTrade && offerEligible === false && isOwner}
         <button class="btn g" onclick={doEnableOffers}>Enable offers for this collection</button>
         <p class="tp-hint">Only the collection contract owner can do this; the transaction is rejected otherwise.</p>
       {/if}
 
       <!-- ── inline forms ──────────────────────────────────────────── -->
-      {#if panel !== 'none'}
+      {#if canTrade && panel !== 'none'}
         <section class="tp-panel" aria-label="Action form">
           <label class="tp-label" for="price-in">
             {panel === 'list' ? `Price (${sym})` : panel === 'edit' ? `New price (${sym})` : panel === 'auction' ? `Reserve price (${sym})` : `Your offer (${sym})`}
           </label>
           <input id="price-in" class="tp-input mono" inputmode="decimal" placeholder="min 1" bind:value={priceIn} />
+          {#if std === 'erc1155' && panel !== 'edit'}
+            <label class="tp-label" for="qty-in">{panel === 'offer' ? 'Units wanted' : 'Units to sell'}{myBalance1155 > 0n && panel !== 'offer' ? ` (you hold ${myBalance1155})` : ''}</label>
+            <input id="qty-in" class="tp-input mono" inputmode="numeric" placeholder="1" bind:value={qtyIn} />
+          {/if}
+          {#if panel === 'auction'}
+            <label class="tp-label" for="inc-in">Minimum raise % <span class="tp-dim">(optional, 0–50)</span></label>
+            <input id="inc-in" class="tp-input mono" inputmode="decimal" placeholder="default: 1 {sym} flat" bind:value={incPctIn} />
+          {/if}
           {#if panel !== 'edit'}<DurationPicker bind:value={duration} label={panel === 'auction' ? 'Auction length' : 'Valid for'} />{/if}
           {#if formErr}<div class="tp-formerr" role="alert">{formErr}</div>{/if}
           <div class="tp-btnrow">
@@ -251,7 +312,7 @@
             {:else}<button class="btn gold" onclick={doOffer}>Place offer</button>{/if}
             <button class="btn g" onclick={() => (panel = 'none')}>Close</button>
           </div>
-          <p class="tp-hint">{panel === 'offer' ? 'Your offer amount is held in escrow and fully refundable until it expires.' : 'Listing is free; the 1.5% fee is taken from the sale only.'}</p>
+          <p class="tp-hint">{panel === 'offer' ? (myOffer ? 'Changing an offer replaces the amount on-chain — the original expiry keeps counting down (it is not extended).' : 'Your offer amount is held in escrow and fully refundable until it expires.') : 'Listing is free; the 1.5% fee is taken from the sale only.'}</p>
         </section>
       {/if}
 

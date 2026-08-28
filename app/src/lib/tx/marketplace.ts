@@ -27,7 +27,7 @@ export function assertPrice(priceWei: bigint): void {
 }
 
 export function assertDuration(d: number): asserts d is DurationSeconds {
-  if (!isValidDuration(d)) throw new TxError('Invalid', 'Pick one of the allowed durations (3m, 15m, 30m, 1h, 4h, 24h).');
+  if (!isValidDuration(d)) throw new TxError('Invalid', 'Pick one of the allowed durations (1m–24h).');
 }
 
 // ── pure builders (unit-tested; no wallet) ─────────────────────────────────
@@ -104,6 +104,43 @@ export function buy(a: BuyArgs, hooks?: TxHooks): Promise<TxResult> {
       ['Price', `${fmtPrice(a.priceWei)} ${sym}`],
       ['Marketplace fee', '1.5% · paid by the seller'],
       ['You pay', `${fmtPrice(a.priceWei)} ${sym} + gas`],
+    ],
+  };
+  return runTx(plan, hooks);
+}
+
+export interface BatchListArgs { items: BatchItem[]; name?: string }
+
+/** List up to 50 ERC-721s in one tx. One shared price+duration form upstream
+ *  builds the items; approval is ensured per unique collection. */
+export function batchList(a: BatchListArgs, hooks?: TxHooks): Promise<TxResult> {
+  const req = buildBatchList(a.items); // validate early (1..50, price, duration)
+  const sym = currentChain().currency;
+  const total = a.items.reduce((t, i) => t + i.price, 0n);
+  const uniqueColls = [...new Set(a.items.map((i) => i.coll.toLowerCase()))] as Address[];
+  const plan: TxPlan = {
+    title: a.name ?? `List ${a.items.length} NFTs`,
+    approval: async (ctx) => {
+      // The runner signs exactly one approval request; extra collections are
+      // approved inline here (rare: batch items usually share one collection).
+      const pending: TxRequest[] = [];
+      for (const coll of uniqueColls) {
+        const req = await ensureOperatorApproval(ctx, coll, marketplaceAddress(), 'erc721');
+        if (req) pending.push(req);
+      }
+      const last = pending.pop() ?? null;
+      for (const req of pending) {
+        const hash = await ctx.wallet.writeContract({ ...req, account: ctx.account, chain: ctx.wallet.chain } as never);
+        await ctx.pub.waitForTransactionReceipt({ hash });
+      }
+      return last;
+    },
+    request: async () => req,
+    summary: [
+      ['Items', `${a.items.length}`],
+      ['Total asking price', `${fmtPrice(total)} ${sym}`],
+      ['Marketplace fee', '1.5% per sale · paid by the seller'],
+      ['Listing cost', 'Free · gas only'],
     ],
   };
   return runTx(plan, hooks);

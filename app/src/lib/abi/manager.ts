@@ -41,13 +41,13 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "OPERATOR_ROLE",
+    "name": "MAX_UPGRADE_WINDOW",
     "inputs": [],
     "outputs": [
       {
         "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
+        "type": "uint64",
+        "internalType": "uint64"
       }
     ],
     "stateMutability": "view"
@@ -67,29 +67,10 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "entriesAllowed",
+    "name": "cancelUpgrade",
     "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "entriesPaused",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -219,10 +200,16 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "pauseEntries",
+    "name": "pendingImplementation",
     "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "outputs": [
+      {
+        "name": "",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -236,6 +223,19 @@ export const managerAbi = [
       }
     ],
     "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "queueUpgrade",
+    "inputs": [
+      {
+        "name": "impl",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -395,10 +395,29 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "unpauseEntries",
+    "name": "upgradeDelay",
     "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "upgradeEta",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint64",
+        "internalType": "uint64"
+      }
+    ],
+    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -487,32 +506,6 @@ export const managerAbi = [
     "inputs": [
       {
         "name": "beacon",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "EntriesPaused",
-    "inputs": [
-      {
-        "name": "by",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "EntriesUnpaused",
-    "inputs": [
-      {
-        "name": "by",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -629,6 +622,38 @@ export const managerAbi = [
   },
   {
     "type": "event",
+    "name": "UpgradeCancelled",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "UpgradeQueued",
+    "inputs": [
+      {
+        "name": "implementation",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "eta",
+        "type": "uint64",
+        "indexed": false,
+        "internalType": "uint64"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "Upgraded",
     "inputs": [
       {
@@ -642,12 +667,27 @@ export const managerAbi = [
   },
   {
     "type": "error",
+    "name": "BadImplementation",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NotContract",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "SameValue",
+    "name": "UpgradeExpired",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UpgradeNotQueued",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "UpgradeNotReady",
     "inputs": []
   },
   {

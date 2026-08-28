@@ -77,7 +77,8 @@ type CollectionRow struct {
 	Symbol      string `json:"symbol"`
 	Standard    string `json:"standard"` // "erc721" | "erc1155"
 	DeployBlock uint64 `json:"deploy_block"`
-	Verified    bool   `json:"verified"` // standard_verified AND metadata resolved; set by internal/verifier
+	Verified    bool   `json:"verified"`     // standard_verified AND metadata resolved; set by internal/verifier
+	CreatorAddr string `json:"creator_addr"` // ERC-173 owner(), lowercase hex; "" = never resolved
 }
 
 func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard string, deployBlock uint64) error {
@@ -93,9 +94,9 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
 	err := q.reader().QueryRow(ctx,
-		`SELECT address, name, symbol, standard::text, deploy_block, verified
+		`SELECT address, name, symbol, standard::text, deploy_block, verified, COALESCE(creator_addr,'')
 		 FROM collections WHERE address=$1`, address).
-		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified, &c.CreatorAddr)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("collection not found: %s", address)
 	}
@@ -108,9 +109,9 @@ func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, 
 func (q *Q) GetCollectionByAddress(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
 	err := q.reader().QueryRow(ctx,
-		`SELECT address, name, '' AS symbol, ''::text AS standard, 0 AS deploy_block, false AS verified
+		`SELECT address, name, '' AS symbol, ''::text AS standard, 0 AS deploy_block, verified, COALESCE(creator_addr,'')
 		 FROM collections WHERE address=$1`, address).
-		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified)
+		Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified, &c.CreatorAddr)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("collection not found: %s", address)
 	}
@@ -122,7 +123,7 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 		limit = 50
 	}
 	rows, err := q.reader().Query(ctx,
-		`SELECT address, name, symbol, standard::text, deploy_block
+		`SELECT address, name, symbol, standard::text, deploy_block, verified, COALESCE(creator_addr,'')
 		 FROM collections WHERE tracked=true ORDER BY created_at DESC LIMIT $1`, limit)
 	if err != nil {
 		return nil, err
@@ -131,7 +132,7 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 	var out []CollectionRow
 	for rows.Next() {
 		var c CollectionRow
-		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock); err != nil {
+		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified, &c.CreatorAddr); err != nil {
 			return nil, err
 		}
 		out = append(out, c)

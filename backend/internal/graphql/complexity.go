@@ -124,6 +124,7 @@ func ComplexityConfig() ComplexityRoot {
 		Collection: struct {
 			Address     func(childComplexity int) int
 			Auctions    func(childComplexity int, limit *int, status *string) int
+			CreatorAddr func(childComplexity int) int
 			DeployBlock func(childComplexity int) int
 			FloorPrice  func(childComplexity int) int
 			ListedCount func(childComplexity int) int
@@ -137,6 +138,7 @@ func ComplexityConfig() ComplexityRoot {
 		}{
 			Address:     func(c int) int { return costScalar },
 			Auctions:    func(c int, limit *int, _ *string) int { return listCost(c, limit) },
+			CreatorAddr: func(c int) int { return costScalar },
 			DeployBlock: func(c int) int { return costScalar },
 			FloorPrice:  func(c int) int { return costScalar },
 			ListedCount: func(c int) int { return costScalar },

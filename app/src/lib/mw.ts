@@ -55,6 +55,8 @@ export const MW = {
     flow(`Cancel listing ${p.name ?? `#${p.tokenId}`}`, undefined, false, (h) => M.cancel({ nft: addr(p.nft), tokenId: big(p.tokenId), name: p.name }, h)),
   editPrice: (p: { nft: string; tokenId: string; newPriceWei: string; name?: string }) =>
     flow(`Change price ${p.name ?? `#${p.tokenId}`}`, undefined, false, (h) => M.editPrice({ nft: addr(p.nft), tokenId: big(p.tokenId), newPriceWei: big(p.newPriceWei), name: p.name }, h)),
+  batchList: (p: { items: Array<{ nft: string; tokenId: string; priceWei: string; duration: number }>; name?: string }) =>
+    flow(p.name ?? `List ${p.items.length} NFTs`, undefined, true, (h) => M.batchList({ items: p.items.map((i) => ({ coll: addr(i.nft), id: big(i.tokenId), price: big(i.priceWei), duration: i.duration })), name: p.name }, h)),
 
   // ── auctions ───────────────────────────────────────────────────────────
   createAuction: (p: { nft: string; tokenId: string; reserveWei: string; duration: number; minIncBps?: number; std?: 'erc721' | 'erc1155'; amount?: string; name?: string }) =>

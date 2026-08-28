@@ -98,6 +98,7 @@ func TestComplexityConfig_ScalarFields(t *testing.T) {
 		{"Collection.FloorPrice", cfg.Collection.FloorPrice(0)},
 		{"Collection.ListedCount", cfg.Collection.ListedCount(0)},
 		{"Collection.Verified", cfg.Collection.Verified(0)},
+		{"Collection.CreatorAddr", cfg.Collection.CreatorAddr(0)},
 		{"Collection.Volume24h", cfg.Collection.Volume24h(0)},
 		{"Auction.AuctionID", cfg.Auction.AuctionID(0)},
 		{"Auction.Seller", cfg.Auction.Seller(0)},
@@ -291,10 +292,10 @@ func TestComplexityConfig_ListingsPage48(t *testing.T) {
 
 // TestComplexityConfig_Collections10WithStats verifies the cost of a
 // collections page: 10 collections with their stats object. Expected cost:
-//   Per-collection: 9 scalars + 5 (stats object) + 3 (stats fields) = 17
-//   listCost(17, &10) = 10 + 17×10 = 180
+//   Per-collection: 10 scalars + 5 (stats object) + 3 (stats fields) = 18
+//   listCost(18, &10) = 10 + 18×10 = 190
 //
-// Note: the user's ballpark estimate was ~200; actual is 180 with the current
+// Note: the user's ballpark estimate was ~200; actual is 190 with the current
 // model. The delta comes from per-collection fields that each cost only 1.
 // If additional fields (listings, auctions) are included, costs rise accordingly.
 func TestComplexityConfig_Collections10WithStats(t *testing.T) {
@@ -306,6 +307,7 @@ func TestComplexityConfig_Collections10WithStats(t *testing.T) {
 		cfg.Collection.Symbol(0) + // 1
 		cfg.Collection.Standard(0) + // 1
 		cfg.Collection.Verified(0) + // 1
+		cfg.Collection.CreatorAddr(0) + // 1
 		cfg.Collection.DeployBlock(0) + // 1
 		cfg.Collection.FloorPrice(0) + // 1
 		cfg.Collection.ListedCount(0) + // 1
@@ -314,15 +316,15 @@ func TestComplexityConfig_Collections10WithStats(t *testing.T) {
 		cfg.CollectionStats.FloorPriceWei(0) + // 1
 		cfg.CollectionStats.ListedCount(0) + // 1
 		cfg.CollectionStats.Volume24hWei(0) // 1
-	wantPerCollection := 9*costScalar + costObject + 3*costScalar // 9 + 5 + 3 = 17
+	wantPerCollection := 10*costScalar + costObject + 3*costScalar // 10 + 5 + 3 = 18
 	if perCollection != wantPerCollection {
-		t.Errorf("per-collection child cost (9 scalars + stats + 3 stats scalars): want %d, got %d",
+		t.Errorf("per-collection child cost (10 scalars + stats + 3 stats scalars): want %d, got %d",
 			wantPerCollection, perCollection)
 	}
 
 	lim10 := 10
 	total := cfg.Query.Collections(perCollection, &lim10)
-	wantTotal := listCost(17, &lim10) // 10 + 17*10 = 180
+	wantTotal := listCost(18, &lim10) // 10 + 18*10 = 190
 	if total != wantTotal {
 		t.Errorf("10 collections with stats: want %d, got %d", wantTotal, total)
 	}
@@ -332,11 +334,11 @@ func TestComplexityConfig_Collections10WithStats(t *testing.T) {
 // collection detail page: collection query + stats + 48 child listings.
 // Expected cost breakdown:
 //   Query.collection       = 10  (base)
-//   Collection scalars     = 5   (name, symbol, standard, verified, address)
+//   Collection scalars     = 6   (name, symbol, standard, verified, creatorAddr, address)
 //   Collection.stats       = 5   (object)
 //   Stats scalars          = 3   (floorPriceWei, listedCount, volume24hWei)
 //   Collection.listings    = listCost(12, &48) = 586
-//   TOTAL                  = 609
+//   TOTAL                  = 610
 func TestComplexityConfig_CollectionDetailPage(t *testing.T) {
 	cfg := ComplexityConfig()
 
@@ -350,8 +352,9 @@ func TestComplexityConfig_CollectionDetailPage(t *testing.T) {
 		cfg.Collection.Symbol(0) + // 1
 		cfg.Collection.Standard(0) + // 1
 		cfg.Collection.Verified(0) + // 1
+		cfg.Collection.CreatorAddr(0) + // 1
 		cfg.Collection.Address(0) // 1
-	// = 5
+	// = 6
 
 	// Step 3: Collection.stats (object) + its scalar children.
 	statsCost := cfg.Collection.Stats(0) + // 5
@@ -365,8 +368,8 @@ func TestComplexityConfig_CollectionDetailPage(t *testing.T) {
 	listingsCost := cfg.Collection.Listings(perListing, &lim48, nil)
 
 	total := rootCost + collectionScalars + statsCost + listingsCost
-	// 10 + 5 + 8 + 586 = 609
-	want := 10 + 5 + 8 + listCost(12, &lim48)
+	// 10 + 6 + 8 + 586 = 610
+	want := 10 + 6 + 8 + listCost(12, &lim48)
 	if total != want {
 		t.Errorf("collection detail page: want %d, got %d", want, total)
 	}
@@ -464,8 +467,8 @@ func TestComplexityConfig_BelowMaxQueryCost(t *testing.T) {
 		name string
 		cost int
 	}{
-		{"10 collections with stats", 180},
-		{"collection detail page", 609},
+		{"10 collections with stats", 190},
+		{"collection detail page", 610},
 		{"48 listings", 586},
 		{"auction with bids", 26},
 		{"trending 12", 82},

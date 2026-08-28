@@ -123,6 +123,38 @@ func CollectionInfo(ctx context.Context, eth Caller, collection string) (name, s
 	return name, symbol, nil
 }
 
+var ownerSelector = crypto.Keccak256([]byte("owner()"))[:4] // ERC-173, 0x8da5cb5b
+
+// Owner reads the ERC-173 owner() of a contract and returns it as a lowercase
+// 0x-prefixed hex address — the normalization used for every address stored by
+// this backend. Ownable is optional, so a contract without owner() is not an
+// error: it yields "" and the caller keeps whatever it already had. The zero
+// address (ownership renounced or never set) also yields "" — it names nobody
+// and storing it would only masquerade as a real creator.
+//
+// Like CollectionInfo, callers MUST NOT overwrite a stored value with "": an
+// unimplemented getter and a chain blip are indistinguishable here.
+func Owner(ctx context.Context, eth Caller, collection string) (string, error) {
+	to := common.HexToAddress(collection)
+	out, err := eth.CallContract(ctx, ethereum.CallMsg{To: &to, Data: ownerSelector}, nil)
+	if err != nil {
+		if isContractRefusal(err) {
+			return "", nil
+		}
+		return "", err
+	}
+	// An address occupies the last 20 bytes of a 32-byte return word. A short
+	// return is a fallback function answering a getter it does not implement.
+	if len(out) < 32 {
+		return "", nil
+	}
+	addr := common.BytesToAddress(out[12:32])
+	if addr == (common.Address{}) {
+		return "", nil
+	}
+	return strings.ToLower(addr.Hex()), nil
+}
+
 // callString performs a no-argument eth_call and decodes the result as a
 // solidity string. A revert means the contract does not implement the getter,
 // which is a definitive empty answer rather than a failure.

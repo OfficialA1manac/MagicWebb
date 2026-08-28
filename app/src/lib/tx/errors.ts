@@ -3,7 +3,7 @@ import { currentChain } from '../chains';
 
 export type TxErrorKind =
   | 'WalletRequired' | 'WrongChain' | 'UserRejected' | 'InsufficientFunds'
-  | 'ContractRevert' | 'Paused' | 'PriceBelowMin' | 'BidTooLow' | 'AuctionEnded'
+  | 'ContractRevert' | 'PriceBelowMin' | 'BidTooLow' | 'AuctionEnded'
   | 'NotOwner' | 'Expired' | 'OffersNotEligible' | 'NotApproved' | 'RpcError' | 'IndexTimeout' | 'Invalid';
 
 export class TxError extends Error {
@@ -24,7 +24,7 @@ function sym() { try { return currentChain().currency; } catch { return 'FLR'; }
 /** Custom-error name → plain-language copy a non-technical user can act on. */
 function revertCopy(name: string): [TxErrorKind, string] | null {
   const table: Record<string, [TxErrorKind, string]> = {
-    EntriesHalted: ['Paused', 'The marketplace has paused new listings, bids and offers. Existing trades can still be settled and refunds withdrawn.'],
+    NotAuthorized: ['NotOwner', 'Only the seller, the auction winner, or the keeper can settle this auction.'],
     BelowMinPrice: ['PriceBelowMin', `Price is below the minimum of 1 ${sym()}.`],
     BidTooLow: ['BidTooLow', `Your bid must beat the current bid by at least 1 ${sym()}.`],
     BadIncrement: ['BidTooLow', 'Bid increment is too small.'],

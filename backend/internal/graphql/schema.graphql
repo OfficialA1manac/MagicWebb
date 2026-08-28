@@ -11,6 +11,7 @@ type Collection {
   standard:     String!          # "erc721" | "erc1155"
   deployBlock:  Int!
   verified:     Boolean!
+  creatorAddr:  String           # ERC-173 owner(), lowercase hex; null/"" = never resolved
   stats:        CollectionStats!
   floorPrice:   String!          # wei
   volume24h:    String!          # wei

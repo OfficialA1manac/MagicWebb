@@ -206,6 +206,7 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 			Standard:    c.Standard,
 			DeployBlock: int(c.DeployBlock),
 			Verified:    c.Verified,
+			CreatorAddr: c.CreatorAddr,
 		}
 		// GQL-3: Preload stats when proto has them (server.go populates via GetCollectionStats).
 		if c.FloorPriceWei != "" || c.Volume_24HWei != "" || c.ListedCount > 0 {
@@ -229,6 +230,7 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 		Standard:    row.Standard,
 		DeployBlock: int(row.DeployBlock),
 		Verified:    row.Verified,
+		CreatorAddr: row.CreatorAddr,
 	}, nil
 }
 
@@ -269,7 +271,7 @@ func (r *queryResolver) Collections(ctx context.Context, limit *int) ([]*Collect
 		out = append(out, &Collection{
 			Address: rows[i].Address, Name: rows[i].Name, Symbol: rows[i].Symbol,
 			Standard: rows[i].Standard, DeployBlock: int(rows[i].DeployBlock),
-			Verified: rows[i].Verified,
+			Verified: rows[i].Verified, CreatorAddr: rows[i].CreatorAddr,
 		})
 	}
 	return out, nil
@@ -1283,6 +1285,7 @@ func collectionFromProto(c *marketplacev1.Collection) *Collection {
 		Standard:    c.Standard,
 		DeployBlock: int(c.DeployBlock),
 		Verified:    c.Verified,
+		CreatorAddr: c.CreatorAddr,
 	}
 	// GQL-3: Preload stats when the proto has them (server.go populates
 	// these via GetCollectionStatsBatch in ListCollections).

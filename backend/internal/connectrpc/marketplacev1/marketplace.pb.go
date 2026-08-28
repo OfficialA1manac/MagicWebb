@@ -840,6 +840,7 @@ type Collection struct {
 	FloorPriceWei string                 `protobuf:"bytes,7,opt,name=floor_price_wei,json=floorPriceWei,proto3" json:"floor_price_wei,omitempty"`
 	Volume_24HWei string                 `protobuf:"bytes,8,opt,name=volume_24h_wei,json=volume24hWei,proto3" json:"volume_24h_wei,omitempty"`
 	ListedCount   int32                  `protobuf:"varint,9,opt,name=listed_count,json=listedCount,proto3" json:"listed_count,omitempty"`
+	CreatorAddr   string                 `protobuf:"bytes,10,opt,name=creator_addr,json=creatorAddr,proto3" json:"creator_addr,omitempty"` // ERC-173 owner(), lowercase hex; "" = never resolved
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -937,6 +938,13 @@ func (x *Collection) GetListedCount() int32 {
 	return 0
 }
 
+func (x *Collection) GetCreatorAddr() string {
+	if x != nil {
+		return x.CreatorAddr
+	}
+	return ""
+}
+
 type GetCollectionRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // hex-encoded contract address
@@ -992,6 +1000,7 @@ type GetCollectionResponse struct {
 	FloorPriceWei string                 `protobuf:"bytes,7,opt,name=floor_price_wei,json=floorPriceWei,proto3" json:"floor_price_wei,omitempty"`
 	Volume_24HWei string                 `protobuf:"bytes,8,opt,name=volume_24h_wei,json=volume24hWei,proto3" json:"volume_24h_wei,omitempty"`
 	ListedCount   int32                  `protobuf:"varint,9,opt,name=listed_count,json=listedCount,proto3" json:"listed_count,omitempty"`
+	CreatorAddr   string                 `protobuf:"bytes,10,opt,name=creator_addr,json=creatorAddr,proto3" json:"creator_addr,omitempty"` // ERC-173 owner(), lowercase hex; "" = never resolved
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1087,6 +1096,13 @@ func (x *GetCollectionResponse) GetListedCount() int32 {
 		return x.ListedCount
 	}
 	return 0
+}
+
+func (x *GetCollectionResponse) GetCreatorAddr() string {
+	if x != nil {
+		return x.CreatorAddr
+	}
+	return ""
 }
 
 type ListListingsRequest struct {
@@ -2815,7 +2831,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x17ListCollectionsResponse\x12:\n" +
 	"\n" +
 	"collection\x18\x01 \x03(\v2\x1a.marketplace.v1.CollectionR\n" +
-	"collection\"\x9e\x02\n" +
+	"collection\"\xc1\x02\n" +
 	"\n" +
 	"Collection\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
@@ -2826,9 +2842,11 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\bverified\x18\x06 \x01(\bR\bverified\x12&\n" +
 	"\x0ffloor_price_wei\x18\a \x01(\tR\rfloorPriceWei\x12$\n" +
 	"\x0evolume_24h_wei\x18\b \x01(\tR\fvolume24hWei\x12!\n" +
-	"\flisted_count\x18\t \x01(\x05R\vlistedCount\"0\n" +
+	"\flisted_count\x18\t \x01(\x05R\vlistedCount\x12!\n" +
+	"\fcreator_addr\x18\n" +
+	" \x01(\tR\vcreatorAddr\"0\n" +
 	"\x14GetCollectionRequest\x12\x18\n" +
-	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xa9\x02\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\"\xcc\x02\n" +
 	"\x15GetCollectionResponse\x12\x18\n" +
 	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x12\n" +
 	"\x04name\x18\x02 \x01(\tR\x04name\x12\x16\n" +
@@ -2838,7 +2856,9 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\bverified\x18\x06 \x01(\bR\bverified\x12&\n" +
 	"\x0ffloor_price_wei\x18\a \x01(\tR\rfloorPriceWei\x12$\n" +
 	"\x0evolume_24h_wei\x18\b \x01(\tR\fvolume24hWei\x12!\n" +
-	"\flisted_count\x18\t \x01(\x05R\vlistedCount\"\xd7\x01\n" +
+	"\flisted_count\x18\t \x01(\x05R\vlistedCount\x12!\n" +
+	"\fcreator_addr\x18\n" +
+	" \x01(\tR\vcreatorAddr\"\xd7\x01\n" +
 	"\x13ListListingsRequest\x12\x1e\n" +
 	"\n" +
 	"collection\x18\x01 \x01(\tR\n" +
