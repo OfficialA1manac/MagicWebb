@@ -912,11 +912,15 @@ func (q *Q) GetImageByParent(ctx context.Context, parentHash string, width int, 
 // CountBlobsForCollection returns the number of distinct blobs first inserted
 // by this collection. Rows with an empty collection (migration 018 default,
 // legacy rows) are excluded from the count so grandfathered blobs do not
-// consume quota. Used by imagestore.Put() to enforce MaxBlobCountPerCollection.
+// consume quota, and thumbnail variants (parent_hash set) are excluded so one
+// ingested image consumes exactly one quota slot regardless of how many
+// 128/256/512px variants StoreThumbnails derives from it. Used by
+// imagestore.Put() to enforce MaxBlobCountPerCollection.
 func (q *Q) CountBlobsForCollection(ctx context.Context, collection string) (int, error) {
 	var n int
 	err := q.reader().QueryRow(ctx,
-		`SELECT count(*) FROM nft_image_blobs WHERE collection=$1`, collection).Scan(&n)
+		`SELECT count(*) FROM nft_image_blobs
+		  WHERE collection = $1 AND collection <> '' AND parent_hash IS NULL`, collection).Scan(&n)
 	return n, err
 }
 

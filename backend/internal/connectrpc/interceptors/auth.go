@@ -14,8 +14,12 @@ import (
 // auth check for all gRPC handlers, eliminating per-handler JWT verification
 // duplication.
 //
-// When secret is empty, the interceptor is a no-op pass-through (useful for
-// tests and development where auth is handled at the HTTP layer).
+// When secret is empty AND no API key store is configured, the interceptor
+// is a no-op pass-through only while requireAuth is false (useful for tests
+// and development where auth is handled at the HTTP layer). With
+// requireAuth=true and no way to verify callers, every request is rejected
+// (fail closed) — a missing secret is a configuration mistake, not an
+// authorization grant.
 //
 // Currently gRPC handlers are all public-read, so the interceptor extracts
 // the caller address for audit/rate-limiting context but does NOT reject
@@ -35,7 +39,15 @@ func AuthInterceptor(secret string, requireAuth bool) connect.UnaryInterceptorFu
 func AuthInterceptorWithAPIKeys(secret string, requireAuth bool, apiKeyStore auth.APIKeyStore, auditLog auth.AuditLogger) connect.UnaryInterceptorFunc {
 	return func(next connect.UnaryFunc) connect.UnaryFunc {
 		return func(ctx context.Context, req connect.AnyRequest) (connect.AnyResponse, error) {
-			if secret == "" {
+			// No JWT secret and no API key store: nothing can verify a
+			// caller. Fail CLOSED when auth is required — a missing secret
+			// is a configuration mistake, not permission to let every RPC
+			// through unauthenticated.
+			if secret == "" && apiKeyStore == nil {
+				if requireAuth {
+					return nil, connect.NewError(connect.CodeUnauthenticated,
+						errString("authentication not configured"))
+				}
 				return next(ctx, req)
 			}
 
@@ -81,7 +93,10 @@ func AuthInterceptorWithAPIKeys(secret string, requireAuth bool, apiKeyStore aut
 				}
 			}
 
-			if token != "" {
+			// Skip JWT verification entirely when no secret is configured
+			// (API-key-only deployments) — VerifyAccessToken with an empty
+			// secret must never be consulted.
+			if token != "" && secret != "" {
 				addr, err := auth.VerifyAccessToken(token, secret)
 				if err == nil {
 					ctx = context.WithValue(ctx, auth.CallerKey, addr)

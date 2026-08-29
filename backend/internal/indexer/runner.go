@@ -4,6 +4,7 @@ package indexer
 import (
 	"context"
 	cryptoecdsa "crypto/ecdsa"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -89,9 +90,20 @@ type Runner struct {
 
 	// KPR-3: tracks the last nonce sent per keeper address to avoid
 	// re-submitting identical transactions that are already pending.
+	// lastNonceAt records WHEN each nonce was broadcast: if the tx is
+	// dropped or replaced, PendingNonceAt keeps returning the same nonce
+	// forever, so the guard expires after lastNonceTTL to let the keeper
+	// re-submit instead of blocking all sends for the process lifetime.
 	lastNonceMu sync.Mutex
 	lastNonce   map[common.Address]uint64
+	lastNonceAt map[common.Address]time.Time
 }
+
+// lastNonceTTL bounds how long the KPR-3 duplicate-nonce guard suppresses
+// re-submission. Long enough to cover normal mining latency on ~2s-block
+// Flare chains (the guard's dedupe purpose), short enough that a dropped
+// broadcast only pauses keeper sends briefly instead of permanently.
+const lastNonceTTL = 2 * time.Minute
 
 // HeadLagBlocks returns the current head lag in blocks (chain head minus last
 // indexed block), updated atomically every watcher tick. Used by the /healthz
@@ -112,6 +124,7 @@ func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, ser
 		h:            &handlers{q: q, bcast: bcast},
 		serverTimeMs: serverTimeMs,
 		lastNonce:    make(map[common.Address]uint64),
+		lastNonceAt:  make(map[common.Address]time.Time),
 		imgStore:     q, // default to Postgres BYTEA; override via WithImgStore
 	}
 }
@@ -578,6 +591,7 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 	}
 
 	blockTimes := make(map[uint64]uint64)
+	var firstDispatchErr error
 	for _, l := range logs {
 		if _, ok := blockTimes[l.BlockNumber]; !ok {
 			// Per-RPC 2s timeout so a stuck HeaderByNumber can't stall the
@@ -606,8 +620,26 @@ func (r *Runner) processRange(ctx context.Context, from, to uint64, contracts []
 			blockTimes[l.BlockNumber] = h.Time
 		}
 		if err := r.h.dispatch(ctx, l, blockTimes[l.BlockNumber]); err != nil {
+			if errors.Is(err, errMalformedLog) {
+				// Permanent: the log's structure can never change, so a
+				// retry can never succeed. Log-and-skip instead of
+				// aborting, or one malformed log would stall the cursor
+				// (and every other event) forever.
+				log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: dispatch skipped malformed log")
+				continue
+			}
+			// Retriable (DB/RPC): remember the first failure and abort the
+			// range below so SetIndexedBlock does NOT advance the cursor
+			// past an unapplied event. The next tick replays the same
+			// range; handlers are idempotent upserts, so replay is safe.
 			log.Error().Err(err).Str("tx", l.TxHash.Hex()).Msg("watcher: dispatch")
+			if firstDispatchErr == nil {
+				firstDispatchErr = fmt.Errorf("dispatch tx %s: %w", l.TxHash.Hex(), err)
+			}
 		}
+	}
+	if firstDispatchErr != nil {
+		return firstDispatchErr
 	}
 
 	if err := r.processTransfers(ctx, from, to, blockTimes); err != nil {
@@ -740,6 +772,15 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 					return
 				}
 				if err := r.h.dispatch(ctx, l, blockTimes[l.BlockNumber]); err != nil {
+					if errors.Is(err, errMalformedLog) {
+						// Permanent decode failure: retrying the chunk can
+						// never fix an immutable on-chain log. Skip it so
+						// one malformed log does not pin lastBlock and
+						// stall every collection forever.
+						log.Error().Err(err).Str("tx", l.TxHash.Hex()).Str("collection", b.addr.Hex()).
+							Msg("watcher: transfer dispatch skipped malformed log")
+						continue
+					}
 					dispatchErr.Store(err)
 					log.Error().Err(err).Str("tx", l.TxHash.Hex()).Str("collection", b.addr.Hex()).
 						Msg("watcher: transfer dispatch failed")
@@ -1074,8 +1115,9 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	// produces "already known" noise.
 	r.lastNonceMu.Lock()
 	last, seen := r.lastNonce[from]
+	sentAt := r.lastNonceAt[from]
 	r.lastNonceMu.Unlock()
-	if seen && nonce == last {
+	if seen && nonce == last && time.Since(sentAt) < lastNonceTTL {
 		return common.Hash{}, fmt.Errorf("keeper: tx with nonce %d already sent; skipping re-submission", nonce)
 	}
 
@@ -1138,6 +1180,7 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 	// full, gas too low — all retriable).
 	r.lastNonceMu.Lock()
 	r.lastNonce[from] = nonce
+	r.lastNonceAt[from] = time.Now()
 	r.lastNonceMu.Unlock()
 
 	return signed.Hash(), nil
@@ -1217,7 +1260,10 @@ func encodeRefundExpiredOffer(coll common.Address, tokenID *big.Int, bidder comm
 // refunded offer (position already deleted) simply reverts on-chain and is
 // skipped on retry.
 func (r *Runner) runOfferRefundSweeper(ctx context.Context) {
-	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	// Normalize like runAuctionKeeper: config.Load() keeps any 0x prefix,
+	// and crypto.HexToECDSA rejects it — without the trim a 0x-prefixed
+	// KEEPER_KEY silently disables only this sweeper.
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(r.cfg.KeeperKey, "0x"))
 	if err != nil {
 		log.Error().Err(err).Msg("offer refund sweeper: invalid KEEPER_KEY, disabled")
 		return

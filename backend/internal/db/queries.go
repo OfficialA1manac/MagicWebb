@@ -467,15 +467,18 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 	err := q.reader().QueryRow(ctx,
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
-		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
+		        COALESCE(c.verified,false)
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
+		 LEFT JOIN collections c ON c.address=l.collection
 		 WHERE l.collection=$1 AND l.token_id=$2 AND l.active=true
 		   AND NOT l.orphaned AND l.expires_at > now()`,
 		collection, tokenID).
 		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
-			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI)
+			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
+			&r.CollectionVerified)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("listing not found")
 	}

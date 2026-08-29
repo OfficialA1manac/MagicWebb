@@ -11,13 +11,16 @@ package db
 // Rollout is migration-free: rows written before the key was configured stay
 // plaintext and decrypt as-is; every upsert re-encrypts. If WEBHOOK_ENC_KEY
 // is unset, secrets are stored plaintext (previous behavior) and a warning is
-// logged once at first use.
+// logged once at first use. If WEBHOOK_ENC_KEY is SET but malformed, the
+// operator's intent was encryption — that is a hard startup error (surfaced
+// via ValidateWebhookEncKey from Connect), never a silent plaintext downgrade.
 
 import (
 	"crypto/aes"
 	"crypto/cipher"
 	"crypto/rand"
 	"encoding/hex"
+	"fmt"
 	"os"
 	"strings"
 	"sync"
@@ -29,33 +32,45 @@ const webhookSecretPrefix = "enc:v1:"
 
 var (
 	webhookEncOnce sync.Once
-	webhookEncAEAD cipher.AEAD // nil when no key configured
+	webhookEncAEAD cipher.AEAD // nil when no key configured or key invalid
+	webhookEncErr  error       // non-nil when a key was configured but unusable
 )
 
+func initWebhookAEAD() {
+	raw := strings.TrimSpace(os.Getenv("WEBHOOK_ENC_KEY"))
+	if raw == "" {
+		log.Warn().Msg("db: WEBHOOK_ENC_KEY unset — webhook signing secrets stored plaintext at rest")
+		return
+	}
+	key, err := hex.DecodeString(raw)
+	if err != nil || len(key) != 32 {
+		webhookEncErr = fmt.Errorf("db: WEBHOOK_ENC_KEY set but invalid — must be 64 hex chars (32 bytes)")
+		return
+	}
+	block, err := aes.NewCipher(key)
+	if err != nil {
+		webhookEncErr = fmt.Errorf("db: webhook secret cipher init failed: %w", err)
+		return
+	}
+	aead, err := cipher.NewGCM(block)
+	if err != nil {
+		webhookEncErr = fmt.Errorf("db: webhook secret GCM init failed: %w", err)
+		return
+	}
+	webhookEncAEAD = aead
+}
+
+// ValidateWebhookEncKey distinguishes "no key configured" (nil — plaintext
+// storage, previous behavior) from "key configured but invalid" (error).
+// Connect calls this so a malformed WEBHOOK_ENC_KEY fails the deployment at
+// startup instead of silently downgrading secret storage to plaintext.
+func ValidateWebhookEncKey() error {
+	webhookEncOnce.Do(initWebhookAEAD)
+	return webhookEncErr
+}
+
 func webhookAEAD() cipher.AEAD {
-	webhookEncOnce.Do(func() {
-		raw := strings.TrimSpace(os.Getenv("WEBHOOK_ENC_KEY"))
-		if raw == "" {
-			log.Warn().Msg("db: WEBHOOK_ENC_KEY unset — webhook signing secrets stored plaintext at rest")
-			return
-		}
-		key, err := hex.DecodeString(raw)
-		if err != nil || len(key) != 32 {
-			log.Error().Msg("db: WEBHOOK_ENC_KEY must be 64 hex chars (32 bytes) — falling back to plaintext storage")
-			return
-		}
-		block, err := aes.NewCipher(key)
-		if err != nil {
-			log.Error().Err(err).Msg("db: webhook secret cipher init failed — falling back to plaintext storage")
-			return
-		}
-		aead, err := cipher.NewGCM(block)
-		if err != nil {
-			log.Error().Err(err).Msg("db: webhook secret GCM init failed — falling back to plaintext storage")
-			return
-		}
-		webhookEncAEAD = aead
-	})
+	webhookEncOnce.Do(initWebhookAEAD)
 	return webhookEncAEAD
 }
 
@@ -64,6 +79,11 @@ func webhookAEAD() cipher.AEAD {
 func encryptWebhookSecret(secret string) string {
 	aead := webhookAEAD()
 	if aead == nil || secret == "" {
+		if webhookEncErr != nil && secret != "" {
+			// Startup validation should have made this unreachable; log
+			// loudly if a caller bypassed Connect.
+			log.Error().Err(webhookEncErr).Msg("db: invalid WEBHOOK_ENC_KEY — storing webhook secret plaintext")
+		}
 		return secret
 	}
 	nonce := make([]byte, aead.NonceSize())
@@ -86,7 +106,7 @@ func decryptWebhookSecret(stored string) string {
 	}
 	aead := webhookAEAD()
 	if aead == nil {
-		log.Error().Msg("db: encrypted webhook secret found but WEBHOOK_ENC_KEY unset — delivery will be unsigned")
+		log.Error().Msg("db: encrypted webhook secret found but WEBHOOK_ENC_KEY unset or invalid — delivery will be unsigned")
 		return ""
 	}
 	blob, err := hex.DecodeString(strings.TrimPrefix(stored, webhookSecretPrefix))

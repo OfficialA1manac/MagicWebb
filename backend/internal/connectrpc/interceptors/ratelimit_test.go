@@ -121,38 +121,26 @@ func TestClientIPFromRequest_FlyClientIP(t *testing.T) {
 	}
 }
 
-func TestClientIPFromRequest_Forwarded(t *testing.T) {
-	req := newRLRequest(http.Header{"Forwarded": {"for=10.0.0.1:12345;proto=https"}})
-	if ip := clientIPFromRequest(req); ip != "10.0.0.1" {
-		t.Errorf("Forwarded for= = %q, want 10.0.0.1", ip)
+// Client-controlled forwarding headers must be ignored — rotating them
+// previously minted a fresh rate-limit bucket per request (spoof bypass).
+func TestClientIPFromRequest_IgnoresClientControlledHeaders(t *testing.T) {
+	for name, hdr := range map[string]http.Header{
+		"Forwarded":       {"Forwarded": {"for=10.0.0.1:12345;proto=https"}},
+		"ForwardedQuoted": {"Forwarded": {"for=\"192.168.1.1\""}},
+		"XForwardedFor":   {"X-Forwarded-For": {"10.0.0.1, 10.0.0.2, 1.2.3.4"}},
+		"XRealIP":         {"X-Real-Ip": {"5.6.7.8"}},
+	} {
+		req := newRLRequest(hdr)
+		if ip := clientIPFromRequest(req); ip != "" {
+			t.Errorf("%s: spoofable header trusted, got %q, want empty (peer fallback)", name, ip)
+		}
 	}
 }
 
-func TestClientIPFromRequest_ForwardedQuoted(t *testing.T) {
-	req := newRLRequest(http.Header{"Forwarded": {"for=\"192.168.1.1\""}})
-	if ip := clientIPFromRequest(req); ip != "192.168.1.1" {
-		t.Errorf("Forwarded quoted = %q, want 192.168.1.1", ip)
-	}
-}
-
-func TestClientIPFromRequest_XForwardedFor(t *testing.T) {
-	req := newRLRequest(http.Header{"X-Forwarded-For": {"10.0.0.1, 10.0.0.2, 1.2.3.4"}})
-	if ip := clientIPFromRequest(req); ip != "1.2.3.4" {
-		t.Errorf("XFF rightmost = %q, want 1.2.3.4", ip)
-	}
-}
-
-func TestClientIPFromRequest_XForwardedForWithPort(t *testing.T) {
-	req := newRLRequest(http.Header{"X-Forwarded-For": {"1.2.3.4:443"}})
-	if ip := clientIPFromRequest(req); ip != "1.2.3.4" {
-		t.Errorf("XFF with port = %q, want 1.2.3.4", ip)
-	}
-}
-
-func TestClientIPFromRequest_XRealIP(t *testing.T) {
-	req := newRLRequest(http.Header{"X-Real-Ip": {"5.6.7.8"}})
-	if ip := clientIPFromRequest(req); ip != "5.6.7.8" {
-		t.Errorf("X-Real-IP = %q, want 5.6.7.8", ip)
+func TestClientIPFromRequest_RejectsNonIPFlyClientIP(t *testing.T) {
+	req := newRLRequest(http.Header{"Fly-Client-Ip": {"not-an-ip"}})
+	if ip := clientIPFromRequest(req); ip != "" {
+		t.Errorf("non-IP Fly-Client-IP = %q, want empty", ip)
 	}
 }
 
@@ -172,32 +160,6 @@ func TestClientIPFromRequest_Priority(t *testing.T) {
 	})
 	if ip := clientIPFromRequest(req); ip != "1.2.3.4" {
 		t.Errorf("priority: Fly-Client-IP should win, got %q", ip)
-	}
-}
-
-// ── extractRightmostIP ───────────────────────────────────────────────────────────
-
-func TestExtractRightmostIP_Single(t *testing.T) {
-	if ip := extractRightmostIP("1.2.3.4"); ip != "1.2.3.4" {
-		t.Errorf("single = %q, want 1.2.3.4", ip)
-	}
-}
-
-func TestExtractRightmostIP_Multiple(t *testing.T) {
-	if ip := extractRightmostIP("a, b, c"); ip != "c" {
-		t.Errorf("multiple = %q, want c", ip)
-	}
-}
-
-func TestExtractRightmostIP_WithPort(t *testing.T) {
-	if ip := extractRightmostIP("1.2.3.4:8080"); ip != "1.2.3.4" {
-		t.Errorf("with port = %q, want 1.2.3.4", ip)
-	}
-}
-
-func TestExtractRightmostIP_Whitespace(t *testing.T) {
-	if ip := extractRightmostIP(" 10.0.0.1 , 10.0.0.2 "); ip != "10.0.0.2" {
-		t.Errorf("whitespace = %q, want 10.0.0.2", ip)
 	}
 }
 

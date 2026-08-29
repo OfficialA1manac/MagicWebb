@@ -12,6 +12,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 )
 
@@ -77,6 +78,13 @@ func (s *WebhookService) handleCreateWebhook(c *fiber.Ctx) error {
 	}
 	if u, err := url.ParseRequestURI(req.URL); err != nil || u.Host == "" || (u.Scheme != "https" && u.Scheme != "http") {
 		return writeErr(c, fiber.StatusBadRequest, "url must be a valid http:// or https:// URL with a host")
+	}
+	// SSRF gate: reject loopback/private/link-local/metadata targets at
+	// registration for early feedback. Delivery re-checks at dial time and
+	// on every redirect (webhook.userWebhookClient), so a host that later
+	// re-points to a private IP is still blocked.
+	if !media.ProxyAllowedContext(c.Context(), req.URL) {
+		return writeErr(c, fiber.StatusBadRequest, "url must resolve to a public address")
 	}
 
 	// Validate events.

@@ -8,6 +8,10 @@
 set -euo pipefail
 
 RPC="${RPC:-http://127.0.0.1:8545}"
+if [ "$#" -ne 4 ]; then
+  echo "usage: RPC=<url> $0 <MARKETPLACE> <AUCTION_HOUSE> <OFFER_BOOK> <MANAGER>" >&2
+  exit 2
+fi
 MP="$1"; AH="$2"; OB="$3"; MGR="$4"
 
 # ── WARNING: Do not hardcode private keys. ─────────────────────────

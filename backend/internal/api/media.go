@@ -41,6 +41,14 @@ func NewMediaService(q *db.Q, eth chain.Caller, rl *ratelimit.Limiter) *MediaSer
 	return &MediaService{q: q, eth: eth, rl: rl, fetch: media.FetchBytes}
 }
 
+// allowed applies the injected SSRF gate, or the default DNS-aware check.
+func (s *MediaService) allowed(ctx context.Context, uri string) bool {
+	if s.allowCheck != nil {
+		return s.allowCheck(ctx, uri)
+	}
+	return media.ProxyAllowedContext(ctx, uri)
+}
+
 // RegisterRoutes registers all media-related routes.
 // The app-level /api/v1/img/:sha256 route is registered separately in Mount().
 func (s *MediaService) RegisterRoutes(api fiber.Router) {
@@ -114,7 +122,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	// to a private IP — the entry-gate ProxyAllowed check only validated
 	// the hostname syntax, not its resolved addresses, leaving a
 	// DNS-rebinding SSRF window between the entry gate and the fetch.
-	if !media.ProxyAllowedContext(c.Context(), resolved) {
+	if !s.allowed(c.Context(), resolved) {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
 	body, err := media.FetchBytes(c.Context(), raw, tokenID)
@@ -262,7 +270,7 @@ func (s *MediaService) handleRetry(c *fiber.Ctx) error {
 	if strings.HasPrefix(imageURI, "ipfs://") {
 		resolved = media.ResolveURI(imageURI, tokenID)
 	}
-	if strings.HasPrefix(resolved, "http") && !media.ProxyAllowedContext(c.Context(), resolved) {
+	if strings.HasPrefix(resolved, "http") && !s.allowed(c.Context(), resolved) {
 		return writeErr(c, fiber.StatusBadRequest, "image_uri resolves to disallowed address")
 	}
 

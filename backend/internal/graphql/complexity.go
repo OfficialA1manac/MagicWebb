@@ -481,13 +481,24 @@ func ComplexityConfig() ComplexityRoot {
 	}
 }
 
+// maxCostItems caps the item count used for cost calculation. It matches
+// the largest limit the resolvers actually accept (DB queries clamp limits
+// to <=100-200), so a query with limit: 500 is charged for what it can
+// fetch, and nested list fields cannot overflow the int cost product into
+// a negative total that would slip past extension.FixedComplexityLimit.
+const maxCostItems = 200
+
 // listCost computes the cost of a list-type field. The formula accounts
 // for the base cost of the DB query plus the child complexity multiplied
-// by the number of items requested (defaulting to 50 when no limit specified).
+// by the number of items requested (defaulting to 50 when no limit specified,
+// clamped to maxCostItems).
 func listCost(childComplexity int, limit *int) int {
 	n := 50 // default limit
 	if limit != nil && *limit > 0 {
 		n = *limit
+	}
+	if n > maxCostItems {
+		n = maxCostItems
 	}
 	return costListBase + childComplexity*n
 }

@@ -56,6 +56,35 @@ var fetchClient = &http.Client{
 	},
 }
 
+// SSRFSafeClient returns an *http.Client that enforces the same SSRF policy
+// as the media proxy: every dial re-resolves the target and refuses private,
+// loopback, link-local, CGNAT, multicast and reserved addresses, and every
+// redirect is re-validated with ProxyAllowedContext. Exported for packages
+// that deliver to user-supplied URLs (e.g. registered webhooks), where the
+// destination host is attacker-controlled.
+func SSRFSafeClient(timeout time.Duration) *http.Client {
+	return &http.Client{
+		Timeout: timeout,
+		CheckRedirect: func(req *http.Request, via []*http.Request) error {
+			if len(via) >= 5 {
+				return fmt.Errorf("too many redirects")
+			}
+			if !ProxyAllowedContext(req.Context(), req.URL.String()) {
+				return fmt.Errorf("redirect blocked")
+			}
+			return nil
+		},
+		Transport: &http.Transport{
+			DialContext:           safeDialContext,
+			ForceAttemptHTTP2:     true,
+			MaxIdleConns:          10,
+			IdleConnTimeout:       90 * time.Second,
+			TLSHandshakeTimeout:   10 * time.Second,
+			ExpectContinueTimeout: 1 * time.Second,
+		},
+	}
+}
+
 // Resolver is the subset of net.Resolver that safeDialContext uses. It is
 // declared as an interface so tests can swap in a fake and verify the
 // re-validation step without touching real DNS.

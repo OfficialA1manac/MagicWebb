@@ -112,6 +112,9 @@ func newRetryApp(t *testing.T, mock pgxmock.PgxPoolIface, fetch imageRetryFetche
 	})
 	svc := NewMediaService(db.New(mock), nil, nil)
 	svc.fetch = fetch
+	// Inject the SSRF gate so the retry tests don't depend on live DNS
+	// resolution of the seeded https://ipfs.io upstream URIs.
+	svc.allowCheck = func(context.Context, string) bool { return true }
 	app.Post("/api/v1/img/retry", svc.handleRetry)
 	return app
 }
@@ -281,7 +284,7 @@ func TestImageRetryNowSelfHostsAndUpdatesAtomically(t *testing.T) {
 	mock.ExpectQuery(`SELECT 1 FROM nft_image_blobs WHERE sha256=\$1`).
 		WithArgs(expectedSHA).
 		WillReturnError(pgx.ErrNoRows)
-	mock.ExpectQuery(`SELECT count\(\*\) FROM nft_image_blobs WHERE collection=\$1`).
+	mock.ExpectQuery(`SELECT count\(\*\) FROM nft_image_blobs\s+WHERE collection = \$1 AND collection <> '' AND parent_hash IS NULL`).
 		WithArgs("0xc").
 		WillReturnRows(pgxmock.NewRows([]string{"count"}).AddRow(0))
 	mock.ExpectQuery(`SELECT COALESCE\(sum\(byte_length\), 0\) FROM nft_image_blobs`).

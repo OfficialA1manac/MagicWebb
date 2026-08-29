@@ -143,6 +143,13 @@ func (c *ResponseCacheExtension) InterceptOperation(ctx context.Context, next gr
 		return next(ctx)
 	}
 
+	// Never cache user-scoped operations. Their resolvers perform per-caller
+	// authorization (AuthCtxKey), and a cache hit skips the resolvers
+	// entirely — serving one user's data to another for the whole TTL.
+	if hasUserScopedField(oc) {
+		return next(ctx)
+	}
+
 	// Build deterministic cache key from raw query + stable-encoded variables.
 	key := cacheKey(oc)
 
@@ -247,6 +254,24 @@ func (c *ResponseCacheExtension) Stats() map[string]int64 {
 // gqlparser defines ast.Query = "query" (lowercase).
 const astOperationQuery = "query"
 
+// hasUserScopedField reports whether any top-level selection resolves
+// user-scoped data whose resolver performs per-caller authorization.
+// Responses for these fields must never be served from the shared cache.
+func hasUserScopedField(oc *graphql.OperationContext) bool {
+	for _, sel := range oc.Operation.SelectionSet {
+		field, ok := sel.(*ast.Field)
+		if !ok {
+			// Fragments could hide a user-scoped field — be conservative.
+			return true
+		}
+		switch field.Name {
+		case "notifications", "savedSearches":
+			return true
+		}
+	}
+	return false
+}
+
 // getOperationContextSafe wraps graphql.GetOperationContext with a panic
 // recovery. gqlgen's GetOperationContext panics when called outside the
 // middleware chain (e.g., in tests with bare context.Background()). This
@@ -268,6 +293,12 @@ func cacheKey(oc *graphql.OperationContext) string {
 	// Normalize whitespace: strip leading/trailing, collapse internal runs.
 	q := strings.Join(strings.Fields(oc.RawQuery), " ")
 	h.Write([]byte(q))
+	// A document can declare several named operations and the client selects
+	// one with operationName — the selected operation is part of the cache
+	// identity, otherwise one operation's cached response is served for
+	// another. The zero byte separates the query from the name.
+	h.Write([]byte{0})
+	h.Write([]byte(oc.OperationName))
 	if len(oc.Variables) > 0 {
 		// json.Marshal produces stable, sorted output for maps.
 		vars, _ := json.Marshal(oc.Variables)

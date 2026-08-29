@@ -4,7 +4,14 @@
 // SubscribeAuctions, SubscribeActivity, SubscribeNotifications). They are
 // defined as plain Go structs (not protobuf-generated) so we can add
 // streaming without regenerating the entire .pb.go file. The struct tags
-// match the protobuf JSON mapping so Connect-RPC JSON encoding works.
+// use protobuf JSON mapping names (lowerCamelCase, e.g. tokenId) so JSON
+// clients generated from a future .proto definition find the same fields.
+//
+// KNOWN GAP: these messages and their four RPCs are NOT declared in
+// marketplace.proto, so generated clients and reflection consumers cannot
+// discover them. Migrating them into the proto (and regenerating the
+// Connect stubs) is the long-term fix; until then this file is the source
+// of truth for their wire shape.
 package marketplacev1
 
 // ── SubscribeListings ──────────────────────────────────────────────────────────
@@ -12,7 +19,7 @@ package marketplacev1
 // SubscribeListingsRequest filters listing push events.
 type SubscribeListingsRequest struct {
 	Collection string `json:"collection,omitempty"` // optional collection address filter
-	TokenID    string `json:"token_id,omitempty"`   // optional token ID filter
+	TokenID    string `json:"tokenId,omitempty"`    // optional token ID filter
 }
 
 // SubscribeListingsResponse wraps a single listing push event.
@@ -24,7 +31,7 @@ type SubscribeListingsResponse struct {
 
 // SubscribeAuctionsRequest filters auction push events.
 type SubscribeAuctionsRequest struct {
-	AuctionID int64 `json:"auction_id,omitempty"` // optional auction ID filter
+	AuctionID int64 `json:"auctionId,omitempty"` // optional auction ID filter
 }
 
 // SubscribeAuctionsResponse wraps a single auction push event.
@@ -38,7 +45,7 @@ type SubscribeAuctionsResponse struct {
 type SubscribeActivityRequest struct {
 	Address    string `json:"address,omitempty"`    // optional address filter
 	Collection string `json:"collection,omitempty"` // optional collection filter
-	TokenID    string `json:"token_id,omitempty"`   // optional token ID filter
+	TokenID    string `json:"tokenId,omitempty"`    // optional token ID filter
 }
 
 // SubscribeActivityResponse wraps a single activity push event.

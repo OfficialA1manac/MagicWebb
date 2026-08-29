@@ -16,7 +16,10 @@ CREATE TABLE saved_searches (
     created_at  TIMESTAMPTZ   NOT NULL DEFAULT now()
 );
 
-CREATE INDEX saved_searches_user_idx ON saved_searches (user_addr, created_at DESC);
+-- The RLS policies below filter on lower(user_addr), so the index must be on
+-- the same expression or the policy predicate cannot use it as an equality
+-- lookup.
+CREATE INDEX saved_searches_user_idx ON saved_searches (lower(user_addr), created_at DESC);
 
 -- RLS: users may only read/write their own rows.
 ALTER TABLE saved_searches ENABLE ROW LEVEL SECURITY;

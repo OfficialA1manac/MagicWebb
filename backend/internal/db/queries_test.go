@@ -405,7 +405,7 @@ func TestListTokensWithUpstreamImages(t *testing.T) {
 	}
 }
 
-// ListTokensWithUpstreamImages clamps limit to [1,200].
+// ListTokensWithUpstreamImages clamps limit to at most 100 and defaults to 50.
 func TestListTokensWithUpstreamImagesClampsLimit(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()

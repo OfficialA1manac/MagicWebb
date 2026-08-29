@@ -14,7 +14,8 @@ import {Script, console2} from "forge-std/Script.sol";
 ///
 /// Example usage:
 ///   SAFE_OWNERS="0x1111...,0x2222...,0x3333..." SAFE_THRESHOLD=2 \
-///     forge script script/DeploySafe.s.sol --rpc-url <RPC> --broadcast
+///     forge script script/DeploySafe.s.sol --rpc-url <RPC> --broadcast \
+///     --private-key $PRIVATE_KEY
 ///
 /// Required env vars:
 ///   SAFE_OWNERS    -- comma-separated list of owner addresses (min 1)
@@ -121,16 +122,25 @@ contract DeploySafe is Script {
         );
 
         // ── Compute predicted address before broadcast ─────────────────────
-        // create2 address = keccak256(0xff ++ factory ++ salt ++
-        //   keccak256(abi.encodePacked(creationCode, singleton, initializer)))
-        // where creationCode is the factory's proxy creation code.
-        // We use createProxyWithNonce (create2 with a nonce salt).
-        // computeProxyAddress is a pure function that can't revert.
-        // Called internally (not via `this.`) to avoid Foundry v1.7+'s
-        // prohibition on address(this) in script contracts.
-        address predicted = computeProxyAddress(
-            factory, singleton, keccak256(initializer), salt
+        // SafeProxyFactory v1.3.0 (createProxyWithNonce) uses:
+        //   create2Salt   = keccak256(abi.encodePacked(keccak256(initializer), saltNonce))
+        //   initCodeHash  = keccak256(abi.encodePacked(proxyCreationCode,
+        //                     uint256(uint160(singleton))))
+        //   predicted     = keccak256(0xff ++ factory ++ create2Salt ++ initCodeHash)
+        // The creation code is read from the factory itself rather than
+        // hardcoded, so a factory version change cannot skew the prediction.
+        (bool codeOk, bytes memory codeRet) = factory.staticcall(
+            abi.encodeWithSignature("proxyCreationCode()")
         );
+        require(codeOk, "Cannot read proxyCreationCode()");
+        bytes memory proxyCreationCode = abi.decode(codeRet, (bytes));
+        bytes32 create2Salt = keccak256(abi.encodePacked(keccak256(initializer), salt));
+        bytes32 initCodeHash = keccak256(
+            abi.encodePacked(proxyCreationCode, uint256(uint160(singleton)))
+        );
+        address predicted = address(uint160(uint256(keccak256(
+            abi.encodePacked(bytes1(0xff), factory, create2Salt, initCodeHash)
+        ))));
         console2.log("Predicted Safe (create2):", vm.toString(predicted));
 
         // ── Broadcast proxy deployment ─────────────────────────────────────
@@ -148,6 +158,7 @@ contract DeploySafe is Script {
 
         address safe = abi.decode(ret, (address));
         require(safe != address(0), "Safe address cannot be zero");
+        require(safe == predicted, "predicted Safe address mismatch");
 
         vm.stopBroadcast();
 
@@ -256,42 +267,4 @@ contract DeploySafe is Script {
         return trimmed;
     }
 
-    /// @notice Helper to compute a Safe proxy's create2 address.
-    ///         The proxy creation code for Safe v1.3.0 is the canonical
-    ///         minimal proxy pattern. Use `cast compute-address` as an
-    ///         alternative when the singleton address or creation code
-    ///         changes between versions.
-    ///
-    ///         The 0x24 offset in the mstore below is the position of the
-    ///         placeholder address (36 bytes into the creation code, which
-    ///         is the 20-byte singleton address slot in the minimal proxy
-    ///         pattern at bytes 4-24 of the runtime code). The first 4 bytes
-    ///         are PUSH1 opcodes and the deployment prefix; byte 0x24 is
-    ///         where the first address argument to the minimal proxy's
-    ///         constructor sits. If the Safe proxy factory version changes,
-    ///         this offset MUST be verified against the actual creation code.
-    function computeProxyAddress(
-        address factory,
-        address singleton,
-        bytes32 initializerHash,
-        uint256 salt
-    ) internal pure returns (address) {
-        // Standard minimal proxy creation code for Safe v1.3.0 factories.
-        // This is the canonical proxy bytecode used by the SafeProxyFactory.
-        bytes memory proxyCreationCode = hex"608060405273"
-            hex"0000000000000000000000000000000000000000000000000000000000"
-            hex"3d602d80600a3d3981f3363d3d373d3d3d363d73"
-            hex"0000000000000000000000000000000000000000"
-            hex"5af43d82803e903d91602b57fd5bf3";
-        // Replace the singleton address in the creation code at offset 0x24,
-        // the 20-byte singleton address slot in the minimal proxy pattern.
-        assembly {
-            mstore(add(proxyCreationCode, 0x24), singleton)
-        }
-        bytes32 saltHash = keccak256(abi.encodePacked(proxyCreationCode, initializerHash));
-        bytes32 hash = keccak256(
-            abi.encodePacked(bytes1(0xff), factory, salt, saltHash)
-        );
-        return address(uint160(uint256(hash)));
-    }
 }

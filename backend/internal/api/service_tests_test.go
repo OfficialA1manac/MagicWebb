@@ -190,11 +190,11 @@ func TestListingsService_HandleGet_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri",
+			"name", "image_uri", "collection_verified",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png",
+			"Token One", "https://example.com/1.png", false,
 		))
 
 	svc := NewListingsService(db.New(mock), nil)

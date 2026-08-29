@@ -13,7 +13,7 @@ AH="${AUCTION_ADDR:-$(jq -r .contracts.auctionHouse "$DEP")}"
 OB="${OFFERBOOK_ADDR:-$(jq -r .contracts.offerBook "$DEP")}"
 NFT="${NFT_ADDR:-$(jq -r .contracts.nft "$DEP")}"
 
-PK_SELLER=$DEPLOYER_KEY                      # deployer doubles as seller (testnet)
+PK_SELLER="${DEPLOYER_KEY:?DEPLOYER_KEY env required (seller/deployer private key)}"  # deployer doubles as seller (testnet)
 # ── WARNING: Do not hardcode private keys in this file. ────────────
 # Set these via environment variables when running the script.
 # These are Coston2 testnet keys — move to env vars for any real use.
@@ -47,11 +47,11 @@ send "$PK_SELLER" "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 50000000
 send "$PK_C" "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 50000000000000000
 check "token1 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 1 --rpc-url "$RPC")"
 
-echo "== B. auction token2 (reserve 0.05, ends +480s): C 0.05 -> D 0.06 -> C +0.02 =="
+echo "== B. auction token2 (reserve 0.05, ends +180s): C 0.05 -> D 0.06 -> C +0.02 =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 send "$PK_SELLER" "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 50000000000000000 180 500 0
 AID=$(cast call "$AH" "nextAuctionId()(uint256)" --rpc-url "$RPC")
-echo "auction id=$AID ends $(date -d @180 2>/dev/null || echo +480s)"
+echo "auction id=$AID ends $(date -d "@$((NOW + 180))" 2>/dev/null || echo "+180s")"
 send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 50000000000000000
 send "$PK_D" "$AH" "bid(uint256)" "$AID" --value 60000000000000000
 send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 20000000000000000
@@ -69,7 +69,7 @@ send "$PK_D" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 50000000
 D_AFTER_OFFER=$(bal "$D")
 
 echo "== E. WAIT: backend keeper must settle auction $AID + refund loser D + refund expired offer =="
-echo "auction ends in ~8min; polling chain for settled flag + D refunds (no manual settle calls)..."
+echo "auction ends in ~3min (plus anti-snipe extensions); polling chain for settled flag + D refunds (no manual settle calls)..."
 DEADLINE=$(( $(date +%s) + 900 ))
 SETTLED=""
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do

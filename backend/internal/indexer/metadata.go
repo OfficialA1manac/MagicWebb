@@ -48,7 +48,15 @@ func (r *Runner) runMetadataWorker(ctx context.Context) {
 	// a slot before calling fetchOne and releases it in a defer. This
 	// prevents a burst of missing metadata across many tokens from hammering
 	// RPC endpoints and IPFS gateways simultaneously.
-	sem := make(chan struct{}, r.cfg.MetadataConcurrency)
+	// Clamp to >= 1: a zero-capacity channel would make the acquire below
+	// block forever (the only receive is gated behind the acquire itself),
+	// silently hanging the worker. config.Load() clamps the env var, but a
+	// directly-constructed Config (tests, future profiles) may leave it 0.
+	conc := r.cfg.MetadataConcurrency
+	if conc < 1 {
+		conc = 1
+	}
+	sem := make(chan struct{}, conc)
 
 	for {
 		select {
@@ -70,6 +78,16 @@ func (r *Runner) runMetadataWorker(ctx context.Context) {
 				}
 				go func() {
 					defer func() { <-sem }()
+					// Recover so one malformed metadata response cannot
+					// crash the process: supervise() only guards the
+					// runMetadataWorker goroutine, not this child.
+					defer func() {
+						if rec := recover(); rec != nil {
+							log.Error().Interface("panic", rec).
+								Str("coll", t.Collection).Str("token", t.TokenID).
+								Msg("metadata: fetch panicked")
+						}
+					}()
 					if err := r.fetchOne(ctx, t); err != nil {
 						// Warn (not Debug) so a sustained gateway outage surfaces
 						// in default prod-log scraping, not just debug mode.
@@ -348,13 +366,17 @@ func decodeABIString(b []byte) string {
 	if len(b) < 64 {
 		return ""
 	}
+	// b comes from an arbitrary contract's eth_call return data, and
+	// big.Int.Int64() truncates values wider than 63 bits — off and n can
+	// therefore be negative or huge. Reject negatives FIRST, and phrase the
+	// upper bounds as subtractions so they cannot overflow int64.
 	off := new(big.Int).SetBytes(b[0:32]).Int64()
-	if off+32 > int64(len(b)) {
+	if off < 0 || off > int64(len(b))-32 {
 		return ""
 	}
 	n := new(big.Int).SetBytes(b[off : off+32]).Int64()
 	start := off + 32
-	if start+n > int64(len(b)) || n < 0 {
+	if n < 0 || n > int64(len(b))-start {
 		return ""
 	}
 	return string(b[start : start+n])

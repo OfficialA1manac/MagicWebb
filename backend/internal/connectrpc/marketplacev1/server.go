@@ -50,15 +50,16 @@ func (s *Server) GetListing(ctx context.Context, req *connect.Request[GetListing
 	}
 
 	res := &GetListingResponse{
-		Collection: row.Collection,
-		TokenId:    row.TokenID,
-		Seller:     row.Seller,
-		PriceWei:   row.PriceWei,
-		Amount:     row.Amount,
-		Standard:   row.Standard,
-		TxHash:     row.TxHash,
-		Name:       row.Name,
-		ImageUri:   row.ImageURI,
+		Collection:         row.Collection,
+		TokenId:            row.TokenID,
+		Seller:             row.Seller,
+		PriceWei:           row.PriceWei,
+		Amount:             row.Amount,
+		Standard:           row.Standard,
+		TxHash:             row.TxHash,
+		Name:               row.Name,
+		ImageUri:           row.ImageURI,
+		CollectionVerified: row.CollectionVerified,
 	}
 	if !row.ExpiresAt.IsZero() {
 		res.ExpiresAtMs = row.ExpiresAt.UnixMilli()
@@ -210,11 +211,14 @@ func (s *Server) ListCollections(ctx context.Context, req *connect.Request[ListC
 	cachedStats := make(map[string]db.CollectionStats, len(addrs))
 	var uncached []string
 	for _, addr := range addrs {
-		if cached, ok := dataloader.StatsCache.Get(addr); ok {
-			cachedStats[addr] = cached.(db.CollectionStats)
-		} else {
-			uncached = append(uncached, addr)
+		// Checked assertion: a value of another type is a cache miss, not
+		// a panic (the cache stores `any`).
+		cached, ok := dataloader.StatsCache.Get(addr)
+		if stats, isStats := cached.(db.CollectionStats); ok && isStats {
+			cachedStats[addr] = stats
+			continue
 		}
+		uncached = append(uncached, addr)
 	}
 
 	// Batch-fill stats: one round-trip for floor + listed count + volume.
@@ -271,11 +275,12 @@ func (s *Server) GetCollection(ctx context.Context, req *connect.Request[GetColl
 
 	// CACHE-3: Check the process-wide TTL cache before hitting the DB.
 	// Single-collection stats queries also benefit from the shared cache.
-	if cached, ok := dataloader.StatsCache.Get(address); ok {
-		s := cached.(db.CollectionStats)
-		res.FloorPriceWei = s.FloorPriceWei
-		res.Volume_24HWei = s.Volume24hWei
-		res.ListedCount = int32(s.ListedCount)
+	// Checked assertion: a value of another type is a cache miss, not a panic.
+	cached, ok := dataloader.StatsCache.Get(address)
+	if cs, isStats := cached.(db.CollectionStats); ok && isStats {
+		res.FloorPriceWei = cs.FloorPriceWei
+		res.Volume_24HWei = cs.Volume24hWei
+		res.ListedCount = int32(cs.ListedCount)
 	} else {
 		// Best-effort stats via existing consolidated helper (3 sub-queries, one shot).
 		if stats, err := s.q.GetCollectionStats(ctx, address); err == nil {

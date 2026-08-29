@@ -23,6 +23,8 @@ import (
 	"net/smtp"
 	"strings"
 	"time"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/media"
 )
 
 // DefaultRetryConfig is the standard exponential backoff for webhook sends.
@@ -417,14 +419,27 @@ func stripHTML(html string) string {
 // per-config secrets MUST use sendJSONWithSecret instead of the package-level
 // HMACSecret variable which is NOT goroutine-safe.
 func sendJSON(ctx context.Context, url string, v any) error {
-	return sendJSONWithSecret(ctx, url, v, HMACSecret)
+	return sendJSONWithSecret(ctx, operatorClient, url, v, HMACSecret)
 }
+
+// operatorClient delivers to operator-configured destinations (Discord,
+// Slack, Alertmanager URLs from env). These are trusted deploy-time config
+// and may legitimately point at private-network services, so no SSRF gate.
+var operatorClient = &http.Client{Timeout: 10 * time.Second}
+
+// userWebhookClient delivers to user-registered webhook URLs (WH-3). The
+// destination is attacker-controlled, so every dial re-resolves and vets the
+// target address, and every redirect is re-validated — a registered public
+// hostname cannot be re-pointed (DNS rebinding) or redirected at internal
+// services or cloud metadata endpoints.
+var userWebhookClient = media.SSRFSafeClient(10 * time.Second)
 
 // sendJSONWithSecret is the goroutine-safe variant that accepts an explicit
 // HMAC secret. When hmacSecret is non-empty, the payload is signed with
 // HMAC-SHA256 and the signature is attached as X-Webhook-Signature.
-// Used by the webhook dispatcher for per-config secrets.
-func sendJSONWithSecret(ctx context.Context, url string, v any, hmacSecret string) error {
+// Used by the webhook dispatcher for per-config secrets (which must pass
+// userWebhookClient — see deliver).
+func sendJSONWithSecret(ctx context.Context, client *http.Client, url string, v any, hmacSecret string) error {
 	body, err := json.Marshal(v)
 	if err != nil {
 		return fmt.Errorf("webhook marshal: %w", err)
@@ -455,7 +470,7 @@ func sendJSONWithSecret(ctx context.Context, url string, v any, hmacSecret strin
 			}
 		}
 
-		lastErr = sendSingle(ctx, url, body, signature)
+		lastErr = sendSingle(ctx, client, url, body, signature)
 		if lastErr == nil {
 			return nil
 		}
@@ -470,8 +485,9 @@ func sendJSONWithSecret(ctx context.Context, url string, v any, hmacSecret strin
 	return fmt.Errorf("webhook: all %d attempts failed: %w", DefaultRetryConfig.MaxAttempts, lastErr)
 }
 
-// sendSingle performs a single HTTP POST without retries.
-func sendSingle(ctx context.Context, url string, body []byte, signature string) error {
+// sendSingle performs a single HTTP POST without retries using the given
+// client (operatorClient or the SSRF-gated userWebhookClient).
+func sendSingle(ctx context.Context, client *http.Client, url string, body []byte, signature string) error {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return fmt.Errorf("webhook request: %w", err)
@@ -481,7 +497,6 @@ func sendSingle(ctx context.Context, url string, body []byte, signature string) 
 		req.Header.Set("X-Webhook-Signature", signature)
 	}
 
-	client := &http.Client{Timeout: 10 * time.Second}
 	resp, err := client.Do(req)
 	if err != nil {
 		return &retryableError{err}

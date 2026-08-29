@@ -133,6 +133,8 @@ func (s *Server) SubscribeAuctions(ctx context.Context, req *connect.Request[Sub
 }
 
 // SubscribeActivity streams activity events to clients.
+// Filters by optional address (matches the event's from/to/address field),
+// collection, and token_id.
 func (s *Server) SubscribeActivity(ctx context.Context, req *connect.Request[SubscribeActivityRequest], stream *connect.ServerStream[SubscribeActivityResponse]) error {
 	if s.bcast == nil {
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("broadcaster not available"))
@@ -143,6 +145,10 @@ func (s *Server) SubscribeActivity(ctx context.Context, req *connect.Request[Sub
 		return connect.NewError(connect.CodeResourceExhausted, fmt.Errorf("too many subscribers"))
 	}
 	defer cancel()
+
+	filterAddress := strings.ToLower(req.Msg.GetAddress())
+	filterCollection := strings.ToLower(req.Msg.GetCollection())
+	filterTokenID := req.Msg.GetTokenId()
 
 	for {
 		select {
@@ -163,6 +169,29 @@ func (s *Server) SubscribeActivity(ctx context.Context, req *connect.Request[Sub
 			var row db.ActivityRow
 			if err := json.Unmarshal(data, &row); err != nil {
 				continue
+			}
+
+			// Apply request filters.
+			if filterCollection != "" && !strings.EqualFold(row.Collection, filterCollection) {
+				continue
+			}
+			if filterTokenID != "" && row.TokenID != filterTokenID {
+				continue
+			}
+			if filterAddress != "" {
+				// Activity rows carry no address, but typed sse.ActivityEvent
+				// payloads carry from/to (and some payloads an address field).
+				var meta struct {
+					From    string `json:"from"`
+					To      string `json:"to"`
+					Address string `json:"address"`
+				}
+				_ = json.Unmarshal(data, &meta)
+				if !strings.EqualFold(meta.From, filterAddress) &&
+					!strings.EqualFold(meta.To, filterAddress) &&
+					!strings.EqualFold(meta.Address, filterAddress) {
+					continue
+				}
 			}
 
 			event := &ActivityEvent{
@@ -272,6 +301,9 @@ func auctionRowToProto(row *db.AuctionRow) *Auction {
 		CreateTx:        row.CreateTx,
 		Name:            row.Name,
 		ImageUri:        row.ImageURI,
+		// Mirror listingRowToProto: streamed auctions must report the same
+		// verified flag as ListAuctions.
+		CollectionVerified: row.CollectionVerified,
 	}
 	if !row.StartsAt.IsZero() {
 		a.StartsAtMs = row.StartsAt.UnixMilli()
@@ -372,7 +404,7 @@ func NewSubscribeListingsHandler(svc *Server, opts ...connect.HandlerOption) (st
 	return ProcedureSubscribeListings, connect.NewServerStreamHandler(
 		ProcedureSubscribeListings,
 		svc.SubscribeListings,
-		append(opts, connect.WithHandlerOptions(opts...))...,
+		opts...,
 	)
 }
 
@@ -381,7 +413,7 @@ func NewSubscribeAuctionsHandler(svc *Server, opts ...connect.HandlerOption) (st
 	return ProcedureSubscribeAuctions, connect.NewServerStreamHandler(
 		ProcedureSubscribeAuctions,
 		svc.SubscribeAuctions,
-		append(opts, connect.WithHandlerOptions(opts...))...,
+		opts...,
 	)
 }
 
@@ -390,7 +422,7 @@ func NewSubscribeActivityHandler(svc *Server, opts ...connect.HandlerOption) (st
 	return ProcedureSubscribeActivity, connect.NewServerStreamHandler(
 		ProcedureSubscribeActivity,
 		svc.SubscribeActivity,
-		append(opts, connect.WithHandlerOptions(opts...))...,
+		opts...,
 	)
 }
 
@@ -399,7 +431,7 @@ func NewSubscribeNotificationsHandler(svc *Server, opts ...connect.HandlerOption
 	return ProcedureSubscribeNotifications, connect.NewServerStreamHandler(
 		ProcedureSubscribeNotifications,
 		svc.SubscribeNotifications,
-		append(opts, connect.WithHandlerOptions(opts...))...,
+		opts...,
 	)
 }
 

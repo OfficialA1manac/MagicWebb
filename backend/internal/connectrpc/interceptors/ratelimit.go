@@ -86,60 +86,28 @@ func TieredRateLimitInterceptor(rl *ratelimit.Limiter, tiers map[string]RateLimi
 	}
 }
 
-// clientIPFromRequest extracts the client IP from a Connect-RPC request's
-// HTTP headers using the same trust hierarchy as the Fiber rate limiter.
+// clientIPFromRequest extracts the client IP from a Connect-RPC request.
+// Trust hierarchy mirrors api.ClientIP (audit `clientIpSpoof` P1):
+//
+//  1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header; the edge
+//     strips any inbound copy, so clients cannot forge it.
+//  2. The transport peer address — derived from the connection itself,
+//     not from headers.
+//
+// Forwarded / X-Forwarded-For / X-Real-IP are attacker-controlled input:
+// rotating their values minted a fresh rate-limit bucket per request,
+// reversing the DoS protection, so they are deliberately NOT consulted.
 func clientIPFromRequest(req connect.AnyRequest) string {
-	hdr := req.Header()
-
-	// 1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header (unspoofable).
-	if v := strings.TrimSpace(hdr.Get("Fly-Client-IP")); v != "" {
+	if v := strings.TrimSpace(req.Header().Get("Fly-Client-IP")); v != "" && net.ParseIP(v) != nil {
 		return v
 	}
-
-	// 2. Forwarded header (RFC 7239).
-	if v := strings.TrimSpace(hdr.Get("Forwarded")); v != "" {
-		for _, part := range strings.Split(v, ";") {
-			p := strings.TrimSpace(part)
-			if !strings.HasPrefix(strings.ToLower(p), "for=") {
-				continue
-			}
-			id := strings.Trim(p[4:], " \"")
-			if host, _, err := net.SplitHostPort(id); err == nil {
-				id = host
-			}
-			if id != "" {
-				return id
-			}
+	if addr := req.Peer().Addr; addr != "" {
+		if host, _, err := net.SplitHostPort(addr); err == nil {
+			return host
 		}
+		return addr
 	}
-
-	// 3. X-Forwarded-For — rightmost entry (most recent trusted proxy).
-	if v := strings.TrimSpace(hdr.Get("X-Forwarded-For")); v != "" {
-		return extractRightmostIP(v)
-	}
-
-	// 4. X-Real-IP — set by nginx and similar reverse proxies.
-	if v := strings.TrimSpace(hdr.Get("X-Real-IP")); v != "" {
-		return v
-	}
-
 	return ""
-}
-
-// extractRightmostIP returns the rightmost IP from a comma-separated
-// X-Forwarded-For header (the most recent proxy hop, which is the one we
-// trust when behind a known proxy).
-func extractRightmostIP(xff string) string {
-	parts := strings.Split(xff, ",")
-	if len(parts) == 0 {
-		return ""
-	}
-	last := strings.TrimSpace(parts[len(parts)-1])
-	// Strip port if present.
-	if host, _, err := net.SplitHostPort(last); err == nil {
-		return host
-	}
-	return last
 }
 
 func errString(msg string) error {
