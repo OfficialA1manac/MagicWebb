@@ -101,15 +101,38 @@ type blockscoutNFTItem struct {
 	ID       string `json:"id"`
 	Value    string `json:"value"`
 	ImageURL string `json:"image_url"`
-	Metadata struct {
+	// Newer Blockscout puts the standard on the item as token_type.
+	TokenType string `json:"token_type"`
+	Metadata  struct {
 		Name  string `json:"name"`
 		Image string `json:"image"`
 	} `json:"metadata"`
 	Token struct {
-		Address string `json:"address"`
-		Name    string `json:"name"`
-		Type    string `json:"type"` // "ERC-721" | "ERC-1155"
+		// Older Blockscout: "address". Newer (Flare/Songbird explorers):
+		// "address_hash". Accept both — the rename silently emptied every
+		// merged item's collection and dropped the whole explorer inventory.
+		Address     string `json:"address"`
+		AddressHash string `json:"address_hash"`
+		Name        string `json:"name"`
+		Type        string `json:"type"` // "ERC-721" | "ERC-1155"
 	} `json:"token"`
+}
+
+// collectionAddr returns the token's contract address across Blockscout
+// schema versions.
+func (it blockscoutNFTItem) collectionAddr() string {
+	if it.Token.Address != "" {
+		return it.Token.Address
+	}
+	return it.Token.AddressHash
+}
+
+// standard returns the token standard across Blockscout schema versions.
+func (it blockscoutNFTItem) standard() string {
+	if it.Token.Type != "" {
+		return it.Token.Type
+	}
+	return it.TokenType
 }
 
 // blockscoutNFTPage is the subset of Blockscout's paginated response the
@@ -188,13 +211,13 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 	}
 	out := dbRows
 	for _, it := range items {
-		coll := strings.ToLower(it.Token.Address)
+		coll := strings.ToLower(it.collectionAddr())
 		if coll == "" || it.ID == "" || seen[coll+"/"+it.ID] {
 			continue
 		}
 		seen[coll+"/"+it.ID] = true
 		std := "erc721"
-		if strings.EqualFold(it.Token.Type, "ERC-1155") {
+		if strings.EqualFold(it.standard(), "ERC-1155") {
 			std = "erc1155"
 		}
 		units := it.Value

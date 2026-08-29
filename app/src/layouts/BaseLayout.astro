@@ -431,6 +431,13 @@ const networks = KNOWN_NETWORKS.map((n) => {
         // even though the origins are live. Rebuilding is idempotent.
         var runtimeUrls=String(window.MW_NETWORK_URLS||'').trim();
         if(cur&&Number(cur.getAttribute('data-chain-id'))===rid&&!runtimeUrls)return;
+        // Astro scopes the menu's CSS via a data-astro-cid-* attribute on each
+        // element; innerHTML-generated items must carry it or they render
+        // unstyled (the run-together text bug).
+        var cid='';
+        for(var ai=0;ai<menu.attributes.length;ai++){
+          if(menu.attributes[ai].name.indexOf('data-astro-cid-')===0){cid=' '+menu.attributes[ai].name;break;}
+        }
         var names={114:'Coston2',19:'Songbird',14:'Flare'};
         var urls={};
         String(window.MW_NETWORK_URLS||'').split(',').forEach(function(p){
@@ -442,9 +449,9 @@ const networks = KNOWN_NETWORKS.map((n) => {
         var html='';
         [114,19,14].forEach(function(id){
           var nm=names[id];
-          if(id===rid)html+='<span class="net-item net-item-current" data-chain-id="'+id+'">'+nm+'<span class="net-tag">Current</span></span>';
-          else if(urls[id])html+='<a href="'+escA(urls[id])+'" class="net-item" data-chain-id="'+id+'">'+nm+'<span class="net-tag">Chain '+id+'</span></a>';
-          else html+='<span class="net-item net-item-off" data-chain-id="'+id+'" title="No contracts are deployed on '+nm+' yet">'+nm+'<span class="net-tag">Unavailable</span></span>';
+          if(id===rid)html+='<span class="net-item net-item-current"'+cid+' data-chain-id="'+id+'">'+nm+'<span class="net-tag"'+cid+'>Current</span></span>';
+          else if(urls[id])html+='<a href="'+escA(urls[id])+'" class="net-item"'+cid+' data-chain-id="'+id+'">'+nm+'<span class="net-tag"'+cid+'>Chain '+id+'</span></a>';
+          else html+='<span class="net-item net-item-off"'+cid+' data-chain-id="'+id+'" title="No contracts are deployed on '+nm+' yet">'+nm+'<span class="net-tag"'+cid+'>Unavailable</span></span>';
         });
         menu.innerHTML=html;
         var label=document.getElementById('net-current-name');
