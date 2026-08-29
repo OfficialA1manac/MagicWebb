@@ -8,6 +8,7 @@ import {BadImplementation, UpgradeNotQueued, UpgradeNotReady, UpgradeExpired} fr
 
 error ZeroAddr();
 error NotContract();
+error NotKeeperOrAdmin();
 
 /// @title MarketplaceManager
 /// @notice Role registry and future-module anchor for the marketplace contract set.
@@ -173,6 +174,36 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
         if (block.timestamp > uint256(upgradeEta) + MAX_UPGRADE_WINDOW) revert UpgradeExpired();
         pendingImplementation = address(0);
         upgradeEta = 0;
+    }
+
+    // ── Keeper fleet (self-replenishing — survives full immutability) ──────
+
+    /// @notice Enroll a keeper. Callable by the admin OR any current keeper,
+    ///         so the fleet can rotate/replace its own keys forever — even
+    ///         after DEFAULT_ADMIN_ROLE is renounced and the system is fully
+    ///         immutable, instant settlement never dies with a lost key.
+    /// @dev A rogue keeper key can only enroll more keepers. Keeper power is
+    ///      strictly benign: settle auctions to the CORRECT parties and sweep
+    ///      refunds to their OWNERS. It cannot move, redirect, or block funds,
+    ///      so self-extension is safe by construction.
+    function addKeeper(address k) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && !hasRole(KEEPER_ROLE, msg.sender)) {
+            revert NotKeeperOrAdmin();
+        }
+        if (k == address(0)) revert ZeroAddr();
+        _grantRole(KEEPER_ROLE, k);
+        emit AuditLog("ADD_KEEPER", msg.sender, k, 0);
+    }
+
+    /// @notice Retire a keeper. The admin (while one exists) may prune any
+    ///         key; a keeper may retire ONLY ITSELF — one compromised key can
+    ///         therefore never evict the honest fleet.
+    function removeKeeper(address k) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && msg.sender != k) {
+            revert NotKeeperOrAdmin();
+        }
+        _revokeRole(KEEPER_ROLE, k);
+        emit AuditLog("REMOVE_KEEPER", msg.sender, k, 0);
     }
 
     // ── Role audit shim ───────────────────────────────────────────────────────

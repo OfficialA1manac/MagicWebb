@@ -3,13 +3,13 @@
   "network": "coston2",
   "chainId": 114,
   "status": "deployed",
-  "deployedAt": "2026-08-23",
-  "indexFromBlock": 34406504,
+  "deployedAt": "2026-08-28",
+  "indexFromBlock": 34619862,
   "contracts": {
-    "marketplace": "0x49B3dA6A0D5C31994c3A52d41416c6BC0A6200F3",
-    "auctionHouse": "0xfD39174B8FD906249257d3b28fBed9DB22A9136e",
-    "offerBook": "0x17564fd5BB2eb8c40DAc24684f4988237CC88eeF",
-    "marketplaceManager": "0xf070bD812de875EdD29D05F1932340BFAFB1057F",
+    "marketplace": "0x74ABb995ffcF8f1F8CC5170d19dDa3705a2640A9",
+    "auctionHouse": "0x102849c42AeFa93D52757A19f57398125242fD02",
+    "offerBook": "0xf58a8ff08FD33AF4969617dD97495A0ab770B4Af",
+    "marketplaceManager": "0xBf55A1D9E5c87A6A30414503eB84974971cbBe2F",
     "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
   },
   "trackedCollections": [
@@ -45,7 +45,7 @@
       "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
     },
     {
-      "note": "2026-08-17 set — pre duration-fix ABI, replaced 2026-08-23",
+      "note": "2026-08-17 set \u00e2\u20ac\u201d pre duration-fix ABI, replaced 2026-08-23",
       "marketplace": "0x34b53209eC694Ce243e28606233CFc72D0673436",
       "auctionHouse": "0x93627Ca0032bc1B8eE0D9134a7c9c4f74d97d04C",
       "offerBook": "0x918bF8748c9950Dc6aDbB2796dE6DfFaf3f44d5E",
@@ -71,6 +71,28 @@
       "marketplace": "0xf9355C77F4Dba5CecA217ceB4D762A33aB7EFE37",
       "auctionHouse": "0x9452518e29DEA185dA392e16be03982c1511753C",
       "offerBook": "0x0C6EdB481BC73B4b817A2E7235B309276D703906"
+    },
+    {
+      "deployedAt": "2026-08-23",
+      "indexFromBlock": 34406504,
+      "contracts": {
+        "marketplace": "0x49B3dA6A0D5C31994c3A52d41416c6BC0A6200F3",
+        "auctionHouse": "0xfD39174B8FD906249257d3b28fBed9DB22A9136e",
+        "offerBook": "0x17564fd5BB2eb8c40DAc24684f4988237CC88eeF",
+        "marketplaceManager": "0xf070bD812de875EdD29D05F1932340BFAFB1057F"
+      },
+      "note": "v2 rules set superseded by v3 (15 durations, keeper/seller/winner-only settle, unpausable, manager timelock)"
+    },
+    {
+      "deployedAt": "2026-08-28",
+      "indexFromBlock": 34619597,
+      "contracts": {
+        "marketplace": "0xa85a798a5cFe104FF6409e649Ec4937eD6b947DC",
+        "auctionHouse": "0xCb1D58454A1ADDa5257B34B5B492bF6859f09250",
+        "offerBook": "0x1c3D20F2EE3e61F7c0E433ada4C39F3e7AEF8B78",
+        "marketplaceManager": "0x71be8838d2952e02015f594506Eeee23B7Ec90cc"
+      },
+      "note": "v3.0 superseded same-day by v3.1: manager gains self-replenishing keeper fleet (addKeeper/removeKeeper) so instant settlement survives full admin renunciation"
     }
   ]
 }

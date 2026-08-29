@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {MarketplaceManager, ZeroAddr} from "../src/MarketplaceManager.sol";
+import {MarketplaceManager, ZeroAddr, NotKeeperOrAdmin} from "../src/MarketplaceManager.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
@@ -70,6 +70,62 @@ contract MarketplaceManagerTest is Test, TestHelpers {
 
         (address s, , ,,) = freeMp.listings(address(nft), tid, address(0xBEEF));
         assertEq(s, address(0xBEEF));
+    }
+
+    // ── Keeper fleet: self-replenishing, survives admin renounce ────────
+
+    function test_keeperFleet_adminEnrolls() public {
+        vm.prank(admin);
+        mgr.addKeeper(address(0xFEE1));
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xFEE1)));
+        vm.prank(admin);
+        mgr.removeKeeper(address(0xFEE1));
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xFEE1)));
+    }
+
+    function test_keeperFleet_keeperEnrollsKeeper_afterAdminRenounce() public {
+        address k1 = address(0xAA1);
+        address k2 = address(0xAA2);
+        vm.prank(admin);
+        mgr.addKeeper(k1);
+        // Full immutability: the admin renounces itself. (Cache the role first:
+        // vm.prank binds to the NEXT call, which a getter would consume.)
+        bytes32 adminRole = mgr.DEFAULT_ADMIN_ROLE();
+        vm.prank(admin);
+        mgr.renounceRole(adminRole, admin);
+        // A live keeper can still rotate in a replacement key forever.
+        vm.prank(k1);
+        mgr.addKeeper(k2);
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), k2));
+        // And retire itself.
+        vm.prank(k1);
+        mgr.removeKeeper(k1);
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), k1));
+    }
+
+    function test_keeperFleet_strangerCannotEnroll() public {
+        vm.prank(address(0x999));
+        vm.expectRevert(NotKeeperOrAdmin.selector);
+        mgr.addKeeper(address(0x999));
+    }
+
+    function test_keeperFleet_keeperCannotEvictOthers() public {
+        address k1 = address(0xAA1);
+        address k2 = address(0xAA2);
+        vm.startPrank(admin);
+        mgr.addKeeper(k1);
+        mgr.addKeeper(k2);
+        vm.stopPrank();
+        vm.prank(k1);
+        vm.expectRevert(NotKeeperOrAdmin.selector);
+        mgr.removeKeeper(k2);
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), k2));
+    }
+
+    function test_keeperFleet_zeroAddressRejected() public {
+        vm.prank(admin);
+        vm.expectRevert(ZeroAddr.selector);
+        mgr.addKeeper(address(0));
     }
 
     // ── Manager upgrade timelock (v3: weak-link fix) ─────────────────────

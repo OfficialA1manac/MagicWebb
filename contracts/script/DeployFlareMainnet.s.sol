@@ -88,6 +88,7 @@ contract DeployFlareMainnet is Script {
         require(marketplace.manager() == address(manager), "MARKETPLACE manager mismatch");
         require(auction.manager()     == address(manager), "AUCTION manager mismatch");
         require(offerBook.manager()   == address(manager), "OFFERBOOK manager mismatch");
+        require(creator.code.length > 0, "CREATOR_ADDR must be a multisig contract (Gnosis Safe), not an EOA");
         require(manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), creator),   "creator must hold admin");
         if (creator != deployer) {
             require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");

@@ -54,6 +54,19 @@ export const managerAbi = [
   },
   {
     "type": "function",
+    "name": "addKeeper",
+    "inputs": [
+      {
+        "name": "k",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
     "name": "auctionHouse",
     "inputs": [],
     "outputs": [
@@ -230,6 +243,19 @@ export const managerAbi = [
     "inputs": [
       {
         "name": "impl",
+        "type": "address",
+        "internalType": "address"
+      }
+    ],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "removeKeeper",
+    "inputs": [
+      {
+        "name": "k",
         "type": "address",
         "internalType": "address"
       }
@@ -673,6 +699,11 @@ export const managerAbi = [
   {
     "type": "error",
     "name": "NotContract",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "NotKeeperOrAdmin",
     "inputs": []
   },
   {
