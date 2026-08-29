@@ -2,6 +2,7 @@ package indexer
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -17,6 +18,21 @@ import (
 type handlers struct {
 	q     *db.Q
 	bcast *sse.Broadcaster
+}
+
+// errMalformedLog marks a dispatch failure as PERMANENT: the on-chain log's
+// topics/data fail structural validation, so no retry can ever succeed
+// (chain logs are immutable). Callers use errors.Is(err, errMalformedLog) to
+// log-and-skip such logs instead of aborting the range — otherwise one
+// hostile or non-standard log would halt cursor advancement for all events
+// and all collections until an operator intervenes. DB/RPC failures are NOT
+// wrapped with this sentinel; those stay retriable and abort the range.
+var errMalformedLog = errors.New("malformed log")
+
+// malformedLogf builds a validation error carrying the errMalformedLog
+// sentinel.
+func malformedLogf(format string, args ...any) error {
+	return fmt.Errorf(format+": %w", append(args, errMalformedLog)...)
 }
 
 // chunk returns the i-th 32-byte ABI word from event data.
@@ -124,7 +140,7 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 //	uint8 standard, uint128 amount, uint128 price, uint64 expiresAt)
 func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 4*32 {
-		return fmt.Errorf("onListed: short log tx=%s", l.TxHash.Hex())
+		return malformedLogf("onListed: short log tx=%s", l.TxHash.Hex())
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -168,7 +184,7 @@ func (h *handlers) onListed(ctx context.Context, l types.Log, blockTime uint64) 
 // Cancelled(address indexed coll, uint256 indexed id, address indexed seller)
 func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 {
-		return fmt.Errorf("onCancelled: short log")
+		return malformedLogf("onCancelled: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -187,7 +203,7 @@ func (h *handlers) onCancelled(ctx context.Context, l types.Log) error {
 //	address seller, uint8 standard, uint128 amount, uint128 price, uint256 fee)
 func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
-		return fmt.Errorf("onBought: short log tx=%s", l.TxHash.Hex())
+		return malformedLogf("onBought: short log tx=%s", l.TxHash.Hex())
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -218,7 +234,7 @@ func (h *handlers) onBought(ctx context.Context, l types.Log, blockTime uint64) 
 //	address seller, uint8 standard, uint128 amount, uint128 reserve, uint64 startsAt, uint64 endsAt)
 func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 6*32 {
-		return fmt.Errorf("onAuctionCreated: short log")
+		return malformedLogf("onAuctionCreated: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	collection := addrStr(l.Topics[2].Bytes())
@@ -260,7 +276,7 @@ func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 // signalled separately by OutbidNotification).
 func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 3 || len(l.Data) < 2*32 {
-		return fmt.Errorf("onBidPlaced: short log")
+		return malformedLogf("onBidPlaced: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	bidder := addrStr(l.Topics[2].Bytes())
@@ -283,7 +299,7 @@ func (h *handlers) onBidPlaced(ctx context.Context, l types.Log, blockTime uint6
 // OutbidNotification(uint256 indexed id, address indexed outbid, uint256 newLeaderTotal)
 func (h *handlers) onOutbidNotification(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 3 || len(l.Data) < 32 {
-		return fmt.Errorf("onOutbidNotification: short log")
+		return malformedLogf("onOutbidNotification: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	outbid := addrStr(l.Topics[2].Bytes())
@@ -302,7 +318,7 @@ func (h *handlers) onOutbidNotification(ctx context.Context, l types.Log) error 
 // LoserRefunded(uint256 indexed id, address indexed bidder, uint256 amount)
 func (h *handlers) onLoserRefunded(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 3 || len(l.Data) < 32 {
-		return fmt.Errorf("onLoserRefunded: short log")
+		return malformedLogf("onLoserRefunded: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	bidder := addrStr(l.Topics[2].Bytes())
@@ -326,7 +342,7 @@ func (h *handlers) onLoserRefunded(ctx context.Context, l types.Log) error {
 // returns a winner's escrow (undeliverable NFT path), push or pull alike.
 func (h *handlers) onRefundPushed(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 2 || len(l.Data) < 32 {
-		return fmt.Errorf("onRefundPushed: short log")
+		return malformedLogf("onRefundPushed: short log")
 	}
 	bidder := addrStr(l.Topics[1].Bytes())
 	amount := bigStr(chunk(l.Data, 0))
@@ -341,7 +357,7 @@ func (h *handlers) onRefundPushed(ctx context.Context, l types.Log) error {
 // AuctionExtended(uint256 indexed id, uint64 newEndsAt) — anti-snipe close-time bump.
 func (h *handlers) onAuctionExtended(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 2 || len(l.Data) < 32 {
-		return fmt.Errorf("onAuctionExtended: short log")
+		return malformedLogf("onAuctionExtended: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	newEndsAt := tsUnix(chunk(l.Data, 0))
@@ -359,7 +375,7 @@ func (h *handlers) onAuctionExtended(ctx context.Context, l types.Log) error {
 //	uint128 bidAmount, uint256 fee)
 func (h *handlers) onAuctionSettled(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 2*32 {
-		return fmt.Errorf("onAuctionSettled: short log")
+		return malformedLogf("onAuctionSettled: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	winner := addrStr(l.Topics[2].Bytes())
@@ -382,7 +398,7 @@ func (h *handlers) onAuctionSettled(ctx context.Context, l types.Log) error {
 // AuctionCancelled(uint256 indexed id)
 func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 2 {
-		return fmt.Errorf("onAuctionCancelled: short log")
+		return malformedLogf("onAuctionCancelled: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	if err := h.q.SetAuctionStatus(ctx, auctionID, "cancelled"); err != nil {
@@ -407,7 +423,7 @@ func (h *handlers) onAuctionCancelled(ctx context.Context, l types.Log) error {
 // still refunded through refundLosers/LoserRefunded as usual.
 func (h *handlers) onAuctionSettlementFailed(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 3 || len(l.Data) < 32 {
-		return fmt.Errorf("onAuctionSettlementFailed: short log")
+		return malformedLogf("onAuctionSettlementFailed: short log")
 	}
 	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
 	winner := addrStr(l.Topics[2].Bytes())
@@ -434,7 +450,7 @@ func (h *handlers) onAuctionSettlementFailed(ctx context.Context, l types.Log) e
 //	uint256 principal, uint128 units, uint64 expiresAt)
 func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 3*32 {
-		return fmt.Errorf("onOfferMade: short log")
+		return malformedLogf("onOfferMade: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -477,7 +493,7 @@ func (h *handlers) onOfferMade(ctx context.Context, l types.Log) error {
 //	address bidder, uint256 principal, uint256 fee, uint128 units, uint8 standard)
 func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime uint64) error {
 	if len(l.Topics) < 4 || len(l.Data) < 5*32 {
-		return fmt.Errorf("onOfferAccepted: short log")
+		return malformedLogf("onOfferAccepted: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -508,7 +524,7 @@ func (h *handlers) onOfferAccepted(ctx context.Context, l types.Log, blockTime u
 // OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal)
 func (h *handlers) onOfferRefunded(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 {
-		return fmt.Errorf("onOfferRefunded: short log")
+		return malformedLogf("onOfferRefunded: short log")
 	}
 	collection := addrStr(l.Topics[1].Bytes())
 	tokenID := bigStr(l.Topics[2].Bytes())
@@ -547,7 +563,7 @@ func (h *handlers) onTransfer721(ctx context.Context, l types.Log) error {
 // TransferSingle(address operator, address indexed from, address indexed to, uint256 id, uint256 value)
 func (h *handlers) onTransferSingle(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 2*32 {
-		return fmt.Errorf("onTransferSingle: short log")
+		return malformedLogf("onTransferSingle: short log")
 	}
 	collection := addrStr(l.Address.Bytes())
 	from := addrStr(l.Topics[2].Bytes())
@@ -577,7 +593,7 @@ func (h *handlers) onTransferSingle(ctx context.Context, l types.Log) error {
 // malformed.
 func (h *handlers) onTransferBatch(ctx context.Context, l types.Log) error {
 	if len(l.Topics) < 4 || len(l.Data) < 2*32 {
-		return fmt.Errorf("onTransferBatch: short log tx=%s", l.TxHash.Hex())
+		return malformedLogf("onTransferBatch: short log tx=%s", l.TxHash.Hex())
 	}
 	collection := addrStr(l.Address.Bytes())
 	from := addrStr(l.Topics[2].Bytes())
@@ -586,24 +602,32 @@ func (h *handlers) onTransferBatch(ctx context.Context, l types.Log) error {
 	dataWords := int64(len(l.Data) / 32)
 	idsOff := bigInt(chunk(l.Data, 0)).Int64() / 32
 	valsOff := bigInt(chunk(l.Data, 1)).Int64() / 32
-	if idsOff <= 0 || idsOff >= dataWords-1 {
-		return fmt.Errorf("onTransferBatch: ids offset out of bounds (%d/%d)", idsOff, dataWords)
+	// Offsets must point at a length word INSIDE the data (> dataWords-1
+	// would put the length word past the payload). A length word as the
+	// LAST data word is legal — that is exactly the canonical encoding of
+	// an empty array — so the bound is dataWords-1 inclusive; element
+	// footprint for non-empty arrays is enforced separately below.
+	if idsOff <= 0 || idsOff > dataWords-1 {
+		return malformedLogf("onTransferBatch: ids offset out of bounds (%d/%d)", idsOff, dataWords)
 	}
-	if valsOff <= 0 || valsOff >= dataWords-1 {
-		return fmt.Errorf("onTransferBatch: vals offset out of bounds (%d/%d)", valsOff, dataWords)
+	if valsOff <= 0 || valsOff > dataWords-1 {
+		return malformedLogf("onTransferBatch: vals offset out of bounds (%d/%d)", valsOff, dataWords)
 	}
 	idsLenRaw := bigInt(chunk(l.Data, int(idsOff))).Int64()
 	valsLenRaw := bigInt(chunk(l.Data, int(valsOff))).Int64()
 
+	if idsLenRaw == 0 && valsLenRaw == 0 {
+		return nil // well-formed empty batch: nothing to apply
+	}
 	idsLen := idsLenRaw
-	if idsLen <= 0 || idsLen > maxBatchLength || idsLen > dataWords {
-		return fmt.Errorf("onTransferBatch: ids length out of bounds (%d, max=%d)", idsLen, maxBatchLength)
+	if idsLen < 0 || idsLen > maxBatchLength || idsLen > dataWords {
+		return malformedLogf("onTransferBatch: ids length out of bounds (%d, max=%d)", idsLen, maxBatchLength)
 	}
 	if valsLenRaw != idsLen {
-		return fmt.Errorf("onTransferBatch: ids/values length mismatch (%d vs %d)", idsLen, valsLenRaw)
+		return malformedLogf("onTransferBatch: ids/values length mismatch (%d vs %d)", idsLen, valsLenRaw)
 	}
 	if idsOff+1+idsLen > dataWords || valsOff+1+idsLen > dataWords {
-		return fmt.Errorf("onTransferBatch: array extends past data boundary")
+		return malformedLogf("onTransferBatch: array extends past data boundary")
 	}
 	for i := int64(0); i < idsLen; i++ {
 		id := bigStr(chunk(l.Data, int(idsOff+1+i)))

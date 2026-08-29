@@ -169,6 +169,7 @@ message Collection {
   string floor_price_wei = 7;
   string volume_24h_wei = 8;
   int32 listed_count = 9;
+  string creator_addr = 10; // ERC-173 owner(), lowercase hex; "" = never resolved
 }
 
 // ── GetCollection ─────────────────────────────────────────────────────────────
@@ -187,6 +188,7 @@ message GetCollectionResponse {
   string floor_price_wei = 7;
   string volume_24h_wei = 8;
   int32 listed_count = 9;
+  string creator_addr = 10; // ERC-173 owner(), lowercase hex; "" = never resolved
 }
 
 // ── ListListings ──────────────────────────────────────────────────────────────

@@ -77,7 +77,8 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	// needed — the context chain is preserved through gqlgen's transport.
 	// The address is set in:
 	//   - HandleWS: context.WithValue(ctx, AuthCtxKey, addr) before ServeHTTP
-	//   - HandlePOST: (future — pass via HTTP Authorization header)
+	//   - HandlePOST / HandleGET: context.WithValue(ctx, AuthCtxKey, addr)
+	//     from cookies / Authorization header via authenticate()
 
 	// RL-2: Query depth validation. Rejects queries with nesting deeper than
 	// 12 levels (e.g., collections { listings { seller { profile { ... } } } }).
@@ -159,6 +160,11 @@ func (s *GraphQLServer) HandlePOST(c *fiber.Ctx) error {
 	}
 	req.Header.Set("Content-Type", string(c.Request().Header.ContentType()))
 
+	// Inject the JWT-authenticated wallet address (cookies / Authorization
+	// header) so user-scoped resolvers (notifications, savedSearches) can
+	// authorize the request. Empty string when unauthenticated.
+	ctx = context.WithValue(ctx, AuthCtxKey, s.authenticate(c))
+
 	// Attach request-scoped DataLoaders to the context before serving.
 	// Each request gets fresh loaders so batched queries don't leak across
 	// users/requests. The resolvers extract loaders via dataloader.FromContext.
@@ -222,6 +228,10 @@ func (s *GraphQLServer) HandleGET(c *fiber.Ctx) error {
 			})
 		}
 
+		// Inject the JWT-authenticated wallet address for user-scoped
+		// resolvers, mirroring HandlePOST.
+		ctx = context.WithValue(ctx, AuthCtxKey, s.authenticate(c))
+
 		// Attach request-scoped DataLoaders.
 		req = req.WithContext(dataloader.WithLoaders(ctx, dataloader.New(s.q)))
 
@@ -233,10 +243,16 @@ func (s *GraphQLServer) HandleGET(c *fiber.Ctx) error {
 
 		// ── GQL-1: CDN cache headers (only on success) ──────────────────
 		// Set cache headers AFTER the response is written so error
-		// responses are never cached at the edge.
+		// responses are never cached at the edge. User-scoped queries
+		// (notifications, savedSearches) must never be stored by shared
+		// proxies keyed only by URL — they get private, no-store.
 		if w.written && w.status < 400 {
-			c.Set("Cache-Control", "public, max-age=15, s-maxage=60")
-			c.Append("Vary", "Origin") // merges with compress middleware's Accept-Encoding
+			if IsPersistedQueryCDNCacheable(hash) {
+				c.Set("Cache-Control", "public, max-age=15, s-maxage=60")
+				c.Append("Vary", "Origin") // merges with compress middleware's Accept-Encoding
+			} else {
+				c.Set("Cache-Control", "private, no-store")
+			}
 		}
 
 		if w.written {
@@ -319,7 +335,7 @@ func (s *GraphQLServer) HandleWS(c *fiber.Ctx) error {
 	}
 
 	// Extract JWT-authenticated wallet address.
-	addr := s.authenticateWS(c)
+	addr := s.authenticate(c)
 
 	// Hijack the underlying connection from Fiber/fasthttp.
 	c.Context().Hijack(func(conn net.Conn) {
@@ -354,10 +370,11 @@ func (s *GraphQLServer) HandleWS(c *fiber.Ctx) error {
 	return nil
 }
 
-// authenticateWS extracts the wallet address from JWT cookies or Authorization
+// authenticate extracts the wallet address from JWT cookies or Authorization
 // header. Mirrors the logic in ws/handler.go authenticate(). Returns "" for
-// unauthenticated connections (public subscriptions still work).
-func (s *GraphQLServer) authenticateWS(c *fiber.Ctx) string {
+// unauthenticated requests (public queries and subscriptions still work).
+// Used by HandlePOST, HandleGET (persisted queries), and HandleWS.
+func (s *GraphQLServer) authenticate(c *fiber.Ctx) string {
 	if s.cfg == nil {
 		return ""
 	}

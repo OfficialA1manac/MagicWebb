@@ -132,6 +132,20 @@ func (q *Q) SetCollectionInfo(ctx context.Context, addr, name, symbol string) er
 	return err
 }
 
+// SetCollectionCreator stores a collection's ERC-173 owner() address.
+//
+// Same contract as SetCollectionInfo: an empty value never overwrites a stored
+// one. owner() is optional, so an empty read means either "this contract has no
+// owner" or "the call failed" — indistinguishable at this layer, and blanking a
+// known creator because of a chain blip is the worse outcome.
+func (q *Q) SetCollectionCreator(ctx context.Context, addr, creator string) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE collections
+		    SET creator_addr = COALESCE(NULLIF($2, ''), creator_addr)
+		  WHERE address = $1`, addr, creator)
+	return err
+}
+
 // SeedTrackedCollections ensures every address in `addrs` has a row in
 // tracked_collections by calling EnsureCollection for each one. Standard
 // defaults to 'erc721' when unknown. Errors are logged but not fatal — a
@@ -898,11 +912,15 @@ func (q *Q) GetImageByParent(ctx context.Context, parentHash string, width int, 
 // CountBlobsForCollection returns the number of distinct blobs first inserted
 // by this collection. Rows with an empty collection (migration 018 default,
 // legacy rows) are excluded from the count so grandfathered blobs do not
-// consume quota. Used by imagestore.Put() to enforce MaxBlobCountPerCollection.
+// consume quota, and thumbnail variants (parent_hash set) are excluded so one
+// ingested image consumes exactly one quota slot regardless of how many
+// 128/256/512px variants StoreThumbnails derives from it. Used by
+// imagestore.Put() to enforce MaxBlobCountPerCollection.
 func (q *Q) CountBlobsForCollection(ctx context.Context, collection string) (int, error) {
 	var n int
 	err := q.reader().QueryRow(ctx,
-		`SELECT count(*) FROM nft_image_blobs WHERE collection=$1`, collection).Scan(&n)
+		`SELECT count(*) FROM nft_image_blobs
+		  WHERE collection = $1 AND collection <> '' AND parent_hash IS NULL`, collection).Scan(&n)
 	return n, err
 }
 

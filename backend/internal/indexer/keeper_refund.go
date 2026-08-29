@@ -53,7 +53,10 @@ func encodeRefundLosers(auctionID int64, addrs []common.Address) []byte {
 // anyone can call it once the auction is settled. This sweeper automates it
 // so losing bidders never need to call anything themselves.
 func (r *Runner) runLoserRefundSweeper(ctx context.Context) {
-	key, err := crypto.HexToECDSA(r.cfg.KeeperKey)
+	// Normalize like runAuctionKeeper: config.Load() keeps any 0x prefix,
+	// and crypto.HexToECDSA rejects it — without the trim a 0x-prefixed
+	// KEEPER_KEY silently disables only this sweeper.
+	key, err := crypto.HexToECDSA(strings.TrimPrefix(r.cfg.KeeperKey, "0x"))
 	if err != nil {
 		log.Error().Err(err).Msg("refund sweeper: invalid KEEPER_KEY, disabled")
 		return

@@ -89,6 +89,7 @@ type ComplexityRoot struct {
 	Collection struct {
 		Address     func(childComplexity int) int
 		Auctions    func(childComplexity int, limit *int, status *string) int
+		CreatorAddr func(childComplexity int) int
 		DeployBlock func(childComplexity int) int
 		FloorPrice  func(childComplexity int) int
 		ListedCount func(childComplexity int) int
@@ -556,6 +557,13 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 		}
 
 		return e.complexity.Collection.Auctions(childComplexity, args["limit"].(*int), args["status"].(*string)), true
+
+	case "Collection.creatorAddr":
+		if e.complexity.Collection.CreatorAddr == nil {
+			break
+		}
+
+		return e.complexity.Collection.CreatorAddr(childComplexity), true
 
 	case "Collection.deployBlock":
 		if e.complexity.Collection.DeployBlock == nil {
@@ -4863,6 +4871,47 @@ func (ec *executionContext) fieldContext_Collection_verified(_ context.Context, 
 	return fc, nil
 }
 
+func (ec *executionContext) _Collection_creatorAddr(ctx context.Context, field graphql.CollectedField, obj *Collection) (ret graphql.Marshaler) {
+	fc, err := ec.fieldContext_Collection_creatorAddr(ctx, field)
+	if err != nil {
+		return graphql.Null
+	}
+	ctx = graphql.WithFieldContext(ctx, fc)
+	defer func() {
+		if r := recover(); r != nil {
+			ec.Error(ctx, ec.Recover(ctx, r))
+			ret = graphql.Null
+		}
+	}()
+	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
+		ctx = rctx // use context from middleware stack in children
+		return obj.CreatorAddr, nil
+	})
+	if err != nil {
+		ec.Error(ctx, err)
+		return graphql.Null
+	}
+	if resTmp == nil {
+		return graphql.Null
+	}
+	res := resTmp.(string)
+	fc.Result = res
+	return ec.marshalOString2string(ctx, field.Selections, res)
+}
+
+func (ec *executionContext) fieldContext_Collection_creatorAddr(_ context.Context, field graphql.CollectedField) (fc *graphql.FieldContext, err error) {
+	fc = &graphql.FieldContext{
+		Object:     "Collection",
+		Field:      field,
+		IsMethod:   false,
+		IsResolver: false,
+		Child: func(ctx context.Context, field graphql.CollectedField) (*graphql.FieldContext, error) {
+			return nil, errors.New("field of type String does not have child fields")
+		},
+	}
+	return fc, nil
+}
+
 func (ec *executionContext) _Collection_stats(ctx context.Context, field graphql.CollectedField, obj *Collection) (ret graphql.Marshaler) {
 	fc, err := ec.fieldContext_Collection_stats(ctx, field)
 	if err != nil {
@@ -8112,6 +8161,8 @@ func (ec *executionContext) fieldContext_Query_collection(ctx context.Context, f
 				return ec.fieldContext_Collection_deployBlock(ctx, field)
 			case "verified":
 				return ec.fieldContext_Collection_verified(ctx, field)
+			case "creatorAddr":
+				return ec.fieldContext_Collection_creatorAddr(ctx, field)
 			case "stats":
 				return ec.fieldContext_Collection_stats(ctx, field)
 			case "floorPrice":
@@ -8193,6 +8244,8 @@ func (ec *executionContext) fieldContext_Query_collections(ctx context.Context, 
 				return ec.fieldContext_Collection_deployBlock(ctx, field)
 			case "verified":
 				return ec.fieldContext_Collection_verified(ctx, field)
+			case "creatorAddr":
+				return ec.fieldContext_Collection_creatorAddr(ctx, field)
 			case "stats":
 				return ec.fieldContext_Collection_stats(ctx, field)
 			case "floorPrice":
@@ -14044,6 +14097,8 @@ func (ec *executionContext) _Collection(ctx context.Context, sel ast.SelectionSe
 			if out.Values[i] == graphql.Null {
 				atomic.AddUint32(&out.Invalids, 1)
 			}
+		case "creatorAddr":
+			out.Values[i] = ec._Collection_creatorAddr(ctx, field, obj)
 		case "stats":
 			field := field
 
@@ -17606,6 +17661,16 @@ func (ec *executionContext) marshalOInt2ᚖint(ctx context.Context, sel ast.Sele
 		return graphql.Null
 	}
 	res := graphql.MarshalInt(*v)
+	return res
+}
+
+func (ec *executionContext) unmarshalOString2string(ctx context.Context, v any) (string, error) {
+	res, err := graphql.UnmarshalString(v)
+	return res, graphql.ErrorOnPath(ctx, err)
+}
+
+func (ec *executionContext) marshalOString2string(ctx context.Context, sel ast.SelectionSet, v string) graphql.Marshaler {
+	res := graphql.MarshalString(v)
 	return res
 }
 

@@ -34,7 +34,7 @@ The rest of this document describes a network where trading is live.
 | Browse, filter, sort, search, see price history | ✓ | ✓ | ✓ |
 | See the Verified NFT badge and what it means | ✓ | ✓ | ✓ |
 | Buy (pays the price; receives the NFT in the same tx) | connect first | ✓ | not your own |
-| List an NFT (price ≥ 1 native, duration 3m–24h) | — | only NFTs you own | ✓ |
+| List an NFT (price ≥ 1 native, duration 1m–24h (15 fixed durations)) | — | only NFTs you own | ✓ |
 | Change price | — | — | ✓ own listing |
 | Cancel listing (NFT never left your wallet) | — | — | ✓ own listing |
 | Batch-list up to 50 | — | — | ✓ |
@@ -45,7 +45,7 @@ The rest of this document describes a network where trading is live.
 | Action | Viewer | Buyer | Seller / owner |
 |---|---|---|---|
 | Watch live countdown, bids, anti-snipe extensions | ✓ | ✓ | ✓ |
-| Create auction (reserve ≥ 1 native, duration 3m–24h, optional min-increment %) | — | — | ✓ |
+| Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations), optional min-increment %) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
 | Settle after it ends (keeper does it automatically within seconds) | — | ✓ winner only | ✓ seller |
@@ -57,12 +57,12 @@ The rest of this document describes a network where trading is live.
 | Action | Viewer | Buyer | Seller / owner |
 |---|---|---|---|
 | See open offers on any NFT | ✓ | ✓ | ✓ |
-| Make an offer (amount ≥ 1 native escrowed, duration 3m–24h) | — | ✓ if the collection allows offers | not on your own |
+| Make an offer (amount ≥ 1 native escrowed, duration 1m–24h (15 fixed durations)) | — | ✓ if the collection allows offers | not on your own |
 | Raise / lower your offer (keeps original expiry) | — | ✓ | — |
 | Cancel your offer → full refund | — | ✓ before expiry | — |
 | Accept an offer (NFT → bidder, funds → you minus 1.5%) | — | — | ✓ owner |
 | Decline an offer (bidder refunded in full) | — | — | ✓ owner |
-| Refund an expired offer (permissionless; keeper also does it) | — | ✓ | ✓ |
+| Refund an expired offer (your own always; keeper sweeps others) | — | ✓ | ✓ |
 | Enable offers for a collection | — | — | ✓ collection **contract** owner (ERC-173) |
 
 ## Search & discovery
@@ -80,12 +80,15 @@ you in the contract. **Profile → "Refunds waiting for you" → Withdraw.** Nev
 - Freeze, move or take your NFT or funds (non-custodial; contracts hold only what you escrow).
 - Curate or approve listings — the Verified NFT badge is computed from on-chain facts.
 - Change the fee.
-- Pause exits. The multisig that holds `OPERATOR_ROLE` can pause **new** listings, bids and
-  offers in an emergency; cancel, settle and withdraw always work.
+- Pause anything administratively. There is no circuit breaker, no operator role, and no
+  entry gate — no role can halt listings, bids, offers, buys, cancels, settlements, or
+  withdrawals. Normal contract rules (ownership, expiry, authorization, escrow) still
+  apply to every action.
 - Log in to an admin page. There is none.
 
 ## Why durations instead of dates?
 
-The contracts accept exactly six durations and compute the expiry from the block that mines
+The contracts accept exactly fifteen durations (1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h,
+4h, 8h, 12h, 16h, 20h, 24h) and compute the expiry from the block that mines
 your transaction. A date picker cannot satisfy that from a wallet (you do not know the
 mining block's timestamp), so every time-bound action asks for a duration.

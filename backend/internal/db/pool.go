@@ -66,6 +66,13 @@ func ConnectReadReplica(ctx context.Context, dsn string) (*pgxpool.Pool, error) 
 //   - rotate connections periodically (max lifetime) to avoid stale sockets
 //   - health-check regularly so dead connections are detected quickly
 func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
+	// Fail the deployment now if WEBHOOK_ENC_KEY is set but malformed —
+	// the operator asked for encryption at rest, so a silent plaintext
+	// downgrade discovered via a buried error log is not acceptable.
+	if err := ValidateWebhookEncKey(); err != nil {
+		return nil, err
+	}
+
 	cfg, err := pgxpool.ParseConfig(dsn)
 	if err != nil {
 		return nil, fmt.Errorf("db: parse config: %w", err)

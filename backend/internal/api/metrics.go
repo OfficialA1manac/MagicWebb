@@ -67,10 +67,12 @@ func (s *MetricsService) RegisterRoutes(api fiber.Router) {
 func (s *MetricsService) handleGasMetrics(c *fiber.Ctx) error {
 	summary, err := s.q.GetGasMetricsSummary(c.Context())
 	if err != nil {
-		return c.JSON(fiber.Map{"error": "gas metrics unavailable"})
+		log.Error().Err(err).Msg("metrics: GetGasMetricsSummary failed")
+		return writeErr(c, fiber.StatusInternalServerError, "gas metrics unavailable")
 	}
 	logs, err := s.q.GetRecentGasLogs(c.Context(), 25)
 	if err != nil {
+		log.Warn().Err(err).Msg("metrics: GetRecentGasLogs failed")
 		logs = []db.GasLogRow{}
 	}
 	return c.JSON(fiber.Map{
@@ -88,7 +90,8 @@ func (s *MetricsService) handleGasAlerts(c *fiber.Ctx) error {
 	}
 	alerts, err := s.q.ListGasAlerts(c.Context(), limit)
 	if err != nil {
-		return c.JSON(fiber.Map{"error": "gas alert history unavailable"})
+		log.Error().Err(err).Msg("metrics: ListGasAlerts failed")
+		return writeErr(c, fiber.StatusInternalServerError, "gas alert history unavailable")
 	}
 	if alerts == nil {
 		alerts = []db.GasAlertRow{}

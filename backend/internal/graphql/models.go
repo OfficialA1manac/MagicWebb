@@ -14,6 +14,7 @@ type Collection struct {
 	Standard    string          `json:"standard"`
 	DeployBlock int             `json:"deployBlock"`
 	Verified    bool            `json:"verified"`
+	CreatorAddr string          `json:"creatorAddr"`
 
 	// GQL-3: Preloaded stats from the proto Collection message.
 	// When set (server.go::ListCollections populates these via

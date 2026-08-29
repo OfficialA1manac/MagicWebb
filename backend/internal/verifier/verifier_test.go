@@ -12,10 +12,11 @@ import (
 )
 
 type fakeStore struct {
-	addrs   []string
-	stamped map[string]bool
-	info    map[string][2]string
-	listErr error
+	addrs    []string
+	stamped  map[string]bool
+	info     map[string][2]string
+	creators map[string]string
+	listErr  error
 }
 
 func (f *fakeStore) ListCollectionsForVerification(context.Context, time.Time, int) ([]string, error) {
@@ -35,6 +36,14 @@ func (f *fakeStore) SetCollectionInfo(_ context.Context, addr, name, symbol stri
 		f.info = map[string][2]string{}
 	}
 	f.info[addr] = [2]string{name, symbol}
+	return nil
+}
+
+func (f *fakeStore) SetCollectionCreator(_ context.Context, addr, creator string) error {
+	if f.creators == nil {
+		f.creators = map[string]string{}
+	}
+	f.creators[addr] = creator
 	return nil
 }
 

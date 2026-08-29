@@ -31,6 +31,17 @@
 
   let imageError = $state(false);
 
+  // Hide quick-buy on the caller's own listings (you cannot buy from yourself).
+  let me = $state<string | null>(null);
+  $effect(() => {
+    const mw = (window as Window).MW;
+    if (!mw) return;
+    try { me = mw.address() ?? null; } catch { me = null; }
+    const off = mw.onAccountChange?.((a: { address: string | null }) => { me = a.address; });
+    return typeof off === 'function' ? off : undefined;
+  });
+  let isOwnListing = $derived(!!me && item.seller?.toLowerCase() === me.toLowerCase());
+
   // Quick buy straight from the card: opens the TxModal via window.MW.
   // Stops the click from following the card link to the token page.
   function quickBuy(e: MouseEvent) {
@@ -129,7 +140,7 @@
     <h3 class="token-name">{item.name || `#${item.token_id}`}</h3>
     <div class="card-footer">
       <span class="supply-text">{item.total_supply ? `${item.total_supply} minted` : ''}</span>
-      <button class="buy-btn" type="button" onclick={quickBuy} aria-label={'Buy ' + (item.name || '#' + item.token_id)}>Buy</button>
+      {#if !isOwnListing}<button class="buy-btn" type="button" onclick={quickBuy} aria-label={'Buy ' + (item.name || '#' + item.token_id)}>Buy</button>{:else}<span class="supply-text" title="This is your listing">Yours</span>{/if}
     </div>
   </div>
 </a>

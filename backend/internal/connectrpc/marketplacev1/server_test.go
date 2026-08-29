@@ -29,11 +29,11 @@ func TestGetListing_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri",
+			"name", "image_uri", "collection_verified",
 		}).AddRow(
 			"0xabc", "1", "0xseller", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx",
-			"MyToken", "https://example.com/img.png",
+			"MyToken", "https://example.com/img.png", true,
 		))
 
 	srv := NewServer(db.New(mock), nil)

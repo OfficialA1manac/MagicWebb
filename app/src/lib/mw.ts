@@ -55,6 +55,8 @@ export const MW = {
     flow(`Cancel listing ${p.name ?? `#${p.tokenId}`}`, undefined, false, (h) => M.cancel({ nft: addr(p.nft), tokenId: big(p.tokenId), name: p.name }, h)),
   editPrice: (p: { nft: string; tokenId: string; newPriceWei: string; name?: string }) =>
     flow(`Change price ${p.name ?? `#${p.tokenId}`}`, undefined, false, (h) => M.editPrice({ nft: addr(p.nft), tokenId: big(p.tokenId), newPriceWei: big(p.newPriceWei), name: p.name }, h)),
+  batchList: (p: { items: Array<{ nft: string; tokenId: string; priceWei: string; duration: number }>; name?: string }) =>
+    flow(p.name ?? `List ${p.items.length} NFTs`, undefined, true, (h) => M.batchList({ items: p.items.map((i) => ({ coll: addr(i.nft), id: big(i.tokenId), price: big(i.priceWei), duration: i.duration })), name: p.name }, h)),
 
   // ── auctions ───────────────────────────────────────────────────────────
   createAuction: (p: { nft: string; tokenId: string; reserveWei: string; duration: number; minIncBps?: number; std?: 'erc721' | 'erc1155'; amount?: string; name?: string }) =>
@@ -65,8 +67,8 @@ export const MW = {
   cancelAuction: (p: { auctionId: string; name?: string }) => flow(`Cancel ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.cancelEarly({ auctionId: big(p.auctionId), name: p.name }, h)),
   withdrawLoserFunds: (p: { auctionId: string; amountWei?: string }) => flow('Withdraw your bid', undefined, false, (h) => A.withdrawLoserFunds({ auctionId: big(p.auctionId), amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
   withdrawRefund: (p: { amountWei?: string } = {}) => flow('Withdraw refund', undefined, false, (h) => A.withdrawRefund({ amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
-  minimumTopUp: (p: { currentHighestWei: string; reserveWei: string; myCumulativeWei?: string }) =>
-    A.minimumTopUp({ currentHighestWei: big(p.currentHighestWei), reserveWei: big(p.reserveWei), myCumulativeWei: big(p.myCumulativeWei ?? 0) }).toString(),
+  minimumTopUp: (p: { currentHighestWei: string; reserveWei: string; myCumulativeWei?: string; minIncrementBps?: number }) =>
+    A.minimumTopUp({ currentHighestWei: big(p.currentHighestWei), reserveWei: big(p.reserveWei), myCumulativeWei: big(p.myCumulativeWei ?? 0), minIncrementBps: p.minIncrementBps }).toString(),
 
   // ── refunds (all cores) ────────────────────────────────────────────────
   pendingReturns: (who: string) => C.pendingReturns(addr(who)),

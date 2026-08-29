@@ -57,11 +57,12 @@ load-addrs: ## sync deployed contract addresses into .env
 	@bc=contracts/broadcast/DeployCoston2.s.sol/114/run-latest.json; \
 	  test -f "$$bc" || { echo "FATAL: $$bc not found - run 'make deploy' first"; exit 1; }; \
 	  command -v jq >/dev/null || { echo "FATAL: jq required"; exit 1; }; \
-	  m=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="Marketplace")|.contractAddress' "$$bc" | head -n1); \
-	  a=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="AuctionHouse")|.contractAddress'  "$$bc" | head -n1); \
-	  o=$$(jq -r '.transactions[]|select(.transactionType=="CREATE" and .contractName=="OfferBook")|.contractAddress'     "$$bc" | head -n1); \
-	  test -n "$$m" -a -n "$$a" -a -n "$$o" || { echo "FATAL: missing address(es) in broadcast"; exit 1; }; \
-	  for kv in MARKETPLACE_ADDR=$$m AUCTION_ADDR=$$a OFFERBOOK_ADDR=$$o; do \
+	  m=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="Marketplace") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
+	  a=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="AuctionHouse") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
+	  o=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="OfferBook") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
+	  g=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="MarketplaceManager") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
+	  test -n "$$m" -a -n "$$a" -a -n "$$o" -a -n "$$g" || { echo "FATAL: missing address(es) in broadcast"; exit 1; }; \
+	  for kv in MARKETPLACE_ADDR=$$m AUCTION_ADDR=$$a OFFERBOOK_ADDR=$$o MARKETPLACE_MANAGER_ADDR=$$g; do \
 	    k=$${kv%%=*}; v=$${kv#*=}; \
 	    if grep -qE "^$$k=" .env 2>/dev/null; then sed -i "s|^$$k=.*|$$k=$$v|" .env; \
 	    else printf '%s=%s\n' "$$k" "$$v" >> .env; fi; \

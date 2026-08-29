@@ -55,6 +55,8 @@ import WalletConnect from '../components/WalletConnect';
           const name = (col&&col.name)||shortAddr(addr);
           const standard = (col&&col.standard)||'erc721';
           const verified = col&&col.verified;
+          const creatorAddr = (col&&col.creator_addr)||'';
+          const shortCreator = creatorAddr ? creatorAddr.slice(0,6)+'…'+creatorAddr.slice(-4) : '';
           const sym = col&&col.symbol||'';
 
           let floor = '0', vol24 = '0';
@@ -71,7 +73,7 @@ import WalletConnect from '../components/WalletConnect';
               '<div style="display:flex;align-items:flex-start;gap:1rem;margin-bottom:2rem;padding:1.5rem;border-radius:1.25rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);">'+
                 '<div style="width:4rem;height:4rem;border-radius:1rem;background:linear-gradient(135deg,rgba(125,211,252,0.2),rgba(14,165,233,0.1));display:flex;align-items:center;justify-content:center;font-size:2rem;border:1px solid rgba(125,211,252,0.25);flex-shrink:0;">🗂</div>'+
                 '<div style="flex:1;min-width:0;">'+
-                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+esc(name)+(verified?' <a class="vb is-ok md" href="/docs/faq#verified" title="Verified NFT: standard NFT contract, metadata confirmed. Not a judgement of the art or the seller." aria-label="Verified NFT"><span class="vb-dot" aria-hidden="true">✓</span>Verified NFT</a>':'')+'</h1>'+
+                  '<h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+esc(name)+(verified?(creatorAddr?' <a class="vb is-ok md" href="/docs/faq#verified" title="Authentic — '+esc(name)+' by '+esc(shortCreator)+'. Standard NFT contract, metadata confirmed, creator known." aria-label="Authentic collection"><span class="vb-dot" aria-hidden="true">✓</span>Authentic</a>':' <a class="vb is-ok md" href="/docs/faq#verified" title="Verified NFT: standard NFT contract, metadata confirmed. Not a judgement of the art or the seller." aria-label="Verified NFT"><span class="vb-dot" aria-hidden="true">✓</span>Verified NFT</a>'):'')+(creatorAddr?' <a class="vb is-creator md" href="/docs/faq#creator" title="Collection creator of '+esc(name)+': this address ('+esc(shortCreator)+') is the on-chain owner of the collection contract." aria-label="Collection creator"><span class="vb-star" aria-hidden="true">★</span>Creator '+esc(shortCreator)+'</a>':'')+'</h1>'+
                   '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(addr)+' · '+esc(standard.toUpperCase())+(sym?' · '+esc(sym):'')+'</p>'+
                 '</div>'+
               '</div>'+
@@ -101,6 +103,32 @@ import WalletConnect from '../components/WalletConnect';
                     '</a>';
                   }).join('')+'</div>')+
             '</div>';
+
+          // Owner-only enable/disable-offers control (v3): shown when the
+          // connected wallet is the collection's on-chain creator/owner.
+          (function(){
+            if (!creatorAddr) return;
+            if (!window.MW_OFFERBOOK) return; // read-only network: no offer contract
+            var meAddr = '';
+            try { var st = localStorage.getItem('mw_addr') || ''; if (/^0x[0-9a-fA-F]{40}$/.test(st)) meAddr = st.toLowerCase(); } catch(_){}
+            if (!meAddr || meAddr !== String(creatorAddr).toLowerCase()) return;
+            function withMW(fn){ if (window.MW) { fn(window.MW); } else { window.addEventListener('mw-ready', function(){ fn(window.MW); }, { once: true }); } }
+            withMW(function(mw){
+              mw.isOfferEligible(addr).then(function(eligible){
+                var host = document.createElement('div');
+                host.style.cssText = 'margin:0 0 1.5rem;padding:1rem 1.25rem;border-radius:1rem;background:rgba(251,191,36,0.06);border:1px solid rgba(251,191,36,0.25);display:flex;align-items:center;gap:0.75rem;flex-wrap:wrap;';
+                host.innerHTML = '<span style="font-size:0.8125rem;font-weight:700;color:#fde68a;">You created this collection.</span>'+
+                  '<span style="font-size:0.75rem;color:rgba(255,255,255,0.5);">Offers are currently <b style="color:'+(eligible?'#86efac':'#fca5a5')+';">'+(eligible?'enabled':'disabled')+'</b>.</span>'+
+                  '<button id="coll-offers-toggle" style="padding:0.45rem 1rem;border-radius:0.625rem;background:rgba(251,191,36,0.12);border:1px solid rgba(251,191,36,0.35);color:#fde68a;font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;">'+(eligible?'Disable offers':'Enable offers')+'</button>';
+                var firstCard = root.querySelector('.reveal');
+                if (firstCard && firstCard.children.length > 1) firstCard.insertBefore(host, firstCard.children[1]); else root.appendChild(host);
+                var btn = document.getElementById('coll-offers-toggle');
+                if (btn) btn.addEventListener('click', function(){
+                  mw.setOfferEligible({ nft: addr, eligible: !eligible, name: name }).then(function(){ setTimeout(function(){ location.reload(); }, 1200); }).catch(function(){});
+                });
+              }).catch(function(){});
+            });
+          })();
         } catch(e) {
           if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:#fca5a5;">Could not load this collection. Check your connection and try again.<br><br><button onclick="location.reload()" style="padding:0.5rem 1.5rem;border-radius:0.625rem;background:rgba(255,255,255,0.08);color:#fafafa;border:1px solid rgba(255,255,255,0.12);font-weight:700;cursor:pointer;font-family:inherit;">Retry</button></div>';
         }

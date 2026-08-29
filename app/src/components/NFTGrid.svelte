@@ -69,10 +69,14 @@
     fetchListings();
   }
 
-  function openAppKit() {
-    if (typeof window !== 'undefined' && window.__MW_APPKIT_OPEN__) {
-      window.__MW_APPKIT_OPEN__();
-    }
+  function goListNFT() {
+    // Route to the profile's My NFTs tab (real scroll target) where every
+    // held NFT has a List action + batch listing. Connect first if needed.
+    if (typeof window === 'undefined') return;
+    const mw = window.MW;
+    const connected = (() => { try { return !!mw?.address?.(); } catch { return false; } })();
+    if (!connected && window.__MW_APPKIT_OPEN__) { window.__MW_APPKIT_OPEN__(); return; }
+    location.href = '/profile#nfts';
   }
 </script>
 
@@ -91,7 +95,7 @@
         <option value="price_desc">Price: High to Low</option>
       </select>
       {#if live}
-        <button on:click={openAppKit} class="list-btn">
+        <button on:click={goListNFT} class="list-btn">
           ＋ List NFT
         </button>
       {/if}
@@ -126,7 +130,7 @@
       {#if live}
         <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
         <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
-        <button on:click={openAppKit} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
+        <button on:click={goListNFT} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
       {:else}
         <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">{ro.heading}</p>
         <p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.25rem;">{ro.body}</p>

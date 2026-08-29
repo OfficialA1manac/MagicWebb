@@ -13,7 +13,6 @@ error WithdrawFailed();
 error NothingToWithdraw();
 error ZeroAddress();
 error BelowMinPrice();
-error EntriesHalted();
 error BadManager();
 error InvalidDuration();
 /// @dev Caller does not hold DEFAULT_ADMIN_ROLE on the linked manager.
@@ -32,31 +31,34 @@ error UpgradeExpired();
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @dev Shared durations for listings, auctions, and offers across all cores.
-///      Every time-bound action must pick one of these exact six values.
+///      Every time-bound action must pick one of these exact fifteen values.
 ///      Callers pass the DURATION; the contract computes the expiry from
 ///      block.timestamp (MarketplaceCore._expiryFor). Passing an absolute
 ///      expiresAt was unusable from a wallet: the caller cannot know the
 ///      timestamp of the block that will mine the transaction.
+uint64 constant DURATION_1MIN  = 1 minutes;
 uint64 constant DURATION_3MIN  = 3 minutes;
+uint64 constant DURATION_5MIN  = 5 minutes;
+uint64 constant DURATION_10MIN = 10 minutes;
 uint64 constant DURATION_15MIN = 15 minutes;
 uint64 constant DURATION_30MIN = 30 minutes;
+uint64 constant DURATION_45MIN = 45 minutes;
 uint64 constant DURATION_1HR   = 1 hours;
+uint64 constant DURATION_2HR   = 2 hours;
 uint64 constant DURATION_4HR   = 4 hours;
+uint64 constant DURATION_8HR   = 8 hours;
+uint64 constant DURATION_12HR  = 12 hours;
+uint64 constant DURATION_16HR  = 16 hours;
+uint64 constant DURATION_20HR  = 20 hours;
 uint64 constant DURATION_24HR  = 24 hours;
-
-/// @dev Read-only surface the cores consult on entry paths.
-interface IMarketplaceManager {
-    function entriesAllowed() external view returns (bool);
-}
 
 /// @title MarketplaceCore
 /// @notice Shared base: immutable fee config, price floor, seller-pays fee math, NFT dispatch.
 /// @dev Single 1.5% platform fee, charged ONLY on a successful sale and DEDUCTED from the seller's
-///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient is
-///      upgradeable storage settable by the manager admin. Entry paths (list/bid/offer) can be
-///      halted via the MarketplaceManager entryGate; EXIT paths (buy-settle, cancel, refund,
-///      withdraw) can never be blocked — "pausable entries, unstoppable exits". Upgrades go
-///      through the UUPS path gated by _requireAdmin.
+///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient lives in
+///      upgradeable storage but has no setter; only a UUPS upgrade can move it. Nothing on the
+///      protocol is pausable: no entry or exit path ever consults an off switch. Upgrades go
+///      through the timelocked UUPS path gated by _requireAdmin.
 abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, ERC1155HolderUpgradeable, UUPSUpgradeable {
     /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
     uint16 public constant PLATFORM_FEE_BPS = 150;
@@ -65,13 +67,17 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     uint256 public constant MIN_PRICE = 1 ether;
 
     /// @dev Validate a caller-supplied duration and turn it into an absolute expiry.
-    ///      Reverts InvalidDuration unless duration is one of the six shared values.
+    ///      Reverts InvalidDuration unless duration is one of the fifteen shared values.
     function _expiryFor(uint64 duration) internal view returns (uint64) {
-        if (duration != DURATION_3MIN && duration != DURATION_15MIN
-            && duration != DURATION_30MIN && duration != DURATION_1HR
-            && duration != DURATION_4HR && duration != DURATION_24HR) {
-            revert InvalidDuration();
-        }
+        bool ok = duration == DURATION_1MIN  || duration == DURATION_3MIN
+               || duration == DURATION_5MIN  || duration == DURATION_10MIN
+               || duration == DURATION_15MIN || duration == DURATION_30MIN
+               || duration == DURATION_45MIN || duration == DURATION_1HR
+               || duration == DURATION_2HR   || duration == DURATION_4HR
+               || duration == DURATION_8HR   || duration == DURATION_12HR
+               || duration == DURATION_16HR  || duration == DURATION_20HR
+               || duration == DURATION_24HR;
+        if (!ok) revert InvalidDuration();
         return uint64(block.timestamp) + duration;
     }
 
@@ -86,11 +92,10 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     ///         withdrawRefund() once the recipient can accept ETH.
     mapping(address => uint256) public pendingReturns;
 
-    /// @notice Optional MarketplaceManager consulted on ENTRY paths only
-    ///         (list/buy/create/bid/makeOffer/acceptOffer). address(0) = ungated.
-    ///         EXIT paths (settle, refunds, withdrawals, cancels, reject) never
-    ///         consult it — escrowed funds can always leave regardless of any
-    ///         role, pause, or manager compromise.
+    /// @notice Optional MarketplaceManager — the roles registry (keeper, admin)
+    ///         and the trust anchor for timelocked upgrades. address(0) = no
+    ///         roles and a permanently frozen implementation. It has no power
+    ///         over funds and cannot halt any user action.
     ///         Was immutable in v1; now upgradeable storage.
     /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
     event PushFailed(address indexed to, uint256 amount);
@@ -115,23 +120,17 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
         __UUPSUpgradeable_init();
         if (recipient == address(0)) revert ZeroAddress();
         // manager is stored in upgradeable storage (was immutable). A typo'd/EOA
-        // address would brick every entry path forever, so validate it answers the
-        // gate probe at init time.
+        // address would silently disable keeper roles and freeze upgrades, so
+        // validate it answers the role probe the cores actually consult.
         if (manager_ != address(0)) {
             if (manager_.code.length == 0) revert BadManager();
-            IMarketplaceManager(manager_).entriesAllowed(); // must not revert
+            (bool ok, bytes memory d) = manager_.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), address(0))
+            );
+            if (!ok || d.length != 32) revert BadManager();
         }
         feeRecipient = recipient;
         manager      = manager_;
-    }
-
-    /// @dev Circuit-breaker guard for entry paths. Fails open if no manager is
-    ///      configured; reverts with EntriesHalted while the manager is paused.
-    modifier entryGate() {
-        if (manager != address(0) && !IMarketplaceManager(manager).entriesAllowed()) {
-            revert EntriesHalted();
-        }
-        _;
     }
 
     // ═══════════════════════════════════════════════════════════════════════
@@ -229,14 +228,15 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     // ── UUPS upgrade authorization ───────────────────────────────────────────
 
     /// @notice How long a queued upgrade must wait before it can be installed.
-    ///         6 hours on testnets so fixes ship fast; 48 hours on Songbird and
-    ///         Flare, where the escrow is real money and users need a window to
-    ///         exit if an upgrade looks hostile.
+    ///         0 on testnets while the marketplace is in active testing so fixes
+    ///         ship instantly; 48 hours on Songbird and Flare, where the escrow
+    ///         is real money and users need a window to exit if an upgrade looks
+    ///         hostile.
     /// @dev Chain IDs: 114 Coston2, 16 Coston, 31337 anvil/local, 19 Songbird,
     ///      14 Flare. Anything unrecognised gets the conservative 48h.
     function upgradeDelay() public view returns (uint64) {
         uint256 id = block.chainid;
-        if (id == 114 || id == 16 || id == 31337) return 6 hours;
+        if (id == 114 || id == 16 || id == 31337) return 0;
         return 48 hours;
     }
 

@@ -1279,11 +1279,6 @@ export const auctionHouseAbi = [
   },
   {
     "type": "error",
-    "name": "EntriesHalted",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "InvalidAmount",
     "inputs": []
   },
@@ -1319,7 +1314,7 @@ export const auctionHouseAbi = [
   },
   {
     "type": "error",
-    "name": "NotKeeper",
+    "name": "NotAuthorized",
     "inputs": []
   },
   {

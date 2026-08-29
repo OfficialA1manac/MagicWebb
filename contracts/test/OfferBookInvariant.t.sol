@@ -36,13 +36,16 @@ contract OfferHandler is Test {
         uint256 tid = tokenIds[tSeed % 3];
         principal = uint128(bound(principal, 0.01 ether, 100 ether));
         (uint128 existingPrincipal,,,) = ob.positions(address(nft), tid, b);
-        uint64[6] memory durations = [
-            uint64(3 minutes), uint64(15 minutes), uint64(30 minutes),
-            uint64(1 hours), uint64(4 hours), uint64(24 hours)
+        uint64[15] memory durations = [
+            uint64(1 minutes), uint64(3 minutes), uint64(5 minutes),
+            uint64(10 minutes), uint64(15 minutes), uint64(30 minutes),
+            uint64(45 minutes), uint64(1 hours), uint64(2 hours),
+            uint64(4 hours), uint64(8 hours), uint64(12 hours),
+            uint64(16 hours), uint64(20 hours), uint64(24 hours)
         ];
         if (uint256(existingPrincipal) > type(uint128).max) return;
         vm.prank(b);
-        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 6]);
+        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 15]);
         ghostEscrowed = ghostEscrowed + principal - uint256(existingPrincipal);
     }
 

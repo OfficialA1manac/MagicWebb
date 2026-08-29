@@ -4,33 +4,28 @@ pragma solidity 0.8.26;
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
 import {AccessControlUpgradeable} from "@openzeppelin/contracts-upgradeable/access/AccessControlUpgradeable.sol";
-import {IMarketplaceManager} from "./MarketplaceCore.sol";
+import {BadImplementation, UpgradeNotQueued, UpgradeNotReady, UpgradeExpired} from "./MarketplaceCore.sol";
 
 error ZeroAddr();
 error NotContract();
-error SameValue();
+error NotKeeperOrAdmin();
 
 /// @title MarketplaceManager
-/// @notice Role registry, atomic circuit breaker, and future-module anchor for the
-///         marketplace contract set.
+/// @notice Role registry and future-module anchor for the marketplace contract set.
 ///
-/// Design contract ("pausable entries, unstoppable exits"):
-///   - The core escrow contracts (Marketplace, AuctionHouse, OfferBook) stay
-///     IMMUTABLE and consult this manager only on ENTRY paths — creating listings
-///     and auctions, bidding, making and accepting offers, buying.
-///   - EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly,
-///     rejectOffer, refundExpiredOffer) never reference the manager: no role,
-///     pause, or upgrade can ever trap escrowed funds.
+/// Design contract:
+///   - The core escrow contracts (Marketplace, AuctionHouse, OfferBook) consult
+///     this manager only for roles (keeper authorization on auction settlement,
+///     admin authorization on timelocked upgrades). Nothing on the protocol is
+///     pausable — no entry or exit path can ever be halted.
 ///   - The manager holds no funds and cannot move funds. Compromise of every role
-///     here can halt NEW activity but cannot redirect a single wei.
+///     here cannot redirect a single wei or block any user action.
 ///
 /// Roles:
-///   - DEFAULT_ADMIN_ROLE  — grants/revokes roles, re-points module registry.
-///   - OPERATOR_ROLE       — pause/unpause entries (circuit breaker).
-///   - KEEPER_ROLE         — registry of authorized keeper addresses. Settlement
-///                           stays permissionless on-chain by design; the role is
-///                           the discoverable identity set for off-chain keepers
-///                           and for future modules that may gate keeper-only ops.
+///   - DEFAULT_ADMIN_ROLE  — grants/revokes roles, re-points module registry,
+///                           queues timelocked upgrades.
+///   - KEEPER_ROLE         — authorized keeper addresses: settle auctions the
+///                           instant they end and sweep expired-offer refunds.
 ///   - FEE_MANAGER_ROLE    — reserved for the future FeeDistributor module (the
 ///                           core 1.5% fee itself is immutable and untouchable).
 ///
@@ -39,14 +34,9 @@ error SameValue();
 ///   - setFeeDistributor    — future token-based fee rebate module.
 ///   - setStakingModule     — future token utility.
 ///   - setGovernanceModule  — future on-chain governance.
-contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgradeable, IMarketplaceManager {
-    bytes32 public constant OPERATOR_ROLE    = keccak256("OPERATOR_ROLE");
+contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgradeable {
     bytes32 public constant KEEPER_ROLE      = keccak256("KEEPER_ROLE");
     bytes32 public constant FEE_MANAGER_ROLE = keccak256("FEE_MANAGER_ROLE");
-
-    /// @notice Circuit breaker: true halts every entry path across all cores
-    ///         atomically (they all read this one flag). Exits are unaffected.
-    bool public entriesPaused;
 
     // ── Module registry (single source of truth for the deployed set) ────────
     address public marketplace;
@@ -62,45 +52,18 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
     // ── Audit log ─────────────────────────────────────────────────────────────
     /// @notice Emitted on every state-changing operation, uniformly indexable.
     event AuditLog(bytes32 indexed action, address indexed actor, address indexed subject, bytes32 extra);
-    event EntriesPaused(address indexed by);
-    event EntriesUnpaused(address indexed by);
     event ModuleSet(bytes32 indexed slot, address indexed addr);
 
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor() { _disableInitializers(); }
 
-    /// @notice One-time initializer. Grants DEFAULT_ADMIN_ROLE + OPERATOR_ROLE
-    ///         to the supplied admin address.
+    /// @notice One-time initializer. Grants DEFAULT_ADMIN_ROLE to the supplied
+    ///         admin address.
     function initialize(address admin) public initializer {
         __AccessControl_init();
         __UUPSUpgradeable_init();
         if (admin == address(0)) revert ZeroAddr();
         _grantRole(DEFAULT_ADMIN_ROLE, admin);
-        _grantRole(OPERATOR_ROLE, admin);
-    }
-
-    // ── Circuit breaker ───────────────────────────────────────────────────────
-
-    /// @notice Halt all entry paths (new listings/auctions/bids/offers/buys)
-    ///         across every core contract atomically. Exits stay live.
-    function pauseEntries() external onlyRole(OPERATOR_ROLE) {
-        if (entriesPaused) revert SameValue();
-        entriesPaused = true;
-        emit EntriesPaused(msg.sender);
-        emit AuditLog("PAUSE", msg.sender, address(0), 0);
-    }
-
-    function unpauseEntries() external onlyRole(OPERATOR_ROLE) {
-        if (!entriesPaused) revert SameValue();
-        entriesPaused = false;
-        emit EntriesUnpaused(msg.sender);
-        emit AuditLog("UNPAUSE", msg.sender, address(0), 0);
-    }
-
-    /// @notice Read by the cores' entry guard. Inverted accessor so the cores
-    ///         fail closed on a true flag, open on the zero-state default.
-    function entriesAllowed() external view returns (bool) {
-        return !entriesPaused;
     }
 
     // ── Module registry ───────────────────────────────────────────────────────
@@ -157,10 +120,91 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
         emit AuditLog("SET_GOVERNANCE", msg.sender, gm, 0);
     }
 
-    // ── UUPS upgrade authorization ───────────────────────────────────────────
+    // ── UUPS upgrade authorization (timelocked — mirrors MarketplaceCore) ────
 
-    /// @notice Only the DEFAULT_ADMIN_ROLE holder can authorize upgrades.
-    function _authorizeUpgrade(address) internal override onlyRole(DEFAULT_ADMIN_ROLE) {}
+    /// @notice Implementation queued for upgrade, or address(0) when none is
+    ///         pending. Packs into a single slot with upgradeEta.
+    address public pendingImplementation;
+    /// @notice Earliest timestamp at which `pendingImplementation` may be
+    ///         installed. Zero when nothing is queued.
+    uint64  public upgradeEta;
+
+    /// @notice Grace period after `upgradeEta` during which the queued
+    ///         implementation may still be installed.
+    uint64 public constant MAX_UPGRADE_WINDOW = 7 days;
+
+    /// @notice Emitted when an upgrade is queued and its timer starts.
+    event UpgradeQueued(address indexed implementation, uint64 eta);
+    /// @notice Emitted when a queued upgrade is abandoned before installation.
+    event UpgradeCancelled(address indexed implementation);
+
+    /// @notice 0 on test chains (instant while the marketplace is in testing),
+    ///         48h elsewhere. Mirrors MarketplaceCore.upgradeDelay().
+    function upgradeDelay() public view returns (uint64) {
+        uint256 id = block.chainid;
+        if (id == 114 || id == 16 || id == 31337) return 0;
+        return 48 hours;
+    }
+
+    /// @notice Start the timer on a manager upgrade. Queuing is public and
+    ///         emits, so holders can see a pending implementation.
+    function queueUpgrade(address impl) external onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (impl == address(0) || impl.code.length == 0) revert BadImplementation();
+        pendingImplementation = impl;
+        upgradeEta = uint64(block.timestamp) + upgradeDelay();
+        emit UpgradeQueued(impl, upgradeEta);
+        emit AuditLog("QUEUE_UPGRADE", msg.sender, impl, 0);
+    }
+
+    /// @notice Abandon the queued upgrade.
+    function cancelUpgrade() external onlyRole(DEFAULT_ADMIN_ROLE) {
+        emit UpgradeCancelled(pendingImplementation);
+        emit AuditLog("CANCEL_UPGRADE", msg.sender, pendingImplementation, 0);
+        pendingImplementation = address(0);
+        upgradeEta = 0;
+    }
+
+    /// @notice DEFAULT_ADMIN_ROLE plus the queue/delay/window discipline the
+    ///         cores use. Previously a bare role check — the one instant-upgrade
+    ///         path in the system, and the trust anchor the cores' timelocks
+    ///         depend on. Now the manager is held to the same standard.
+    function _authorizeUpgrade(address newImplementation) internal override onlyRole(DEFAULT_ADMIN_ROLE) {
+        if (newImplementation != pendingImplementation) revert UpgradeNotQueued();
+        if (block.timestamp < upgradeEta) revert UpgradeNotReady();
+        if (block.timestamp > uint256(upgradeEta) + MAX_UPGRADE_WINDOW) revert UpgradeExpired();
+        pendingImplementation = address(0);
+        upgradeEta = 0;
+    }
+
+    // ── Keeper fleet (self-replenishing — survives full immutability) ──────
+
+    /// @notice Enroll a keeper. Callable by the admin OR any current keeper,
+    ///         so the fleet can rotate/replace its own keys forever — even
+    ///         after DEFAULT_ADMIN_ROLE is renounced and the system is fully
+    ///         immutable, instant settlement never dies with a lost key.
+    /// @dev A rogue keeper key can only enroll more keepers. Keeper power is
+    ///      strictly benign: settle auctions to the CORRECT parties and sweep
+    ///      refunds to their OWNERS. It cannot move, redirect, or block funds,
+    ///      so self-extension is safe by construction.
+    function addKeeper(address k) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && !hasRole(KEEPER_ROLE, msg.sender)) {
+            revert NotKeeperOrAdmin();
+        }
+        if (k == address(0)) revert ZeroAddr();
+        _grantRole(KEEPER_ROLE, k);
+        emit AuditLog("ADD_KEEPER", msg.sender, k, 0);
+    }
+
+    /// @notice Retire a keeper. The admin (while one exists) may prune any
+    ///         key; a keeper may retire ONLY ITSELF — one compromised key can
+    ///         therefore never evict the honest fleet.
+    function removeKeeper(address k) external {
+        if (!hasRole(DEFAULT_ADMIN_ROLE, msg.sender) && msg.sender != k) {
+            revert NotKeeperOrAdmin();
+        }
+        _revokeRole(KEEPER_ROLE, k);
+        emit AuditLog("REMOVE_KEEPER", msg.sender, k, 0);
+    }
 
     // ── Role audit shim ───────────────────────────────────────────────────────
 
@@ -176,5 +220,7 @@ contract MarketplaceManager is Initializable, AccessControlUpgradeable, UUPSUpgr
     }
 
     /// @dev Storage gap for future role extensions and module slots.
-    uint256[50] private __gap;
+    ///      50 → 49: pendingImplementation (address) and upgradeEta (uint64)
+    ///      pack into one freshly-claimed slot ahead of this gap.
+    uint256[49] private __gap;
 }

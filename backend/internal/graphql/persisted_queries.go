@@ -78,7 +78,7 @@ func init() {
   } }`)
 	register(`{
   auctions(limit: 50, status: "active") {
-    auctionId collection tokenID seller reservePriceWei
+    auctionID collection tokenID seller reservePriceWei
     highestBidWei highestBidder status startsAt endsAt
     name imageURI
   }
@@ -89,7 +89,7 @@ func init() {
   }
 }`)
 	register(`{ offers(limit: 50) {
-    offerId bidder collection tokenID amountWei feeWei
+    offerID bidder collection tokenID amountWei feeWei
     units standard status makeTx expiresAt createdAt
   } }`)
 	register(`{
@@ -134,12 +134,12 @@ func init() {
 }`)
 	register(`query Profile($address: String!) {
   profile(address: $address) {
-    address displayName bio avatarURI bannerURI twitter website verified
+    address displayName bio avatarURI bannerURI twitter website
   }
 }`)
 	register(`query Auction($id: Int!) {
   auction(id: $id) {
-    auctionId collection tokenID seller reservePriceWei
+    auctionID collection tokenID seller reservePriceWei
     highestBidWei highestBidder minIncrementBps status
     startsAt endsAt createTx name imageURI
     bids { bidder amountWei placedAt txHash }
@@ -147,7 +147,7 @@ func init() {
 }`)
 	register(`query Auctions($collection: String, $seller: String, $status: String, $limit: Int, $minPrice: String, $maxPrice: String) {
   auctions(collection: $collection, seller: $seller, status: $status, limit: $limit, minPrice: $minPrice, maxPrice: $maxPrice) {
-    auctionId collection tokenID seller reservePriceWei
+    auctionID collection tokenID seller reservePriceWei
     highestBidWei highestBidder status startsAt endsAt
     name imageURI
   }
@@ -169,21 +169,30 @@ func init() {
 }`)
 	register(`query Offers($collection: String, $tokenID: String, $bidder: String, $owner: String, $status: String, $limit: Int) {
   offers(collection: $collection, tokenID: $tokenID, bidder: $bidder, owner: $owner, status: $status, limit: $limit) {
-    offerId bidder collection tokenID amountWei feeWei
+    offerID bidder collection tokenID amountWei feeWei
     units standard status makeTx expiresAt createdAt
   }
 }`)
-	register(`query SavedSearches($address: String!, $page: String, $limit: Int) {
+	// ── User-scoped queries (never CDN-cacheable) ─────────────────────────
+	// Registered as private: HandleGET must send Cache-Control: private,
+	// no-store for these so shared proxies never store per-user data keyed
+	// only by URL.
+	registerPrivate(`query SavedSearches($address: String!, $page: String, $limit: Int) {
   savedSearches(address: $address, page: $page, limit: $limit) {
     id userAddr name page params createdAt
   }
 }`)
-	register(`query Notifications($address: String!, $limit: Int) {
+	registerPrivate(`query Notifications($address: String!, $limit: Int) {
   notifications(address: $address, limit: $limit) {
     id kind title body link read createdAt
   }
 }`)
 }
+
+// privatePersistedQueries marks hashes whose responses carry user-scoped
+// data. HandleGET consults IsPersistedQueryCDNCacheable before setting
+// public CDN cache headers.
+var privatePersistedQueries = map[string]bool{}
 
 // register hashes a GraphQL query and stores it in the persisted query map.
 // The key is hex(sha256(queryText)) — the same format used by Apollo APQ.
@@ -191,6 +200,22 @@ func register(query string) {
 	h := sha256.Sum256([]byte(query))
 	key := hex.EncodeToString(h[:])
 	persistedQueries[key] = query
+}
+
+// registerPrivate registers a persisted query whose response is user-scoped
+// and therefore must never receive public CDN cache headers.
+func registerPrivate(query string) {
+	register(query)
+	h := sha256.Sum256([]byte(query))
+	privatePersistedQueries[hex.EncodeToString(h[:])] = true
+}
+
+// IsPersistedQueryCDNCacheable reports whether the registered persisted
+// query for hash is safe to cache at a shared proxy/CDN. Unknown hashes
+// and user-scoped queries return false.
+func IsPersistedQueryCDNCacheable(hash string) bool {
+	_, ok := persistedQueries[hash]
+	return ok && !privatePersistedQueries[hash]
 }
 
 // LookupPersistedQuery returns the query text for a given SHA-256 hash.

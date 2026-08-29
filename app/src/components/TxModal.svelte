@@ -79,14 +79,13 @@
           {:else if txModal.error?.kind === 'WalletRequired'}Wallet needed
           {:else if txModal.error?.kind === 'WrongChain'}Wrong network
           {:else if txModal.error?.kind === 'InsufficientFunds'}Not enough funds
-          {:else if txModal.error?.kind === 'Paused'}Marketplace paused
           {:else}Could not complete{/if}
         </div>
         <p>{txModal.error?.message ?? 'Something went wrong.'}</p>
         {#if txModal.explorerUrl}<a class="mw-tx-link" href={txModal.explorerUrl} target="_blank" rel="noopener">View on explorer ↗</a>{/if}
       </div>
       <div class="mw-tx-actions">
-        {#if txModal.error?.kind !== 'Paused'}<button class="mw-btn mw-btn-primary" onclick={() => txModal.retry?.()}>Try again</button>{/if}
+        <button class="mw-btn mw-btn-primary" onclick={() => txModal.retry?.()}>Try again</button>
         <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Close</button>
       </div>
     {:else}

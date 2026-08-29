@@ -3,11 +3,15 @@
 # Exercises every user flow exactly as it will run on Coston2:
 #   list -> buy (fee split), auction -> bid -> outbid -> top-up -> settle ->
 #   loser refund, offer -> accept -> distribute, offer expiry refund,
-#   manager pause (entries halt, exits run).
+#   pause-free protocol (pauseEntries selector must not exist).
 # Usage: anvil --chain-id 114 & then:  RPC=http://127.0.0.1:8545 ./e2e_local.sh <MP> <AH> <OB> <MGR>
 set -euo pipefail
 
 RPC="${RPC:-http://127.0.0.1:8545}"
+if [ "$#" -ne 4 ]; then
+  echo "usage: RPC=<url> $0 <MARKETPLACE> <AUCTION_HOUSE> <OFFER_BOOK> <MANAGER>" >&2
+  exit 2
+fi
 MP="$1"; AH="$2"; OB="$3"; MGR="$4"
 
 # ── WARNING: Do not hardcode private keys. ─────────────────────────
@@ -95,22 +99,20 @@ cast send "$OB" "refundExpiredOffer(address,uint256,address)" "$NFT" 4 "$BOB" --
 B1=$(bal "$BOB")
 check "expired offer refunded" "1000000000000000000" "$(sub $B1 $B0)"
 
-echo "== E. circuit breaker: entries halt, exits run =="
-cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null 2>&1 \
-  && { echo "  FAIL  deployer should have renounced operator"; fail=1; } \
-  || echo "  PASS  deployer cannot pause (roles renounced)"
-PK_CREATOR=0x2a871d0798f97d79848a013d4936a73bf4cc922c825d33c1cf7073dff6d409c6
-cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null
-check "entriesAllowed=false" "false" "$(cast call "$MGR" "entriesAllowed()(bool)" --rpc-url "$RPC")"
-NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null 2>&1 \
-  && { echo "  FAIL  list should revert while paused"; fail=1; } \
-  || echo "  PASS  list halted while paused"
-cast send "$MGR" "unpauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null
-check "entriesAllowed=true" "true" "$(cast call "$MGR" "entriesAllowed()(bool)" --rpc-url "$RPC")"
-# Recovery proof: an entry must actually succeed again after unpause.
+echo "== E. pause-free protocol: no circuit breaker exists =="
+# A revert alone doesn't prove the selector is gone (it could be an auth
+# revert) -- inspect the implementation bytecode for the 4-byte selector.
+MGR_IMPL=$(cast implementation "$MGR" --rpc-url "$RPC")
+PAUSE_SEL=$(cast sig "pauseEntries()")
+if cast code "$MGR_IMPL" --rpc-url "$RPC" | grep -qi "${PAUSE_SEL#0x}"; then
+  echo "  FAIL  pauseEntries selector present in manager implementation"; fail=1
+else
+  echo "  PASS  protocol has no pause (pauseEntries selector absent from bytecode)"
+fi
+cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null 2>&1   && { echo "  FAIL  pauseEntries call should revert"; fail=1; }   || echo "  PASS  pauseEntries reverts for the creator too"
+# Entries must always work -- nothing can halt them.
 cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
-echo "  PASS  entries recover after unpause"
+echo "  PASS  entries always live"
 
 echo
 if [ "$fail" -eq 0 ]; then echo "E2E PLAYTHROUGH: ALL CHECKS PASSED"; else echo "E2E PLAYTHROUGH: FAILURES PRESENT"; exit 1; fi

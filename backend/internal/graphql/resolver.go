@@ -206,6 +206,7 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 			Standard:    c.Standard,
 			DeployBlock: int(c.DeployBlock),
 			Verified:    c.Verified,
+			CreatorAddr: c.CreatorAddr,
 		}
 		// GQL-3: Preload stats when proto has them (server.go populates via GetCollectionStats).
 		if c.FloorPriceWei != "" || c.Volume_24HWei != "" || c.ListedCount > 0 {
@@ -229,6 +230,7 @@ func (r *queryResolver) Collection(ctx context.Context, address string) (*Collec
 		Standard:    row.Standard,
 		DeployBlock: int(row.DeployBlock),
 		Verified:    row.Verified,
+		CreatorAddr: row.CreatorAddr,
 	}, nil
 }
 
@@ -269,7 +271,7 @@ func (r *queryResolver) Collections(ctx context.Context, limit *int) ([]*Collect
 		out = append(out, &Collection{
 			Address: rows[i].Address, Name: rows[i].Name, Symbol: rows[i].Symbol,
 			Standard: rows[i].Standard, DeployBlock: int(rows[i].DeployBlock),
-			Verified: rows[i].Verified,
+			Verified: rows[i].Verified, CreatorAddr: rows[i].CreatorAddr,
 		})
 	}
 	return out, nil
@@ -693,8 +695,15 @@ func (r *queryResolver) Profile(ctx context.Context, address string) (*Profile, 
 	}, nil
 }
 
-// Notifications returns notifications for a user.
+// Notifications returns notifications for the authenticated user.
+// The requested address must match the JWT-authenticated wallet address
+// (injected via AuthCtxKey by HandlePOST/HandleGET/HandleWS) — otherwise
+// any caller could read another user's notifications.
 func (r *queryResolver) Notifications(ctx context.Context, address string, limit *int) ([]*Notification, error) {
+	authAddr, _ := ctx.Value(AuthCtxKey).(string)
+	if authAddr == "" || !strings.EqualFold(authAddr, address) {
+		return nil, fmt.Errorf("unauthorized")
+	}
 	l := 50
 	if limit != nil && *limit > 0 {
 		l = *limit
@@ -843,8 +852,14 @@ func (r *queryResolver) Trending(ctx context.Context, window *string, limit *int
 	return out, nil
 }
 
-// SavedSearches returns saved searches for a user.
+// SavedSearches returns saved searches for the authenticated user.
+// Same authorization rule as Notifications: the requested address must
+// match the JWT-authenticated wallet address.
 func (r *queryResolver) SavedSearches(ctx context.Context, address string, page *string, limit *int) ([]*SavedSearch, error) {
+	authAddr, _ := ctx.Value(AuthCtxKey).(string)
+	if authAddr == "" || !strings.EqualFold(authAddr, address) {
+		return nil, fmt.Errorf("unauthorized")
+	}
 	l := 50
 	if limit != nil && *limit > 0 {
 		l = *limit
@@ -991,6 +1006,9 @@ func (r *subscriptionResolver) ListingUpdated(ctx context.Context, collection *s
 
 // AuctionUpdated returns a channel that receives auction updates.
 func (r *subscriptionResolver) AuctionUpdated(ctx context.Context, auctionID *int) (<-chan *Auction, error) {
+	if r.bcast == nil {
+		return nil, fmt.Errorf("broadcaster not available")
+	}
 	eventCh, cancel, ok := r.bcast.SubscribeRaw()
 	if !ok {
 		return nil, fmt.Errorf("too many subscribers")
@@ -1046,6 +1064,9 @@ func (r *subscriptionResolver) AuctionUpdated(ctx context.Context, auctionID *in
 
 // ActivityUpdated returns a channel that receives activity feed updates.
 func (r *subscriptionResolver) ActivityUpdated(ctx context.Context) (<-chan *Activity, error) {
+	if r.bcast == nil {
+		return nil, fmt.Errorf("broadcaster not available")
+	}
 	eventCh, cancel, ok := r.bcast.SubscribeRaw()
 	if !ok {
 		return nil, fmt.Errorf("too many subscribers")
@@ -1105,6 +1126,9 @@ func (r *subscriptionResolver) ActivityUpdated(ctx context.Context) (<-chan *Act
 // extracted from ctx (injected by HandleWS via AuthCtxKey). Unauthenticated
 // connections receive no notifications.
 func (r *subscriptionResolver) NotificationUpdated(ctx context.Context) (<-chan *Notification, error) {
+	if r.bcast == nil {
+		return nil, fmt.Errorf("broadcaster not available")
+	}
 	eventCh, cancel, ok := r.bcast.SubscribeRaw()
 	if !ok {
 		return nil, fmt.Errorf("too many subscribers")
@@ -1283,6 +1307,7 @@ func collectionFromProto(c *marketplacev1.Collection) *Collection {
 		Standard:    c.Standard,
 		DeployBlock: int(c.DeployBlock),
 		Verified:    c.Verified,
+		CreatorAddr: c.CreatorAddr,
 	}
 	// GQL-3: Preload stats when the proto has them (server.go populates
 	// these via GetCollectionStatsBatch in ListCollections).

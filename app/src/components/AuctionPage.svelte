@@ -9,7 +9,7 @@
   import { MW } from '../lib/mw';
   import { ws } from '../lib/ws/client';
   import { tokenChannel } from '../lib/ws/channels';
-  import { currentChain } from '../lib/chains';
+  import { currentChain, tradingLive, readOnlyCopy } from '../lib/chains';
   import { fmtPrice, shortAddr, timeAgo, fmtCountdown, toWei } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
   import { onAccountChange } from '../lib/tx/client';
@@ -31,6 +31,8 @@
   let syncing = $state('');
   const chain = currentChain();
   const sym = chain.currency;
+  const canTrade = tradingLive();
+  const roCopy = readOnlyCopy();
 
   let endsMs = $derived(a ? new Date(a.ends_at).getTime() : 0);
   let isLive = $derived(!!a && a.status === 'active' && endsMs > now);
@@ -39,7 +41,7 @@
   let highest = $derived(BigInt(a?.highest_bid_wei || '0'));
   let myCumulative = $derived(me ? bids.filter((b) => b.bidder.toLowerCase() === me!.toLowerCase()).reduce((s, b) => s + BigInt(b.amount_wei), 0n) : 0n);
   let amLeader = $derived(!!me && !!a && a.highest_bidder?.toLowerCase() === me.toLowerCase());
-  let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative }) : 0n);
+  let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative, minIncrementBps: a.min_increment_bps }) : 0n);
   let name = $derived(a?.name || `#${a?.token_id ?? ''}`);
   let img = $derived(resolveImageUri(a?.image_uri, a?.token_id));
   let antiSnipe = $derived(isLive && endsMs - now < 3 * 60 * 1000);
@@ -95,6 +97,14 @@
       <div class="ap-meta mono">Auction #{a.auction_id} · seller {isSeller ? 'you' : shortAddr(a.seller)} · <a href={`/token/${a.collection}/${a.token_id}`}>token #{a.token_id}</a></div>
       {#if syncing}<div class="ap-sync" role="status"><span class="ap-spin" aria-hidden="true"></span>{syncing}</div>{/if}
 
+      {#if !canTrade}
+        <section class="ap-card" aria-label="Read-only network">
+          <div class="ap-head"><span>{roCopy.heading}</span></div>
+          <p class="ap-hint">{roCopy.body}</p>
+          {#if roCopy.ctaHref}<a class="btn v" href={roCopy.ctaHref}>{roCopy.cta}</a>{/if}
+        </section>
+      {/if}
+
       <section class="ap-card" class:is-hot={antiSnipe}>
         <div class="ap-head">
           <span>{isLive ? 'Ends in' : ended ? 'Ended' : a.status}</span>
@@ -104,7 +114,7 @@
         <div class="ap-price mono">{fmtPrice(highest > 0n ? a.highest_bid_wei : a.reserve_price_wei)} <small>{sym}</small></div>
         <div class="ap-sub">{highest > 0n ? `Highest bid · ${amLeader ? 'you are leading' : shortAddr(a.highest_bidder)}` : 'No bids yet · reserve shown'}</div>
 
-        {#if isLive && !isSeller}
+        {#if canTrade && isLive && !isSeller}
           {#if amLeader}
             <div class="ap-ok">You are the highest bidder with {fmtPrice(myCumulative)} {sym}.</div>
           {:else}
@@ -115,17 +125,17 @@
               <p class="ap-hint">Bids add up: your total is what counts. If you are outbid, every {sym} you sent is refundable.</p>
             </div>
           {/if}
-        {:else if ended}
+        {:else if canTrade && ended}
           {#if amLeader || isSeller}
             <button class="btn gold" onclick={doSettle}>Settle now</button>
             <p class="ap-hint">The marketplace settles this automatically within seconds; as {amLeader ? 'the winner' : 'the seller'} you can also settle it yourself.</p>
           {:else}
             <p class="ap-hint">Auction ended — settling automatically. NFT to the winner, proceeds (minus 1.5%) to the seller, losing bids refundable.</p>
           {/if}
-        {:else if isLive && isSeller}
+        {:else if canTrade && isLive && isSeller}
           {#if highest === 0n}<button class="btn g" onclick={doCancel}>Cancel auction</button>{:else}<p class="ap-hint">Your auction has bids and will settle when it ends.</p>{/if}
         {/if}
-        {#if me && myCumulative > 0n && !amLeader && (isLive || a.status !== 'active')}
+        {#if canTrade && me && myCumulative > 0n && !amLeader && (isLive || a.status !== 'active')}
           <button class="btn g" onclick={doWithdraw}>Withdraw my {fmtPrice(myCumulative)} {sym}</button>
         {/if}
       </section>

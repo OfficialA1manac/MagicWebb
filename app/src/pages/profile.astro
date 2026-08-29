@@ -74,6 +74,11 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
       // BEFORE loadProfileData so the catch block (which resets it on
       // failure) and the mw-wallet-changed guard both reference it cleanly.
       var _lastRenderedAddr = addr;
+
+      // Collector badge -- inline duplicate of src/lib/holderBadge.ts (inline
+      // scripts cannot import). Keep the list + hash byte-identical.
+      var MW_HOLDER_NAMES = ['SharinganHodl','RasenganMint','HokageWhale','PirateKingHodl','DevilFruitMint','SuperSaiyanHodl','UltraInstinctWhale','HashiraHodl','DomainExpansionMint','QuirkHodl','WaifuWhale','OtakuOG','RasenganRekt','KamehamehaHodl','ChidoriMint','GomuGomuWhale','BankaiHodl','ZanpakutoMint','TitanSlayerHodl','OdmGearWhale','AlchemistMint','PhilosopherHodl','SusanooWhale','ByakuganMint','RinneganHodl','NineTailsWhale','AkatsukiMint','JutsuHodl','SenpaiWhale','KawaiiMint','MechaHodl','GundamWhale','EvaPilotMint','SpiritGunHodl','DragonSlayerWhale','FairyTailMint','CelestialHodl','ShinigamiWhale','DeathNoteMint','StandUserHodl','OraOraWhale','MudaMudaMint','HamonHodl','NenMasterWhale','HunterMint','GreedIslandHodl','ChimeraWhale','FullCowlMint','OneForAllHodl','PlusUltraWhale','DekuMint','ShotoHodl','BakugoWhale','GojoMint','SukunaHodl','CursedEnergyWhale','BlackFlashMint','NezukoHodl','TanjiroWhale','WaterBreathingMint','ThunderclapHodl','FlameHashiraWhale','YareYareMint','StarPlatinumHodl','ZaWarudoWhale','GetsugaMint','HollowHodl','VizardWhale','SoulReaperMint','ShonenHodl','IsekaiWhale','SenseiMint','TsundereHodl','YanderaWhale','ChibiMint','NakamaHodl','MangekyoWhale','IzanagiMint','ShadowCloneHodl','SageModeWhale','CurseMarkMint','SoulSocietyHodl','GrandLineWhale','HakiMint','ConquerorsHodl','YonkoWhale','WanoMint','GearFifthHodl','SaiyanPrideWhale','FusionDanceMint','SenzuBeanHodl','NimbusWhale','SpiritBombMint','FinalFlashHodl','MajinWhale','OtakuAlpha','AnimeOG'];
+      function mwHolderBadge(a){var h=0x811c9dc5>>>0;a=String(a||'').toLowerCase();for(var i=0;i<a.length;i++){h^=a.charCodeAt(i);h=Math.imul(h,0x01000193)>>>0;}return MW_HOLDER_NAMES[h%MW_HOLDER_NAMES.length];}
       // Debounce timer for wallet-changed events (prevent rapid re-renders)
       var _wcDebounceTimer = null;
       // In-flight guard: prevent overlapping loadProfileData calls
@@ -109,6 +114,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         fetch('/api/v1/metrics').catch(function(){return null;}),
         fetch('/api/v1/activity?address='+encAddr+'&limit=20').catch(function(){return null;})
       ]);
+          // Creator badge: does this address own (ERC-173) any indexed collection?
+          const collRes = await fetch('/api/v1/collections?limit=200').catch(function(){return null;});
 
           function ok(r){return r&&r.ok;}
           async function safeJson(r){try{return await r.json();}catch(_){return null;}}
@@ -120,6 +127,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           let offersSent  = ok(offSentRes) ? (await safeJson(offSentRes)) : [];
           let offersRecv  = ok(offRecvRes) ? (await safeJson(offRecvRes)) : [];
           const metrics     = ok(metRes)  ? ((await safeJson(metRes)) || {})  : {};
+          let allColls    = ok(collRes) ? (await safeJson(collRes)) : [];
+          if (!Array.isArray(allColls)) allColls = [];
+          const createdColls = allColls.filter(function(c){ return c && c.creator_addr && String(c.creator_addr).toLowerCase() === targetAddr.toLowerCase(); });
           let activity    = ok(actRes)  ? (await safeJson(actRes))  : [];
 
           if (!Array.isArray(nfts)) nfts = [];
@@ -149,7 +159,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             return '<img src="'+esc(src)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;" onerror="this.style.display=\'none\';this.nextElementSibling.style.display=\'flex\';"><span style="display:none;align-items:center;justify-content:center;position:absolute;inset:0;font-size:2.5rem;color:rgba(255,255,255,0.08);">'+fallback+'</span>';
           }
 
-          function renderNFTGrid(items){
+          function renderNFTGrid(items, ownMode){
             if(!items||!items.length) return '<div style="padding:4rem 2rem;text-align:center;border-radius:1rem;background:rgba(15,15,19,0.5);border:1px solid rgba(255,255,255,0.05);">'+
               '<div style="font-size:2rem;margin-bottom:0.75rem;" aria-hidden="true">🖼</div>'+
               '<p style="color:rgba(255,255,255,0.55);font-size:0.875rem;font-weight:600;margin:0;">Nothing here yet</p>'+
@@ -161,13 +171,54 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
               const src=resolveImageUri(it.image_uri,it.token_id);
               const price=it.price_wei?weiToFLR(it.price_wei,4):'';
-              return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;">'+
+              return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;position:relative;">'+
+                (ownMode&&!price?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" onclick="event.stopPropagation();" style="position:absolute;top:0.5rem;left:0.5rem;z-index:2;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                   imgTag(src,'🖼')+
                   (price?'<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">'+cur()+'</span></div>':'')+
                 '</div>'+
-                '<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p></div></a>';
+                '<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p>'+
+                (ownMode&&!price?'<a href="/token/'+encC+'/'+encT+'#list" onclick="event.stopPropagation();" style="display:inline-block;margin-top:0.5rem;padding:0.25rem 0.75rem;border-radius:0.5rem;background:rgba(125,211,252,0.12);border:1px solid rgba(125,211,252,0.3);color:#7dd3fc;font-size:0.6875rem;font-weight:700;">List →</a>':'')+
+                '</div></a>';
             }).join('')+'</div>';
+          }
+
+          // Batch listing: one price+duration for every selected NFT -> one tx (MW.batchList, max 50).
+          function renderBatchBar(){
+            var durOpts = [[60,'1m'],[180,'3m'],[300,'5m'],[600,'10m'],[900,'15m'],[1800,'30m'],[2700,'45m'],[3600,'1h'],[7200,'2h'],[14400,'4h'],[28800,'8h'],[43200,'12h'],[57600,'16h'],[72000,'20h'],[86400,'24h']];
+            return '<div id="batch-bar" style="display:none;align-items:center;gap:0.625rem;flex-wrap:wrap;margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.875rem;background:rgba(125,211,252,0.06);border:1px solid rgba(125,211,252,0.25);">'+
+              '<span id="batch-count" style="font-size:0.8125rem;font-weight:700;color:#7dd3fc;">0 selected</span>'+
+              '<input id="batch-price" inputmode="decimal" placeholder="Price each ('+cur()+', min 1)" style="width:11rem;padding:0.45rem 0.75rem;border-radius:0.625rem;background:rgba(9,9,11,0.6);border:1px solid rgba(255,255,255,0.12);color:#fafafa;font-family:JetBrains Mono,monospace;font-size:0.8125rem;">'+
+              '<select id="batch-dur" style="padding:0.45rem 0.75rem;border-radius:0.625rem;background:rgba(9,9,11,0.6);border:1px solid rgba(255,255,255,0.12);color:#fafafa;font-size:0.8125rem;font-family:inherit;">'+
+                durOpts.map(function(d){return '<option value="'+d[0]+'"'+(d[0]===86400?' selected':'')+'>'+d[1]+'</option>';}).join('')+
+              '</select>'+
+              '<button id="batch-go" style="padding:0.5rem 1.25rem;border-radius:0.625rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;border:none;cursor:pointer;font-family:inherit;">List selected · free</button>'+
+              '<span id="batch-err" style="font-size:0.75rem;color:#fca5a5;font-weight:600;"></span>'+
+            '</div>';
+          }
+          function wireBatchBar(tc){
+            var bar = document.getElementById('batch-bar'); if(!bar) return;
+            function selected(){ return Array.prototype.slice.call(tc.querySelectorAll('.mw-batch-cb:checked')); }
+            tc.addEventListener('change', function(e){
+              if(!e.target || !e.target.classList || !e.target.classList.contains('mw-batch-cb')) return;
+              var n = selected().length;
+              bar.style.display = n ? 'flex' : 'none';
+              var c = document.getElementById('batch-count'); if(c) c.textContent = n+' selected'+(n>50?' — max 50':'');
+            });
+            var go = document.getElementById('batch-go');
+            if(go) go.addEventListener('click', function(){
+              var err = document.getElementById('batch-err'); if(err) err.textContent='';
+              var sel = selected();
+              if(!sel.length) return;
+              if(sel.length>50){ if(err) err.textContent='Pick at most 50.'; return; }
+              var mw = window.MW; if(!mw){ if(err) err.textContent='Wallet bridge not ready — reload the page.'; return; }
+              var priceStr = (document.getElementById('batch-price')||{}).value || '';
+              var wei; try { wei = mw.toWei(priceStr); } catch(_){ if(err) err.textContent='Enter a price like 12.5'; return; }
+              if(wei < 1000000000000000000n){ if(err) err.textContent='Minimum price is 1 '+cur()+'.'; return; }
+              var dur = Number((document.getElementById('batch-dur')||{}).value || 86400);
+              var items = sel.map(function(cb){ return { nft: cb.getAttribute('data-coll'), tokenId: cb.getAttribute('data-tid'), priceWei: wei.toString(), duration: dur }; });
+              mw.batchList({ items: items }).then(function(){ setTimeout(function(){ location.reload(); }, 1500); }).catch(function(){ /* TxModal showed it */ });
+            });
           }
 
           function renderListingsGrid(items){
@@ -263,6 +314,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               '<div style="flex:1;min-width:0;">'+
                 '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+
                   '<h1 style="font-size:1.5rem;font-weight:800;color:#fafafa;">'+esc(displayName)+'</h1>'+
+                  '<span class="vb is-holder sm" title="Collector badge — a fun label derived from this wallet address.">'+esc(mwHolderBadge(targetAddr))+'</span>'+
+                  (createdColls.length?'<a class="vb is-creator sm" href="/docs/faq#creator" title="Collection creator of '+esc(createdColls.map(function(c){return c.name||c.address;}).join(', '))+'." aria-label="Collection creator"><span class="vb-star" aria-hidden="true">★</span>Creator</a>':'')+
                 '</div>'+
                 '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(targetAddr)+'</p>'+
                 (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;">'+esc(bio)+'</p>':'')+
@@ -314,16 +367,27 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             emptyWalletNotice +
 
             // Tab bar
-            '<div id="tab-bar" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">'+
+            '<div id="nfts"></div><div id="tab-bar" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">'+
               tabs.map(function(t){return '<button data-tab="'+t.id+'" class="profile-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap;font-family:inherit;">'+t.label+'</button>';}).join('')+
             '</div><div id="tab-content"></div>';
+
+          // Deep link: /profile#nfts jumps straight to the My NFTs tab.
+          if (location.hash === '#nfts') {
+            setTimeout(function(){ var el = document.getElementById('nfts'); if(el) el.scrollIntoView({behavior:'smooth'}); }, 100);
+          }
 
           // Tab switching
           function renderTab(id){
             const tc = document.getElementById('tab-content');
             if(!tc) return;
             switch(id){
-              case 'nfts':     tc.innerHTML = renderNFTGrid(combinedNFTs); break;
+              case 'nfts': {
+                // Read-only deployments have no marketplace contract: no List/batch UI.
+                var own = isOwnProfileFor(targetAddr) && !!window.MW_MARKETPLACE;
+                tc.innerHTML = (own ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:0.5rem;">Tick unlisted NFTs to list several at once (max 50), or use each card\u2019s List \u2192 link.</p>'+renderBatchBar() : '') + renderNFTGrid(combinedNFTs, own);
+                if(own) wireBatchBar(tc);
+                break;
+              }
               case 'listings': tc.innerHTML = renderListingsGrid(listings); break;
               case 'auctions': tc.innerHTML = renderAuctionsList(auctions); break;
               case 'offers':

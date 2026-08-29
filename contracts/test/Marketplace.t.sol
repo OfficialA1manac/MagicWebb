@@ -161,9 +161,9 @@ contract MarketplaceTest is Test, TestHelpers {
         assertEq(s2.balance, sb + uint256(price) - fee);
     }
 
-    /// Six shared durations accepted; expiry computed on-chain from block.timestamp.
+    /// Fifteen shared durations accepted; expiry computed on-chain from block.timestamp.
     function test_list_durationsAndExpiry() public {
-        uint64[6] memory ok = [uint64(3 minutes), uint64(15 minutes), uint64(30 minutes), uint64(1 hours), uint64(4 hours), uint64(24 hours)];
+        uint64[15] memory ok = [uint64(1 minutes), uint64(3 minutes), uint64(5 minutes), uint64(10 minutes), uint64(15 minutes), uint64(30 minutes), uint64(45 minutes), uint64(1 hours), uint64(2 hours), uint64(4 hours), uint64(8 hours), uint64(12 hours), uint64(16 hours), uint64(20 hours), uint64(24 hours)];
         vm.warp(1_700_000_000);
         for (uint256 i; i < ok.length; ++i) {
             vm.startPrank(seller);
@@ -182,7 +182,9 @@ contract MarketplaceTest is Test, TestHelpers {
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert(InvalidDuration.selector);
-        mp.list(address(nft), tid, 1 ether, 2 hours);
+        mp.list(address(nft), tid, 1 ether, 7 minutes);
+        vm.expectRevert(InvalidDuration.selector);
+        mp.list(address(nft), tid, 1 ether, 2 hours + 1);
         vm.expectRevert(InvalidDuration.selector);
         mp.list(address(nft), tid, 1 ether, 0);
         vm.stopPrank();

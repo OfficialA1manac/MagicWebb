@@ -291,7 +291,7 @@ func (d *Dispatcher) deliver(ctx context.Context, cfg WebhookConfig, hookType Ma
 	defer cancel()
 
 	start := time.Now()
-	err := sendJSONWithSecret(deliveryCtx, cfg.URL, payload, cfg.Secret)
+	err := sendJSONWithSecret(deliveryCtx, userWebhookClient, cfg.URL, payload, cfg.Secret)
 	elapsed := int(time.Since(start).Milliseconds())
 
 	// Log the delivery attempt.

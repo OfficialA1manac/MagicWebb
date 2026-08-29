@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, TransferFailed, WithdrawFailed, BelowMinPrice, InvalidDuration, DURATION_3MIN, DURATION_15MIN, DURATION_30MIN, DURATION_1HR, DURATION_4HR, DURATION_24HR} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, TransferFailed, WithdrawFailed, BelowMinPrice, InvalidDuration, DURATION_24HR} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -18,13 +18,13 @@ error BadIncrement();
 error NotSettled();
 error NothingToWithdraw();
 error BatchTooLarge();
-error NotKeeper();
+error NotAuthorized();
 
 error CannotCancel();
 
 /// @title AuctionHouse
 /// @notice English auctions with a CUMULATIVE bid model, escrow-until-settle, and
-///         keeper-friendly (permissionless) auto-settlement.
+///         keeper-driven instant auto-settlement.
 ///
 /// Cumulative model:
 ///   - A bidder may place many bids on one auction. Their EFFECTIVE bid is the SUM
@@ -36,23 +36,30 @@ error CannotCancel();
 ///     the current leader by the min increment. Sub-threshold bids still escrow
 ///     (accumulate) but do not lead.
 ///
-/// Settlement (three-tier gate, so funds are never trapped):
-///   1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
-///   2. Seller OR auction winner — settles any time after `endsAt`.
-///   3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
+/// Settlement (keeper + parties only — funds still never trapped):
+///   1. KEEPER_ROLE — settles the instant `endsAt` passes (1s ticker).
+///   2. Seller OR auction winner — settle any time after `endsAt` if the
+///      keeper has not already done so.
+///   No third party can ever settle someone else's auction. Escrow can still
+///   never be stuck: all non-leading escrow is withdrawable at any time via
+///   withdrawLoserFunds(), and `forceCancel()` (permissionless, endsAt + 3d)
+///   finalises any auction nobody settled, unlocking refundLosers() for the
+///   leader too. Worst case — seller vanished AND keeper dead — the leader
+///   waits 3 days for escrow recovery; no path leaves funds locked forever.
 ///   NFT → winner; 1.5% fee → feeRecipient; winningBid−fee → seller.
 ///   The winner's escrow is consumed.
 ///   - `refundLosers(id, batch)` is callable by ANYONE after settlement and returns
 ///     each non-winner's full escrow. Batched + pull-fallback so one non-receiving
 ///     bidder can never brick the refunds. Bounded gas per call.
 ///
-/// Non-custodial; immutable; no admin, no pause, no upgrade.
+/// Non-custodial; no admin over funds; NOTHING is pausable — no entry or exit
+/// path can ever be halted. Upgrades only via the timelocked UUPS path.
 ///
 /// @dev Timestamp usage: This contract uses `block.timestamp` for auction timing
 ///      (startsAt, endsAt, extension window). Miners can manipulate
 ///      block.timestamp by up to ~15 seconds on Ethereum mainnet (less on Flare),
 ///      but all time windows are far larger than the manipulation threshold:
-///      - Auctions last from 3 minutes to 24 hours (one of 6 fixed durations)
+///      - Auctions last from 1 minute to 24 hours (one of 15 fixed durations)
 ///      - Anti-snipe extension window is 3 minutes (EXTENSION_WINDOW)
 ///      - No stall window: settle() reverts entirely on transfer failure; keeper retries
 ///      A 15-second skew is negligible against these magnitudes and cannot be
@@ -75,22 +82,22 @@ contract AuctionHouse is MarketplaceCore {
     ///         Undeliverable NFTs no longer need this window: settle() finalises
     ///         the auction on a failed transfer and returns the winner's escrow
     ///         on the spot (see AuctionSettlementFailed). forceCancel() remains
-    ///         only as a backstop for an auction nobody ever called settle() on,
-    ///         which settle()'s own permissionless tier already makes unlikely.
+    ///         only as a backstop for an auction nobody ever called settle() on
+    ///         (lost seller + dead keeper) — permissionless, so escrow is
+    ///         recoverable by anyone driving refundLosers() afterwards.
     uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
-    /// @notice Flat minimum increment of 1 FLR/C2FLR/SGB (1 ether) for overtaking
-    ///         the current leader. The user's new cumulative bid must exceed the
-    ///         leader's total by at least this amount. The percentage-based
-    ///         `minIncrementBps` and `minIncrementFlat` parameters are still
-    ///         accepted at creation for backward-compatibility but the bid() logic
-    ///         uses only this flat value — guaranteeing a +1 C2FLR/FLR/SGB floor
-    ///         across all chains.
+    /// @notice Flat FLOOR on the overtaking increment: 1 FLR/C2FLR/SGB (1
+    ///         ether). The seller's percentage increment (`minIncrementBps`,
+    ///         capped at MAX_MIN_INCREMENT_BPS = 50%) can RAISE the required
+    ///         step above this floor but never lower it. `minIncrementFlat`
+    ///         is deprecated and ignored by bid() — it was uncapped and let a
+    ///         seller make the first leader unbeatable.
     uint128 public constant MIN_BID_INCREMENT  = 1 ether;
 
     struct Auction {
         address       seller;
         uint64        startsAt;
-        uint16        minIncrementBps;   // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
+        uint16        minIncrementBps;   // seller's min-raise %, capped 50%; bid() floors the step at MIN_BID_INCREMENT
         bool          settled;
         bool          active;            // seller activates after creation; bids only when true
         TokenStandard standard;
@@ -101,7 +108,7 @@ contract AuctionHouse is MarketplaceCore {
         uint128       amount;            // token amount (1 for ERC-721)
         address       leader;            // current highest-cumulative bidder
         uint128       leaderTotal;       // leader's cumulative escrow
-        uint128       minIncrementFlat;  // kept for backwards-compat; bid() ignores it — see MIN_BID_INCREMENT
+        uint128       minIncrementFlat;  // DEPRECATED + IGNORED by bid(): uncapped flat was a griefing vector
     }
 
     uint256 public nextAuctionId;
@@ -226,22 +233,21 @@ contract AuctionHouse is MarketplaceCore {
     // ── Create (free) ───────────────────────────────────────────────────────────
 
     /// @notice Create an ERC-721 auction. Starts immediately.
-    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    ///                   bid() always uses MIN_BID_INCREMENT (1 ether flat floor).
-    /// @param duration One of the six shared durations; endsAt is computed on-chain.
+    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000 =
+    ///                   0–50%). bid() uses max(leader*bps/10000, 1 ether).
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
+    /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
     function create(address coll, uint256 tokenId, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
-        external nonReentrant entryGate returns (uint256 id)
+        external nonReentrant returns (uint256 id)
     {
         return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, _expiryFor(duration), minIncBps, minIncFlat);
     }
 
     /// @notice Create an ERC-1155 auction. Starts immediately.
-    /// @param minIncBps  DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED.
+    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000). See create().
+    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
     function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
-        external nonReentrant entryGate returns (uint256 id)
+        external nonReentrant returns (uint256 id)
     {
         if (amount == 0) revert InvalidAmount();
         return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, _expiryFor(duration), minIncBps, minIncFlat);
@@ -257,7 +263,7 @@ contract AuctionHouse is MarketplaceCore {
         uint16  minIncBps,
         uint128 minIncFlat
     ) internal returns (uint256 id) {
-        // endsAt was produced by _expiryFor(): in the future, one of the six durations.
+        // endsAt was produced by _expiryFor(): in the future, one of the fifteen durations.
         if (endsAt <= block.timestamp) revert InvalidWindow();
         if (minIncBps > MAX_MIN_INCREMENT_BPS) revert BadIncrement();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
@@ -276,15 +282,11 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
-        // v21 — INC floor: when both minIncrementBps and minIncrementFlat are
-        // 0, the bid() path now falls through to MIN_BID_INCREMENT (1
-        // ether) instead of the legacy +1 wei rule. The previous 1-wei
-        // fall-through let two colluding wallets perpetually trade 1-wei
-        // leads and stall an auction indefinitely via repeated anti-snipe
-        // extensions (audit-#5). 1 ETH per flip is economically unviable
-        // for griefing while remaining trivial for any legitimate bidder.
-        // Existing auctions are unaffected — this only governs auctions
-        // created after the redeploy.
+        // Increment rule (v3): bid() requires max(leader*minIncBps/10000,
+        // MIN_BID_INCREMENT) to overtake — the 1-ether floor kills 1-wei
+        // griefing loops (audit-#5) and the 50% bps cap (checked above)
+        // bounds seller-chosen increments. minIncFlat is stored for ABI
+        // compatibility but never consulted by bid().
         a.minIncrementBps = minIncBps;
         a.standard        = standard;
         a.collection      = coll;
@@ -313,7 +315,7 @@ contract AuctionHouse is MarketplaceCore {
     ///         bids are accepted immediately. Bids that do not place the caller in
     ///         first place (or clear the reserve when there is no leader) revert.
     ///         Losers can withdraw early via withdrawLoserFunds().
-    function bid(uint256 id) external payable nonReentrant entryGate {
+    function bid(uint256 id) external payable nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
@@ -359,11 +361,15 @@ contract AuctionHouse is MarketplaceCore {
         } else if (newTotal > a.leaderTotal) {
             // Overtaking the leader requires clearing the min increment — a bidder
             // may not sit above the leader without taking the lead.
-            uint256 incPct  = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
-            uint256 inc     = incPct > a.minIncrementFlat ? incPct : a.minIncrementFlat;
-            // Floor at MIN_BID_INCREMENT so a 0/0 increment config cannot be
-            // reduced to a 1-wei griefing loop (audit-#5). Per-cycle
-            // gas cost vs. the 1 ETH flip cost makes the attack uneconomic.
+            // v3 rule: the increment is the seller's percentage (capped at
+            // MAX_MIN_INCREMENT_BPS by _create) floored at MIN_BID_INCREMENT.
+            // minIncrementFlat is DEPRECATED and fully IGNORED: it was
+            // uncapped, so a hostile seller could set uint128.max and make
+            // the first leader unbeatable (every overtake would revert
+            // BidOverflow). The percentage path cannot do that: at the 50%
+            // cap, minNext = 1.5x leader, always reachable below uint128.max
+            // until leaderTotal is astronomically large.
+            uint256 inc = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
             if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
             // L-11 fix: keep the min-next comparison in uint256 to avoid
             // silent truncation when leaderTotal + inc exceeds uint128 max.
@@ -417,50 +423,43 @@ contract AuctionHouse is MarketplaceCore {
         emit BidPlaced(id, msg.sender, msg.value, newTotal);
     }
 
-    // ── Settle (3-tier: keeper, seller/winner after 5min, permissionless after 25hr)
+    // ── Settle (keeper instant, or seller/winner — never a third party) ──────
 
-    /// @notice Finalize a finished auction. Three-tier settlement gate:
-    ///         1. KEEPER_ROLE — settles immediately after `endsAt` (1s ticker).
-    ///         2. Seller OR auction winner — settles any time after `endsAt`.
-    ///         3. Permissionless — anyone settles after `endsAt + DURATION_24HR + 1hr`.
+    /// @notice Finalize a finished auction. Settlement gate:
+    ///         1. KEEPER_ROLE — settles the instant `endsAt` passes (1s ticker).
+    ///         2. Seller OR auction winner — settle any time after `endsAt` when
+    ///            the keeper has not already done so.
+    ///         No one else can ever settle: there is no permissionless tier.
     ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
-    ///         If there is no qualifying leader, cancels (all escrow refundable via
-    ///         refundLosers). If the NFT can't be delivered, the entire tx reverts —
-    ///         no stall state. The keeper bot retries on the next block.
+    ///         If there is no qualifying leader, cancels (all escrow refundable
+    ///         via refundLosers; with no leader the escrow is provably zero for
+    ///         losing bids that never led — non-leading bids revert on entry).
+    ///         If the NFT can't be delivered the auction still finalises: no fee,
+    ///         seller gets nothing, and the winner's escrow is pushed back (with
+    ///         pull-fallback) on the spot — see AuctionSettlementFailed.
     ///         Losers are refunded separately via refundLosers.
     ///
-    ///         If no MarketplaceManager is deployed (manager == address(0)),
-    ///         settlement is permissionless immediately as a fallback — funds are
-    ///         never trapped.
+    ///         Escrow backstop: if the seller is lost AND the keeper is dead,
+    ///         forceCancel() (permissionless, endsAt + 3 days) finalises the
+    ///         auction so refundLosers releases every bidder's escrow — an
+    ///         auction can NEVER be stuck.
     // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt) revert AuctionLive();
 
-        // Three-tier settlement gate:
-        // 1. KEEPER_ROLE — settles immediately after endsAt (1s ticker).
-        // 2. Seller or auction winner — settles any time after endsAt.
-        // 3. Permissionless — anyone settles after endsAt + DURATION_24HR + 1hr.
-        // When no manager is deployed (address(0)), settlement is permissionless
-        // immediately — funds are never trapped.
-        if (manager != address(0)) {
+        // Parties first (skips the staticcall on the common seller/winner path);
+        // keeper checked via the manager role registry. No time-based fallback:
+        // settlement authority never widens beyond keeper + seller + winner.
+        bool authorized = (msg.sender == a.seller || msg.sender == a.leader);
+        if (!authorized && manager != address(0)) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );
-            bool isKeeper = ok && data.length == 32 && abi.decode(data, (bool));
-            // Seller or auction winner can settle 
-            // post-auction. This gives the primary parties control over
-            // settlement timing without waiting for the keeper or the full
-            // 25-hour permissionless fallback.
-            bool isSellerOrWinner = (msg.sender == a.seller || msg.sender == a.leader);
-            bool canSettle = isKeeper || isSellerOrWinner;
-            // Permissionless fallback: after DURATION_24HR + 1 hour past endsAt,
-            // anyone can settle.
-            if (!canSettle && block.timestamp < a.endsAt + DURATION_24HR + 1 hours) {
-                revert NotKeeper();
-            }
+            authorized = ok && data.length == 32 && abi.decode(data, (bool));
         }
+        if (!authorized) revert NotAuthorized();
 
         address winner = a.leader;
         if (winner == address(0)) {
