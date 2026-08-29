@@ -424,7 +424,13 @@ const networks = KNOWN_NETWORKS.map((n) => {
         var menu=document.getElementById('net-switcher-menu');
         if(!menu)return;
         var cur=menu.querySelector('.net-item-current');
-        if(cur&&Number(cur.getAttribute('data-chain-id'))===rid)return; // build matches runtime
+        // Rebuild when the runtime chain differs from the build-time one, OR
+        // when the runtime injected sibling origins (MW_NETWORK_URLS) that the
+        // build didn't know about -- the build has no PUBLIC_NETWORK_URLS, so
+        // without this the menu keeps its build-time "Unavailable" entries
+        // even though the origins are live. Rebuilding is idempotent.
+        var runtimeUrls=String(window.MW_NETWORK_URLS||'').trim();
+        if(cur&&Number(cur.getAttribute('data-chain-id'))===rid&&!runtimeUrls)return;
         var names={114:'Coston2',19:'Songbird',14:'Flare'};
         var urls={};
         String(window.MW_NETWORK_URLS||'').split(',').forEach(function(p){
