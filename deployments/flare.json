@@ -2,13 +2,25 @@
   "$schema": "./schema.json",
   "network": "flare",
   "chainId": 14,
-  "status": "not-deployed",
+  "status": "read-only",
   "deployedAt": null,
   "indexFromBlock": null,
-  "contracts": { "marketplace": null, "auctionHouse": null, "offerBook": null, "marketplaceManager": null, "nft": null },
+  "contracts": {
+    "marketplace": null,
+    "auctionHouse": null,
+    "offerBook": null,
+    "marketplaceManager": null,
+    "nft": null
+  },
   "trackedCollections": [],
-  "rpc": { "primary": "https://flare-api.flare.network/ext/C/rpc", "fallbacks": [] },
+  "rpc": {
+    "primary": "https://flare-api.flare.network/ext/C/rpc",
+    "fallbacks": []
+  },
   "explorer": "https://flare-explorer.flare.network",
-  "app": { "flyApp": "magicwebb-flare", "origin": "https://magicwebb-flare.fly.dev" },
+  "app": {
+    "flyApp": "magicwebb-flare",
+    "origin": "https://magicwebb-flare.fly.dev"
+  },
   "note": "contracts/script/DeployFlareMainnet.s.sol has never been run. Deployment is gated on external audit + fee-recipient multisig. Filling these addresses + setting FLARE_ENABLED=true in CI is the entire enable procedure."
 }
