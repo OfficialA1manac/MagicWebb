@@ -127,6 +127,10 @@ import WalletConnect from '../../components/WalletConnect';
       if (alerts.length) {
         box.innerHTML = alerts.map((a: string) => `<p>⚠ ${esc(a)}</p>`).join('');
         box.hidden = false;
+      } else {
+        // Resolved alerts must clear on the next poll, not linger stale.
+        box.innerHTML = '';
+        box.hidden = true;
       }
     } catch { /* alerts are advisory; their absence is not an error */ }
   }

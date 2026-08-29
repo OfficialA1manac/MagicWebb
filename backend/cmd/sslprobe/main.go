@@ -21,8 +21,8 @@ package main
 import (
 	"context"
 	"fmt"
+	"net/url"
 	"os"
-	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -44,12 +44,15 @@ func main() {
 		fmt.Fprintln(os.Stderr, "POSTGRES_URL is unset")
 		os.Exit(2)
 	}
-	base := stripQuery(raw)
-
 	ok := true
 	for _, mode := range []string{"require", "disable", "prefer"} {
+		connStr, err := modeURL(raw, mode)
+		if err != nil {
+			fmt.Fprintf(os.Stderr, "sslprobe: cannot parse POSTGRES_URL: %v\n", err)
+			os.Exit(2)
+		}
 		ctx, cancel := context.WithTimeout(context.Background(), 8*time.Second)
-		conn, err := pgx.Connect(ctx, fmt.Sprintf("%s?sslmode=%s&connect_timeout=5", base, mode))
+		conn, err := pgx.Connect(ctx, connStr)
 		if err != nil {
 			fmt.Printf("sslmode=%-8s REJECTED  %v\n", mode, err)
 			if expected[mode] {
@@ -71,11 +74,19 @@ func main() {
 	}
 }
 
-// stripQuery removes the query string from a URL (everything after '?').
-// We re-derive the query per-mode so the active sslmode never leaks through.
-func stripQuery(s string) string {
-	if i := strings.Index(s, "?"); i >= 0 {
-		return s[:i]
+// modeURL returns raw with sslmode and connect_timeout overridden, preserving
+// every other query parameter the operator set (options, application_name,
+// pooler settings, …). Overriding — rather than stripping the whole query —
+// keeps the active sslmode from leaking through without breaking a URL that
+// needs its other parameters to connect at all.
+func modeURL(raw, mode string) (string, error) {
+	u, err := url.Parse(raw)
+	if err != nil {
+		return "", err
 	}
-	return s
+	qs := u.Query()
+	qs.Set("sslmode", mode)
+	qs.Set("connect_timeout", "5")
+	u.RawQuery = qs.Encode()
+	return u.String(), nil
 }

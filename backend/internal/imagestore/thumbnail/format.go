@@ -78,10 +78,18 @@ func NegotiateFormat(acceptHeader string) Format {
 	available := AvailableFormats()
 	parsed := parseAccept(acceptHeader)
 
-	// Sort by quality (descending), then by server preference.
-	for _, f := range available {
-		for _, ae := range parsed {
-			if ae.matches(string(f.MimeType())) && ae.quality > 0 {
+	// Client entries are already sorted by quality (descending), then
+	// specificity. Walk them in that order and take the first
+	// server-supported match — iterating the server list outer would let
+	// JPEG win over an explicitly preferred webp/avif via wildcards.
+	// A wildcard entry matches available[0] (JPEG), which keeps the
+	// documented "*/*" → JPEG behavior.
+	for _, ae := range parsed {
+		if ae.quality <= 0 {
+			continue
+		}
+		for _, f := range available {
+			if ae.matches(f.MimeType()) {
 				return f
 			}
 		}

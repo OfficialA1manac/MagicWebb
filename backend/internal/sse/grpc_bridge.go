@@ -30,7 +30,7 @@ type peerConn struct {
 	conn   *grpc.ClientConn
 	stream proto.EventBridge_StreamEventsClient
 	outbox chan *proto.EventMessage // buffered, non-blocking send from Publish
-	wg     sync.WaitGroup            // tracks drainOutbox goroutine for clean shutdown
+	wg     sync.WaitGroup           // tracks drainOutbox goroutine for clean shutdown
 }
 
 // GrpcEventBridge manages the gRPC server (receiving events from peers) and
@@ -48,6 +48,7 @@ type GrpcEventBridge struct {
 	mu           sync.Mutex
 	peers        map[string]*peerConn // peer addr → connection + outbox
 	shuttingDown atomic.Bool          // set before outbox closure to prevent Send() panics
+	cancel       context.CancelFunc   // stops connectPeerLoop goroutines on Shutdown
 }
 
 // GRPCServer returns the underlying gRPC server, allowing external code to
@@ -120,9 +121,13 @@ func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, event
 	}()
 
 	// Connect to peers with staggered start to allow peers to come online.
+	// The peer-loop context is cancellable so Shutdown can stop reconnect
+	// loops that would otherwise re-dial and re-register peers forever.
+	peerCtx, cancel := context.WithCancel(ctx)
+	b.cancel = cancel
 	if len(peerAddrs) > 0 {
 		for _, peer := range peerAddrs {
-			go b.connectPeerLoop(ctx, peer)
+			go b.connectPeerLoop(peerCtx, peer)
 		}
 	}
 
@@ -177,12 +182,29 @@ func (b *GrpcEventBridge) Send(ev Event) {
 // be closed — avoiding a panic. The drainOutbox goroutines are still waited
 // on via wg.Wait() to confirm they've exited before conns are closed.
 func (b *GrpcEventBridge) Shutdown() {
-	// Stop the server first — no new peer connections accepted.
-	b.srv.GracefulStop()
-
 	// Signal drainOutbox goroutines to stop sending (avoids Send() on
-	// a soon-to-be-closed connection).
+	// a soon-to-be-closed connection) and stop connectPeerLoop goroutines
+	// from re-dialing and re-registering peers after the map is drained.
 	b.shuttingDown.Store(true)
+	if b.cancel != nil {
+		b.cancel()
+	}
+
+	// Stop the server — no new peer connections accepted. GracefulStop
+	// waits for in-flight RPCs, but StreamEvents blocks in Recv() for as
+	// long as a peer stays connected, so bound the graceful phase and
+	// fall back to Stop to force-close remaining peer streams.
+	stopped := make(chan struct{})
+	go func() {
+		b.srv.GracefulStop()
+		close(stopped)
+	}()
+	select {
+	case <-stopped:
+	case <-time.After(5 * time.Second):
+		b.srv.Stop()
+		<-stopped
+	}
 
 	// Collect peers under lock, then release before closing outboxes.
 	b.mu.Lock()
@@ -230,11 +252,22 @@ func (b *GrpcEventBridge) connectPeerLoop(ctx context.Context, peer string) {
 		backoff = time.Second // reset on successful connect
 
 		b.mu.Lock()
+		if b.shuttingDown.Load() {
+			// Shutdown already drained the peers map — do not re-register
+			// (nobody would close this outbox or connection).
+			b.mu.Unlock()
+			pc.conn.Close()
+			return
+		}
 		b.peers[peer] = pc
+		// wg.Add must happen under the same lock Shutdown uses to snapshot
+		// b.peers, so wg.Wait() is guaranteed to see the drainOutbox
+		// goroutine for every registered peer.
+		pc.wg.Add(1)
 		b.mu.Unlock()
 
 		// Drain the outbox: read events and send them over the stream.
-		// This goroutine blocks until the outbox is closed (disconnect/shutdown).
+		// This call blocks until the outbox is closed (disconnect/shutdown).
 		b.drainOutbox(pc, peer)
 
 		// Outbox drained — peer disconnected or errored.
@@ -292,7 +325,9 @@ func (b *GrpcEventBridge) dialPeer(ctx context.Context, peer string) (*peerConn,
 // outbox without calling stream.Send() — this avoids a panic from Send() on
 // a connection that Shutdown() is about to close.
 func (b *GrpcEventBridge) drainOutbox(pc *peerConn, peer string) {
-	pc.wg.Add(1)
+	// Note: pc.wg.Add(1) is done by the caller (connectPeerLoop) under
+	// b.mu, BEFORE this goroutine's work is observable via b.peers —
+	// otherwise Shutdown's wg.Wait() could pass before Add runs.
 	defer pc.wg.Done()
 	for msg := range pc.outbox {
 		if b.shuttingDown.Load() {
@@ -331,13 +366,19 @@ func loadTLSCredentials() credentials.TransportCredentials {
 	if caFile := os.Getenv("GRPC_TLS_CA_CERT"); caFile != "" {
 		caPEM, err := os.ReadFile(caFile)
 		if err != nil {
-			log.Warn().Err(err).Msg("grpc: CA cert read failed, skipping mTLS")
+			log.Error().Err(err).Str("ca", caFile).Msg("grpc: CA cert read failed; mTLS NOT enabled")
 		} else {
 			caPool := x509.NewCertPool()
 			if caPool.AppendCertsFromPEM(caPEM) {
 				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
 				tlsCfg.ClientCAs = caPool
+				// Client side of the mesh: trust peer server certs signed by
+				// the same CA. Without RootCAs, dialPeer verifies against the
+				// system trust store and every private-CA peer connect fails.
+				tlsCfg.RootCAs = caPool
 				log.Info().Msg("grpc: mTLS enabled with client certificate verification")
+			} else {
+				log.Error().Str("ca", caFile).Msg("grpc: CA cert contains no usable certificates; mTLS NOT enabled")
 			}
 		}
 	}
@@ -358,6 +399,27 @@ func (b *GrpcEventBridge) sleep(ctx context.Context, backoff *time.Duration) {
 }
 
 // ── gRPC server handler ──────────────────────────────────────────────────────
+
+// attachBridgedData restores the Data field (full DB row) on typed events
+// received over the bridge. PopulateProtoOneof never puts Data into the proto
+// oneof, but the JSON payload in msg.Data still carries it under the "data"
+// key — without this, a subscriber on a peer instance would see Data as nil
+// while a local subscriber sees the full row.
+func attachBridgedData(typed TypedEvent, raw []byte) {
+	var wrapper struct {
+		Data json.RawMessage `json:"data"`
+	}
+	if len(raw) == 0 || json.Unmarshal(raw, &wrapper) != nil ||
+		len(wrapper.Data) == 0 || string(wrapper.Data) == "null" {
+		return
+	}
+	switch ev := typed.(type) {
+	case *ListingUpdatedEvent:
+		ev.Data = wrapper.Data
+	case *AuctionUpdatedEvent:
+		ev.Data = wrapper.Data
+	}
+}
 
 // StreamEvents implements proto.EventBridgeServer.StreamEvents. It receives
 // events from a connected peer and feeds them into the local Broadcaster.
@@ -385,6 +447,10 @@ func (h *bridgeHandler) StreamEvents(stream proto.EventBridge_StreamEventsServer
 		// backward compat with older bridge instances.
 		var evData any
 		if typed := FromProtoOneof(msg); typed != nil {
+			// The proto oneof schema carries no Data field (full DB row).
+			// Restore it from the JSON payload so bridged consumers see
+			// the same event shape as local subscribers.
+			attachBridgedData(typed, msg.Data)
 			evData = typed
 		} else {
 			evData = json.RawMessage(msg.Data)

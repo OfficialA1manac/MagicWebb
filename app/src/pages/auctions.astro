@@ -244,7 +244,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
             const isActive = a.status === 'active';
             const statusColor = isActive ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.1)';
 
-            return '<a href="/auction/' + a.auction_id + '" class="auction-card tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid '+(isActive?(ending?'rgba(252,211,77,0.35)':'rgba(255,255,255,0.07)'):'rgba(255,255,255,0.04)')+';border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
+            return '<a href="/auction/' + a.auction_id + '" data-auction-id="' + esc(String(a.auction_id)) + '" class="auction-card tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid '+(isActive?(ending?'rgba(252,211,77,0.35)':'rgba(255,255,255,0.07)'):'rgba(255,255,255,0.04)')+';border-radius:1rem;overflow:hidden;transition:all 0.3s;cursor:pointer;">' +
               '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;">' +
                                 (imgSrc ? '<img src="'+esc(imgSrc)+'" alt="'+esc(name)+'" loading="lazy" style="width:100%;height:100%;object-fit:cover;transition:transform 0.5s;" onerror="this.style.display=\'none\';this.parentElement.querySelector(\'.fallback-icon\').style.display=\'flex\';"><span class="fallback-icon" style="display:none;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;">🖼</span>' : '<div style="display:flex;align-items:center;justify-content:center;height:100%;color:rgba(255,255,255,0.1);font-size:3rem;">🖼</div>') +
                 '<div style="position:absolute;top:0.5rem;left:0.5rem;display:flex;flex-direction:column;gap:0.375rem;">' +
@@ -543,10 +543,15 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
             if(!Array.isArray(a) || !grid) return;
             if(badge) badge.textContent = a.length + ' result'+(a.length!==1?'s':'');
             const now = Math.floor(Date.now()/1000);
+            // Anchor each countdown to its auction id — the refetched array's
+            // order/membership can differ from the rendered cards.
+            const byId = {};
+            a.forEach(function(x){ byId[String(x.auction_id)] = x; });
             const cards = grid.querySelectorAll('.auction-card');
-            cards.forEach(function(card, i) {
-              if(!a[i]) return;
-              const endsAt = a[i].ends_at ? (new Date(a[i].ends_at).getTime()/1000) : 0;
+            cards.forEach(function(card) {
+              const item = byId[String(card.dataset.auctionId || '')];
+              if(!item) return;
+              const endsAt = item.ends_at ? (new Date(item.ends_at).getTime()/1000) : 0;
               const tLeft = Math.max(0, endsAt - now);
               let tStr = '';
               if(tLeft<60) tStr=tLeft+'s'; else if(tLeft<3600) tStr=Math.floor(tLeft/60)+'m'; else if(tLeft<86400) tStr=Math.floor(tLeft/3600)+'h '+Math.floor((tLeft%3600)/60)+'m'; else tStr=Math.floor(tLeft/86400)+'d';

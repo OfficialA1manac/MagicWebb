@@ -16,15 +16,22 @@
   const sym = currentChain().currency;
   let total = $derived(rows.filter((r) => r.ok).reduce((s, r) => s + r.wei, 0n));
 
+  // Generation counter: overlapping loads (wallet switch + WS burst) resolve
+  // out of order, and a slower earlier response must not overwrite fresh rows.
+  let _gen = 0;
   async function load() {
     if (!me) { rows = []; loadError = false; return; }
+    const gen = ++_gen;
     loading = true;
     try {
-      rows = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string }));
+      const next = (await MW.pendingReturns(me)).map((r) => ({ ...r, address: r.address as string }));
+      if (gen !== _gen) return;
+      rows = next;
       // Never hide silently: even one failed core read could be masking money
       // the user can withdraw, so any partial failure surfaces the error card.
       loadError = rows.some((r) => !r.ok);
     } catch {
+      if (gen !== _gen) return;
       rows = [];
       loadError = true;
     }
@@ -32,8 +39,11 @@
   }
   onMount(() => {
     const off = onAccountChange((a) => { me = a.address; void load(); });
-    const offWs = MW.ws.on('*', () => void load());
-    return () => { off(); offWs(); };
+    // Debounce the firehose '*' subscription (matches NFTGrid): each load is
+    // one on-chain read per core contract, so bursts must coalesce.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const offWs = MW.ws.on('*', () => { if (t) clearTimeout(t); t = setTimeout(() => { t = null; void load(); }, 400); });
+    return () => { off(); offWs(); if (t) clearTimeout(t); };
   });
   async function withdraw(r: { key: CoreKey; address: string; wei: bigint }) {
     try { await MW.withdrawRefundFrom({ core: r.address, label: CORE_LABEL[r.key], amountWei: r.wei.toString() }); setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal */ }

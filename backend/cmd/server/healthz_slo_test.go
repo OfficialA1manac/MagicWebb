@@ -199,7 +199,7 @@ func TestHealthz_LagAtThreshold_Boundary(t *testing.T) {
 
 	app := setupSLOHealthApp(pool, ethc, lag.Load)
 
-	// Exactly 15 is healthy (threshold is > 15, not >= 15).
+	// Liveness ignores indexer lag entirely, so any lag value returns 200.
 	lag.Store(15)
 	resp := getReq(t, app, "/healthz")
 	defer resp.Body.Close()

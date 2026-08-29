@@ -92,13 +92,30 @@ func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckReque
 	s.mu.RUnlock()
 
 	// Run probes with a short timeout (3s each, same as /healthz).
-	status := s.probe(ctx)
+	// Named st, not status: that identifier is the imported grpc status
+	// package, and shadowing it here silently breaks any later status.Error.
+	st := s.cachedProbe(ctx)
 
+	return &grpc_health_v1.HealthCheckResponse{Status: st}, nil
+}
+
+// cachedProbe runs probe() and refreshes the shared cache, so every caller
+// (Check and each Watch stream) draws from one probe per cacheTTL instead of
+// hammering the DB and RPC once per poller.
+func (s *Server) cachedProbe(ctx context.Context) grpc_health_v1.HealthCheckResponse_ServingStatus {
+	s.mu.RLock()
+	if time.Now().Before(s.cached.expiresAt) {
+		st := s.cached.status
+		s.mu.RUnlock()
+		return st
+	}
+	s.mu.RUnlock()
+
+	st := s.probe(ctx)
 	s.mu.Lock()
-	s.cached = cachedResult{status: status, expiresAt: time.Now().Add(cacheTTL)}
+	s.cached = cachedResult{status: st, expiresAt: time.Now().Add(cacheTTL)}
 	s.mu.Unlock()
-
-	return &grpc_health_v1.HealthCheckResponse{Status: status}, nil
+	return st
 }
 
 // Watch implements grpc_health_v1.HealthServer.Watch (server-side streaming).
@@ -111,7 +128,7 @@ func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, stream grpc_healt
 	}
 
 	// Send initial status.
-	initialStatus := s.probe(stream.Context())
+	initialStatus := s.cachedProbe(stream.Context())
 	if err := stream.Send(&grpc_health_v1.HealthCheckResponse{Status: initialStatus}); err != nil {
 		return err
 	}
@@ -126,7 +143,7 @@ func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, stream grpc_healt
 		case <-stream.Context().Done():
 			return stream.Context().Err()
 		case <-ticker.C:
-			current := s.probe(stream.Context())
+			current := s.cachedProbe(stream.Context())
 			if current != lastStatus {
 				if err := stream.Send(&grpc_health_v1.HealthCheckResponse{Status: current}); err != nil {
 					return err

@@ -5,7 +5,10 @@ description: "Every action for viewers, buyers and sellers — listings, auction
 ---
 
 
-MagicWebb has no accounts, no admin and no approval step. Three kinds of visitor exist, and
+MagicWebb has no accounts and no approval step. The trading contracts are immutable and no
+role can pause, censor or reprice a trade; a separate MarketplaceManager contract holds
+narrow operational roles (keeper authorization for auto-settling auctions, module registry)
+that cannot touch trading actions or escrowed funds. Three kinds of visitor exist, and
 a person is all three at different moments:
 
 - **Viewer** — no wallet connected.

@@ -210,12 +210,18 @@ const networks = KNOWN_NETWORKS.map((n) => {
   </head>
   <body>
     <!-- Testnet banner: static (not sticky) so it never fights the sticky nav for the top edge.
-         Rendered only on test networks (Coston2 114 / Coston 16) — mainnets show nothing. -->
-    {(currentChainId === 114 || currentChainId === 16) && (
-      <div class="mw-devbanner" role="note">
-        Test network — <span class="mw-net-name">Flare Coston2</span>. Assets and <span class="mw-cur">C2FLR</span> here have no real-world value.
-      </div>
-    )}
+         Always rendered at build time; the inline script below removes it synchronously
+         (before paint) when the server-injected runtime chain is a mainnet, so one build
+         serves every network with the correct banner state. -->
+    <div class="mw-devbanner" id="mw-devbanner" role="note">
+      Test network — <span class="mw-net-name">Flare Coston2</span>. Assets and <span class="mw-cur">C2FLR</span> here have no real-world value.
+    </div>
+    <script is:inline>
+      (function(){
+        var id = Number(window.MW_CHAIN_ID || '114');
+        if (id === 14 || id === 19) { var el = document.getElementById('mw-devbanner'); if (el) el.remove(); }
+      })();
+    </script>
     <!-- Installs window.MW, opens /ws, hosts the transaction modal + wrong-network banner. -->
     <MwRuntime client:load />
     <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;"></div>
@@ -240,17 +246,17 @@ const networks = KNOWN_NETWORKS.map((n) => {
           <button type="button" id="net-switcher-btn" class="net-btn" aria-haspopup="true" aria-expanded="false"
                   title="Switch network — each network is a separate deployment">
             <span class="net-dot" aria-hidden="true"></span>
-            {networks.find((n) => n.current)?.name ?? 'Network'}
+            <span id="net-current-name">{networks.find((n) => n.current)?.name ?? 'Network'}</span>
             <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
           </button>
           <div id="net-switcher-menu" class="net-menu">
             {networks.map((n) => (
               n.current ? (
-                <span class="net-item net-item-current">{n.name}<span class="net-tag">Current</span></span>
+                <span class="net-item net-item-current" data-chain-id={n.chainId}>{n.name}<span class="net-tag">Current</span></span>
               ) : n.available ? (
-                <a href={n.url} class="net-item">{n.name}<span class="net-tag">Chain {n.chainId}</span></a>
+                <a href={n.url} class="net-item" data-chain-id={n.chainId}>{n.name}<span class="net-tag">Chain {n.chainId}</span></a>
               ) : (
-                <span class="net-item net-item-off" title={`No contracts are deployed on ${n.name} yet`}>
+                <span class="net-item net-item-off" data-chain-id={n.chainId} title={`No contracts are deployed on ${n.name} yet`}>
                   {n.name}<span class="net-tag">Unavailable</span>
                 </span>
               )
@@ -404,6 +410,39 @@ const networks = KNOWN_NETWORKS.map((n) => {
         }
         if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',updateLabels);}
         else{updateLabels();}
+      })();
+
+      // ── Runtime network switcher correction ──
+      // The switcher's "Current" entry is resolved at build time from
+      // PUBLIC_CHAIN_ID, but one build serves every network (the Go server
+      // injects window.MW_CHAIN_ID / MW_NETWORK_URLS at runtime). When the
+      // runtime chain differs from the build-time one, rebuild the menu and
+      // button label from the runtime globals so the page never shows a
+      // contradictory network identity.
+      (function(){if(typeof window==='undefined')return;
+        var rid=Number(window.MW_CHAIN_ID||'114');
+        var menu=document.getElementById('net-switcher-menu');
+        if(!menu)return;
+        var cur=menu.querySelector('.net-item-current');
+        if(cur&&Number(cur.getAttribute('data-chain-id'))===rid)return; // build matches runtime
+        var names={114:'Coston2',19:'Songbird',14:'Flare'};
+        var urls={};
+        String(window.MW_NETWORK_URLS||'').split(',').forEach(function(p){
+          var i=p.indexOf('=');if(i<1)return;
+          var id=Number(p.slice(0,i).trim());var o=p.slice(i+1).trim().replace(/\/+$/,'');
+          if(isFinite(id)&&o)urls[id]=o;
+        });
+        function escA(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+        var html='';
+        [114,19,14].forEach(function(id){
+          var nm=names[id];
+          if(id===rid)html+='<span class="net-item net-item-current" data-chain-id="'+id+'">'+nm+'<span class="net-tag">Current</span></span>';
+          else if(urls[id])html+='<a href="'+escA(urls[id])+'" class="net-item" data-chain-id="'+id+'">'+nm+'<span class="net-tag">Chain '+id+'</span></a>';
+          else html+='<span class="net-item net-item-off" data-chain-id="'+id+'" title="No contracts are deployed on '+nm+' yet">'+nm+'<span class="net-tag">Unavailable</span></span>';
+        });
+        menu.innerHTML=html;
+        var label=document.getElementById('net-current-name');
+        if(label)label.textContent=names[rid]||('Chain '+rid);
       })();
     </script>
   </body>

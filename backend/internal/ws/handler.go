@@ -35,8 +35,8 @@ const wsGlobalLimit = 5_000
 // messages then settles at 10 msg/s steady state. A malicious client spamming
 // MsgAction with malformed params would otherwise force JSON-unmarshal on
 // every message without any backpressure.
-const wsConnMsgLimit = 20   // burst capacity
-const wsConnMsgRefill = 10  // tokens per second
+const wsConnMsgLimit = 20  // burst capacity
+const wsConnMsgRefill = 10 // tokens per second
 
 // Connection represents a single authenticated WebSocket connection.
 type Connection struct {
@@ -53,7 +53,7 @@ type Connection struct {
 	// Per-connection token bucket for client message rate limiting.
 	// tokens available for immediate consumption (atomic; consumed by readPump).
 	// Refilled by a background goroutine at wsConnMsgRefill/sec up to wsConnMsgLimit.
-	msgTokens   int64
+	msgTokens int64
 
 	// WS-2: Binary frame mode. When true, push events use websocket.BinaryMessage
 	// instead of websocket.TextMessage. Negotiated via MsgBinaryUpgrade from client.
@@ -90,8 +90,8 @@ func (c *Connection) writePump() {
 	// window and flushes them as a single NDJSON frame. Uses time.After for
 	// simplicity — no timer lifecycle to manage, no stale channel drain needed.
 	var (
-		buf     []byte          // accumulated messages separated by newlines
-		flushCh <-chan time.Time // set to time.After when batch is pending; nil when idle
+		buf     []byte                  // accumulated messages separated by newlines
+		flushCh <-chan time.Time        // set to time.After when batch is pending; nil when idle
 		msgType = websocket.TextMessage // WS-2: default text; upgraded to binary
 	)
 	resetCoalesce := func() {
@@ -125,7 +125,11 @@ func (c *Connection) writePump() {
 			// WS-3: coalesce writes — if there's already a pending batch,
 			// append to it. Otherwise start a new batch with a timer.
 			if buf == nil {
-				buf = msg
+				// Copy the payload: BroadcastTo marshals one slice and sends
+				// it to every connection, so appending in place would write
+				// into a backing array shared across connections (data race
+				// + corrupted frames).
+				buf = append(make([]byte, 0, len(msg)+64), msg...)
 				// Try a non-blocking drain of any additional messages
 				// already queued — if multiple events arrived between
 				// the last writePump iteration and now, grab them all
@@ -323,21 +327,21 @@ func mustJSON(v any) json.RawMessage {
 
 // Handler manages WebSocket connections and bridges them with the SSE broadcaster.
 type Handler struct {
-	cfg         *config.Config
-	bcast       *sse.Broadcaster
-	q           *db.Q
-	client      marketplacev1connect.MarketplaceServiceClient
-	serverTime  func() int64
-	mu          sync.RWMutex
-	conns       map[string]*Connection // id → Connection
-	ipCounters  map[string]*int64      // ip → atomic counter
-	eventsSent  atomic.Int64           // total events pushed to all WS clients
-	connCount   atomic.Int64           // total connections established (lifetime)
+	cfg        *config.Config
+	bcast      *sse.Broadcaster
+	q          *db.Q
+	client     marketplacev1connect.MarketplaceServiceClient
+	serverTime func() int64
+	mu         sync.RWMutex
+	conns      map[string]*Connection // id → Connection
+	ipCounters map[string]*int64      // ip → atomic counter
+	eventsSent atomic.Int64           // total events pushed to all WS clients
+	connCount  atomic.Int64           // total connections established (lifetime)
 
 	// WS metrics: connection-level rate limiting + rejection counters.
 	// Exposed via Prometheus /metrics for Grafana dashboards.
-	msgRateLimited    atomic.Int64 // messages rejected by per-connection token bucket
-	connsRejectedIP   atomic.Int64 // connections rejected due to per-IP limit
+	msgRateLimited      atomic.Int64 // messages rejected by per-connection token bucket
+	connsRejectedIP     atomic.Int64 // connections rejected due to per-IP limit
 	connsRejectedGlobal atomic.Int64 // connections rejected due to global limit
 }
 
@@ -486,13 +490,8 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 					// if a subscriber's channel filter passes, the notification must
 					// still belong to them. Reuses eventPayload (from subscriptions.go)
 					// to avoid JSON tag drift; the extra field parsing is negligible.
-					if ev.Type == "notification" {
-						var notif eventPayload
-						if json.Unmarshal(payload, &notif) != nil ||
-							conn.addr == "" ||
-							!strings.EqualFold(notif.UserAddr, conn.addr) {
-							continue
-						}
+					if !conn.allowedNotification(string(ev.Type), payload) {
+						continue
 					}
 					// Filter by client's channel subscriptions (with per-entity
 					// scoping when payload is available).
@@ -899,7 +898,8 @@ func (c *Connection) subscribe(channels []string) {
 	subscribed := make([]string, 0, len(channels))
 	for _, ch := range channels {
 		// Gate user: channels on the authenticated wallet address.
-		if strings.HasPrefix(ch, channelUser) && strings.TrimPrefix(ch, channelUser) != c.addr {
+		if strings.HasPrefix(ch, channelUser) &&
+			!strings.EqualFold(strings.TrimPrefix(ch, channelUser), c.addr) {
 			continue
 		}
 		if isValidChannel(ch) {
@@ -974,6 +974,25 @@ func (c *Connection) isSubscribedToEvent(eventType string, payloadBytes []byte) 
 
 // ── BroadcastTo (direct push) ────────────────────────────────────────────────
 
+// allowedNotification reports whether an event of the given type may be
+// delivered to this connection. Notification events are private: they must
+// match the authenticated wallet (Phase 3 RBAC). All other event types are
+// public. Shared by the broadcaster event pump and BroadcastTo so the two
+// push paths cannot drift.
+func (c *Connection) allowedNotification(eventType string, payload []byte) bool {
+	if eventType != "notification" {
+		return true
+	}
+	if c.addr == "" {
+		return false
+	}
+	var notif eventPayload
+	if json.Unmarshal(payload, &notif) != nil {
+		return false
+	}
+	return strings.EqualFold(notif.UserAddr, c.addr)
+}
+
 // BroadcastTo sends an event to WebSocket clients, respecting per-connection
 // subscription filters. Clients with no active subscriptions receive all
 // events (backward-compatible default). Clients with subscriptions only
@@ -999,6 +1018,11 @@ func (h *Handler) BroadcastTo(ev sse.Event) {
 	defer h.mu.RUnlock()
 
 	for _, conn := range h.conns {
+		// Notification RBAC: private events must match the authenticated
+		// wallet (same gate as the broadcaster event pump goroutine).
+		if !conn.allowedNotification(string(ev.Type), payload) {
+			continue
+		}
 		// Respect per-connection subscription filters (same logic as the
 		// broadcaster event pump goroutine).
 		if !conn.isSubscribedToEvent(string(ev.Type), payload) {

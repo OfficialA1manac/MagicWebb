@@ -91,6 +91,7 @@ func PublicPath(sha256hex string) string {
 // The hash computation is pluggable via build tags:
 //   - Default (no tag): uses Go's crypto/sha256
 //   - zigmedia tag:      uses Zig-accelerated SHA-256 via CGO
+//
 // Both implementations produce identical results.
 func Hash(body []byte) string {
 	if len(body) == 0 {
@@ -373,16 +374,17 @@ func StoreThumbnails(ctx context.Context, s Store, fullSizeBody []byte, fullSize
 				continue
 			}
 
-			// Check if thumbnail already exists (dedup across collections).
-			if exists, err := s.HasImage(ctx, thumbHash); err != nil {
-				// Transient DB error — skip this variant, don't block ingest.
-				// The retry worker can regenerate on next cycle.
-				continue
-			} else if exists {
-				stored++
+			// The generator returns the source bytes unchanged when the image
+			// is already smaller than the target width — that is not a
+			// thumbnail; storing it would just re-count the parent blob.
+			if thumbHash == parentHash {
 				continue
 			}
 
+			// PutThumbnail dedupes by sha256 (ON CONFLICT upsert) and still
+			// records parent_hash/thumb_width on first insert, which the
+			// ?size= lookup needs. A pre-existence check here would skip that
+			// row entirely and leave the variant unservable.
 			if err := s.PutThumbnail(ctx, thumbHash, thumbMime, parentHash, collection, sourceURI, thumbBytes, size); err != nil {
 				continue
 			}

@@ -95,7 +95,13 @@ export function buy(a: BuyArgs, hooks?: TxHooks): Promise<TxResult> {
         if (r.ok) {
           const pf = await r.json() as { ok?: boolean; price_wei?: string };
           if (pf.ok === false) throw new TxError('Invalid', 'This listing is no longer available (sold, cancelled, or the NFT moved).');
-          if (pf.price_wei) price = BigInt(pf.price_wei);
+          if (pf.price_wei) {
+            // The modal summary shows a.priceWei; never silently send more
+            // than the user was shown. A lower fresh price is fine.
+            const fresh = BigInt(pf.price_wei);
+            if (fresh > a.priceWei) throw new TxError('Invalid', 'The price changed. Refresh and try again.');
+            price = fresh;
+          }
         }
       } catch (e) { if (e instanceof TxError) throw e; /* preflight is advisory */ }
       return buildBuy(a.nft, a.tokenId, a.seller, price);

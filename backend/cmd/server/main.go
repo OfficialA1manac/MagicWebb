@@ -33,6 +33,7 @@ import (
 	sdktrace "go.opentelemetry.io/otel/sdk/trace"
 	"go.opentelemetry.io/otel/trace"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/cmd/internal/chaintables"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/api"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
@@ -422,12 +423,13 @@ func main() {
 // (Prometheus, Grafana Agent, Datadog Agent with OpenMetrics check) can
 // ingest it.
 //
-// NOT /metrics: that path belongs to the human-facing HTML dashboard mounted
-// by mountUI (uiMetrics), which every nav in both frontends links to. Both
-// were registered on "/metrics" and Fiber matches the first route it was
-// given — this one, registered earlier — so visiting the Metrics link in the
-// site served raw exposition text and the dashboard was unreachable.
-// Scrapers are configured by URL and simply point at the new path.
+// NOT /metrics: that path is the human-facing HTML dashboard — the Astro
+// static handler (mountAstro) serves metrics/index.html from the app build —
+// which the site nav links to. Both were once registered on "/metrics" and
+// Fiber matches the first route it was given — this one, registered earlier —
+// so visiting the Metrics link in the site served raw exposition text and the
+// dashboard was unreachable. Scrapers are configured by URL and simply point
+// at the new path.
 //
 // Exported metrics:
 //
@@ -742,6 +744,9 @@ func verifyDeploymentConfig(ctx context.Context, pool db.PgxPool) error {
 	if nftAddr != config.C.NFTAddr {
 		diffs = append(diffs, fmt.Sprintf("nft_addr: stored=%s env=%s", nftAddr, config.C.NFTAddr))
 	}
+	if managerAddr != config.C.MarketplaceManagerAddr {
+		diffs = append(diffs, fmt.Sprintf("marketplace_manager_addr: stored=%s env=%s", managerAddr, config.C.MarketplaceManagerAddr))
+	}
 	if len(diffs) > 0 {
 		// RESET_ON_ADDRESS_CHANGE=true (set only in the Coston2 TESTNET
 		// template) turns an address change into an automatic chain-data
@@ -751,14 +756,11 @@ func verifyDeploymentConfig(ctx context.Context, pool db.PgxPool) error {
 		// runs chainwipe deliberately.
 		if os.Getenv("RESET_ON_ADDRESS_CHANGE") == "true" {
 			log.Warn().Strs("diffs", diffs).Msg("deployment config mismatch — RESET_ON_ADDRESS_CHANGE=true, wiping chain-derived tables and re-seeding")
-			for _, t := range []string{
-				"trending_scores", "bids", "sales", "offers", "listings", "auctions",
-				"nft_attributes", "nft_metadata", "nft_ownership", "nft_tokens",
-				"tracked_collections", "collections", "indexer_state", "deployment_config",
-			} {
-				if _, err := pool.Exec(ctx, "TRUNCATE TABLE "+t+" CASCADE"); err != nil {
-					return fmt.Errorf("reset-on-address-change: truncate %s: %w", t, err)
-				}
+			// One TRUNCATE over the shared chaintables list: atomic (a failure
+			// leaves everything intact, never a half-wiped DB with a stale
+			// deployment_config row) and guaranteed to match cmd/chainwipe.
+			if _, err := pool.Exec(ctx, chaintables.TruncateStmt()); err != nil {
+				return fmt.Errorf("reset-on-address-change: truncate chain tables: %w", err)
 			}
 			if _, err := pool.Exec(ctx,
 				`INSERT INTO deployment_config(chain_id, marketplace_addr, auction_addr, offerbook_addr, nft_addr, marketplace_manager_addr)
@@ -818,9 +820,19 @@ func nonceHandler(ns nonce.Store, rl *ratelimit.Limiter) fiber.Handler {
 		}
 		n := hex.EncodeToString(rb[:])
 		if !ns.SetIfFree(address, n, config.C.NonceTTL) {
-			// Live nonce exists — caller must consume it first. Rate-limit
-			// prevents tight retry loops from a legitimate user.
-			return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce already issued, consume it or wait for expiry"})
+			// A live nonce exists. Returning 409 here let any unauthenticated
+			// caller hold the slot for a victim's address (one request per
+			// NonceTTL — the per-IP rate limit is no obstacle) and block that
+			// address's login indefinitely. Replace instead: consume the old
+			// nonce and claim the freed slot. Single-use semantics survive —
+			// GetDel makes the old nonce unusable, and the new one is still
+			// consumed exactly once by /auth/verify.
+			ns.GetDel(address)
+			if !ns.SetIfFree(address, n, config.C.NonceTTL) {
+				// Lost the race with a concurrent claim; the rate limiter
+				// keeps this from looping tightly.
+				return c.Status(fiber.StatusConflict).JSON(fiber.Map{"error": "nonce contention — retry"})
+			}
 		}
 		return c.JSON(nonceResp{Nonce: n})
 	}
@@ -1065,7 +1077,8 @@ func refreshHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLo
 // ── Logout handler ────────────────────────────────────────────────────────
 
 // logoutHandler implements POST /auth/logout with token family revocation.
-// Reads the mw_r_ refresh cookie, verifies it, revokes the entire token
+// Reads the mw_r_ refresh cookie (or an Authorization: Bearer refresh token,
+// like refreshHandler), verifies it, revokes the entire token
 // family in the DB, and clears all session cookies. Idempotent — calling
 // logout without a valid token is a no-op (cookies cleared, 200 returned).
 func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLogger) fiber.Handler {
@@ -1081,6 +1094,16 @@ func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLog
 		}
 
 		refreshToken := extractRefreshCookie(c)
+
+		// Mirror refreshHandler: clients that refresh via `Authorization:
+		// Bearer` carry no cookie, and without this their logout cleared
+		// cookies, returned ok — and left the refresh family valid
+		// server-side, still able to mint access tokens.
+		if refreshToken == "" {
+			if hdr := c.Get("Authorization"); strings.HasPrefix(hdr, "Bearer ") {
+				refreshToken = strings.TrimPrefix(hdr, "Bearer ")
+			}
+		}
 
 		if refreshToken == "" {
 			// No refresh token found — clear any existing session cookies
@@ -1129,7 +1152,13 @@ func logoutHandler(rs auth.RefreshStore, rl *ratelimit.Limiter, al auth.AuditLog
 func extractRefreshCookie(c *fiber.Ctx) string {
 	for _, cookie := range strings.Split(c.Get("Cookie"), ";") {
 		cookie = strings.TrimSpace(cookie)
-		if strings.HasPrefix(strings.ToLower(cookie), "mw_r_") {
+		// Case-SENSITIVE on purpose: setRefreshCookie only ever writes
+		// lowercase mw_r_ names and cookie names are case-sensitive (RFC
+		// 6265). A ToLower here let a cookie-writing actor on the domain
+		// (e.g. a sibling subdomain) plant MW_R_x= ahead of the real cookie
+		// and have its value win, fixing the session onto an
+		// attacker-chosen token family.
+		if strings.HasPrefix(cookie, "mw_r_") {
 			if idx := strings.IndexByte(cookie, '='); idx > 0 {
 				return cookie[idx+1:]
 			}

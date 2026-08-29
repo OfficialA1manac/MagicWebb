@@ -50,7 +50,10 @@ func readIcon(t *testing.T, sz int) image.Image {
 		t.Fatalf("read %s: %v", path, err)
 	}
 	if !bytes.HasPrefix(b, pngSignature) {
-		t.Fatalf("%s magic bytes = %x; want %x", path, b[:8], pngSignature)
+		// Guard the slice: a zero-byte or truncated file from an interrupted
+		// generator run must report the mismatch, not panic on b[:8].
+		t.Fatalf("%s magic bytes = %x; want %x",
+			path, b[:min(len(b), len(pngSignature))], pngSignature)
 	}
 	img, err := png.Decode(bytes.NewReader(b))
 	if err != nil {

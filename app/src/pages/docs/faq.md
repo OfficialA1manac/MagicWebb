@@ -124,7 +124,7 @@ the protocol is pausable, so no one can freeze an auction either.
 ## Offers
 
 ### How do offers work?
-Make an offer on any NFT with an amount and an expiry (one of 15 fixed durations: 1min–24hr). The offer amount is escrowed in the contract — it's free to make and fully refundable. Multiple offers from the same wallet on the same NFT stack into one position. Top-ups do not refresh the expiry timer.
+Make an offer on any NFT in an offer-enabled collection (the collection owner opts in) with an amount and an expiry (one of 15 fixed durations: 1min–24hr). The offer amount is escrowed in the contract — it's free to make and fully refundable. Multiple offers from the same wallet on the same NFT stack into one position. Top-ups do not refresh the expiry timer.
 
 ### When am I charged?
 Never as an offerer. If the owner accepts your offer, you receive the NFT and the seller

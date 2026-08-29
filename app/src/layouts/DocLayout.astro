@@ -3,9 +3,10 @@
 //
 // These were rendered at request time by the Go binary (goldmark against an
 // embedded FS) and served through the HTMX template stack. Astro renders the
-// same markdown at build time instead, so the pages cost nothing at runtime,
-// carry no markdown dependency in the server, and — unlike the old path — do
-// not pull a wallet bundle onto a page that has no wallet interaction.
+// same markdown at build time instead, so the pages cost nothing at runtime
+// and carry no markdown dependency in the server. The nav's WalletConnect
+// island below still loads the wallet bundle, keeping the header consistent
+// with every other page.
 import BaseLayout from './BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
 

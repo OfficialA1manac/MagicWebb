@@ -61,17 +61,17 @@ func TestCancelUnsubscribes(t *testing.T) {
 	b := New()
 	_, cancel, _ := b.SubscribeRaw()
 
-	rawClientsMu.RLock()
-	before := len(rawClients)
-	rawClientsMu.RUnlock()
+	b.rawClientsMu.RLock()
+	before := len(b.rawClients)
+	b.rawClientsMu.RUnlock()
 	if before != 1 {
 		t.Fatalf("rawClients = %d, want 1", before)
 	}
 
 	cancel()
-	rawClientsMu.RLock()
-	after := len(rawClients)
-	rawClientsMu.RUnlock()
+	b.rawClientsMu.RLock()
+	after := len(b.rawClients)
+	b.rawClientsMu.RUnlock()
 	if after != 0 {
 		t.Fatalf("rawClients after cancel = %d, want 0", after)
 	}
@@ -80,9 +80,11 @@ func TestCancelUnsubscribes(t *testing.T) {
 func TestSubscriberCap(t *testing.T) {
 	b := New()
 	for i := range MaxClients {
-		if _, _, ok := b.SubscribeRaw(); !ok {
+		_, cancel, ok := b.SubscribeRaw()
+		if !ok {
 			t.Fatalf("subscribe %d should be within cap", i)
 		}
+		t.Cleanup(cancel)
 	}
 	if _, _, ok := b.SubscribeRaw(); ok {
 		t.Fatal("subscribe beyond MaxClients should be rejected")

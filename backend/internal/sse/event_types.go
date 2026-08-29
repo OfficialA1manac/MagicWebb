@@ -12,6 +12,7 @@ package sse
 
 import (
 	"math"
+	"strconv"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse/proto"
 )
@@ -20,7 +21,7 @@ import (
 
 // ListingUpdatedEvent carries the structured payload for listing-updated events.
 type ListingUpdatedEvent struct {
-	Event      string `json:"event"`      // sub-event: "Listed", "Cancelled", "Bought", "Transfer", "TransferSingle", "TransferBatch"
+	Event      string `json:"event"` // sub-event: "Listed", "Cancelled", "Bought", "Transfer", "TransferSingle", "TransferBatch"
 	Collection string `json:"collection"`
 	TokenID    string `json:"token_id"`
 	Seller     string `json:"seller"`
@@ -105,12 +106,12 @@ type TypedEvent interface {
 	ProtoOneofField() string
 }
 
-func (ListingUpdatedEvent) ProtoOneofField() string  { return "listing_updated" }
-func (AuctionUpdatedEvent) ProtoOneofField() string   { return "auction_updated" }
-func (OfferUpdatedEvent) ProtoOneofField() string     { return "offer_updated" }
-func (NotificationEvent) ProtoOneofField() string     { return "notification" }
-func (ActivityEvent) ProtoOneofField() string         { return "activity" }
-func (RPCHealthEvent) ProtoOneofField() string        { return "rpc_health" }
+func (ListingUpdatedEvent) ProtoOneofField() string { return "listing_updated" }
+func (AuctionUpdatedEvent) ProtoOneofField() string { return "auction_updated" }
+func (OfferUpdatedEvent) ProtoOneofField() string   { return "offer_updated" }
+func (NotificationEvent) ProtoOneofField() string   { return "notification" }
+func (ActivityEvent) ProtoOneofField() string       { return "activity" }
+func (RPCHealthEvent) ProtoOneofField() string      { return "rpc_health" }
 
 // ── Event type name → protobuf oneof field name mapping ───────────────────
 
@@ -247,19 +248,22 @@ func populateAuctionUpdated(msg *proto.EventMessage, data any) {
 		ev = &d
 	case map[string]any:
 		ev = &AuctionUpdatedEvent{
-			Event:        mapStr(d, "event"),
-			AuctionID:    mapInt64(d, "auctionId"),
-			Collection:   mapStr(d, "collection"),
-			TokenID:      mapStr(d, "tokenId"),
-			Seller:       mapStr(d, "seller"),
-			Winner:       mapStr(d, "winner"),
-			AmtWei:       mapStr(d, "amtWei"),
-			Bidder:       mapStr(d, "bidder"),
-			EffectiveWei: mapStr(d, "effectiveWei"),
-			OutbidAddr:   mapStr(d, "outbid"),
-			LeaderTotal:  mapStr(d, "leaderTotalWei"),
-			EndTimeUnix:  mapInt64(d, "endsAt"),
-			Data:         d["data"],
+			Event:         mapStr(d, "event"),
+			AuctionID:     mapInt64(d, "auctionId"),
+			Collection:    mapStr(d, "collection"),
+			TokenID:       mapStr(d, "tokenId"),
+			Status:        mapStr(d, "status"),
+			HighestBid:    mapStr(d, "highestBid"),
+			HighestBidder: mapStr(d, "highestBidder"),
+			Seller:        mapStr(d, "seller"),
+			Winner:        mapStr(d, "winner"),
+			AmtWei:        mapStr(d, "amtWei"),
+			Bidder:        mapStr(d, "bidder"),
+			EffectiveWei:  mapStr(d, "effectiveWei"),
+			OutbidAddr:    mapStr(d, "outbid"),
+			LeaderTotal:   mapStr(d, "leaderTotalWei"),
+			EndTimeUnix:   mapInt64(d, "endsAt"),
+			Data:          d["data"],
 		}
 	default:
 		return
@@ -318,6 +322,8 @@ func populateOfferUpdated(msg *proto.EventMessage, data any) {
 	case map[string]any:
 		ev = &OfferUpdatedEvent{
 			Event:      mapStr(d, "event"),
+			OfferID:    mapStr(d, "offerId"),
+			Status:     mapStr(d, "status"),
 			Collection: mapStr(d, "collection"),
 			TokenID:    mapStr(d, "tokenId"),
 			Bidder:     mapStr(d, "bidder"),
@@ -330,6 +336,8 @@ func populateOfferUpdated(msg *proto.EventMessage, data any) {
 	msg.Event = &proto.EventMessage_OfferUpdated{
 		OfferUpdated: &proto.OfferUpdated{
 			Event:      ev.Event,
+			OfferId:    ev.OfferID,
+			Status:     ev.Status,
 			Collection: ev.Collection,
 			TokenId:    ev.TokenID,
 			Bidder:     ev.Bidder,
@@ -346,6 +354,8 @@ func fromOfferUpdatedProto(p *proto.OfferUpdated) *OfferUpdatedEvent {
 	}
 	return &OfferUpdatedEvent{
 		Event:      p.Event,
+		OfferID:    p.OfferId,
+		Status:     p.Status,
 		Collection: p.Collection,
 		TokenID:    p.TokenId,
 		Bidder:     p.Bidder,
@@ -502,7 +512,11 @@ func mapStr(m map[string]any, key string) string {
 		case int64:
 			return itoa(val)
 		case float64:
-			return itoa(int64(val))
+			// Do NOT round-trip through int64: wei amounts and token ids
+			// can exceed int64 range and non-integral values would be
+			// silently truncated. FormatFloat with -1 precision preserves
+			// the value exactly as float64 represents it.
+			return strconv.FormatFloat(val, 'f', -1, 64)
 		}
 	}
 	return ""

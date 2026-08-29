@@ -14,8 +14,14 @@ import (
 // ERC-165 interface identifiers. These are the canonical values from the
 // standards themselves — the XOR of every function selector in the interface.
 var (
+	InterfaceERC165  = [4]byte{0x01, 0xff, 0xc9, 0xa7}
 	InterfaceERC721  = [4]byte{0x80, 0xac, 0x58, 0xcd}
 	InterfaceERC1155 = [4]byte{0xd9, 0xb6, 0x7a, 0x26}
+
+	// interfaceInvalid is the id ERC-165 requires every compliant contract
+	// to answer false for. A fallback function that returns true to any
+	// selector fails this probe and is rejected.
+	interfaceInvalid = [4]byte{0xff, 0xff, 0xff, 0xff}
 )
 
 var supportsInterfaceSelector = crypto.Keccak256([]byte("supportsInterface(bytes4)"))[:4]
@@ -58,6 +64,25 @@ func SupportsInterface(ctx context.Context, eth Caller, collection string, id [4
 // declares neither. A non-nil error means the chain could not be reached and
 // the answer is unknown — it is never a statement about the contract.
 func DetectStandard(ctx context.Context, eth Caller, collection string) (string, error) {
+	// ERC-165 baseline: a compliant contract answers true for the ERC-165
+	// id itself and false for 0xffffffff. Without these probes, a contract
+	// whose fallback returns true for every selector would be classified as
+	// ERC-721 and send later ownership checks through the wrong path.
+	is165, err := SupportsInterface(ctx, eth, collection, InterfaceERC165)
+	if err != nil {
+		return "", err
+	}
+	if !is165 {
+		return "", nil
+	}
+	answersInvalid, err := SupportsInterface(ctx, eth, collection, interfaceInvalid)
+	if err != nil {
+		return "", err
+	}
+	if answersInvalid {
+		return "", nil
+	}
+
 	is721, err := SupportsInterface(ctx, eth, collection, InterfaceERC721)
 	if err != nil {
 		return "", err
@@ -183,7 +208,10 @@ func decodeString(out []byte) string {
 		// fixed-width branch rather than indexing past the buffer.
 		if offset == 32 && uint64(len(out)) >= 64 {
 			length := new(big.Int).SetBytes(out[32:64]).Uint64()
-			if 64+length <= uint64(len(out)) {
+			// Compare without adding to length: a contract can return
+			// math.MaxUint64, and 64+length would wrap past the check and
+			// panic on the slice below. len(out) >= 64 in this branch.
+			if length <= uint64(len(out)-64) {
 				return sanitizeUTF8(string(out[64 : 64+length]))
 			}
 		}

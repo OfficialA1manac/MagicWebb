@@ -57,6 +57,8 @@ export async function runWithModal<T extends TxResult>(
       if (meta.error) txModal.error = meta.error;
     },
   };
-  txModal.retry = () => { void runWithModal(opts, run); };
+  // Swallow the retry rejection: the tx hooks already surface the error in
+  // the modal, so a failed retry must not become an unhandled rejection.
+  txModal.retry = () => { void runWithModal(opts, run).catch(() => undefined); };
   return run(hooks);
 }

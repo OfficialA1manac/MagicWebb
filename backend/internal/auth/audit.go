@@ -3,6 +3,7 @@ package auth
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"time"
 
 	"github.com/jackc/pgx/v5/pgxpool"
@@ -45,10 +46,11 @@ type AuditLogger interface {
 // The internal buffer is 1024 entries; overflow entries are silently dropped
 // (audit log is best-effort, not transactional).
 type PgAuditLogger struct {
-	pool *pgxpool.Pool
-	ch   chan AuditEntry
-	done chan struct{}
-	quit chan struct{}
+	pool      *pgxpool.Pool
+	ch        chan AuditEntry
+	done      chan struct{}
+	quit      chan struct{}
+	closeOnce sync.Once
 }
 
 // auditRetention is how long auth audit rows (wallet_addr + ip + user_agent —
@@ -99,6 +101,14 @@ func (l *PgAuditLogger) retentionSweeper() {
 }
 
 func (l *PgAuditLogger) Log(entry AuditEntry) {
+	// After Close, drop entries instead of sending. The send channel is
+	// never closed (a send on a closed channel would panic inside an auth
+	// handler racing shutdown); shutdown is signalled via quit only.
+	select {
+	case <-l.quit:
+		return
+	default:
+	}
 	select {
 	case l.ch <- entry:
 	default:
@@ -108,32 +118,47 @@ func (l *PgAuditLogger) Log(entry AuditEntry) {
 }
 
 func (l *PgAuditLogger) Close() {
-	close(l.quit)
-	close(l.ch)
+	l.closeOnce.Do(func() { close(l.quit) })
 	<-l.done
 }
 
 func (l *PgAuditLogger) worker() {
 	defer close(l.done)
 
-	ctx := context.Background()
+	for {
+		select {
+		case entry := <-l.ch:
+			l.insert(entry)
+		case <-l.quit:
+			// Drain whatever is already buffered, then stop.
+			for {
+				select {
+				case entry := <-l.ch:
+					l.insert(entry)
+				default:
+					return
+				}
+			}
+		}
+	}
+}
+
+// insert writes one audit row. Best-effort with a short timeout so a hung DB
+// doesn't stall the worker indefinitely.
+func (l *PgAuditLogger) insert(entry AuditEntry) {
 	const insertSQL = `INSERT INTO auth_audit_log(event_type, wallet_addr, ip, user_agent, outcome, details)
 		VALUES($1, $2, $3, $4, $5, $6)`
 
-	for entry := range l.ch {
-		// Best-effort insert with a short timeout so a hung DB doesn't
-		// stall the worker indefinitely.
-		insCtx, cancel := context.WithTimeout(ctx, 2*time.Second)
-		_, _ = l.pool.Exec(insCtx, insertSQL,
-			entry.EventType,
-			entry.WalletAddr,
-			entry.IP,
-			entry.UserAgent,
-			entry.Outcome,
-			entry.Details,
-		)
-		cancel()
-	}
+	insCtx, cancel := context.WithTimeout(context.Background(), 2*time.Second)
+	defer cancel()
+	_, _ = l.pool.Exec(insCtx, insertSQL,
+		entry.EventType,
+		entry.WalletAddr,
+		entry.IP,
+		entry.UserAgent,
+		entry.Outcome,
+		entry.Details,
+	)
 }
 
 // ── Convenience helpers ──────────────────────────────────────────────────

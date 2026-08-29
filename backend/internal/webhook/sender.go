@@ -175,6 +175,17 @@ func SendDiscordResolvedAlert(ctx context.Context, url, title, description strin
 // so Alertmanager links them as the same alert (same fingerprint); a
 // different severity creates a separate alert group.
 func SendPrometheusResolvedAlert(ctx context.Context, url, alertName, description string) error {
+	// Historical default: the existing gas-cost caller fires with "warning".
+	// Callers that fire with a different severity MUST use
+	// SendPrometheusResolvedAlertWithSeverity or the resolved alert will not
+	// link to (and resolve) the firing alert.
+	return SendPrometheusResolvedAlertWithSeverity(ctx, url, alertName, description, "warning")
+}
+
+// SendPrometheusResolvedAlertWithSeverity is SendPrometheusResolvedAlert with
+// an explicit severity, which MUST match the severity of the firing alert so
+// Alertmanager links the two as the same fingerprint.
+func SendPrometheusResolvedAlertWithSeverity(ctx context.Context, url, alertName, description, severity string) error {
 	now := time.Now().UTC().Format(time.RFC3339Nano)
 	payload := PromPayload{
 		Version:         "4",
@@ -187,7 +198,7 @@ func SendPrometheusResolvedAlert(ctx context.Context, url, alertName, descriptio
 		},
 		CommonLabels: map[string]string{
 			"alertname": alertName,
-			"severity":  "warning", // MUST match firing alert severity for Alertmanager fingerprint linking
+			"severity":  severity, // MUST match firing alert severity for Alertmanager fingerprint linking
 		},
 		CommonAnnotations: map[string]string{
 			"summary":     fmt.Sprintf("Keeper gas cost resolved: %s", alertName),
@@ -198,7 +209,7 @@ func SendPrometheusResolvedAlert(ctx context.Context, url, alertName, descriptio
 			Status: "resolved",
 			Labels: map[string]string{
 				"alertname": alertName,
-				"severity":  "warning", // MUST match firing alert severity
+				"severity":  severity, // MUST match firing alert severity
 			},
 			Annotations: map[string]string{
 				"summary":     fmt.Sprintf("Keeper gas cost resolved: %s", alertName),
@@ -301,6 +312,15 @@ func SendEmail(ctx context.Context, host string, port int, user, pass, from, to,
 
 	select {
 	case <-ctx.Done():
+		// Drain the dial result so a connection established after
+		// cancellation is not leaked (socket + server-side session).
+		go func() {
+			select {
+			case c := <-connCh:
+				_ = c.Close()
+			case <-errCh:
+			}
+		}()
 		return ctx.Err()
 	case err := <-errCh:
 		return fmt.Errorf("smtp dial: %w", err)
@@ -440,9 +460,29 @@ var userWebhookClient = media.SSRFSafeClient(10 * time.Second)
 // Used by the webhook dispatcher for per-config secrets (which must pass
 // userWebhookClient — see deliver).
 func sendJSONWithSecret(ctx context.Context, client *http.Client, url string, v any, hmacSecret string) error {
+	_, err := sendJSONWithSecretResult(ctx, client, url, v, hmacSecret)
+	return err
+}
+
+// deliveryResult reports what actually happened during a delivery for the
+// webhook_deliveries audit log.
+type deliveryResult struct {
+	// StatusCode is the last HTTP status observed from the receiver
+	// (e.g. 201, 204, 404, 500). 0 means no HTTP response was received
+	// (network error, DNS failure, or timeout).
+	StatusCode int
+	// Attempts is the number of HTTP attempts actually made.
+	Attempts int
+}
+
+// sendJSONWithSecretResult is sendJSONWithSecret returning the observed HTTP
+// status code and attempt count so the dispatcher can record accurate audit
+// rows instead of reconstructing them from the error string.
+func sendJSONWithSecretResult(ctx context.Context, client *http.Client, url string, v any, hmacSecret string) (deliveryResult, error) {
+	var res deliveryResult
 	body, err := json.Marshal(v)
 	if err != nil {
-		return fmt.Errorf("webhook marshal: %w", err)
+		return res, fmt.Errorf("webhook marshal: %w", err)
 	}
 
 	// Sign the payload with HMAC-SHA256 when a secret is configured.
@@ -465,32 +505,37 @@ func sendJSONWithSecret(ctx context.Context, client *http.Client, url string, v 
 			}
 			select {
 			case <-ctx.Done():
-				return ctx.Err()
+				return res, ctx.Err()
 			case <-time.After(DefaultRetryConfig.Delays[delayIdx]):
 			}
 		}
 
-		lastErr = sendSingle(ctx, client, url, body, signature)
+		var status int
+		status, lastErr = sendSingle(ctx, client, url, body, signature)
+		res.Attempts++
+		res.StatusCode = status
 		if lastErr == nil {
-			return nil
+			return res, nil
 		}
 
 		// Only retry on transient errors (5xx, network issues).
 		// 4xx errors are permanent — retrying won't help.
 		if !isRetryable(lastErr) {
-			return lastErr
+			return res, lastErr
 		}
 	}
 
-	return fmt.Errorf("webhook: all %d attempts failed: %w", DefaultRetryConfig.MaxAttempts, lastErr)
+	return res, fmt.Errorf("webhook: all %d attempts failed: %w", DefaultRetryConfig.MaxAttempts, lastErr)
 }
 
 // sendSingle performs a single HTTP POST without retries using the given
-// client (operatorClient or the SSRF-gated userWebhookClient).
-func sendSingle(ctx context.Context, client *http.Client, url string, body []byte, signature string) error {
+// client (operatorClient or the SSRF-gated userWebhookClient). The returned
+// int is the HTTP status observed from the receiver; 0 means no HTTP
+// response (network error, DNS failure, or timeout).
+func sendSingle(ctx context.Context, client *http.Client, url string, body []byte, signature string) (int, error) {
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
-		return fmt.Errorf("webhook request: %w", err)
+		return 0, fmt.Errorf("webhook request: %w", err)
 	}
 	req.Header.Set("Content-Type", "application/json")
 	if signature != "" {
@@ -499,7 +544,7 @@ func sendSingle(ctx context.Context, client *http.Client, url string, body []byt
 
 	resp, err := client.Do(req)
 	if err != nil {
-		return &retryableError{err}
+		return 0, &retryableError{err}
 	}
 	defer resp.Body.Close()
 
@@ -513,12 +558,12 @@ func sendSingle(ctx context.Context, client *http.Client, url string, body []byt
 		err := fmt.Errorf("webhook returned %d: %s", resp.StatusCode, bodySnippet)
 		// 5xx = retryable, 4xx = not
 		if resp.StatusCode >= 500 {
-			return &retryableError{err}
+			return resp.StatusCode, &retryableError{err}
 		}
-		return err
+		return resp.StatusCode, err
 	}
 
-	return nil
+	return resp.StatusCode, nil
 }
 
 // retryableError wraps an error that should be retried.

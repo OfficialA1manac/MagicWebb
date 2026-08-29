@@ -46,20 +46,27 @@
     if (e.key === 'Escape' && !busy) closeTxModal();
     if (e.key === 'Tab' && dialog) {
       const f = dialog.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
-      if (!f.length) return;
+      // Busy steps render no focusable element: keep focus on the dialog
+      // itself so Tab cannot escape to the page behind the scrim.
+      if (!f.length) { dialog.focus(); e.preventDefault(); return; }
       const first = f[0], last = f[f.length - 1];
       if (e.shiftKey && document.activeElement === first) { last.focus(); e.preventDefault(); }
       else if (!e.shiftKey && document.activeElement === last) { first.focus(); e.preventDefault(); }
     }
   }
 
+  let lastFocused: HTMLElement | null = null;
   $effect(() => {
     if (txModal.open && dialog) {
+      lastFocused ??= document.activeElement as HTMLElement | null;
       const btn = dialog.querySelector<HTMLElement>('button');
-      queueMicrotask(() => btn?.focus());
+      const target = dialog;
+      queueMicrotask(() => (btn ?? target)?.focus());
       document.body.style.overflow = 'hidden';
     } else {
       document.body.style.overflow = '';
+      lastFocused?.focus();
+      lastFocused = null;
     }
   });
 </script>
@@ -68,7 +75,7 @@
 
 {#if txModal.open}
   <div class="mw-tx-scrim" role="presentation" transition:fade={{ duration: 150 }} onclick={() => { if (!busy) closeTxModal(); }}></div>
-  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" bind:this={dialog} transition:fly={{ y: 24, duration: 220 }}>
+  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" tabindex="-1" bind:this={dialog} transition:fly={{ y: 24, duration: 220 }}>
     <div class="mw-tx-grab" aria-hidden="true"></div>
     <h2 id="mw-tx-title">{txModal.title}</h2>
 

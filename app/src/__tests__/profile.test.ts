@@ -344,7 +344,7 @@ describe('_loading flag — prevents overlapping calls', () => {
     localStorage.clear();
   });
 
-  it('blocks a second loadProfileData call while one is in-flight', async () => {
+  it('blocks a second loadProfileData call while one is in-flight, then applies it after', async () => {
     setupProfilePage({ pathname: '/profile' });
 
     // The initial load is now hanging (waiting for resolveFirstFetch)
@@ -356,19 +356,26 @@ describe('_loading flag — prevents overlapping calls', () => {
     localStorage.setItem('mw_addr', ADDR_B);
     window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
 
-    // Advance past debounce — but the second call should be blocked by _loading=true
+    // Advance past debounce — the second call is blocked by _loading=true and
+    // deferred (no overlapping load starts).
     await flushDebounce();
 
     // The loading indicator should still be the original one — NOT re-entered
     expect(root.innerHTML).toContain('Loading profile');
 
-    // Now resolve the first fetch
+    // Resolve the first fetch: the ADDR_A load completes, and the deferred
+    // wallet change immediately starts a follow-up load for ADDR_B (which
+    // hangs on its own profile fetch) — the change is never silently dropped.
     resolveFirstFetch();
     await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
+    expect(root.innerHTML).toContain('Loading profile');
 
-    // The profile should now be rendered (first call completed)
-    // The second call was blocked, so the rendered address is still ADDR_A
-    expect(root.innerHTML).toContain(ADDR_A.toLowerCase());
+    // Resolve the follow-up fetch: the page now shows the new wallet.
+    resolveFirstFetch();
+    await vi.runAllTimersAsync();
+    await vi.runAllTimersAsync();
+    expect(root.innerHTML).toContain(ADDR_B.toLowerCase());
   });
 
   it('_loading is reset after successful load, allowing subsequent calls', async () => {

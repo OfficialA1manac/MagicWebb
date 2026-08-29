@@ -327,6 +327,14 @@ const sortParam = urlParams.get('sort') || 'recent';
       if(sortSelect) sortSelect.addEventListener('change', applyFilters);
       if(applyBtn) applyBtn.addEventListener('click', applyFilters);
       if(clearBtn) clearBtn.addEventListener('click', clearFilters);
+      // ✕ next to a preselected collection: drop the collection (and its
+      // traits) but keep price/sort, then re-apply.
+      const clearCollBtn = document.getElementById('clear-collection-btn');
+      if(clearCollBtn) clearCollBtn.addEventListener('click', function(){
+        if(collectionInput) collectionInput.value = '';
+        activeTraits = {};
+        applyFilters();
+      });
 
       // Focus styles
       document.querySelectorAll('#filter-bar input, #filter-bar select').forEach(function(el){

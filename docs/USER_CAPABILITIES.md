@@ -9,7 +9,10 @@ a person is all three at different moments:
 
 Every write is a wallet transaction on the network you are viewing. The marketplace fee is
 **1.5%, paid by the seller, only when something sells**. Listing, auctioning, bidding and
-offering are free (gas only). Every amount you escrow is refundable.
+offering are free (gas only). Escrow you put up stays withdrawable until it
+becomes a sale: winning bids and accepted offers pay the seller, while outbid,
+cancelled, declined, expired, and failed-payout amounts are all refundable
+(see [Refunds](#refunds)).
 
 ## Per network
 
@@ -80,8 +83,10 @@ you in the contract. **Profile → "Refunds waiting for you" → Withdraw.** Nev
 - Freeze, move or take your NFT or funds (non-custodial; contracts hold only what you escrow).
 - Curate or approve listings — the Verified NFT badge is computed from on-chain facts.
 - Change the fee.
-- Pause anything administratively. There is no circuit breaker, no operator role, and no
-  entry gate — no role can halt listings, bids, offers, buys, cancels, settlements, or
+- Pause anything. Protocol roles do exist — `DEFAULT_ADMIN_ROLE` manages roles and queued
+  upgrades, `KEEPER_ROLE` automates settlement and refunds (see
+  `IMMUTABILITY_TRANSITION.md`) — but there is no circuit breaker and no entry gate: no
+  role, those included, can halt listings, bids, offers, buys, cancels, settlements, or
   withdrawals. Normal contract rules (ownership, expiry, authorization, escrow) still
   apply to every action.
 - Log in to an admin page. There is none.

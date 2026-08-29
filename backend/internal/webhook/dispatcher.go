@@ -287,27 +287,31 @@ func (d *Dispatcher) dispatch(ctx context.Context, ev sse.Event) {
 // Uses sendJSONWithSecret (not the package-level HMACSecret var) so
 // per-config secrets don't race across concurrent deliveries.
 func (d *Dispatcher) deliver(ctx context.Context, cfg WebhookConfig, hookType MarketplaceEventType, payload WebhookPayload) {
-	deliveryCtx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	// Size the timeout to the full retry budget — a smaller timeout would
+	// expire during the documented backoff delays and silently cancel the
+	// final retry attempt(s).
+	deliveryCtx, cancel := context.WithTimeout(ctx, deliveryBudget(DefaultRetryConfig))
 	defer cancel()
 
 	start := time.Now()
-	err := sendJSONWithSecret(deliveryCtx, userWebhookClient, cfg.URL, payload, cfg.Secret)
+	res, err := sendJSONWithSecretResult(deliveryCtx, userWebhookClient, cfg.URL, payload, cfg.Secret)
 	elapsed := int(time.Since(start).Milliseconds())
 
-	// Log the delivery attempt.
-	statusCode := 200
+	// Log the delivery attempt with the observed HTTP status (0 = no HTTP
+	// response: network error or timeout) and the real attempt count.
 	errMsg := ""
-	attempts := 1
 	if err != nil {
-		statusCode = 0 // network error or timeout — no HTTP response
 		errMsg = err.Error()
-		// sendJSON retries internally; extract actual attempt count from error
 		if len(errMsg) > 256 {
 			errMsg = errMsg[:256]
 		}
 	}
 
-	if logErr := d.store.LogDelivery(ctx, cfg.ID, hookType, statusCode, errMsg, attempts, elapsed); logErr != nil {
+	// Audit write must survive shutdown: the parent ctx may already be
+	// cancelled when the final delivery attempts complete.
+	logCtx, logCancel := context.WithTimeout(context.WithoutCancel(ctx), 5*time.Second)
+	defer logCancel()
+	if logErr := d.store.LogDelivery(logCtx, cfg.ID, hookType, res.StatusCode, errMsg, res.Attempts, elapsed); logErr != nil {
 		log.Warn().Err(logErr).Int64("config_id", cfg.ID).Msg("webhook: delivery log failed")
 	}
 
@@ -315,4 +319,15 @@ func (d *Dispatcher) deliver(ctx context.Context, cfg WebhookConfig, hookType Ma
 		log.Warn().Err(err).Int64("config_id", cfg.ID).Str("url", cfg.URL).Str("event", string(hookType)).
 			Msg("webhook: delivery failed")
 	}
+}
+
+// deliveryBudget returns the wall-clock time needed for all retry attempts:
+// the per-attempt HTTP client timeout (10s, matching userWebhookClient and
+// operatorClient) times MaxAttempts, plus the backoff delays between them.
+func deliveryBudget(rc RetryConfig) time.Duration {
+	total := time.Duration(rc.MaxAttempts) * 10 * time.Second
+	for i := 0; i < rc.MaxAttempts-1 && i < len(rc.Delays); i++ {
+		total += rc.Delays[i]
+	}
+	return total
 }

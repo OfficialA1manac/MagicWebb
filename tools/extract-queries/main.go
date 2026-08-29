@@ -69,8 +69,12 @@ var (
 // backtickRe matches all backtick-delimited blocks in source text.
 var backtickRe = regexp.MustCompile("`([^`]*)`")
 
-// opPrefixRe matches the start of a GraphQL operation definition.
-var opPrefixRe = regexp.MustCompile(`^(?:query|mutation|subscription)\s+\w+`)
+// opPrefixRe matches the start of a GraphQL operation or fragment
+// definition. The operation name is optional (`query { ... }` is a valid
+// anonymous operation), and a document may open with a fragment that
+// precedes its operation — \b keeps identifiers like `queryClient`
+// from matching.
+var opPrefixRe = regexp.MustCompile(`^(?:query|mutation|subscription|fragment)\b`)
 
 // shorthandRe matches a shorthand query opening: { followed by a field name.
 var shorthandRe = regexp.MustCompile(`^\s*\{\s*[a-zA-Z_]\w*`)

@@ -4,7 +4,6 @@
 //
 // Targets the key public endpoints (no auth). Adjust TARGET env for staging:
 //   k6 run -e TARGET=https://magicwebb.fly.dev tools/load-test.js --vus 20 --duration 60s
-//   k6 run -e SSE_TEST=true tools/load-test.js          # also probe SSE events
 //
 // Install k6: https://k6.io/docs/get-started/installation/
 // ─────────────────────────────────────────────────────────────────────────────

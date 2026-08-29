@@ -69,6 +69,12 @@ type Broadcaster struct {
 	ringPos   int
 	ringCount int
 	ringMu    sync.RWMutex
+
+	// Subscriber registry. Per-broadcaster (not package-level) so multiple
+	// Broadcasters in one process — fallback paths, tests — do not
+	// cross-deliver events or share the MaxClients cap.
+	rawClientsMu sync.RWMutex
+	rawClients   map[string]*rawClient
 }
 
 // New creates and starts a local-only Broadcaster.
@@ -83,8 +89,9 @@ func New() *Broadcaster {
 // deterministically before starting the loop (e.g., saturation-metric tests).
 func newNoLoop() *Broadcaster {
 	return &Broadcaster{
-		events: make(chan Event, 256),
-		origin: uuid.New().String(),
+		events:     make(chan Event, 256),
+		origin:     uuid.New().String(),
+		rawClients: make(map[string]*rawClient),
 	}
 }
 
@@ -184,7 +191,9 @@ func (b *Broadcaster) Replay(fromSeq uint64) []RetryEvent {
 		return nil // evicted — caller must full-refresh
 	}
 
-	var out []RetryEvent
+	// Non-nil even when empty: a client asking for lastSeq+1 (fully caught
+	// up) has lost nothing, and nil means "evicted — full-refresh required".
+	out := []RetryEvent{}
 	for i := 0; i < b.ringCount; i++ {
 		pos := (oldestPos(b.ringPos, b.ringCount) + i) % RingBufferSize
 		if b.ringBuf[pos].Seq >= fromSeq {
@@ -220,37 +229,34 @@ type rawClient struct {
 	dropped atomic.Uint64
 }
 
-var rawClientsMu sync.RWMutex
-var rawClients = make(map[string]*rawClient)
-
 // SubscribeRaw registers a subscriber that receives raw Event objects (no SSE
 // formatting). This is the WebSocket-native subscriber path.
 func (b *Broadcaster) SubscribeRaw() (<-chan Event, func(), bool) {
 	id := uuid.New().String()
 	c := make(chan Event, 64)
 
-	rawClientsMu.Lock()
-	if len(rawClients) >= MaxClients {
-		rawClientsMu.Unlock()
+	b.rawClientsMu.Lock()
+	if len(b.rawClients) >= MaxClients {
+		b.rawClientsMu.Unlock()
 		return nil, nil, false
 	}
 	cancel := func() {
-		rawClientsMu.Lock()
-		delete(rawClients, id)
-		rawClientsMu.Unlock()
+		b.rawClientsMu.Lock()
+		delete(b.rawClients, id)
+		b.rawClientsMu.Unlock()
 		for len(c) > 0 {
 			<-c
 		}
 	}
-	rawClients[id] = &rawClient{ch: c, cancel: cancel}
-	rawClientsMu.Unlock()
+	b.rawClients[id] = &rawClient{ch: c, cancel: cancel}
+	b.rawClientsMu.Unlock()
 	return c, cancel, true
 }
 
 func (b *Broadcaster) loop() {
 	for ev := range b.events {
-		rawClientsMu.RLock()
-		for _, rc := range rawClients {
+		b.rawClientsMu.RLock()
+		for _, rc := range b.rawClients {
 			select {
 			case rc.ch <- ev:
 			default:
@@ -261,6 +267,6 @@ func (b *Broadcaster) loop() {
 				droppedClientsTotal.Add(1)
 			}
 		}
-		rawClientsMu.RUnlock()
+		b.rawClientsMu.RUnlock()
 	}
 }

@@ -21,7 +21,10 @@
   let { item }: { item: ListingItem } = $props();
 
   let priceFormatted = $derived(() => {
-    const wei = BigInt(item.price_wei);
+    // price_wei comes straight from the API payload — guard against a
+    // non-numeric value so one bad row cannot throw inside the render.
+    let wei: bigint;
+    try { wei = BigInt(item.price_wei ?? '0'); } catch { return '—'; }
     const divisor = BigInt(10) ** BigInt(18);
     const whole = wei / divisor;
     const remainder = wei % divisor;

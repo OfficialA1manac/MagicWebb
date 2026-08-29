@@ -9,6 +9,8 @@ import (
 	"time"
 
 	ethereum "github.com/ethereum/go-ethereum"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 )
 
 type fakeStore struct {
@@ -47,15 +49,15 @@ func (f *fakeStore) SetCollectionCreator(_ context.Context, addr, creator string
 	return nil
 }
 
-// fakeCaller answers supportsInterface per-collection so one sweep can mix
+// fakeCaller answers eth_calls per-collection so one sweep can mix
 // standard contracts, non-standard contracts and unreachable ones.
 type fakeCaller struct {
-	byAddr map[string]func() ([]byte, error)
+	byAddr map[string]func(data []byte) ([]byte, error)
 }
 
 func (f *fakeCaller) CallContract(_ context.Context, msg ethereum.CallMsg, _ *big.Int) ([]byte, error) {
 	// To.Hex() is EIP-55 checksummed; the test's literals are not.
-	return f.byAddr[strings.ToLower(msg.To.Hex())]()
+	return f.byAddr[strings.ToLower(msg.To.Hex())](msg.Data)
 }
 
 func (f *fakeCaller) BlockNumber(context.Context) (uint64, error) { return 0, nil }
@@ -68,6 +70,23 @@ func trueWord() ([]byte, error) {
 
 func falseWord() ([]byte, error) { return make([]byte, 32), nil }
 
+// nftContract models an ERC-165-compliant NFT contract: supportsInterface
+// answers true for the ERC-165 baseline id and the given interface, false
+// for everything else (including 0xffffffff). Other getters (name/symbol/
+// owner) answer an empty word.
+func nftContract(id [4]byte) func([]byte) ([]byte, error) {
+	return func(data []byte) ([]byte, error) {
+		if len(data) == 36 { // supportsInterface(bytes4) probe
+			probe := [4]byte{data[4], data[5], data[6], data[7]}
+			if probe == chain.InterfaceERC165 || probe == id {
+				return trueWord()
+			}
+			return falseWord()
+		}
+		return falseWord()
+	}
+}
+
 const (
 	standardColl    = "0x832d74cfbb4617b50c32cd110dfe16837a359b35"
 	nonStandardColl = "0x0000000000000000000000000000000000000abc"
@@ -76,10 +95,10 @@ const (
 
 func TestSweepOnceStampsOutcomes(t *testing.T) {
 	store := &fakeStore{addrs: []string{standardColl, nonStandardColl, downColl}}
-	eth := &fakeCaller{byAddr: map[string]func() ([]byte, error){
-		standardColl:    trueWord,
-		nonStandardColl: func() ([]byte, error) { return nil, errors.New("execution reverted") },
-		downColl:        func() ([]byte, error) { return nil, errors.New("dial tcp: connection refused") },
+	eth := &fakeCaller{byAddr: map[string]func([]byte) ([]byte, error){
+		standardColl:    nftContract(chain.InterfaceERC721),
+		nonStandardColl: func([]byte) ([]byte, error) { return nil, errors.New("execution reverted") },
+		downColl:        func([]byte) ([]byte, error) { return nil, errors.New("dial tcp: connection refused") },
 	}}
 
 	r := New(store, eth)
@@ -105,15 +124,9 @@ func TestSweepOnceStampsOutcomes(t *testing.T) {
 
 func TestSweepOnceERC1155(t *testing.T) {
 	store := &fakeStore{addrs: []string{standardColl}}
-	var calls int
-	eth := &fakeCaller{byAddr: map[string]func() ([]byte, error){
-		standardColl: func() ([]byte, error) {
-			calls++
-			if calls == 1 { // ERC-721 probe misses
-				return falseWord()
-			}
-			return trueWord()
-		},
+	eth := &fakeCaller{byAddr: map[string]func([]byte) ([]byte, error){
+		// ERC-721 probe misses; ERC-1155 hits.
+		standardColl: nftContract(chain.InterfaceERC1155),
 	}}
 
 	if _, err := New(store, eth).SweepOnce(context.Background()); err != nil {

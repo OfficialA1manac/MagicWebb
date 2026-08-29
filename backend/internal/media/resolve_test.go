@@ -91,6 +91,13 @@ func TestSafeDialContext_BlocksLoopbackAndPrivate(t *testing.T) {
 }
 
 func TestSafeDialContext_BlocksLocalhostAndLocalDomains(t *testing.T) {
+	// my-service.lan passes proxyHostAllowed (only localhost/.local are
+	// name-rejected) and proceeds to DNS resolution — stub the resolver so
+	// the test does not depend on the local DNS environment or attempt a
+	// real TCP connect on networks where .lan resolves.
+	orig := dialResolver
+	defer func() { dialResolver = orig }()
+	dialResolver = &fakeResolver{err: errors.New("no such host")}
 	for _, addr := range []string{
 		"localhost:80",
 		"example.local:80",
@@ -192,12 +199,12 @@ type inertConn struct {
 	addr string
 }
 
-func (c inertConn) Read(p []byte) (int, error)  { return c.r.Read(p) }
-func (c inertConn) Write(p []byte) (int, error) { return c.w.Write(p) }
-func (c inertConn) Close() error                { return nil }
-func (c inertConn) LocalAddr() net.Addr         { return dummyAddr(c.addr) }
-func (c inertConn) RemoteAddr() net.Addr        { return dummyAddr(c.addr) }
-func (c inertConn) SetDeadline(time.Time) error { return nil }
+func (c inertConn) Read(p []byte) (int, error)       { return c.r.Read(p) }
+func (c inertConn) Write(p []byte) (int, error)      { return c.w.Write(p) }
+func (c inertConn) Close() error                     { return nil }
+func (c inertConn) LocalAddr() net.Addr              { return dummyAddr(c.addr) }
+func (c inertConn) RemoteAddr() net.Addr             { return dummyAddr(c.addr) }
+func (c inertConn) SetDeadline(time.Time) error      { return nil }
 func (c inertConn) SetReadDeadline(time.Time) error  { return nil }
 func (c inertConn) SetWriteDeadline(time.Time) error { return nil }
 

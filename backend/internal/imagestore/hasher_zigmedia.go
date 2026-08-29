@@ -28,8 +28,16 @@ import (
 // Go SHA-256 interface so callers are interchangeable regardless of build tag.
 func hashBytes(body []byte) [sha256.Size]byte {
 	var out [sha256.Size]byte
+	// Zero-length inputs must still pass a valid non-nil pointer:
+	// unsafe.SliceData returns an unspecified (possibly nil) address for a
+	// zero-capacity slice. Zig reads zero bytes from it. Mirrors the same
+	// guard in hashBatch.
+	data := unsafe.SliceData(body)
+	if len(body) == 0 {
+		data = new(byte)
+	}
 	C.zig_sha256(
-		(*C.uint8_t)(unsafe.Pointer(unsafe.SliceData(body))),
+		(*C.uint8_t)(unsafe.Pointer(data)),
 		C.size_t(len(body)),
 		(*C.uint8_t)(unsafe.Pointer(&out[0])),
 	)

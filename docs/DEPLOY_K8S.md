@@ -33,14 +33,16 @@ kubectl -n magicwebb-coston2 create secret generic mw-secrets \
   --from-literal=WC_PROJECT_ID="$WC_PROJECT_ID" \
   --from-literal=REDIS_URL='rediss://…'   # optional; omit for in-memory
 
-# 2. Build/push the image (same Dockerfile as Fly):
-docker build -t ghcr.io/officiala1manac/magicwebb:$(git rev-parse --short HEAD) \
+# 2. Build/push the image (same Dockerfile as Fly). Define the tag ONCE so
+#    build, push and the overlay all reference the same image:
+IMAGE_TAG="$(git rev-parse --short HEAD)"
+docker build -t ghcr.io/officiala1manac/magicwebb:"$IMAGE_TAG" \
   --build-arg REOWN_PROJECT_ID="$WC_PROJECT_ID" .
-docker push ghcr.io/officiala1manac/magicwebb:$(git rev-parse --short HEAD)
+docker push ghcr.io/officiala1manac/magicwebb:"$IMAGE_TAG"
 
 # 3. Point the overlay at the tag and apply:
 cd k8s/overlays/coston2
-kustomize edit set image ghcr.io/officiala1manac/magicwebb:<tag>
+kustomize edit set image ghcr.io/officiala1manac/magicwebb:"$IMAGE_TAG"
 kubectl apply -k .
 ```
 
@@ -54,14 +56,23 @@ The default is `replicas: 1` per chain. Before scaling up:
 1. Set `GRPC_PORT` and `GRPC_PEERS` (or add a headless Service) so the
    gRPC event mesh fans WebSocket events across pods and keeper leader
    election picks a single settler.
-2. Set `REDIS_URL` to a shared Redis so rate limits and cache agree.
+2. Set `REDIS_URL` to a shared Redis so the read caches agree across pods
+   (rate-limit counters and SIWE nonces are Postgres-backed and already
+   shared — see `ARCHITECTURE.md`).
 
 Without both, a second replica double-settles nothing (election defaults
 safe) but WS clients on pod B miss events from pod A.
 
 ## Enabling Songbird / Flare trading
 
-Same procedure as Fly (`deployments/README.md`): run the forge deploy script,
-fill the `*_ADDR` literals in the overlay's `kustomization.yaml`, mirror the
-addresses into `deployments/<network>.json`, redeploy. Until then the overlay
+Same procedure as Fly (`deployments/README.md`): run the forge deploy script
+and record the addresses in `deployments/<network>.json` first — that file is
+the single source of truth for contract addresses. Then copy those values into
+the overlay's `*_ADDR` literals verbatim (read them back with
+`jq .contracts deployments/<network>.json`; never hand-type addresses into the
+overlay that the JSON does not carry) and redeploy. Divergence matters: the
+env literals are what the server actually indexes, so an overlay that drifts
+from the JSON silently runs a different contract set than every other
+consumer of `deployments/<network>.json` — diff the two before `kubectl
+apply`. Until then the overlay
 boots read-only: browse/search/profiles work, trading CTAs point to Coston2.

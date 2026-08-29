@@ -21,7 +21,9 @@ package keeper
 
 import (
 	"context"
+	"crypto/subtle"
 	"fmt"
+	"os"
 	"sort"
 	"sync"
 	"sync/atomic"
@@ -30,7 +32,10 @@ import (
 	"github.com/google/uuid"
 	"github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
+	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/credentials/insecure"
+	"google.golang.org/grpc/metadata"
+	"google.golang.org/grpc/status"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/keeper/proto"
 )
@@ -41,6 +46,13 @@ const (
 	missedThreshold   = 3               // failover after 3 missed heartbeats
 	heartbeatTimeout  = 2 * time.Second // per-heartbeat RPC timeout
 )
+
+// clusterSecretHeader is the gRPC metadata key carrying the shared cluster
+// secret (KEEPER_CLUSTER_SECRET env var). When the secret is set, every
+// Heartbeat must present it — an unauthenticated client on the mesh port can
+// otherwise seize or block leadership. Empty secret preserves the previous
+// (unauthenticated) behaviour for existing deployments.
+const clusterSecretHeader = "x-keeper-cluster-secret"
 
 // ElectionState represents the current role of this instance.
 type ElectionState int32
@@ -56,24 +68,25 @@ const (
 // and failover logic.
 type Election struct {
 	// Immutable config.
-	instanceID string // UUID for this instance
+	instanceID string   // UUID for this instance
 	peers      []string // list of peer addresses (host:port)
+	secret     string   // shared cluster secret (KEEPER_CLUSTER_SECRET); "" disables auth
 
 	// State machine — accessed under mu.
 	mu             sync.RWMutex
 	state          ElectionState
-	leaderID       string // who we believe the leader is
+	leaderID       string    // who we believe the leader is
 	lastHeartbeat  time.Time // last time we heard from the leader
-	leaderPriority int    // priority rank of current leader (lower = higher priority)
+	leaderPriority int       // priority rank of current leader (lower = higher priority)
 
 	// Peer client connections.
 	clientsMu sync.RWMutex
 	clients   map[string]proto.KeeperElectionClient // addr → client
 
 	// gRPC server for receiving heartbeats.
-	srv    *grpc.Server
-	registered sync.Once // guards proto.RegisterKeeperElectionServer (panic on double-call)
-	proto.UnimplementedKeeperElectionServer // required for forward compatibility
+	srv                                     *grpc.Server
+	registered                              sync.Once // guards proto.RegisterKeeperElectionServer (panic on double-call)
+	proto.UnimplementedKeeperElectionServer           // required for forward compatibility
 
 	// KeeperGate channels — lockCtx is cancelled when leadership is lost.
 	lockCtx    context.Context
@@ -81,15 +94,15 @@ type Election struct {
 	gateReady  chan struct{} // closed when lockCtx is ready (first leadership acquired)
 
 	// Health / degraded detection.
-	eth         EthClient              // optional — for degraded-RPC detection
-	yieldCh     chan struct{}          // signals voluntary yield
-	degradedCnt atomic.Int64           // consecutive RPC failures
-	maxDegraded int64                  // max tolerable failures before yield (0 = never yield)
+	eth         EthClient     // optional — for degraded-RPC detection
+	yieldCh     chan struct{} // signals voluntary yield
+	degradedCnt atomic.Int64  // consecutive degraded ticks (whole tick failed)
+	maxDegraded int64         // max tolerable failures before yield (0 = never yield)
 
 	// Shutdown coordination.
-	ctx        context.Context
-	cancel     context.CancelFunc
-	wg         sync.WaitGroup
+	ctx         context.Context
+	cancel      context.CancelFunc
+	wg          sync.WaitGroup
 	loopStarted atomic.Bool // guards electionLoop against duplicate starts
 }
 
@@ -136,20 +149,21 @@ func New(srv *grpc.Server, peerAddrs []string, myAddr string, opts ...Option) *E
 	ctx, cancel := context.WithCancel(context.Background())
 
 	e := &Election{
-		instanceID:   uuid.New().String(),
-		peers:        filterSelf(peerAddrs, myAddr),
-		state:        StateFollower,
-		leaderID:     "",
+		instanceID:    uuid.New().String(),
+		peers:         filterSelf(peerAddrs, myAddr),
+		secret:        os.Getenv("KEEPER_CLUSTER_SECRET"),
+		state:         StateFollower,
+		leaderID:      "",
 		lastHeartbeat: time.Time{},
-		clients:      make(map[string]proto.KeeperElectionClient),
-		srv:          srv,
-		gateReady:    make(chan struct{}),
-		lockCtx:      nil,
-		lockCancel:   nil,
-		yieldCh:      make(chan struct{}, 1),
-		maxDegraded:  3,
-		ctx:          ctx,
-		cancel:       cancel,
+		clients:       make(map[string]proto.KeeperElectionClient),
+		srv:           srv,
+		gateReady:     make(chan struct{}),
+		lockCtx:       nil,
+		lockCancel:    nil,
+		yieldCh:       make(chan struct{}, 1),
+		maxDegraded:   3,
+		ctx:           ctx,
+		cancel:        cancel,
 	}
 
 	for _, opt := range opts {
@@ -193,7 +207,7 @@ func (e *Election) Run(ctx context.Context) error {
 	// Start the election loop goroutine (once, guarded by atomic).
 	if e.loopStarted.CompareAndSwap(false, true) {
 		e.wg.Add(1)
-		go e.electionLoop(ctx)
+		go e.electionLoop()
 	}
 
 	// Block until this instance becomes leader or context is done.
@@ -349,6 +363,17 @@ func (e *Election) DegradedRPCGauge() int64 {
 // Heartbeat implements proto.KeeperElectionServer. It receives heartbeats
 // from peers and updates the local election state.
 func (e *Election) Heartbeat(ctx context.Context, req *proto.HeartbeatRequest) (*proto.HeartbeatResponse, error) {
+	// Authenticate the peer when a cluster secret is configured. Without
+	// this, any client that reaches the mesh port can seize or block
+	// leadership by sending forged heartbeats.
+	if e.secret != "" {
+		md, _ := metadata.FromIncomingContext(ctx)
+		vals := md.Get(clusterSecretHeader)
+		if len(vals) == 0 || subtle.ConstantTimeCompare([]byte(vals[0]), []byte(e.secret)) != 1 {
+			return nil, status.Error(codes.PermissionDenied, "keeper: invalid cluster secret")
+		}
+	}
+
 	now := time.Now()
 
 	e.mu.Lock()
@@ -385,6 +410,16 @@ func (e *Election) Heartbeat(ctx context.Context, req *proto.HeartbeatRequest) (
 			e.leaderID = req.InstanceId
 			e.state = StateFollower
 			e.lastHeartbeat = now
+			// If we held the keeper lock, drop it: the consumer waiting on
+			// LockCtx() must stop before the new leader's keepers start,
+			// otherwise two instances run keeper single-flight work at once.
+			if e.lockCancel != nil {
+				e.lockCancel()
+				e.lockCancel = nil
+				// Fresh gate so the next Run() blocks until re-election
+				// instead of returning at once with a cancelled lockCtx.
+				e.gateReady = make(chan struct{})
+			}
 			resp.LeaderId = e.leaderID
 		} else {
 			// We win — tell the sender to follow us.
@@ -397,11 +432,11 @@ func (e *Election) Heartbeat(ctx context.Context, req *proto.HeartbeatRequest) (
 		// If we're the lowest-ID instance, we become leader.
 		if e.instanceID < req.InstanceId {
 			e.becomeLeaderLocked()
-		} else {
-			e.leaderID = req.InstanceId
-			e.state = StateFollower
-			e.lastHeartbeat = now
 		}
+		// The sender is announcing presence as a follower — do NOT record
+		// it as leader. Adopting a non-leader here suppresses our own
+		// candidacy for the full missedThreshold window. leaderID is set
+		// only from heartbeats with is_leader = true.
 		resp.LeaderId = e.leaderID
 	}
 
@@ -449,10 +484,19 @@ func (e *Election) resign() {
 	}
 	log.Info().Str("instance", e.instanceID).Msg("keeper: resigned leadership")
 	e.state = StateFollower
+	// Clear leader identity: leaving leaderID == e.instanceID would keep the
+	// failure detector (which requires leaderID != instanceID) from ever
+	// firing, so the instance would never re-elect.
+	e.leaderID = ""
+	e.lastHeartbeat = time.Time{}
 	if e.lockCancel != nil {
 		e.lockCancel()
 		e.lockCancel = nil
 	}
+	// Fresh gate channel so the next Run() blocks until re-election instead
+	// of returning immediately on the closed channel with a cancelled lockCtx
+	// (which would make the runner loop spin).
+	e.gateReady = make(chan struct{})
 }
 
 // ── Peer connection ───────────────────────────────────────────────────────
@@ -475,10 +519,20 @@ func (e *Election) connectPeer(ctx context.Context, addr string) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
-		conn, err := grpc.DialContext(dialCtx, addr,
+		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
 			grpc.WithBlock(),
-		)
+		}
+		if secret := e.secret; secret != "" {
+			// Attach the shared cluster secret to every election RPC so
+			// peers with KEEPER_CLUSTER_SECRET set accept our heartbeats.
+			dialOpts = append(dialOpts, grpc.WithUnaryInterceptor(
+				func(ctx context.Context, method string, req, reply interface{}, cc *grpc.ClientConn, invoker grpc.UnaryInvoker, opts ...grpc.CallOption) error {
+					ctx = metadata.AppendToOutgoingContext(ctx, clusterSecretHeader, secret)
+					return invoker(ctx, method, req, reply, cc, opts...)
+				}))
+		}
+		conn, err := grpc.DialContext(dialCtx, addr, dialOpts...)
 		cancel()
 
 		if err != nil {
@@ -519,7 +573,17 @@ func (e *Election) connectPeer(ctx context.Context, addr string) {
 
 // ── Election loop ─────────────────────────────────────────────────────────
 
-func (e *Election) electionLoop(ctx context.Context) {
+func (e *Election) electionLoop() {
+	// Release the WaitGroup slot taken in Run() — without this Shutdown's
+	// wg.Wait() blocks forever.
+	defer e.wg.Done()
+
+	// Bind the loop to the election's own lifecycle context, not the caller
+	// context of the first Run(). The caller ctx may end while loopStarted
+	// stays true, which would leave later Run() calls blocked on gateReady
+	// with no state machine running.
+	ctx := e.ctx
+
 	// Step 1: Initial election — sort peers by instance_id, determine our priority.
 	// Since we don't know peers' instance_ids yet, we use a simple approach:
 	// initially become leader if we're the first to send heartbeats,
@@ -560,20 +624,18 @@ func (e *Election) electionLoop(ctx context.Context) {
 		select {
 		case <-ctx.Done():
 			return
-		case <-e.ctx.Done():
-			return
-	case <-leaderElectionCh:
-		// Election timeout — no leader heard from, become leader.
-		// BUT: double-check we don't already follow a leader that was
-		// established via Heartbeat() from a peer before this timer fired.
-		leaderElectionCh = nil
-		e.mu.RLock()
-		alreadyHasLeader := e.leaderID != "" && e.leaderID != e.instanceID
-		e.mu.RUnlock()
-		if alreadyHasLeader {
-			continue
-		}
-		e.becomeLeader()
+		case <-leaderElectionCh:
+			// Election timeout — no leader heard from, become leader.
+			// BUT: double-check we don't already follow a leader that was
+			// established via Heartbeat() from a peer before this timer fired.
+			leaderElectionCh = nil
+			e.mu.RLock()
+			alreadyHasLeader := e.leaderID != "" && e.leaderID != e.instanceID
+			e.mu.RUnlock()
+			if alreadyHasLeader {
+				continue
+			}
+			e.becomeLeader()
 
 		case <-ticker.C:
 			e.heartbeatTick(ctx)
@@ -629,21 +691,17 @@ func (e *Election) heartbeatTick(ctx context.Context) {
 	}
 	e.clientsMu.RUnlock()
 
+	var attempts, failures int
 	for addr, client := range clients {
 		hbCtx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
 		resp, err := client.Heartbeat(hbCtx, req)
 		cancel()
+		attempts++
 
 		if err != nil {
 			log.Warn().Str("peer", addr).Err(err).Msg("keeper: heartbeat to peer failed")
-			if isLeader {
-				e.degradedCnt.Add(1)
-			}
+			failures++
 			continue
-		}
-
-		if isLeader {
-			e.degradedCnt.Store(0) // successful heartbeat = not degraded
 		}
 
 		// Check for leadership conflict response.
@@ -662,16 +720,42 @@ func (e *Election) heartbeatTick(ctx context.Context) {
 				if e.lockCancel != nil {
 					e.lockCancel()
 					e.lockCancel = nil
+					// Fresh gate so the next Run() blocks until re-election.
+					e.gateReady = make(chan struct{})
 				}
 			}
 			e.mu.Unlock()
 		}
 	}
 
-	// Degraded-RPC check: if leader has too many consecutive failures, yield.
+	// Degraded check: a tick is degraded when EVERY peer heartbeat failed
+	// (per-peer counting would let a single healthy peer reset the counter
+	// each tick, making the threshold unreachable) or when the chain RPC
+	// probe fails. The counter tracks consecutive degraded ticks; a healthy
+	// tick resets it.
 	if isLeader && e.maxDegraded > 0 {
-		degraded := e.degradedCnt.Load()
-		if degraded >= e.maxDegraded {
+		degradedTick := attempts > 0 && failures == attempts
+
+		// Chain-RPC probe (BlockNumber) — this is the degraded-RPC detection
+		// the package documentation describes. Optional: nil disables it.
+		if e.eth != nil {
+			probeCtx, cancel := context.WithTimeout(ctx, heartbeatTimeout)
+			if _, err := e.eth.BlockNumber(probeCtx); err != nil {
+				log.Warn().Err(err).Msg("keeper: chain RPC probe failed")
+				degradedTick = true
+			}
+			cancel()
+		}
+
+		if attempts > 0 || e.eth != nil {
+			if degradedTick {
+				e.degradedCnt.Add(1)
+			} else {
+				e.degradedCnt.Store(0)
+			}
+		}
+
+		if degraded := e.degradedCnt.Load(); degraded >= e.maxDegraded {
 			log.Warn().Int64("failures", degraded).
 				Msg("keeper: degraded RPC detected — yielding leadership")
 			e.resign()

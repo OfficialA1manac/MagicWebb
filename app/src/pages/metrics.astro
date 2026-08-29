@@ -195,7 +195,9 @@ import WalletConnect from '../components/WalletConnect';
             const ctx = canvas.getContext('2d');
             const cx = canvas.width/2, cy = canvas.height/2, r = 70, ir = 40;
 
-            const total = listings + sales + auctions + bids + offers + (parseFloat(volFLR)||0);
+            // Event counts only: native-token volume has a different unit and
+            // must not be summed into the slices or the center total.
+            const total = listings + sales + auctions + bids + offers;
             if (total === 0) {
               ctx.fillStyle = 'rgba(255,255,255,0.1)';
               ctx.font = '14px Inter, sans-serif';
@@ -209,8 +211,7 @@ import WalletConnect from '../components/WalletConnect';
           {value:sales, color:'#fcd34d', label:'Sales'},
           {value:auctions, color:'#a78bfa', label:'Auctions'},
           {value:bids, color:'#67e8f9', label:'Bids'},
-          {value:offers, color:'#fbbf24', label:'Offers'},
-          {value:parseFloat(volFLR)||0, color:'rgba(255,255,255,0.4)', label:'Volume'}
+          {value:offers, color:'#fbbf24', label:'Offers'}
         ];
 
             let startAngle = -Math.PI/2;
@@ -261,7 +262,9 @@ import WalletConnect from '../components/WalletConnect';
             setTimeout(function(){drawBarChart();drawDonutChart();}, 100);
           }
 
-          // Recent activity
+          // Recent activity — a named loader so the WS-driven refresh can
+          // update the feed too, not just the metric tiles and charts.
+          async function loadActivity(){
           try {
             const aRes = await fetch('/api/v1/activity?limit=15');
             if (!aRes.ok) {
@@ -275,6 +278,8 @@ import WalletConnect from '../components/WalletConnect';
               }
             }
           } catch(_) {}
+          }
+          await loadActivity();
 
           // WebSocket live refresh — re-fetch metrics data in-place instead of full page reload
           (function(){
@@ -311,6 +316,8 @@ import WalletConnect from '../components/WalletConnect';
               // Redraw charts with fresh data
               drawBarChart();
               drawDonutChart();
+              // Keep the recent-activity feed live too
+              await loadActivity();
             } catch(_) {}
           });
 

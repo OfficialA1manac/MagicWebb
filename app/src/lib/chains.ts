@@ -48,6 +48,11 @@ export function currentChain(): ChainProfile {
   if (cached) return cached;
   const w = typeof window !== 'undefined' ? window : ({} as Window);
   const id = Number(w.MW_CHAIN_ID || env('PUBLIC_CHAIN_ID') || 114);
+  // Fail closed on an unsupported chain id: display metadata falls back to
+  // Coston2 (runtime-injected values still win), but contract addresses are
+  // dropped so tradingLive() is false and no transaction can be built against
+  // addresses configured for a chain the wallet layer would not target.
+  const known = STATIC[id] !== undefined;
   const base = STATIC[id] ?? STATIC[114];
   cached = {
     ...base,
@@ -55,11 +60,11 @@ export function currentChain(): ChainProfile {
     currency: w.MW_NATIVE_CURRENCY || base.currency,
     explorer: (w.MW_EXPLORER || base.explorer).replace(/\/+$/, ''),
     rpc: w.MW_RPC_URL || env('PUBLIC_RPC_URL') || base.rpc,
-    contracts: {
+    contracts: known ? {
       marketplace: addr(w.MW_MARKETPLACE) ?? addr(env('PUBLIC_MARKETPLACE_ADDR')),
       auctionHouse: addr(w.MW_AUCTION) ?? addr(env('PUBLIC_AUCTION_ADDR')),
       offerBook: addr(w.MW_OFFERBOOK) ?? addr(env('PUBLIC_OFFERBOOK_ADDR')),
-    },
+    } : { marketplace: null, auctionHouse: null, offerBook: null },
   };
   return cached;
 }

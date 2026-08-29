@@ -33,10 +33,14 @@ func boolWord(b bool) []byte {
 	return w
 }
 
-// answersTrueFor replies true only for the given interface id.
+// answersTrueFor models an ERC-165-compliant contract: it answers true for
+// the ERC-165 id itself and for the given interface id, false for everything
+// else (including the mandatory-false 0xffffffff probe).
 func answersTrueFor(id [4]byte) func([]byte) ([]byte, error) {
 	return func(data []byte) ([]byte, error) {
-		return boolWord(bytes.Equal(data[4:8], id[:])), nil
+		probe := data[4:8]
+		ok := bytes.Equal(probe, id[:]) || bytes.Equal(probe, InterfaceERC165[:])
+		return boolWord(ok), nil
 	}
 }
 
@@ -88,6 +92,19 @@ func TestDetectStandard(t *testing.T) {
 			want: "",
 		},
 		{
+			// ERC-165 compliant but declares neither NFT interface.
+			name: "erc165 without nft interfaces",
+			fn:   answersTrueFor(InterfaceERC165),
+			want: "",
+		},
+		{
+			// A fallback that answers true for every selector must fail the
+			// mandatory-false 0xffffffff probe instead of classifying as 721.
+			name: "fallback answering true to everything",
+			fn:   func([]byte) ([]byte, error) { return boolWord(true), nil },
+			want: "",
+		},
+		{
 			name: "empty return is a definitive no",
 			fn:   func([]byte) ([]byte, error) { return nil, nil },
 			want: "",
@@ -133,26 +150,32 @@ func TestDetectStandard(t *testing.T) {
 	}
 }
 
-// A 1155 collection must not cost two calls' worth of confusion: 721 is probed
-// first and only a false answer falls through to the 1155 probe.
+// Probe order: the ERC-165 baseline (0x01ffc9a7 then 0xffffffff) runs first,
+// then 721, and only a false 721 answer falls through to the 1155 probe.
 func TestDetectStandardProbeOrder(t *testing.T) {
 	f := &fakeCaller{fn: answersTrueFor(InterfaceERC1155)}
 	if _, err := DetectStandard(context.Background(), f, coll); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(f.calls) != 2 {
-		t.Fatalf("made %d calls, want 2", len(f.calls))
+	if len(f.calls) != 4 {
+		t.Fatalf("made %d calls, want 4", len(f.calls))
 	}
-	if !bytes.Equal(f.calls[0][4:8], InterfaceERC721[:]) {
-		t.Fatalf("first probe = %x, want ERC-721", f.calls[0][4:8])
+	if !bytes.Equal(f.calls[0][4:8], InterfaceERC165[:]) {
+		t.Fatalf("first probe = %x, want ERC-165 baseline", f.calls[0][4:8])
+	}
+	if !bytes.Equal(f.calls[1][4:8], interfaceInvalid[:]) {
+		t.Fatalf("second probe = %x, want 0xffffffff", f.calls[1][4:8])
+	}
+	if !bytes.Equal(f.calls[2][4:8], InterfaceERC721[:]) {
+		t.Fatalf("third probe = %x, want ERC-721", f.calls[2][4:8])
 	}
 
 	f = &fakeCaller{fn: answersTrueFor(InterfaceERC721)}
 	if _, err := DetectStandard(context.Background(), f, coll); err != nil {
 		t.Fatalf("unexpected error: %v", err)
 	}
-	if len(f.calls) != 1 {
-		t.Fatalf("made %d calls after a 721 hit, want 1", len(f.calls))
+	if len(f.calls) != 3 {
+		t.Fatalf("made %d calls after a 721 hit, want 3", len(f.calls))
 	}
 }
 
@@ -183,6 +206,14 @@ func TestDecodeString(t *testing.T) {
 		{"short return", []byte{0x01}, ""},
 		{"control chars stripped", abiString("Ani\nmi\x00"), "Animi"},
 		{"surrounding space trimmed", abiString("  Animi  "), "Animi"},
+		{"max uint64 length must not panic", func() []byte {
+			out := make([]byte, 64)
+			out[31] = 32 // offset
+			for i := 32; i < 64; i++ {
+				out[i] = 0xff // length = math.MaxUint64 — 64+length wraps
+			}
+			return out
+		}(), ""},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {

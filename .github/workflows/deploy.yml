@@ -74,6 +74,12 @@ name: Deploy (push to main)
 on:
   push:
     branches: [main]
+    # v* tags exist solely to run the tag-gated `verify` job (FlareScan
+    # source verification). They never deploy: `plan` requires
+    # github.ref == 'refs/heads/main', which excludes all tag refs, and
+    # `deploy` needs `plan`. Without this trigger the verify job's
+    # startsWith(github.ref, 'refs/tags/v') condition could never be true.
+    tags: ["v*"]
   # Manual re-deploy after flipping <NETWORK>_ENABLED repo variables or
   # rotating secrets — no empty commit needed.
   workflow_dispatch:

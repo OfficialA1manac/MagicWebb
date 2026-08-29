@@ -97,7 +97,14 @@ func mountAstro(app *fiber.App) {
 			// Use 302 (temporary) so browsers don't cache the redirect — if
 			// the site architecture changes, users won't be stuck in a loop.
 			if !strings.HasSuffix(c.Path(), "/") {
-				return c.Redirect(c.Path()+"/", fiber.StatusFound)
+				// Preserve the query string — c.Path() drops it, and a
+				// redirect from /listings?page=2 to /listings/ would silently
+				// reset pagination, filters and search terms.
+				target := c.Path() + "/"
+				if q := string(c.Request().URI().QueryString()); q != "" {
+					target += "?" + q
+				}
+				return c.Redirect(target, fiber.StatusFound)
 			}
 			c.Set("Cache-Control", "public, max-age=300")
 			return sendHTMLWithConfig(c, indexPath)

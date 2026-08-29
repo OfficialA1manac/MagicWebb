@@ -158,12 +158,18 @@ func (s *PgAPIKeyStore) Verify(ctx context.Context, hash []byte) (*APIKeyInfo, e
 }
 
 func (s *PgAPIKeyStore) Revoke(ctx context.Context, id int64, revokedBy string) error {
-	_, err := s.pool.Exec(ctx,
+	tag, err := s.pool.Exec(ctx,
 		`UPDATE api_keys SET revoked = true WHERE id = $1 AND created_by = $2`,
 		id, revokedBy,
 	)
 	if err != nil {
 		return fmt.Errorf("apikey: revoke: %w", err)
+	}
+	// The UPDATE is scoped by created_by, so a revoke of another admin's key
+	// (or an unknown ID) matches zero rows. Report it instead of claiming
+	// success while the key stays active.
+	if tag.RowsAffected() == 0 {
+		return ErrAPIKeyInvalid
 	}
 	return nil
 }
@@ -217,6 +223,18 @@ const (
 	EventAPIKeyFailed   = "apikey_failed"
 )
 
+// auditDetails marshals audit detail fields with encoding/json. Interpolating
+// values into a raw JSON string breaks on quotes/backslashes/control chars,
+// and the async audit worker discards insert errors — the row would be lost
+// silently on a jsonb column.
+func auditDetails(fields map[string]any) string {
+	b, err := json.Marshal(fields)
+	if err != nil {
+		return "{}"
+	}
+	return string(b)
+}
+
 // AuditAPIKeyCreated logs API key creation.
 func AuditAPIKeyCreated(log AuditLogger, adminAddr, ip, ua, label string) {
 	if log == nil {
@@ -228,7 +246,7 @@ func AuditAPIKeyCreated(log AuditLogger, adminAddr, ip, ua, label string) {
 		IP:         ip,
 		UserAgent:  ua,
 		Outcome:    "success",
-		Details:    fmt.Sprintf(`{"label":"%s"}`, label),
+		Details:    auditDetails(map[string]any{"label": label}),
 	})
 }
 
@@ -243,7 +261,7 @@ func AuditAPIKeyRevoked(log AuditLogger, adminAddr, ip, ua string, keyID int64) 
 		IP:         ip,
 		UserAgent:  ua,
 		Outcome:    "success",
-		Details:    fmt.Sprintf(`{"key_id":%d}`, keyID),
+		Details:    auditDetails(map[string]any{"key_id": keyID}),
 	})
 }
 
@@ -259,7 +277,7 @@ func AuditAPIKeyVerified(log AuditLogger, keyID int64, ip, ua, label string) {
 		IP:         ip,
 		UserAgent:  ua,
 		Outcome:    "success",
-		Details:    fmt.Sprintf(`{"key_id":%d,"label":"%s"}`, keyID, label),
+		Details:    auditDetails(map[string]any{"key_id": keyID, "label": label}),
 	})
 }
 
@@ -275,6 +293,6 @@ func AuditAPIKeyFailed(log AuditLogger, ip, ua, reason string) {
 		IP:         ip,
 		UserAgent:  ua,
 		Outcome:    "failure",
-		Details:    fmt.Sprintf(`{"reason":"%s"}`, reason),
+		Details:    auditDetails(map[string]any{"reason": reason}),
 	})
 }

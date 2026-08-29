@@ -18,6 +18,7 @@ package cache
 import (
 	"context"
 	"encoding/json"
+	"net/url"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -41,13 +42,13 @@ type CacheInterface interface {
 // type that the caller passes to Set() must be JSON-marshalable (same
 // constraint as the in-memory cache when used for JSON response bodies).
 type RedisCache struct {
-	client   RedisClient
-	ttl      time.Duration
-	local    *Cache // fallback when Redis is unavailable
-	enabled  atomic.Bool
+	client  RedisClient
+	ttl     time.Duration
+	local   *Cache // fallback when Redis is unavailable
+	enabled atomic.Bool
 
-	mu       sync.RWMutex
-	closed   bool
+	mu     sync.RWMutex
+	closed bool
 }
 
 // RedisClient is the subset of redis.UniversalClient that RedisCache needs.
@@ -215,13 +216,19 @@ func (rc *RedisCache) Close() error {
 	return rc.client.Close()
 }
 
-// truncateURL returns a safe-for-logging prefix of a URL (first 30 chars).
-// Shared by both build-tag variants of newRedisClient.
+// truncateURL returns a safe-for-logging form of a Redis URL: credentials
+// (URL user-info, e.g. redis://:password@host) are stripped and the result
+// is capped at 30 chars. Shared by all newRedisClient variants.
 func truncateURL(u string) string {
-	if len(u) > 30 {
-		return u[:30] + "..."
+	parsed, err := url.Parse(u)
+	if err != nil {
+		return "<invalid Redis URL>"
 	}
-	return u
+	safe := parsed.Scheme + "://" + parsed.Host
+	if len(safe) > 30 {
+		return safe[:30] + "..."
+	}
+	return safe
 }
 
 // NewRedisOrMemory creates either a Redis-backed cache (when redisURL is

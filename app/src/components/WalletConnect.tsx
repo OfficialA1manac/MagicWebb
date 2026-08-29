@@ -77,7 +77,8 @@ function WalletButton() {
   }, []);
 
   const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
-  const copyAddress = () => { if (address) navigator.clipboard.writeText(address).catch(() => {}); };
+  // navigator.clipboard is undefined in non-secure contexts (plain-HTTP LAN).
+  const copyAddress = () => { if (address) navigator.clipboard?.writeText(address).catch(() => {}); };
 
   const wasConnectedRef = useRef(false);
   const prevAddressRef = useRef<string | null>(null);

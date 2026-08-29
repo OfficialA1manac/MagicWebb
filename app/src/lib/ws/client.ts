@@ -126,6 +126,10 @@ export class MwSocket {
 
   private cleanup() {
     if (this.pingTimer) { clearInterval(this.pingTimer); this.pingTimer = null; }
+    // A user-initiated close() must also cancel a pending reconnect, or the
+    // armed timer reopens the socket the user just closed. On the onclose
+    // path the timer is always null here, so reconnect scheduling is safe.
+    if (this.timer) { clearTimeout(this.timer); this.timer = null; }
   }
 
   private setStatus(s: WsStatus) {

@@ -156,7 +156,7 @@ If user feedback ever justifies governance, it will be added via a separate mech
 
 | Phase | Quarter | Scope |
 |---|---|---|
-| **Phase 1** | Q2 2026 (current) | Coston2 testnet. All trade primitives live. Indexer + frontend feature-complete. |
+| **Phase 1** | Q2 2026 (shipped) | Coston2 testnet. All trade primitives live. Indexer + frontend feature-complete. |
 | **Phase 2** | Q3 2026 | ERC-2981 royalty integration. FTSO USD display. |
 | **Phase 3** | Q4 2026 | Cross-collection routing. Bundle listings. WFLR/USDC payment adapter for stable-priced offers. |
 | **Phase 4** | 2027 | Songbird deploy. Cross-network offer relay via Flare FAssets. Bug bounty live. |

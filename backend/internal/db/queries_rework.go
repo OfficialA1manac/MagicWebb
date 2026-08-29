@@ -134,14 +134,16 @@ func (q *Q) SetCollectionInfo(ctx context.Context, addr, name, symbol string) er
 
 // SetCollectionCreator stores a collection's ERC-173 owner() address.
 //
-// Same contract as SetCollectionInfo: an empty value never overwrites a stored
-// one. owner() is optional, so an empty read means either "this contract has no
-// owner" or "the call failed" — indistinguishable at this layer, and blanking a
-// known creator because of a chain blip is the worse outcome.
+// SET-ONCE: the badge means "the creator of this collection", so the FIRST
+// detected owner wins forever — a later ownership transfer (or a hostile
+// owner() implementation changing its answer) must not rewrite who created
+// the collection. Empty values also never overwrite: owner() is optional, so
+// an empty read means "no owner" or "call failed" — indistinguishable here,
+// and blanking a known creator on a chain blip is the worse outcome.
 func (q *Q) SetCollectionCreator(ctx context.Context, addr, creator string) error {
 	_, err := q.writer().Exec(ctx,
 		`UPDATE collections
-		    SET creator_addr = COALESCE(NULLIF($2, ''), creator_addr)
+		    SET creator_addr = COALESCE(NULLIF(creator_addr, ''), NULLIF($2, ''))
 		  WHERE address = $1`, addr, creator)
 	return err
 }

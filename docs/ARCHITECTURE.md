@@ -1,7 +1,10 @@
 # MagicWebb — system architecture
 
-Open, non-custodial NFT marketplace on the Flare family of networks. No admin, no login:
-anyone with a wallet on a supported network can list, bid, offer and buy. This document is
+Open, non-custodial NFT marketplace on the Flare family of networks. No user accounts, no
+login, no admin console: anyone with a wallet on a supported network can list, bid, offer
+and buy. (Protocol roles are a separate matter — a `DEFAULT_ADMIN_ROLE` holder manages
+roles and queued upgrades and `KEEPER_ROLE` automates settlement; see
+`IMMUTABILITY_TRANSITION.md`. No role can pause trading entries or exits.) This document is
 the map; `USER_CAPABILITIES.md` is what each kind of user can do; `NETWORKS.md` is how a
 network is provisioned.
 

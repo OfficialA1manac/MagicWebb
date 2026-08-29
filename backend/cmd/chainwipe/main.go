@@ -14,33 +14,9 @@ import (
 	"os"
 	"time"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/cmd/internal/chaintables"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
-
-// chainTables is everything the indexer rebuilds from chain events, in an
-// order that respects FK references (children first).
-var chainTables = []string{
-	"trending_scores",
-	"bids",
-	"sales",
-	"offers",
-	"listings",
-	"auctions",
-	"nft_attributes",
-	"nft_metadata",
-	"nft_ownership",
-	"nft_tokens",
-	"tracked_collections",
-	"collections",
-	"indexer_state",
-	// The startup guard in cmd/server compares deployment_config against the
-	// env addresses and refuses to boot on a mismatch, telling the operator to
-	// "truncate on-chain data first". Leaving this row behind meant doing
-	// exactly that still left the server blocked — the wipe cleared the data
-	// the row describes but not the row. Empty is the correct post-wipe state:
-	// the server re-inserts it from the current env on the ErrNoRows path.
-	"deployment_config",
-}
 
 func main() {
 	yes := flag.Bool("yes", false, "confirm wipe of all chain-derived tables")
@@ -64,11 +40,15 @@ func main() {
 	}
 	defer pool.Close()
 
-	for _, t := range chainTables {
-		if _, err := pool.Exec(ctx, "TRUNCATE TABLE "+t+" CASCADE"); err != nil {
-			fmt.Fprintf(os.Stderr, "truncate %s: %v\n", t, err)
-			os.Exit(1)
-		}
+	// One TRUNCATE statement over the shared chaintables list: atomic (a
+	// failure leaves everything intact — never a half-wiped DB with a stale
+	// deployment_config row) and guaranteed to match cmd/server's
+	// RESET_ON_ADDRESS_CHANGE path.
+	if _, err := pool.Exec(ctx, chaintables.TruncateStmt()); err != nil {
+		fmt.Fprintf(os.Stderr, "truncate: %v\n", err)
+		os.Exit(1)
+	}
+	for _, t := range chaintables.Tables {
 		fmt.Println("wiped", t)
 	}
 	fmt.Println("chain-derived state reset; indexer will rebuild from INDEX_FROM_BLOCK")

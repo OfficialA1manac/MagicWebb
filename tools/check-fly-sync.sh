@@ -107,15 +107,11 @@ elif [ "${#ORIGIN_SHA}" -lt "${#LIVE_SHA}" ]; then
     bold   "  Note: origin is ${#ORIGIN_SHA}-char SHA, live served ${#LIVE_SHA}-char — both refer to commit ${ORIG_SHORT}."
     exit 0
   fi
-else
-  LIVE_SHORT="${LIVE_SHA:0:7}"
-  ORIG_SHORT="${ORIGIN_SHA:0:7}"
-  if [ "${LIVE_SHORT}" = "${ORIG_SHORT}" ]; then
-    green  "  ✅   ${LIVE_SHORT}  ==  ${ORIG_SHORT} (short-match; lengths differ)"
-    bold   "  Note: Fly served a ${#LIVE_SHA}-char SHA, origin is ${#ORIGIN_SHA}-char — both refer to commit ${ORIG_SHORT}."
-    exit 0
-  fi
 fi
+# Equal lengths already failed the strict-equality check above, so the SHAs
+# are simply different commits — a first-7-chars match must NOT pass the
+# gate (two distinct 40-char SHAs sharing a 7-char prefix would slip
+# through). Fall through to DRIFT.
 
 red "  ❌   DRIFT detected"
 red       "       live      : ${LIVE_SHA}"

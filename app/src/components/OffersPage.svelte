@@ -37,11 +37,20 @@
     made = m ?? []; received = r ?? []; loading = false; syncing = '';
   }
   onMount(() => {
-    const offAcct = onAccountChange((a) => { const changed = a.address !== me; me = a.address; if (me) { ws.subscribe(userChannel(me)); if (changed) void load(); } });
+    // Track the subscribed user channel so a wallet switch drops the old
+    // address's channel and unmount leaves nothing subscribed.
+    let ch = '';
+    const offAcct = onAccountChange((a) => {
+      const changed = a.address !== me;
+      me = a.address;
+      const next = me ? userChannel(me) : '';
+      if (next !== ch) { if (ch) ws.unsubscribe(ch); if (next) ws.subscribe(next); ch = next; }
+      if (me && changed) void load();
+    });
     const offWs = ws.on('offer-updated', () => void load());
     const tick = setInterval(() => (now = Date.now()), 1000);
     if (location.hash === '#made') tab = 'made';
-    return () => { offAcct(); offWs(); clearInterval(tick); };
+    return () => { offAcct(); offWs(); clearInterval(tick); if (ch) ws.unsubscribe(ch); };
   });
   const expired = (o: Offer) => new Date(o.expires_at).getTime() <= now;
   const active = (o: Offer) => o.status === 'active';

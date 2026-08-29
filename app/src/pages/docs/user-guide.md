@@ -27,7 +27,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 
 ## Create an auction
 1. Open any token you own → click **Auction**
-2. Set reserve price (0 = accept any bid), end time, min increment (bps, e.g. 500 = 5%)
+2. Set reserve price (at least 1 native token), end time, min increment (bps, e.g. 500 = 5%)
 3. Click **Create auction** — approve AuctionHouse if prompted
 4. Auction starts immediately. A bid in the final 3 minutes extends the end time by 3 minutes (anti-snipe).
 5. If nobody bids within 30 minutes, the auction is cancelled automatically.
@@ -37,7 +37,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Open an active auction → enter bid amount
 2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
 3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed. If the automatic transfer fails (e.g., your wallet is a contract that cannot receive ETH), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
-4. At auction end, anyone (winner, seller, or a third party) can call **settle** permissionlessly — the keeper bot may do it automatically when configured, but settlement does not depend on any single actor. NFT goes to winner, seller receives the winning bid minus the 1.5% platform fee (98.5%).
+4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days anyone can call the permissionless `forceCancel` to release every bidder's escrow. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 1.5% platform fee (98.5%).
 
 ## Auction fees
 - Bidding is free — you send only your bid amount.
@@ -45,7 +45,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 - If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept. Most refunds arrive automatically; if a push fails, the amount is parked in `pendingReturns` and you can pull it manually via **Withdraw Refund**.
 
 ## Offer on an NFT
-You can offer on **any** NFT — there is no eligibility gate, and offering is free:
+You can offer on any NFT whose collection has offers enabled (the collection's contract owner opts in via `setOfferEligible`), and offering is free:
 
 1. Browse to any token → click **Make Offer**
 2. Enter offer amount and expiry → click **Submit Offer** → confirm wallet (your C2FLR is escrowed on-chain)

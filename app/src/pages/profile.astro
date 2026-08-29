@@ -83,6 +83,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
       var _wcDebounceTimer = null;
       // In-flight guard: prevent overlapping loadProfileData calls
       var _loading = false;
+      // Wallet change that arrived while a load was in flight — applied when
+      // the in-flight load settles (see the finally block in loadProfileData).
+      var _pendingAddr = null;
 
       // Compute isOwnProfile inside loadProfileData to stay fresh on wallet changes
       function isOwnProfileFor(targetAddr){
@@ -171,14 +174,17 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
               const src=resolveImageUri(it.image_uri,it.token_id);
               const price=it.price_wei?weiToFLR(it.price_wei,4):'';
+              // Auction-escrowed tokens (merged below) have no price_wei but are
+              // NOT listable — batchList would revert on them.
+              const selectable=ownMode&&!price&&!it._escrowed;
               return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;position:relative;">'+
-                (ownMode&&!price?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" onclick="event.stopPropagation();" style="position:absolute;top:0.5rem;left:0.5rem;z-index:2;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
+                (selectable?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" onclick="event.stopPropagation();" style="position:absolute;top:0.5rem;left:0.5rem;z-index:2;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                   imgTag(src,'🖼')+
                   (price?'<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">'+cur()+'</span></div>':'')+
                 '</div>'+
                 '<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p>'+
-                (ownMode&&!price?'<a href="/token/'+encC+'/'+encT+'#list" onclick="event.stopPropagation();" style="display:inline-block;margin-top:0.5rem;padding:0.25rem 0.75rem;border-radius:0.5rem;background:rgba(125,211,252,0.12);border:1px solid rgba(125,211,252,0.3);color:#7dd3fc;font-size:0.6875rem;font-weight:700;">List →</a>':'')+
+                (selectable?'<a href="/token/'+encC+'/'+encT+'#list" onclick="event.stopPropagation();" style="display:inline-block;margin-top:0.5rem;padding:0.25rem 0.75rem;border-radius:0.5rem;background:rgba(125,211,252,0.12);border:1px solid rgba(125,211,252,0.3);color:#7dd3fc;font-size:0.6875rem;font-weight:700;">List →</a>':'')+
                 '</div></a>';
             }).join('')+'</div>';
           }
@@ -293,7 +299,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // Priority: wallet-held > listed > auctioned (prefer held for latest info)
           mergeItems(nfts);
           mergeItems(listings);
-          mergeItems(auctions);
+          // Auction items are escrowed in the AuctionHouse: mark them so the
+          // grid never offers batch-list / List → on tokens the wallet cannot move.
+          mergeItems(auctions.map(function(a){ var c = Object.assign({}, a); c._escrowed = true; return c; }));
           var allNFTsCount = combinedNFTs.length;
 
           const tabs = [
@@ -579,6 +587,15 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           if(root) root.innerHTML = '<div style="text-align:center;padding:4rem;color:rgba(255,255,255,0.3);"><p style="font-size:1rem;font-weight:700;color:#fca5a5;">Could not load profile</p><p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.5rem;">'+esc(e.message||'')+'</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
         } finally {
           _loading = false;
+          // Apply a wallet change that was deferred while this load ran.
+          if (_pendingAddr !== null && _pendingAddr !== _lastRenderedAddr) {
+            var p = _pendingAddr;
+            _pendingAddr = null;
+            _lastRenderedAddr = p;
+            loadProfileData(p);
+          } else {
+            _pendingAddr = null;
+          }
         }
       }
 
@@ -601,12 +618,21 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // re-fetches and visual flicker when wagmi reconnects with the
           // same wallet during page hydration.
           if (newAddr === _lastRenderedAddr) return;
-          _lastRenderedAddr = newAddr;
           if (!newAddr) {
+            _lastRenderedAddr = newAddr;
             // Wallet was disconnected — show connect screen
             if(root) root.innerHTML = '<div style="text-align:center;padding:4rem 1.5rem;"><div style="font-size:3rem;margin-bottom:1rem;opacity:0.3;">⌬</div><p style="font-size:1.25rem;font-weight:700;color:rgba(255,255,255,0.5);margin-bottom:0.5rem;">Connect your wallet</p><p style="font-size:0.875rem;color:rgba(255,255,255,0.25);">to view your profile, NFTs, and marketplace activity</p><button onclick="window.__MW_APPKIT_OPEN__&&window.__MW_APPKIT_OPEN__()" style="margin-top:1.5rem;padding:0.75rem 2rem;border-radius:0.75rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fff;font-weight:800;font-size:0.875rem;border:none;cursor:pointer;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);font-family:inherit;">Connect Wallet</button></div>';
             return;
           }
+          if (_loading) {
+            // A load is in flight — loadProfileData would drop this call.
+            // Defer the address; the finally block applies it when the
+            // in-flight load settles, so the page never sticks on the
+            // previous wallet.
+            _pendingAddr = newAddr;
+            return;
+          }
+          _lastRenderedAddr = newAddr;
           // Re-fetch and re-render for the new/updated address
           loadProfileData(newAddr);
         }, 500);
