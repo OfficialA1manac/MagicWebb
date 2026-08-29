@@ -23,13 +23,13 @@ configMapGenerator:
       - SIWE_DOMAIN=coston2.magicwebb.example
       - FRONTEND_URL=https://coston2.magicwebb.example
       - NETWORK_URLS=114=https://coston2.magicwebb.example,19=https://songbird.magicwebb.example,14=https://flare.magicwebb.example
-      - MARKETPLACE_ADDR=0x49b3da6a0d5c31994c3a52d41416c6bc0a6200f3
-      - AUCTION_ADDR=0xfd39174b8fd906249257d3b28fbed9db22a9136e
-      - OFFERBOOK_ADDR=0x17564fd5bb2eb8c40dac24684f4988237cc88eef
+      - MARKETPLACE_ADDR=0x74abb995ffcf8f1f8cc5170d19dda3705a2640a9
+      - AUCTION_ADDR=0x102849c42aefa93d52757a19f57398125242fd02
+      - OFFERBOOK_ADDR=0xf58a8ff08fd33af4969617dd97495a0ab770b4af
       - NFT_ADDR=0x832d74cfbb4617b50c32cd110dfe16837a359b35
-      - MARKETPLACE_MANAGER_ADDR=0xf070bd812de875edd29d05f1932340bfafb1057f
+      - MARKETPLACE_MANAGER_ADDR=0xbf55a1d9e5c87a6a30414503eb84974971cbbe2f
       - TRACKED_COLLECTIONS=0x832d74cfbb4617b50c32cd110dfe16837a359b35
-      - INDEX_FROM_BLOCK=34406504
+      - INDEX_FROM_BLOCK=34619862
       # Testnet convenience: contract-address change wipes chain-derived tables
       # at boot. Mainnet overlays leave this unset (manual chainwipe).
       - RESET_ON_ADDRESS_CHANGE=true
