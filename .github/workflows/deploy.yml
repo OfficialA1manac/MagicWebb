@@ -341,6 +341,16 @@ jobs:
           grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS)\s*=' fly.toml
       - name: Deploy (Fly remote build → rolling release)
         id: fly_deploy
+        # STEP-level bound, which is what actually contains this failure.
+        # --wait-timeout below only bounds the RELEASE wait (health checks after
+        # an image exists); it does NOT bound the remote BUILD. Observed on
+        # 2026-08-30: the coston2 leg stalled ~28 minutes inside the builder on
+        # `#14 [go-build 1/8] FROM docker.io/library/golang:1.26-bookworm`, sailed
+        # past --wait-timeout untouched, and was killed by the JOB timeout — which
+        # then let the always() sync gate report DRIFT on a never-updated app.
+        # A step timeout bounds build + release together and fails the leg
+        # loudly instead. 12m is ~5x the ~2m30s a healthy leg takes.
+        timeout-minutes: 12
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
