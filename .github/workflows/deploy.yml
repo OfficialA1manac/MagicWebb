@@ -265,6 +265,21 @@ jobs:
     timeout-minutes: 30
     strategy:
       fail-fast: false
+      # Serialize the legs. All networks build the SAME image (identical
+      # Dockerfile and build args — only the generated fly.toml env differs),
+      # so running them in parallel puts three identical builds on Fly's shared
+      # remote builder at once. The logs show them contending:
+      # "Deduplicating step ID …, another build is calculating it", and on three
+      # consecutive deploys exactly one leg then stalled inside the builder for
+      # >12 minutes — songbird (33295011979), coston2 (33339253223), songbird
+      # again (33340769236) — leaving that one network drifted while the others
+      # went green.
+      #
+      # Sequential legs cost wall-clock (~2m30s each instead of all at once) but
+      # let Fly's layer cache serve legs 2 and 3, and remove the contention
+      # entirely. The stronger fix is to build ONCE and deploy that image ref to
+      # all three apps; this is the low-risk step toward it.
+      max-parallel: 1
       matrix:
         network: ${{ fromJson(needs.plan.outputs.networks) }}
     steps:
