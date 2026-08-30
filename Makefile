@@ -141,8 +141,8 @@ test: ## run Go test suite with the race detector
 check-deployments: ## validate deployments/*.json and find stray addresses
 	bash tools/check-deployments.sh
 
-check-fly-sync: ## verify magicwebb.fly.dev X-MW-Build-SHA matches origin/main
-	@./tools/check-fly-sync.sh
+check-fly-sync: ## verify EVERY deployed network serves origin/main (drift detector)
+	@fail=0; for u in $$(jq -r 'select(.status!="not-deployed")|.app.origin' deployments/*.json); do echo "-- $$u"; LIVE_URL="$$u" ./tools/check-fly-sync.sh || fail=1; done; exit $$fail
 .PHONY: check-fly-sync
 
 vulncheck: ## run govulncheck over the backend
