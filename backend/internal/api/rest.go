@@ -490,13 +490,15 @@ func tieredRateLimitMiddleware(rl *ratelimit.Limiter, keyPrefix string, limit in
 //  1. Fly-Client-IP — Fly.io's reverse-proxy-stamped header;
 //     mathematically unspoofable from the outside because Fly's edge
 //     strips any inbound copy.
-//  2. RFC 7239 Forwarded `for=` — modern standard; bracket-stripped
-//     IPv6 + port-stripped form.
-//  3. X-Forwarded-For rightmost — legacy; right-trusted only when
-//     behind a known reverse proxy (and the previous rightmost-XFF
-//     pattern that this method replaces is exactly the bypass the
-//     audit fix closes).
-//  4. fasthttp's RemoteAddr — last-resort so the bucket key isn't blank.
+//  2. fasthttp's RemoteAddr (via c.IP()) — last-resort so the bucket key
+//     isn't blank.
+//
+// RFC 7239 `Forwarded` and `X-Forwarded-For` are deliberately NOT consulted.
+// Both are attacker-controlled: honouring them let a client mint a fresh
+// rate-limit bucket per request (and poison logs) by sending a new spoofed
+// value each time. That is the `clientIpSpoof` 🟠 P1 audit finding, and
+// removing those two tiers is the fix — do not reinstate them without an
+// allow-list of trusted proxy addresses.
 //
 // Audit: `clientIpSpoof` 🟠 P1.
 func ClientIP(c *fiber.Ctx) string {
@@ -509,60 +511,6 @@ func ClientIP(c *fiber.Ctx) string {
 		return ip
 	}
 	return c.IP()
-}
-
-// stripAddrPort normalises RFC-7239 `for=` payloads:
-//   - `[2001:db8::1]:443` → `2001:db8::1` (bracketed IPv6 with :port)
-//   - `2001:db8::1`       → `2001:db8::1` (bare IPv6, kept)
-//   - `192.0.2.1:443`     → `192.0.2.1` (IPv4 with :port)
-//   - `192.0.2.1`         → `192.0.2.1` (bare IPv4, kept)
-//
-// Quoted-obfuscation forms (`for="_foo"`) are stripped by the caller.
-func stripAddrPort(id string) string {
-	if id == "" {
-		return id
-	}
-	if strings.HasPrefix(id, "[") {
-		// Bracketed IPv6 — strip the `[...]` envelope. If a `:port`
-		// follows after `]`, strip that too.
-		if end := strings.Index(id, "]"); end >= 0 {
-			inner := id[1:end]
-			if rest := id[end+1:]; rest != "" {
-				if strings.HasPrefix(rest, ":") && looksLikePort(rest[1:]) {
-					return inner
-				}
-			}
-			return inner
-		}
-		// Malformed bracket pair — drop the prefix and return rest.
-		return id[1:]
-	}
-	// Bare IPv6 (multiple colons) — port wouldn't make sense, keep as-is.
-	if strings.Count(id, ":") > 1 {
-		return id
-	}
-	// IPv4:port — strip `:port` only when the suffix is numeric.
-	if colon := strings.LastIndex(id, ":"); colon >= 0 {
-		suf := id[colon+1:]
-		if looksLikePort(suf) {
-			return id[:colon]
-		}
-	}
-	return id
-}
-
-// looksLikePort returns true when s is a non-empty all-digit string.
-// Empty input is NOT a port (returns false).
-func looksLikePort(s string) bool {
-	if s == "" {
-		return false
-	}
-	for _, r := range s {
-		if r < '0' || r > '9' {
-			return false
-		}
-	}
-	return true
 }
 
 // buildOrigins returns the comma-separated CORS AllowOrigins list. In

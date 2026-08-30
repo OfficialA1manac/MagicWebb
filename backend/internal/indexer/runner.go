@@ -709,19 +709,20 @@ func (r *Runner) processTransfers(ctx context.Context, from, to uint64, blockTim
 
 	// Resolve block timestamps for all transfer logs (same pass as before).
 	for _, l := range logs {
-		bt, ok := blockTimes[l.BlockNumber]
-		if !ok {
-			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
-			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
-			hcancel()
-			if herr != nil {
-				log.Error().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
-					Msg("transfer: header lookup failed; aborting chunk for retry on next tick")
-				return fmt.Errorf("transfer: header lookup failed for block %d: %w", l.BlockNumber, herr)
-			}
-			bt = h.Time
-			blockTimes[l.BlockNumber] = bt
+		// Existence check only — the cached value is not needed here, just the
+		// fact that this block has already been resolved.
+		if _, ok := blockTimes[l.BlockNumber]; ok {
+			continue
 		}
+		hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+		h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
+		hcancel()
+		if herr != nil {
+			log.Error().Err(herr).Uint64("block", l.BlockNumber).Str("tx", l.TxHash.Hex()).
+				Msg("transfer: header lookup failed; aborting chunk for retry on next tick")
+			return fmt.Errorf("transfer: header lookup failed for block %d: %w", l.BlockNumber, herr)
+		}
+		blockTimes[l.BlockNumber] = h.Time
 	}
 
 	// ── IDX-1: Bucket logs by collection for parallel dispatch ────────────

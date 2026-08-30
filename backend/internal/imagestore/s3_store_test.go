@@ -568,12 +568,19 @@ func TestS3Store_ImplementsStore(t *testing.T) {
 	}
 	defer mock.Close()
 
+	// Assert the CONCRETE value, not the interface: `var s Store = store` wraps
+	// a typed nil, so `s == nil` is false even when store is nil and the check
+	// could never fail. Interface satisfaction is asserted at compile time
+	// instead (see the package-level var below).
 	store, _ := newTestS3Store(t, mock)
-	var s Store = store
-	if s == nil {
-		t.Fatal("S3Store should not be nil Store")
+	if store == nil {
+		t.Fatal("newTestS3Store returned a nil *S3Store")
 	}
 }
+
+// Compile-time proof that *S3Store implements Store — this is what the runtime
+// nil-check above was reaching for, and it cannot silently pass.
+var _ Store = (*S3Store)(nil)
 
 // ── s3Key helper test ───────────────────────────────────────────────────
 

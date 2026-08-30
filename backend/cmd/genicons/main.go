@@ -44,7 +44,8 @@ import (
 // Both sizes use these constants verbatim — magicwebb's palette is
 // the single source of truth for icon and page colors.
 var (
-	brandSky  = color.NRGBA{R: 0x38, G: 0xbd, B: 0xf8, A: 0xff}
+	brandSky = color.NRGBA{R: 0x38, G: 0xbd, B: 0xf8, A: 0xff}
+	//lint:ignore U1000 palette constant kept alongside render(); see its comment
 	brandInk  = color.NRGBA{R: 0x05, G: 0x05, B: 0x07, A: 0xff}
 	brandMark = color.NRGBA{R: 0xff, G: 0xff, B: 0xff, A: 0xff}
 	// cleared marks pixels OUTSIDE the rounded-square body — PWA splash
@@ -130,6 +131,8 @@ func min(a, b int) int {
 // render uses brandInk for an alt palette swap if we ever need a dark-mode
 // companion. Currently unused but kept available behind a flag for future
 // PWA variants.
+//
+//lint:ignore U1000 deliberately retained for a future dark-mode PWA variant
 func render(size int, palette ...color.NRGBA) *image.NRGBA {
 	_ = palette // reserved
 	return makeIcon(size)

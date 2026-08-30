@@ -306,6 +306,14 @@ func (b *GrpcEventBridge) dialPeer(ctx context.Context, peer string) (*peerConn,
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
 	}
 
+	// DEPRECATION NOTE (SA1019): grpc.NewClient replaces DialContext but does
+	// not dial eagerly, so a peer that is down would no longer fail here — the
+	// error would surface at StreamEvents below instead, changing where the
+	// caller's retry/backoff sees failures. Migrating the mesh dial is tracked
+	// with the keeper-election dial (same deprecation, same reasoning) rather
+	// than done piecemeal.
+	//
+	//lint:ignore SA1019 eager dial keeps failures at the dial site; see note above
 	conn, err := grpc.DialContext(dialCtx, peer, dialOpts...)
 	if err != nil {
 		return nil, err

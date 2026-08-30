@@ -27,8 +27,17 @@ import (
 	marketplacev1connect "github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 )
 
-// GQL-4: Per-connection GraphQL subscription limit. Prevents a single
-// WebSocket connection from opening unlimited subscriptions (DoS vector).
+// GQL-4: Per-connection GraphQL subscription limit.
+//
+// ⚠️ NOT ENFORCED. This constant is declared but nothing reads it, so the DoS
+// vector it names is currently OPEN: a single WebSocket connection can open
+// unlimited subscriptions. It is kept (rather than deleted) so the intended
+// control stays on the record instead of disappearing silently — enforcing it
+// needs per-connection subscription accounting, which gqlgen's
+// transport.Websocket does not expose without a custom InitFunc plus
+// connection-scoped state.
+//
+//lint:ignore U1000 documented-but-unenforced control; see comment above
 const maxSubscriptionsPerConn = 10
 
 // GQL-4: Auth context key for the authenticated wallet address.
@@ -302,7 +311,7 @@ func countDepth(set ast.SelectionSet, depth int) int {
 	for _, sel := range set {
 		switch s := sel.(type) {
 		case *ast.Field:
-			if s.SelectionSet != nil && len(s.SelectionSet) > 0 {
+			if len(s.SelectionSet) > 0 {
 				d := countDepth(s.SelectionSet, depth+1)
 				if d > maxDepth {
 					maxDepth = d

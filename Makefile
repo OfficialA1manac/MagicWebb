@@ -142,7 +142,7 @@ check-deployments: ## validate deployments/*.json and find stray addresses
 	bash tools/check-deployments.sh
 
 check-fly-sync: ## verify EVERY deployed network serves origin/main (drift detector)
-	@fail=0; for u in $$(jq -r 'select(.status!="not-deployed")|.app.origin//empty' deployments/*.json); do echo "-- $$u"; LIVE_URL="$$u" ./tools/check-fly-sync.sh || fail=1; done; exit $$fail
+	@./tools/check-fly-sync.sh
 .PHONY: check-fly-sync
 
 vulncheck: ## run govulncheck over the backend

@@ -154,15 +154,6 @@ func (s *Server) Watch(req *grpc_health_v1.HealthCheckRequest, stream grpc_healt
 	}
 }
 
-// forceRefresh clears the cached result so the next Check call re-probes.
-// Useful for testing or when an external event (e.g. reconnection) suggests
-// the cached status may be stale.
-func (s *Server) forceRefresh() {
-	s.mu.Lock()
-	s.cached = cachedResult{expiresAt: time.Time{}}
-	s.mu.Unlock()
-}
-
 // probe runs the DB and RPC checks and returns the overall status.
 func (s *Server) probe(ctx context.Context) grpc_health_v1.HealthCheckResponse_ServingStatus {
 	// DB ping.

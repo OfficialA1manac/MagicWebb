@@ -259,7 +259,10 @@ jobs:
     name: fly deploy (${{ matrix.network }})
     needs: [plan]
     runs-on: ubuntu-latest
-    timeout-minutes: 20
+    # Must exceed the fly --wait-timeout (10m) plus build, smoke check and sync
+    # gate, so a stuck release is caught by fly's bounded wait — with its own
+    # error text — rather than by the job timeout killing the step mid-flight.
+    timeout-minutes: 30
     strategy:
       fail-fast: false
       matrix:
@@ -337,12 +340,20 @@ jobs:
           echo "  generated fly.toml for ${NETWORK} (app $(jq -r .app.flyApp "$DEP"), status ${STATUS})"
           grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS)\s*=' fly.toml
       - name: Deploy (Fly remote build → rolling release)
+        id: fly_deploy
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
         run: |
           set -o pipefail
           echo "  deploying commit $GITHUB_SHA to ${{ matrix.network }}"
-          if fly deploy --remote-only --strategy rolling --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }} 2>&1 | tee /tmp/fly-deploy.log; then
+          # --wait-timeout bounds the release wait. Without it fly can sit on a
+          # rolling release until the JOB timeout kills it mid-deploy, and the
+          # always() sync gate below then reports DRIFT against a half-deployed
+          # app — which reads as a deploy-integrity failure when the real cause
+          # is "the deploy never finished". A bounded wait fails with fly's own
+          # diagnostics instead. 10m is well above the ~2m30s a healthy deploy
+          # takes here, so it only trips on a genuinely stuck release.
+          if fly deploy --remote-only --strategy rolling --wait-timeout 600 --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }} 2>&1 | tee /tmp/fly-deploy.log; then
             exit 0
           fi
           echo "::error title=fly deploy failed (${{ matrix.network }})::$(tail -c 3000 /tmp/fly-deploy.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
@@ -359,4 +370,12 @@ jobs:
         # Runs in every terminal state so a broken binary and a stale-SHA
         # deploy both surface loudly (see tools/check-fly-sync.sh).
         if: always()
-        run: LIVE_URL=$(jq -r .app.origin "deployments/${{ matrix.network }}.json") ./tools/check-fly-sync.sh
+        run: |
+          # Say up front whether the deploy step actually succeeded. When it did
+          # not, a stale SHA below means "the deploy never landed", NOT that a
+          # good deploy served the wrong binary — two very different incidents
+          # that this gate's DRIFT output otherwise reports identically.
+          if [ "${{ steps.fly_deploy.outcome }}" != "success" ]; then
+            echo "::warning title=deploy did not succeed (${{ matrix.network }})::The deploy step outcome was '${{ steps.fly_deploy.outcome }}'. Any DRIFT reported below is expected — this network was never updated. Fix the deploy failure first."
+          fi
+          LIVE_URL=$(jq -r .app.origin "deployments/${{ matrix.network }}.json" | tr -d '\r') ./tools/check-fly-sync.sh

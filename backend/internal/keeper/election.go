@@ -24,7 +24,6 @@ import (
 	"crypto/subtle"
 	"fmt"
 	"os"
-	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -77,7 +76,6 @@ type Election struct {
 	state          ElectionState
 	leaderID       string    // who we believe the leader is
 	lastHeartbeat  time.Time // last time we heard from the leader
-	leaderPriority int       // priority rank of current leader (lower = higher priority)
 
 	// Peer client connections.
 	clientsMu sync.RWMutex
@@ -569,9 +567,21 @@ func (e *Election) connectPeer(ctx context.Context, addr string) {
 	backoff := time.Second
 	for ctx.Err() == nil {
 		dialCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		// DEPRECATION NOTE (SA1019): grpc.WithBlock + grpc.DialContext are
+		// deprecated in favour of grpc.NewClient, which does NOT block and does
+		// not accept WithBlock. That difference is load-bearing here: this loop
+		// relies on the dial itself failing so it can log, back off, and retry.
+		// Under NewClient the dial always "succeeds" immediately and the failure
+		// surfaces later on the first RPC, which would silently change election
+		// connection behaviour. Migrating needs the retry loop restructured
+		// around conn.Connect()/WaitForStateChange and is tracked separately —
+		// it is not a lint-cleanup change.
+		//
+		//lint:ignore SA1019 blocking dial semantics are required by the retry loop; see note above
+		blockingDial := grpc.WithBlock()
 		dialOpts := []grpc.DialOption{
 			grpc.WithTransportCredentials(insecure.NewCredentials()),
-			grpc.WithBlock(),
+			blockingDial,
 		}
 		if secret := e.secret; secret != "" {
 			// Attach the shared cluster secret to every election RPC so
@@ -582,6 +592,7 @@ func (e *Election) connectPeer(ctx context.Context, addr string) {
 					return invoker(ctx, method, req, reply, cc, opts...)
 				}))
 		}
+		//lint:ignore SA1019 paired with WithBlock above; see the deprecation note
 		conn, err := grpc.DialContext(dialCtx, addr, dialOpts...)
 		cancel()
 
@@ -856,13 +867,3 @@ func (e *Election) InstanceID() string {
 	return e.instanceID
 }
 
-// ── Sort peers by address for deterministic ordering ──────────────────────
-
-// sortPeers returns the peer list sorted lexicographically. The lowest
-// address has highest election priority.
-func sortPeers(peers []string) []string {
-	sorted := make([]string, len(peers))
-	copy(sorted, peers)
-	sort.Strings(sorted)
-	return sorted
-}

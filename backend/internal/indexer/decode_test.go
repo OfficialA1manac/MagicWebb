@@ -1,6 +1,7 @@
 package indexer
 
 import (
+	"context"
 	"errors"
 	"math/big"
 	"testing"
@@ -151,7 +152,7 @@ func TestOnTransferBatchEmptyBatchIsNoOp(t *testing.T) {
 		Topics: []common.Hash{TopicTransferBatch, {}, {}, {}},
 		Data:   data,
 	}
-	if err := h.onTransferBatch(nil, l); err != nil {
+	if err := h.onTransferBatch(context.Background(), l); err != nil {
 		t.Fatalf("empty batch: got %v, want nil", err)
 	}
 }
@@ -165,7 +166,7 @@ func TestOnTransferBatchMalformedCarriesSentinel(t *testing.T) {
 		Topics: []common.Hash{TopicTransferBatch, {}, {}, {}},
 		Data:   make([]byte, 32), // shorter than the 2-word head
 	}
-	err := h.onTransferBatch(nil, l)
+	err := h.onTransferBatch(context.Background(), l)
 	if err == nil {
 		t.Fatal("short log: want error, got nil")
 	}

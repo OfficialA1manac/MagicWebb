@@ -19,7 +19,7 @@ func TestIssueAccessTokenVerifyRoundtrip(t *testing.T) {
 	if err != nil {
 		t.Fatalf("verify: %v", err)
 	}
-	if strings.ToLower(got) != strings.ToLower(address) {
+	if !strings.EqualFold(got, address) {
 		t.Fatalf("sub mismatch: %q vs %q", got, address)
 	}
 }
