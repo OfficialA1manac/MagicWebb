@@ -7,6 +7,7 @@ import (
 	"crypto/rand"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"os/signal"
@@ -55,6 +56,44 @@ import (
 )
 
 func main() {
+	if err := run(); err != nil {
+		var fe *fatalError
+		if errors.As(err, &fe) {
+			// Emit the exact log line the old inline log.Fatal call
+			// produced — but only after run()'s teardown has finished.
+			log.Fatal().Err(fe.cause).Msg(fe.msg)
+		}
+		log.Fatal().Err(err).Msg("startup failed")
+	}
+}
+
+// fatalError carries the zerolog message its failure site used to log
+// inline. log.Fatal calls os.Exit(1), which skips every deferred teardown —
+// so a Fatal after the DB pool, RPC transports or the keeper's Postgres
+// advisory lock were acquired leaked them (worst case: the advisory lock
+// stays held until the session times out, blocking the next leader).
+// run() returns one of these instead, unwinds its defers, and main logs.
+type fatalError struct {
+	msg   string
+	cause error
+}
+
+func (f *fatalError) Error() string {
+	if f.cause == nil {
+		return f.msg
+	}
+	return f.msg + ": " + f.cause.Error()
+}
+
+func (f *fatalError) Unwrap() error { return f.cause }
+
+// fatal builds a fatalError. cause may be nil for message-only failures
+// (log.Fatal().Msg(...) with no .Err()).
+func fatal(cause error, msg string) error { return &fatalError{msg: msg, cause: cause} }
+
+// run is what used to be main's body. Every startup failure returns an error
+// so the deferred teardown below it runs before the process exits.
+func run() error {
 	config.Load()
 
 	if config.C.Env != "production" {
@@ -80,11 +119,11 @@ func main() {
 
 	// DB
 	if err := db.Migrate(config.C.PostgresURL); err != nil {
-		log.Fatal().Err(err).Msg("db migration failed")
+		return fatal(err, "db migration failed")
 	}
 	pool, err := db.Connect(ctx, config.C.PostgresURL)
 	if err != nil {
-		log.Fatal().Err(err).Msg("db connect failed")
+		return fatal(err, "db connect failed")
 	}
 	defer pool.Close()
 
@@ -95,7 +134,7 @@ func main() {
 	// the eventual real deploy look like a mismatch on an empty database.
 	if config.C.ContractsDeployed() {
 		if err := verifyDeploymentConfig(ctx, pool); err != nil {
-			log.Fatal().Err(err).Msg("deployment config mismatch — contract addresses changed since last deploy; truncate on-chain data first")
+			return fatal(err, "deployment config mismatch — contract addresses changed since last deploy; truncate on-chain data first")
 		}
 	}
 
@@ -106,7 +145,7 @@ func main() {
 	// back to the primary pool when no replica is configured.
 	readPool, err := db.ConnectReadReplica(ctx, config.C.ReadPoolURL)
 	if err != nil {
-		log.Fatal().Err(err).Msg("read replica connect failed")
+		return fatal(err, "read replica connect failed")
 	}
 	if readPool != nil {
 		defer readPool.Close()
@@ -123,14 +162,14 @@ func main() {
 	var imgStore imagestore.Store = q // default: Postgres BYTEA
 	if config.C.ImgStoreBackend == "s3" {
 		if config.C.S3Endpoint == "" || config.C.S3Bucket == "" {
-			log.Fatal().Msg("img-3: IMG_STORE_BACKEND=s3 requires S3_ENDPOINT and S3_BUCKET to be set")
+			return fatal(nil, "img-3: IMG_STORE_BACKEND=s3 requires S3_ENDPOINT and S3_BUCKET to be set")
 		}
 		s3Store, err := imagestore.NewS3Store(ctx, pool,
 			config.C.S3Endpoint, config.C.S3Bucket,
 			config.C.S3AccessKey, config.C.S3SecretKey,
 			config.C.S3UseSSL)
 		if err != nil {
-			log.Fatal().Err(err).Msg("img-3: s3 store init failed")
+			return fatal(err, "img-3: s3 store init failed")
 		}
 		imgStore = s3Store
 		log.Info().Str("endpoint", config.C.S3Endpoint).Str("bucket", config.C.S3Bucket).
@@ -175,7 +214,7 @@ func main() {
 	// log filters go through the pool.
 	eth, err := rpcpool.New(ctx, config.C.RPCURLs, rpcpool.DefaultTimeout)
 	if err != nil {
-		log.Fatal().Err(err).Msg("eth rpc pool init failed")
+		return fatal(err, "eth rpc pool init failed")
 	}
 
 	// RPC-1: Wire RPC pool health events to the SSE broadcaster so WebSocket
@@ -250,6 +289,7 @@ func main() {
 			}, nil
 		})
 	indexerDone := make(chan struct{})
+	verifierDone := make(chan struct{})
 	if config.C.ContractsDeployed() {
 		go func() {
 			defer close(indexerDone)
@@ -262,6 +302,7 @@ func main() {
 		// supportsInterface plus resolved metadata — the on-chain replacement for
 		// the admin curation removed in 3d2010d.
 		go func() {
+			defer close(verifierDone)
 			log.Info().Msg("collection verifier starting")
 			verifier.New(q, eth).Run(ctx)
 			log.Info().Msg("collection verifier stopped")
@@ -271,6 +312,7 @@ func main() {
 		// index, nothing to keep. The HTTP layer still serves so the network
 		// exists for the switcher and health checks.
 		close(indexerDone)
+		close(verifierDone)
 		log.Warn().Uint64("chain_id", config.C.ChainID).Msg("read-only network mode: indexer, keepers and verifier are idle (no contract addresses)")
 	}
 
@@ -372,9 +414,11 @@ func main() {
 	mountUI(app, q, &serverTimeMs)
 
 	// Graceful shutdown: SIGINT/SIGTERM stops accepting traffic, shuts down
-	// the gRPC event bridge, then cancels ctx and WAITS for the indexer/keepers
-	// to drain so no settle/refund broadcast is cut mid-flight and the advisory
-	// lock releases cleanly.
+	// the gRPC event bridge, then cancels ctx and WAITS for the indexer,
+	// keepers and collection verifier to drain so no settle/refund broadcast
+	// is cut mid-flight and the advisory lock releases cleanly. Only once
+	// every writer has stopped do the sinks they write through close (audit
+	// log queue, RPC transports, DB pools) — see the teardown block below.
 	go func() {
 		sig := make(chan os.Signal, 1)
 		signal.Notify(sig, os.Interrupt, syscall.SIGTERM)
@@ -389,9 +433,45 @@ func main() {
 	}()
 
 	log.Info().Str("addr", config.C.HTTPAddr).Msg("server starting")
-	if err := app.Listen(config.C.HTTPAddr); err != nil {
-		log.Fatal().Err(err).Msg("server failed")
+	// A Listen failure is reported after the teardown below, not with an
+	// inline log.Fatal: os.Exit(1) would skip it and leak the keeper's
+	// Postgres advisory lock until its session times out.
+	listenErr := app.Listen(config.C.HTTPAddr)
+
+	// ── Teardown ────────────────────────────────────────────────────────
+	// Order matters. Cancel ctx FIRST so the indexer, keepers and collection
+	// verifier see the cancellation and stop writing, then wait for them to
+	// drain. Everything they write through (audit log queue, RPC pool, DB
+	// pools) is closed only afterwards — closing a sink while a writer is
+	// still live loses that write and logs "closed pool" noise.
+	cancel()
+	// One shared 15s budget across both waits, so shutdown stays bounded by
+	// the same deadline it had when only the indexer was awaited.
+	drainCtx, drainCancel := context.WithTimeout(context.Background(), 15*time.Second)
+	defer drainCancel()
+	select {
+	case <-indexerDone:
+		log.Info().Msg("indexer drained")
+	case <-drainCtx.Done():
+		log.Warn().Msg("indexer drain timed out")
 	}
+	select {
+	case <-verifierDone:
+		log.Info().Msg("collection verifier drained")
+	case <-drainCtx.Done():
+		log.Warn().Msg("collection verifier drain timed out")
+	}
+
+	// The election's goroutines hang off its own internal context, not ctx,
+	// so cancel() above does not reach them — Shutdown stops the state
+	// machine and heartbeat loop. (Release, called by the keeper gate on
+	// leadership loss, is a different thing and stays where it is.)
+	if keeperElection != nil {
+		keeperElection.Shutdown()
+	}
+	// RPC transports: safe now that every reader (indexer, keepers,
+	// verifier, health routes) has stopped.
+	eth.Close()
 
 	// ── Monitoring teardown ─────────────────────────────────────────────
 	if config.C.SentryDSN != "" {
@@ -404,15 +484,12 @@ func main() {
 			log.Warn().Err(err).Msg("otel: shutdown failed")
 		}
 	}
-	al.Close() // drain audit log queue before exit
+	al.Close() // drain audit log queue once every writer has stopped
 
-	cancel()
-	select {
-	case <-indexerDone:
-		log.Info().Msg("indexer drained")
-	case <-time.After(15 * time.Second):
-		log.Warn().Msg("indexer drain timed out")
+	if listenErr != nil {
+		return fatal(listenErr, "server failed")
 	}
+	return nil
 }
 
 // ── Prometheus /metrics endpoint ────────────────────────────────────────────

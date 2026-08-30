@@ -34,7 +34,10 @@ contract OfferHandler is Test {
     function makeOffer(uint256 bSeed, uint256 tSeed, uint128 principal, uint256 ttl) external {
         address b = bidders[bSeed % 3];
         uint256 tid = tokenIds[tSeed % 3];
-        principal = uint128(bound(principal, 0.01 ether, 100 ether));
+        // Floor at MIN_PRICE: _makeOffer reverts BelowMinPrice below 1 ether, so
+        // the old 0.01-ether floor made ~99% of fuzz draws revert-and-discard,
+        // leaving the suite almost no real coverage.
+        principal = uint128(bound(principal, ob.MIN_PRICE(), 100 ether));
         (uint128 existingPrincipal,,,) = ob.positions(address(nft), tid, b);
         uint64[15] memory durations = [
             uint64(1 minutes), uint64(3 minutes), uint64(5 minutes),
@@ -43,7 +46,6 @@ contract OfferHandler is Test {
             uint64(4 hours), uint64(8 hours), uint64(12 hours),
             uint64(16 hours), uint64(20 hours), uint64(24 hours)
         ];
-        if (uint256(existingPrincipal) > type(uint128).max) return;
         vm.prank(b);
         ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 15]);
         ghostEscrowed = ghostEscrowed + principal - uint256(existingPrincipal);
@@ -59,15 +61,51 @@ contract OfferHandler is Test {
         ghostEscrowed -= p;
     }
 
+    /// @notice Exercise the unstoppable-exit path: refundExpiredOffer().
+    /// @dev This used to call rejectOffer(), a copy-paste bug that left
+    ///      refundExpiredOffer with ZERO invariant coverage even though
+    ///      .github/workflows/audit.yml gates releases on this file.
+    ///      The bidder is pranked because a bidder reclaiming their own expired
+    ///      escrow is always allowed, whatever the manager configuration.
     function refundExpired(uint256 bSeed, uint256 tSeed, uint256 warp) external {
         address b = bidders[bSeed % 3];
         uint256 tid = tokenIds[tSeed % 3];
         (uint128 p,, uint64 exp,) = ob.positions(address(nft), tid, b);
         if (p == 0) return;
         vm.warp(uint256(exp) + 1 + (warp % 1000));
-        vm.prank(owner);
-        ob.rejectOffer(address(nft), tid, b);
+        vm.prank(b);
+        ob.refundExpiredOffer(address(nft), tid, b);
         ghostEscrowed -= p;
+    }
+
+    /// @notice Bidder-initiated exit before expiry.
+    function cancelOffer(uint256 bSeed, uint256 tSeed) external {
+        address b = bidders[bSeed % 3];
+        uint256 tid = tokenIds[tSeed % 3];
+        (uint128 p,, uint64 exp,) = ob.positions(address(nft), tid, b);
+        if (p == 0 || block.timestamp >= exp) return;
+        vm.prank(b);
+        ob.cancelOffer(address(nft), tid);
+        ghostEscrowed -= p;
+    }
+
+    /// @notice Sum of every live position's principal: the escrow the book owes.
+    function outstandingPrincipal() external view returns (uint256 total) {
+        for (uint256 i; i < 3; i++) {
+            for (uint256 j; j < 3; j++) {
+                (uint128 p,,,) = ob.positions(address(nft), tokenIds[i], bidders[j]);
+                total += uint256(p);
+            }
+        }
+    }
+
+    /// @notice Sum of every pull-refund credit the book still owes.
+    function outstandingPending() external view returns (uint256 total) {
+        for (uint256 j; j < 3; j++) {
+            total += ob.pendingReturns(bidders[j]);
+        }
+        total += ob.pendingReturns(owner);
+        total += ob.pendingReturns(ob.feeRecipient());
     }
 }
 
@@ -88,7 +126,22 @@ contract OfferBookInvariantTest is Test, TestHelpers {
         targetContract(address(handler));
     }
 
-    function invariant_escrowMatchesPrincipals() public view {
-        assertEq(address(ob).balance, handler.ghostEscrowed());
+    /// @notice Ghost accounting: every wei in escrow was deposited by a handler
+    ///         action, and every exit decremented the ghost by exactly the
+    ///         principal it released.
+    function invariant_escrowMatchesGhost() public view {
+        assertEq(address(ob).balance, handler.ghostEscrowed(), "balance != ghost escrow");
+    }
+
+    /// @notice Solvency derived from contract state rather than the ghost: the
+    ///         ETH the book holds is exactly what it still owes as live offer
+    ///         principals plus unclaimed pull-refund credits. Catches a delete
+    ///         that forgets to pay, and a pay that forgets to delete.
+    function invariant_escrowMatchesPositions() public view {
+        assertEq(
+            address(ob).balance,
+            handler.outstandingPrincipal() + handler.outstandingPending(),
+            "balance != live principals + pending refunds"
+        );
     }
 }

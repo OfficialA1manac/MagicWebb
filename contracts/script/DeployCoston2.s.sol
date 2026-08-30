@@ -17,8 +17,10 @@ import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 ///   PRIVATE_KEY   -- deployer private key (never commit)
 ///   CREATOR_ADDR  -- fee recipient wallet address (MUST be a Gnosis Safe multisig for production;
 ///                    run DeploySafe.s.sol first and use the resulting SAFE_ADDR)
-/// Optional env vars:
-///   KEEPER_ADDR   -- keeper identity registered under KEEPER_ROLE
+///   KEEPER_ADDR   -- keeper identity registered under KEEPER_ROLE. REQUIRED: the
+///                    manager grants KEEPER_ROLE only to admin-or-keeper callers,
+///                    so deploying with an empty keeper fleet and then renouncing
+///                    admin seals the role shut forever.
 ///
 /// Mainnet safety notes:
 ///   - CREATOR_ADDR MUST be a multisig (Safe or equivalent), NOT an EOA.
@@ -39,6 +41,13 @@ contract DeployCoston2 is Script {
         address keeper  = vm.envOr("KEEPER_ADDR", address(0));
 
         require(creator != address(0), "CREATOR_ADDR required");
+        // A deploy with no keeper is unrecoverable once the admin renounces:
+        // MarketplaceManager.addKeeper() requires admin-or-keeper, so an empty
+        // KEEPER_ROLE fleet plus a renounced DEFAULT_ADMIN_ROLE means the role
+        // can never be granted again on this deployment. Refuse to deploy
+        // rather than ship a marketplace whose keeper seat is sealed shut.
+        // See docs/IMMUTABILITY_TRANSITION.md.
+        require(keeper != address(0), "KEEPER_ADDR required");
 
         address deployer = vm.addr(pk);
 
@@ -77,9 +86,7 @@ contract DeployCoston2 is Script {
         OfferBook offerBook = OfferBook(address(offerBookProxy));
 
         manager.setCoreContracts(address(marketplace), address(auction), address(offerBook));
-        if (keeper != address(0)) {
-            manager.grantRole(manager.KEEPER_ROLE(), keeper);
-        }
+        manager.grantRole(manager.KEEPER_ROLE(), keeper);
         manager.grantRole(manager.DEFAULT_ADMIN_ROLE(), creator);
         if (creator != deployer) {
             manager.renounceRole(manager.DEFAULT_ADMIN_ROLE(), deployer);
@@ -106,9 +113,7 @@ contract DeployCoston2 is Script {
         if (creator != deployer) {
             require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "deployer must have renounced admin");
         }
-        if (keeper != address(0)) {
-            require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");
-        }
+        require(manager.hasRole(manager.KEEPER_ROLE(), keeper), "keeper role missing");
         console2.log("feeRecipient + manager + admin handover verified");
     }
 }

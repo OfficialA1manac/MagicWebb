@@ -37,6 +37,8 @@ jobs:
         run: |
           forge test --match-path test/AuditFuzz.t.sol -vvv
           forge test --match-path test/OfferBookInvariant.t.sol -vvv
+          forge test --match-path test/AuctionHouseInvariant.t.sol -vvv
+          forge test --match-path test/MarketplaceInvariant.t.sol -vvv
 
       - name: Generate coverage report
         working-directory: contracts
