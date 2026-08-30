@@ -85,9 +85,13 @@ export class MwSocket {
    * unsubscribes afterwards.
    */
   waitFor(type: WsEventType, pred: (data: unknown) => boolean, timeoutMs: number, channel?: string): Promise<unknown> {
-    if (channel) this.subscribe(channel);
+    // Only unsubscribe what this call subscribed. channels is a Set, so
+    // unsubscribing a channel a page already holds would silently kill that
+    // page's live updates when the wait resolves.
+    const ownsChannel = !!channel && !this.channels.has(channel);
+    if (ownsChannel && channel) this.subscribe(channel);
     return new Promise((res, rej) => {
-      const done = (fn: () => void) => { off(); clearTimeout(t); if (channel) this.unsubscribe(channel); fn(); };
+      const done = (fn: () => void) => { off(); clearTimeout(t); if (ownsChannel && channel) this.unsubscribe(channel); fn(); };
       const off = this.on(type, (data) => { try { if (pred(data)) done(() => res(data)); } catch { /* ignore */ } });
       const t = setTimeout(() => done(() => rej(new Error('timeout'))), timeoutMs);
     });

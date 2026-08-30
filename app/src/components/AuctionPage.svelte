@@ -12,8 +12,10 @@
   import { currentChain, tradingLive, readOnlyCopy } from '../lib/chains';
   import { fmtPrice, shortAddr, timeAgo, fmtCountdown, toWei } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
-  import { onAccountChange } from '../lib/tx/client';
+  import { onAccountChange, publicClient } from '../lib/tx/client';
+  import { auctionHouseAbi } from '../lib/abi';
   import { minimumTopUp } from '../lib/tx/auction';
+  import type { Address } from 'viem';
 
   type Auction = { auction_id: number; collection: string; token_id: string; seller: string; standard: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps: number; starts_at: string; ends_at: string; status: string; create_tx: string; name: string; image_uri: string; collection_verified: boolean };
   type Bid = { bidder: string; amount_wei: string; tx_hash: string; placed_at: string };
@@ -39,7 +41,14 @@
   let ended = $derived(!!a && a.status === 'active' && endsMs <= now);
   let isSeller = $derived(!!me && !!a && a.seller.toLowerCase() === me.toLowerCase());
   let highest = $derived(BigInt(a?.highest_bid_wei || '0'));
-  let myCumulative = $derived(me ? bids.filter((b) => b.bidder.toLowerCase() === me!.toLowerCase()).reduce((s, b) => s + BigInt(b.amount_wei), 0n) : 0n);
+  // Cumulative escrow comes from the CHAIN, never from summing the bids API.
+  // The bids table is an append-only event log: withdrawLoserFunds() zeroes the
+  // on-chain cumulative but leaves every historical bid row in place, so the
+  // sum OVERSTATES what is still escrowed. An overstated cumulative makes
+  // minimumTopUp() quote a minimum below the real one and the resulting bid
+  // reverts BidTooLow. TokenPage already read this on-chain; this is the same
+  // read, so the two pages can no longer disagree about the same auction.
+  let myCumulative = $state(0n);
   let amLeader = $derived(!!me && !!a && a.highest_bidder?.toLowerCase() === me.toLowerCase());
   let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative, minIncrementBps: a.min_increment_bps }) : 0n);
   let name = $derived(a?.name || `#${a?.token_id ?? ''}`);
@@ -47,6 +56,21 @@
   let antiSnipe = $derived(isLive && endsMs - now < 3 * 60 * 1000);
 
   async function j<T>(u: string): Promise<T | null> { try { const r = await fetch(u); return r.ok ? (await r.json()) as T : null; } catch { return null; } }
+
+  // Mirrors TokenPage.loadMyCumulative(). On failure it stays 0n, which makes
+  // minimumTopUp() quote the FULL amount — safe (an overpay-shaped quote that
+  // still clears the threshold) rather than a quote that reverts.
+  async function loadMyCumulative() {
+    myCumulative = 0n;
+    if (!me || !a) return;
+    try {
+      const pub = await publicClient();
+      const ahAddr = chain.contracts.auctionHouse;
+      if (!ahAddr) return;
+      myCumulative = (await pub.readContract({ address: ahAddr as Address, abi: auctionHouseAbi, functionName: 'cumulative', args: [BigInt(a.auction_id), me as Address] })) as bigint;
+    } catch { /* stays 0n */ }
+  }
+  $effect(() => { if (me && a) void loadMyCumulative(); });
 
   async function load(initial = false) {
     if (initial) loading = true;
@@ -135,7 +159,12 @@
         {:else if canTrade && isLive && isSeller}
           {#if highest === 0n}<button class="btn g" onclick={doCancel}>Cancel auction</button>{:else}<p class="ap-hint">Your auction has bids and will settle when it ends.</p>{/if}
         {/if}
-        {#if canTrade && me && myCumulative > 0n && !amLeader && (isLive || a.status !== 'active')}
+        <!-- `ended` (status still 'active', endsAt passed) was missing from this
+             window, so the one moment a loser most wants their escrow back —
+             after the auction closed but before it settled — was the one moment
+             the button disappeared. The contract allows withdrawLoserFunds() at
+             any time for a non-leading bidder; the UI now matches. -->
+        {#if canTrade && me && myCumulative > 0n && !amLeader && (isLive || ended || a.status !== 'active')}
           <button class="btn g" onclick={doWithdraw}>Withdraw my {fmtPrice(myCumulative)} {sym}</button>
         {/if}
       </section>

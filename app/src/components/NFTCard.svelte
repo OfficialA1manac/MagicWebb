@@ -16,6 +16,10 @@
     image_uri: string;
     total_supply: number;
     collection_verified: boolean;
+    // ERC-173 owner() of the collection, "" when the verifier never resolved
+    // one. Verified + creator is what upgrades the badge to "Authentic";
+    // without passing it, this card was permanently stuck on "Verified NFT".
+    collection_creator?: string;
   }
 
   let { item }: { item: ListingItem } = $props();
@@ -120,7 +124,7 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      <VerifiedBadge verified={item.collection_verified} link={false} />
+      <VerifiedBadge verified={item.collection_verified} creatorAddr={item.collection_creator ?? ''} link={false} />
       {#if item.standard}
         <span class="standard-badge" title="Token standard">{item.standard}</span>
       {/if}

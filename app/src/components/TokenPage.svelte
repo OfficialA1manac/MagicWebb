@@ -176,10 +176,21 @@
       j<Record<string, string>>(`/api/v1/collections/${coll}/traits`),
       j<Activity[]>(`/api/v1/activity?${q}&limit=20`),
       j<Offer[]>(`/api/v1/offers?${q}&limit=20`),
-      j<Auction[]>(`/api/v1/auctions?collection=${encodeURIComponent(coll)}&status=active&limit=50`),
+      // Scoped to this exact token. The previous form pulled the first 50
+      // active auctions in the collection and searched them client side, so a
+      // collection with more than 50 auctions ordered ahead of this one made
+      // the token's own auction invisible — the page then rendered as if no
+      // auction existed.
+      j<Auction[]>(`/api/v1/auctions?collection=${encodeURIComponent(coll)}&token_id=${encodeURIComponent(tid)}&status=active&limit=1`),
     ]);
     listing = l && l.price_wei ? l : null;
     collection = c; traits = t ?? {}; activity = a ?? []; offers = o ?? [];
+    // The server filters by token_id, so this is a correctness backstop, not a
+    // search: it guarantees we never attach ANOTHER token's auction to this
+    // page. During a rolling deploy where this frontend is live against a
+    // backend that predates the token_id parameter, the single row returned
+    // may belong to a different token — this drops it and the page renders as
+    // having no auction, which is the safe direction to fail.
     auction = (au ?? []).find((x) => String(x.token_id) === String(tid)) ?? null;
     if (!c && !l && !auction) {
       // Unindexed token (common on read-only networks where NFTs come from
@@ -341,7 +352,11 @@
       {/if}
 
       <!-- ── owner actions ─────────────────────────────────────────── -->
-      {#if canTrade && isOwner && !listing && !auctionLive}
+      <!-- auctionEnded (ended, not yet settled) must gate these too: the seller
+           still holds the token, so isOwner is true, but settle() will transfer
+           it to the winner. Listing or re-auctioning in that window commits the
+           same token twice and strands whichever action loses the race. -->
+      {#if canTrade && isOwner && !listing && !auctionLive && !auctionEnded}
         <div class="tp-btnrow">
           <button class="btn p" onclick={() => openPanel('list')}>List for sale</button>
           <button class="btn v" onclick={() => openPanel('auction')}>Start auction</button>

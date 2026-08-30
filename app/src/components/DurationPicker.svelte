@@ -1,13 +1,41 @@
 <script lang="ts">
   import { DURATIONS, DEFAULT_DURATION } from '../lib/tx/durations';
   let { value = $bindable(DEFAULT_DURATION), label = 'Duration' }: { value?: number; label?: string } = $props();
+
+  // ARIA radiogroup means ONE tab stop with arrow keys inside it, not one tab
+  // stop per option. Every option was natively focusable, so a keyboard user
+  // had to tab through all 15 durations to reach the next field, and arrow
+  // keys did nothing at all.
+  let selectedIndex = $derived(Math.max(0, DURATIONS.findIndex((d) => d.seconds === value)));
+
+  function onKey(e: KeyboardEvent, i: number) {
+    let next = -1;
+    if (e.key === 'ArrowRight' || e.key === 'ArrowDown') next = (i + 1) % DURATIONS.length;
+    else if (e.key === 'ArrowLeft' || e.key === 'ArrowUp') next = (i - 1 + DURATIONS.length) % DURATIONS.length;
+    else if (e.key === 'Home') next = 0;
+    else if (e.key === 'End') next = DURATIONS.length - 1;
+    if (next < 0) return;
+    e.preventDefault();
+    // Selection follows focus, which is the expected radiogroup behaviour.
+    value = DURATIONS[next].seconds;
+    const row = (e.currentTarget as HTMLElement).parentElement;
+    (row?.children[next] as HTMLElement | undefined)?.focus();
+  }
 </script>
 
 <fieldset class="dp">
   <legend>{label}</legend>
   <div class="dp-row" role="radiogroup" aria-label={label}>
-    {#each DURATIONS as d (d.seconds)}
-      <button type="button" class="dp-opt" class:is-on={value === d.seconds} role="radio" aria-checked={value === d.seconds} onclick={() => (value = d.seconds)}>{d.label}</button>
+    {#each DURATIONS as d, i (d.seconds)}
+      <button
+        type="button"
+        class="dp-opt"
+        class:is-on={value === d.seconds}
+        role="radio"
+        aria-checked={value === d.seconds}
+        tabindex={i === selectedIndex ? 0 : -1}
+        onkeydown={(e) => onKey(e, i)}
+        onclick={() => (value = d.seconds)}>{d.label}</button>
     {/each}
   </div>
 </fieldset>

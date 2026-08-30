@@ -330,11 +330,6 @@ async function initAppKit(): Promise<void> {
   try {
     const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
-    // Publish for the non-React world (Astro page scripts, Svelte islands):
-    // app/src/lib/tx/client.ts reads window.__MW_WAGMI_CONFIG__ and waits on
-    // the mw-wagmi-ready event. One wagmi config == one wallet session.
-    window.__MW_WAGMI_CONFIG__ = adapter.wagmiConfig;
-    window.dispatchEvent(new CustomEvent('mw-wagmi-ready'));
     createAppKit({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- chains matches AppKitNetwork structurally but type defs differ
       adapters: [adapter], networks: chains as any, defaultNetwork: targetAppKitNetwork, projectId,
@@ -354,7 +349,20 @@ async function initAppKit(): Promise<void> {
       themeMode: 'dark',
     });
     _appKitReady = true;
-  } catch (e) { console.error('[mw-wc] AppKit init failed:', e); _initFailed = true; }
+    // Publish for the non-React world (Astro page scripts, Svelte islands):
+    // app/src/lib/tx/client.ts reads window.__MW_WAGMI_CONFIG__ and waits on
+    // the mw-wagmi-ready event. One wagmi config == one wallet session.
+    // Published only AFTER createAppKit() succeeds — a config without a live
+    // AppKit has no __MW_APPKIT_OPEN__ modal, so requireWallet() would sit in
+    // its 120s account-change wait with no way for the user to connect.
+    window.__MW_WAGMI_CONFIG__ = adapter.wagmiConfig;
+    window.dispatchEvent(new CustomEvent('mw-wagmi-ready'));
+  } catch (e) {
+    console.error('[mw-wc] AppKit init failed:', e);
+    _initFailed = true;
+    _wagmiConfig = null;
+    delete window.__MW_WAGMI_CONFIG__;
+  }
 }
 
 const queryClient = new QueryClient();

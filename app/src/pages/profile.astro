@@ -209,15 +209,26 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               // Auction-escrowed tokens (merged below) have no price_wei but are
               // NOT listable — batchList would revert on them.
               const selectable=ownMode&&!price&&!it._escrowed;
-              return '<a href="/token/'+encC+'/'+encT+'" class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;position:relative;">'+
-                (selectable?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" onclick="event.stopPropagation();" style="position:absolute;top:0.5rem;left:0.5rem;z-index:2;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
+              // The card is a <div> with a STRETCHED LINK, not an <a> wrapper.
+              // An <a> may not contain interactive content: the batch checkbox
+              // and the "List →" link are both interactive, and the nested
+              // anchor in particular made the browser auto-close the outer <a>
+              // at that point, splitting the card into two elements and killing
+              // the card's own click target for everything after it. The
+              // overlay <a> below covers the whole card at z-index 1; the text
+              // block sits above it with pointer-events:none so clicks fall
+              // through to the link, and the two real controls re-enable
+              // pointer events at a higher z-index.
+              return '<div class="tilt-card" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.07);border-radius:1rem;overflow:hidden;transition:all 0.3s;position:relative;">'+
+                '<a href="/token/'+encC+'/'+encT+'" aria-label="'+esc(nm)+'" style="position:absolute;inset:0;z-index:1;"></a>'+
+                (selectable?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" style="position:absolute;top:0.5rem;left:0.5rem;z-index:3;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                   imgTag(src,'🖼')+
                   (price?'<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">'+cur()+'</span></div>':'')+
                 '</div>'+
-                '<div style="padding:0.75rem;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p>'+
-                (selectable?'<a href="/token/'+encC+'/'+encT+'#list" onclick="event.stopPropagation();" style="display:inline-block;margin-top:0.5rem;padding:0.25rem 0.75rem;border-radius:0.5rem;background:rgba(125,211,252,0.12);border:1px solid rgba(125,211,252,0.3);color:#7dd3fc;font-size:0.6875rem;font-weight:700;">List →</a>':'')+
-                '</div></a>';
+                '<div style="padding:0.75rem;position:relative;z-index:2;pointer-events:none;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p>'+
+                (selectable?'<a href="/token/'+encC+'/'+encT+'#list" style="display:inline-block;margin-top:0.5rem;padding:0.25rem 0.75rem;border-radius:0.5rem;background:rgba(125,211,252,0.12);border:1px solid rgba(125,211,252,0.3);color:#7dd3fc;font-size:0.6875rem;font-weight:700;pointer-events:auto;position:relative;z-index:3;">List →</a>':'')+
+                '</div></div>';
             }).join('')+'</div>';
           }
 
@@ -237,12 +248,22 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           function wireBatchBar(tc){
             var bar = document.getElementById('batch-bar'); if(!bar) return;
             function selected(){ return Array.prototype.slice.call(tc.querySelectorAll('.mw-batch-cb:checked')); }
-            tc.addEventListener('change', function(e){
-              if(!e.target || !e.target.classList || !e.target.classList.contains('mw-batch-cb')) return;
-              var n = selected().length;
-              bar.style.display = n ? 'flex' : 'none';
-              var c = document.getElementById('batch-count'); if(c) c.textContent = n+' selected'+(n>50?' — max 50':'');
-            });
+            // #tab-content is a PERSISTENT element — renderTab() only swaps its
+            // innerHTML — so this delegated listener would stack one copy per
+            // visit to the NFTs tab. The buttons below are re-created by each
+            // render and so bind fresh every time; this one must bind once.
+            if(!tc.dataset.mwBatchWired){
+              tc.dataset.mwBatchWired = '1';
+              tc.addEventListener('change', function(e){
+                if(!e.target || !e.target.classList || !e.target.classList.contains('mw-batch-cb')) return;
+                // `bar` is re-created by every render, so resolve it live rather
+                // than closing over the instance present at wiring time.
+                var b = document.getElementById('batch-bar'); if(!b) return;
+                var n = selected().length;
+                b.style.display = n ? 'flex' : 'none';
+                var c = document.getElementById('batch-count'); if(c) c.textContent = n+' selected'+(n>50?' — max 50':'');
+              });
+            }
             var go = document.getElementById('batch-go');
             if(go) go.addEventListener('click', function(){
               var err = document.getElementById('batch-err'); if(err) err.textContent='';
@@ -365,7 +386,12 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               '</div>'+
               '<div style="display:flex;align-items:center;gap:0.5rem;flex-shrink:0;">'+
                 (isOwnProfileFor(targetAddr)?'<button id="edit-profile-btn" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(125,211,252,0.25);color:#7dd3fc;font-size:0.8125rem;font-weight:700;transition:all 0.2s;background:rgba(125,211,252,0.1);cursor:pointer;font-family:inherit;display:inline-flex;align-items:center;gap:0.375rem;">✎ Edit Profile</button>':'')+
-                '<a href="/offers?addr='+encAddr+'" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>'+
+                // Own profile ONLY. /offers renders the CONNECTED wallet's offers
+                // and ignores any ?addr= parameter, so linking it from someone
+                // else's profile showed the viewer their own offers under that
+                // person's name. Another wallet's offers are already visible in
+                // the Offers tab of this page, which does fetch by targetAddr.
+                (isOwnProfileFor(targetAddr)?'<a href="/offers" style="padding:0.5rem 1rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.1);color:rgba(255,255,255,0.6);font-size:0.8125rem;font-weight:600;transition:all 0.2s;flex-shrink:0;">View Offers →</a>':'')+
               '</div>'+
             '</div>'+
 
@@ -408,9 +434,14 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             emptyWalletNotice +
 
             // Tab bar
-            '<div id="nfts"></div><div id="tab-bar" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">'+
-              tabs.map(function(t){return '<button data-tab="'+t.id+'" class="profile-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap;font-family:inherit;">'+t.label+'</button>';}).join('')+
-            '</div><div id="tab-content"></div>';
+            // ARIA tabs pattern: tablist / tab / tabpanel, with a roving
+            // tabindex so the bar is ONE tab stop and Arrow keys move between
+            // sections (wired below). Without the roles this read to a screen
+            // reader as a row of unrelated buttons with no indication of which
+            // section was showing.
+            '<div id="nfts"></div><div id="tab-bar" role="tablist" aria-label="Profile sections" style="display:flex;gap:0.25rem;margin-bottom:1.5rem;border-bottom:1px solid rgba(255,255,255,0.06);overflow-x:auto;">'+
+              tabs.map(function(t,i){return '<button data-tab="'+t.id+'" id="tab-'+t.id+'" role="tab" aria-selected="false" aria-controls="tab-content" tabindex="'+(i===0?'0':'-1')+'" class="profile-tab" style="padding:0.625rem 1rem;border:none;background:transparent;color:rgba(255,255,255,0.35);font-size:0.75rem;font-weight:700;text-transform:uppercase;cursor:pointer;border-bottom:2px solid transparent;transition:all 0.2s;white-space:nowrap;font-family:inherit;">'+t.label+'</button>';}).join('')+
+            '</div><div id="tab-content" role="tabpanel" tabindex="0"></div>';
 
           // Deep link: /profile#nfts jumps straight to the My NFTs tab.
           if (location.hash === '#nfts') {
@@ -481,17 +512,40 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
           const tabBar = document.getElementById('tab-bar');
           if(tabBar){
-            tabBar.querySelectorAll('.profile-tab').forEach(function(btn){
-              btn.addEventListener('click', function(){
-                tabBar.querySelectorAll('.profile-tab').forEach(function(b){b.style.color='rgba(255,255,255,0.35)';b.style.borderBottomColor='transparent';});
-                const t = tabs.find(function(t){return t.id===btn.dataset.tab;});
-                btn.style.color = t?t.color:'#7dd3fc';
-                btn.style.borderBottomColor = t?t.color:'#7dd3fc';
-                renderTab(btn.dataset.tab);
+            const tabBtns = Array.prototype.slice.call(tabBar.querySelectorAll('.profile-tab'));
+            function activateTab(btn, focus){
+              tabBtns.forEach(function(b){
+                b.style.color='rgba(255,255,255,0.35)';
+                b.style.borderBottomColor='transparent';
+                b.setAttribute('aria-selected','false');
+                b.tabIndex = -1;              // roving: only the active tab is tabbable
+              });
+              const t = tabs.find(function(t){return t.id===btn.dataset.tab;});
+              btn.style.color = t?t.color:'#7dd3fc';
+              btn.style.borderBottomColor = t?t.color:'#7dd3fc';
+              btn.setAttribute('aria-selected','true');
+              btn.tabIndex = 0;
+              const panel = document.getElementById('tab-content');
+              if(panel) panel.setAttribute('aria-labelledby', btn.id);
+              if(focus) btn.focus();
+              renderTab(btn.dataset.tab);
+            }
+            tabBtns.forEach(function(btn, i){
+              btn.addEventListener('click', function(){ activateTab(btn, false); });
+              // Arrow/Home/End navigation is what makes a roving tabindex
+              // usable: the bar is one tab stop, arrows move within it.
+              btn.addEventListener('keydown', function(e){
+                var next = -1;
+                if(e.key==='ArrowRight') next = (i+1) % tabBtns.length;
+                else if(e.key==='ArrowLeft') next = (i-1+tabBtns.length) % tabBtns.length;
+                else if(e.key==='Home') next = 0;
+                else if(e.key==='End') next = tabBtns.length-1;
+                if(next<0) return;
+                e.preventDefault();
+                activateTab(tabBtns[next], true);
               });
             });
-            const first = tabBar.querySelector('.profile-tab');
-            if(first) first.click();
+            if(tabBtns.length) activateTab(tabBtns[0], false);
           }
 
           // ── Native balance (wallet value) — read straight from the RPC so
@@ -523,6 +577,12 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               overlay.style.cssText = 'position:fixed;inset:0;background:rgba(0,0,0,0.65);backdrop-filter:blur(6px);z-index:9999;display:flex;align-items:center;justify-content:center;padding:1rem;animation:fadeIn 0.2s ease;';
 
               const modal = document.createElement('div');
+              // role=dialog + aria-modal tells assistive tech this is a modal
+              // and that the rest of the page is inert; aria-labelledby points
+              // at the <h2> below so the dialog announces its own name.
+              modal.setAttribute('role', 'dialog');
+              modal.setAttribute('aria-modal', 'true');
+              modal.setAttribute('aria-labelledby', 'edit-profile-title');
               modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1.25rem;padding:2rem;max-width:480px;width:100%;box-shadow:0 25px 60px rgba(0,0,0,0.5);animation:modalSlideUp 0.25s ease;';
 
               const currentDisplayName = profile && profile.display_name ? esc(profile.display_name) : '';
@@ -534,8 +594,9 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
               modal.innerHTML =
                 '<div style="display:flex;align-items:center;justify-content:space-between;margin-bottom:1.5rem;">'+
-                  '<h2 style="font-size:1.25rem;font-weight:800;color:#fafafa;">Edit Profile</h2>'+
-                  '<button id="edit-profile-close" style="width:2rem;height:2rem;border-radius:0.5rem;border:none;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:all 0.2s;">✕</button>'+
+                  '<h2 id="edit-profile-title" style="font-size:1.25rem;font-weight:800;color:#fafafa;">Edit Profile</h2>'+
+                  // The glyph alone announced as "✕" or nothing at all.
+                  '<button id="edit-profile-close" type="button" aria-label="Close Edit Profile" style="width:2rem;height:2rem;border-radius:0.5rem;border:none;background:rgba(255,255,255,0.04);color:rgba(255,255,255,0.3);cursor:pointer;font-size:1rem;display:flex;align-items:center;justify-content:center;font-family:inherit;transition:all 0.2s;"><span aria-hidden="true">✕</span></button>'+
                 '</div>'+
                 '<form id="edit-profile-form" style="display:flex;flex-direction:column;gap:1rem;">'+
                   '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Display Name</label>'+
@@ -571,9 +632,35 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               const firstInput = modal.querySelector('input[name="display_name"]');
               if(firstInput) setTimeout(function(){firstInput.focus();firstInput.select();}, 100);
 
+              // escHandler is a hoisted function declaration below, so it is
+              // already bound by the time any close path runs. Detaching here
+              // (rather than only inside the Escape branch) is what keeps the
+              // X / Cancel / overlay-click paths from leaving a live keydown
+              // listener on document for every modal the user ever opened.
+              // Where focus was before the dialog opened, so it can be handed
+              // back on close instead of resetting to the top of the document.
+              const prevFocus = document.activeElement;
+
               function closeModal(){
+                document.removeEventListener('keydown', escHandler);
+                document.removeEventListener('keydown', trapHandler, true);
                 if(overlay.parentNode) overlay.parentNode.removeChild(overlay);
+                if(prevFocus && typeof prevFocus.focus === 'function') prevFocus.focus();
               }
+
+              // Focus trap: Tab and Shift+Tab cycle WITHIN the dialog. Without
+              // it, tabbing walks straight out into the page behind the
+              // overlay, which is still fully interactive to the keyboard even
+              // though it is visually covered.
+              function trapHandler(e){
+                if(e.key !== 'Tab') return;
+                const f = modal.querySelectorAll('a[href], button:not([disabled]), input:not([disabled]), textarea:not([disabled]), select:not([disabled]), [tabindex]:not([tabindex="-1"])');
+                if(!f.length) return;
+                const first = f[0], last = f[f.length-1];
+                if(e.shiftKey && document.activeElement === first){ e.preventDefault(); last.focus(); }
+                else if(!e.shiftKey && document.activeElement === last){ e.preventDefault(); first.focus(); }
+              }
+              document.addEventListener('keydown', trapHandler, true);
 
               // Close handlers
               const closeBtn = document.getElementById('edit-profile-close');
@@ -582,8 +669,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               if(cancelBtn) cancelBtn.addEventListener('click', closeModal);
               overlay.addEventListener('click', function(e){if(e.target===overlay) closeModal();});
 
-              // ESC key
-              function escHandler(e){if(e.key==='Escape'){closeModal();document.removeEventListener('keydown',escHandler);}}
+              // ESC key — closeModal() owns the detach for every close path.
+              function escHandler(e){if(e.key==='Escape') closeModal();}
               document.addEventListener('keydown', escHandler);
 
               // Focus/blur border color
