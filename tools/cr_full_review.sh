@@ -3,36 +3,42 @@
 # Diffs each directory against the repo's initial commit so all files count as
 # changed. Free tier allows 3 reviews per ~1h window: on "Review limit reached"
 # the runner sleeps 51 min and retries the SAME directory until it succeeds.
-# Output: appended report at ~/coderabbit-full-review-v3.md
+# Output: appended report at ~/coderabbit-full-review-v4.md
 set -u
 BASE=b829cc886db4a0607a0faf4c43cf929be756d1ba
-OUT="$HOME/coderabbit-full-review-v3.md"
+OUT="$HOME/coderabbit-full-review-v4.md"
 TMP=$(mktemp)
 DIRS=(
+  contracts
+  backend/internal/db
+  backend/internal/api
+  app/src
+  backend/internal/graphql
+  backend/internal/connectrpc
+  backend/internal/indexer
   backend/internal/keeper
+  backend/internal/imagestore
+  backend/internal/ws
+  backend/internal/sse
   backend/internal/auth
   backend/internal/chain
   backend/internal/verifier
-  backend/internal/ws
-  backend/internal/sse
   backend/internal/media
-  backend/internal/imagestore
   backend/internal/webhook
-  backend/internal/ratelimit
-  backend/internal/rpcpool
   backend/internal/cache
+  backend/cmd
   backend/internal/config
   backend/internal/crypto
   backend/internal/dataloader
   backend/internal/health
-  backend/cmd
-  app/src
+  backend/internal/nonce
+  backend/internal/ratelimit
+  backend/internal/rpcpool
   tools
   .github
   docs
 )
-echo "" >> "$OUT"
-echo "# Resumed limit-aware sweep $(date) — contracts/src + contracts/test + nonce already done" >> "$OUT"
+echo "# CodeRabbit full sweep v4 (priority order) $(date) — HEAD $(git rev-parse --short HEAD)" > "$OUT"
 for d in "${DIRS[@]}"; do
   [ -d "$d" ] || { echo "skip missing $d" >> "$OUT"; continue; }
   tries=0

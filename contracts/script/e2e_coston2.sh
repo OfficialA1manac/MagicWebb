@@ -43,29 +43,30 @@ send "$PK_SELLER" "$NFT" "setApprovalForAll(address,bool)" "$OB" true
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 
 echo "== A. list token1 @0.05 -> C buys =="
-send "$PK_SELLER" "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 50000000000000000 86400
-send "$PK_C" "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 50000000000000000
+send "$PK_SELLER" "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 1000000000000000000 86400
+send "$PK_C" "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 1000000000000000000
 check "token1 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 1 --rpc-url "$RPC")"
 
-echo "== B. auction token2 (reserve 0.05, ends +180s): C 0.05 -> D 0.06 -> C +0.02 =="
+echo "== B. auction token2 (reserve 1, ends +180s): C 1 -> D 2 (leader+1 floor) -> C +2 =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_SELLER" "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 50000000000000000 180 500 0
+send "$PK_SELLER" "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2 1000000000000000000 180 500 0
 AID=$(cast call "$AH" "nextAuctionId()(uint256)" --rpc-url "$RPC")
 echo "auction id=$AID ends $(date -d "@$((NOW + 180))" 2>/dev/null || echo "+180s")"
-send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 50000000000000000
-send "$PK_D" "$AH" "bid(uint256)" "$AID" --value 60000000000000000
-send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 20000000000000000
-check "C cumulative 0.07" "70000000000000000" "$(cast call "$AH" "cumulative(uint256,address)(uint128)" "$AID" "$C" --rpc-url "$RPC" | awk '{print $1}')"
+# v3 rule: overtaking needs leader + max(leader*bps/10000, 1 ether).
+send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 1000000000000000000
+send "$PK_D" "$AH" "bid(uint256)" "$AID" --value 2000000000000000000
+send "$PK_C" "$AH" "bid(uint256)" "$AID" --value 2000000000000000000
+check "C cumulative 3" "3000000000000000000" "$(cast call "$AH" "cumulative(uint256,address)(uint128)" "$AID" "$C" --rpc-url "$RPC" | awk '{print $1}')"
 
-echo "== C. offer 0.05 on token3 from C -> seller accepts =="
+echo "== C. offer 1 on token3 from C -> seller accepts =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_C" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 50000000000000000 86400 --value 50000000000000000
-send "$PK_SELLER" "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$C" 50000000000000000
+send "$PK_C" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 1000000000000000000 86400 --value 1000000000000000000
+send "$PK_SELLER" "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$C" 1000000000000000000
 check "token3 -> C" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 
-echo "== D. offer 0.05 on token4 from D, expires in 3 min — the shortest allowed duration (offer keeper must refund) =="
+echo "== D. offer 1 on token4 from D, expires in 3 min — the shortest allowed duration (offer keeper must refund) =="
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
-send "$PK_D" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 50000000000000000 180 --value 50000000000000000
+send "$PK_D" "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 4 1000000000000000000 180 --value 1000000000000000000
 D_AFTER_OFFER=$(bal "$D")
 
 echo "== E. WAIT: backend keeper must settle auction $AID + refund loser D + refund expired offer =="
@@ -73,14 +74,15 @@ echo "auction ends in ~3min (plus anti-snipe extensions); polling chain for sett
 DEADLINE=$(( $(date +%s) + 900 ))
 SETTLED=""
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  SETTLED=$(cast call "$AH" "auctions(uint256)(address,uint64,uint16,bool,uint8,address,uint64,uint256,uint128,uint128,address,uint128,uint128)" "$AID" --rpc-url "$RPC" | sed -n 4p)
+  # Auction struct has 14 fields incl. the `active` bool right after `settled`.
+  SETTLED=$(cast call "$AH" "auctions(uint256)(address,uint64,uint16,bool,bool,uint8,address,uint64,uint256,uint128,uint128,address,uint128,uint128)" "$AID" --rpc-url "$RPC" | sed -n 4p)
   [ "$SETTLED" = "true" ] && break
   sleep 20
 done
 check "keeper auto-settled auction" "true" "$SETTLED"
 check "token2 -> C (auction winner)" "$C" "$(cast call "$NFT" "ownerOf(uint256)(address)" 2 --rpc-url "$RPC")"
 
-# loser refund: D's escrow (0.06) must come back without anyone calling refundLosers
+# loser refund: D's escrow (2) must come back without anyone calling refundLosers
 DEADLINE=$(( $(date +%s) + 300 ))
 DREF=0
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do

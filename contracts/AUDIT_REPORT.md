@@ -79,7 +79,9 @@ All public/external functions have appropriate visibility. Internal helpers are 
 | `entryGate`    | Entry-path functions (list, buy, create, bid, makeOffer, acceptOffer) | ✅ Correct — fails open if no manager |
 | `onlyRole()`   | MarketplaceManager only | ✅ Standard OZ pattern |
 
-**Critical design invariant verified:** EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly, rejectOffer, refundExpiredOffer) never consult the manager. ✅ *(⚠️ `reclaim` and `settleUnstuck` were removed post-audit — stall window eliminated.)*
+**Critical design invariant verified (as of the audited revision):** EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly, rejectOffer, refundExpiredOffer) never consult the manager. ✅ *(⚠️ `reclaim` and `settleUnstuck` were removed post-audit — stall window eliminated.)*
+
+> **v3 update (2026-08-28):** `settle()` now consults the manager for KEEPER_ROLE, and is authorized only for the keeper, the seller, or the winner — a deliberate product rule. Escrow recovery remains fully manager-independent: `forceCancel()` (permissionless, endsAt + 3 days), `withdrawLoserFunds()`, `refundLosers()`, and `withdrawRefund()` never consult the manager, so funds can never be trapped. The cores are also UUPS-upgradeable behind a timelock (instant on testnets during the testing phase) rather than immutable; full immutability is the documented end state via admin renunciation — see docs/IMMUTABILITY_TRANSITION.md.
 
 ### Event Emission Review
 

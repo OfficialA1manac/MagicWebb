@@ -61,7 +61,8 @@ error CannotCancel();
 ///      but all time windows are far larger than the manipulation threshold:
 ///      - Auctions last from 1 minute to 24 hours (one of 15 fixed durations)
 ///      - Anti-snipe extension window is 3 minutes (EXTENSION_WINDOW)
-///      - No stall window: settle() reverts entirely on transfer failure; keeper retries
+///      - No stall window: a failed NFT transfer finalises the auction and refunds
+///        the winner on the spot (AuctionSettlementFailed) — nothing waits on a retry
 ///      A 15-second skew is negligible against these magnitudes and cannot be
 ///      exploited to force premature settlement or indefinitely extend an auction.
 contract AuctionHouse is MarketplaceCore {

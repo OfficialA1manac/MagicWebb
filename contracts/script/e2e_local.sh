@@ -63,19 +63,20 @@ cast send "$AH" "create(address,uint256,uint128,uint64,uint16,uint128)" "$NFT" 2
 AID=$(cast call "$AH" "nextAuctionId()(uint256)" --rpc-url "$RPC")
 echo "auction id=$AID"
 cast send "$AH" "bid(uint256)" "$AID" --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null  # alice leads @1
-cast send "$AH" "bid(uint256)" "$AID" --value 1100000000000000000 --rpc-url "$RPC" --private-key "$PK_BOB" >/dev/null    # bob outbids @1.1 -> OutbidNotification(alice)
-cast send "$AH" "bid(uint256)" "$AID" --value 500000000000000000  --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null  # alice tops up -> cumulative 1.5, retakes lead
-check "alice cumulative=1.5e18" "1500000000000000000" "$(cast call "$AH" "cumulative(uint256,address)(uint128)" "$AID" "$ALICE" --rpc-url "$RPC" | awk '{print $1}')"
+# v3 rule: overtaking needs leader + max(leader*bps/10000, 1 ether); sub-leader bids revert.
+cast send "$AH" "bid(uint256)" "$AID" --value 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_BOB" >/dev/null    # bob outbids @2.0 (1 + 1-ether floor) -> OutbidNotification(alice)
+cast send "$AH" "bid(uint256)" "$AID" --value 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null  # alice tops up -> cumulative 3.0 (2 + floor), retakes lead
+check "alice cumulative=3e18" "3000000000000000000" "$(cast call "$AH" "cumulative(uint256,address)(uint128)" "$AID" "$ALICE" --rpc-url "$RPC" | awk '{print $1}')"
 warp 7200
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR"); B0=$(bal "$BOB")
 cast send "$AH" "settle(uint256)" "$AID" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
 S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
 check "auction NFT -> alice"   "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 2 --rpc-url "$RPC")"
-check "seller +1.47750"        "1477500000000000000" "$(sub $S1 $S0)"
-check "fee    +0.02250"        "22500000000000000"   "$(sub $C1 $C0)"
+check "seller +2.95500"        "2955000000000000000" "$(sub $S1 $S0)"
+check "fee    +0.04500"        "45000000000000000"   "$(sub $C1 $C0)"
 cast send "$AH" "refundLosers(uint256,address[])" "$AID" "[$BOB]" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
 B1=$(bal "$BOB")
-check "bob (loser) refunded 1.1e18" "1100000000000000000" "$(sub $B1 $B0)"
+check "bob (loser) refunded 2e18" "2000000000000000000" "$(sub $B1 $B0)"
 
 echo "== C. offer -> accept -> distribute =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 3

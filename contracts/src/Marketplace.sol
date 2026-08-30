@@ -207,8 +207,9 @@ contract Marketplace is MarketplaceCore {
 
     /// @notice Clean up an expired listing that had no buyer. Callable only by
     ///         addresses with KEEPER_ROLE (via the MarketplaceManager). Expired
-    ///         listings are auto-cleaned by the keeper bot — users cannot cancel
-    ///         expired listings themselves. Emits Cancelled event.
+    ///         listings are auto-cleaned by the keeper bot; the seller can also
+    ///         remove their own listing at any time via cancel(), which does not
+    ///         check expiry. Emits Cancelled event.
     ///         If no MarketplaceManager is deployed (manager == address(0)),
     ///         cleanup stays permissionless as a safety fallback.
     /// @dev The listing must be expired (block.timestamp > expiresAt). No price
