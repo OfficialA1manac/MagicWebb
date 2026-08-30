@@ -42,7 +42,15 @@ jobs:
 
       - name: Generate coverage report
         working-directory: contracts
-        run: forge coverage --report lcov --report-file lcov.info
+        # --ir-minimum is required, not optional: `forge coverage` disables the
+        # optimizer and viaIR for accurate source mappings, but these contracts
+        # need `via_ir = true` (foundry.toml) to compile at all, so plain
+        # `forge coverage` fails with "Stack too deep" and has been failing this
+        # job. --ir-minimum re-enables viaIR at minimum optimization, which is
+        # Foundry's documented workaround; the trade-off is less precise source
+        # mappings, which is acceptable here because the lcov output is only
+        # uploaded to Codecov on version tags (see the next step).
+        run: forge coverage --ir-minimum --report lcov --report-file lcov.info
 
       - name: Upload coverage to Codecov
         if: github.event_name == 'push' && startsWith(github.ref, 'refs/tags/v')
