@@ -343,7 +343,7 @@ type Subscription {
 
   """Push an auction update when a bid is placed or status changes."""
   auctionUpdated(
-    auctionId: Int
+    auctionID: Int
   ): Auction!
 
   """Push a new activity event when a marketplace transaction occurs."""

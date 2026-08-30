@@ -101,6 +101,13 @@ func (l *PgAuditLogger) retentionSweeper() {
 }
 
 func (l *PgAuditLogger) Log(entry AuditEntry) {
+	// Apply the documented Details default. details is JSONB NOT NULL
+	// (migration 028); sending "" explicitly bypasses the column default and
+	// fails the insert with an invalid-JSON error.
+	if entry.Details == "" {
+		entry.Details = "{}"
+	}
+
 	// After Close, drop entries instead of sending. The send channel is
 	// never closed (a send on a closed channel would panic inside an auth
 	// handler racing shutdown); shutdown is signalled via quit only.

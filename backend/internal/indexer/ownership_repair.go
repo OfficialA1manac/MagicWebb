@@ -61,6 +61,18 @@ func verifyListingSeller(ctx context.Context, eth chain.Caller, collection, toke
 	}
 	bal, err1155 := chain.Balance1155(ctx, eth, collection, tokenID, seller)
 	if err1155 == nil {
+		// boundedPositiveAmount below already treats a nil balance as valid
+		// input; this call site must agree, or a (nil, nil) return from
+		// Balance1155 panics the ownership-repair worker.
+		//
+		// A nil balance is UNKNOWN, not zero. Reporting verified=false makes
+		// the caller skip the row; reporting verified=true with owns=false
+		// would make it orphan a listing whose ownership was never actually
+		// determined. Balance1155 cannot return (nil, nil) today — this keeps
+		// the failure direction safe if that ever changes.
+		if bal == nil {
+			return false, "erc1155", 0, false, nil
+		}
 		if bal.Sign() > 0 {
 			return true, "erc1155", boundedPositiveAmount(bal), true, nil
 		}

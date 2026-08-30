@@ -11,10 +11,12 @@ package marketplacev1
 import (
 	"context"
 	"fmt"
+	"net/http"
 	"strings"
 
 	"connectrpc.com/connect"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/dataloader"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
@@ -26,13 +28,91 @@ import (
 type Server struct {
 	q     *db.Q
 	bcast *sse.Broadcaster
+	// jwtSecret lets STREAMING handlers authenticate their caller. The
+	// Connect auth interceptor is a UnaryInterceptorFunc, so it never runs for
+	// server-streaming RPCs and never puts a caller in the context. Any stream
+	// carrying per-user data must therefore verify the token itself.
+	// Empty = no JWT configured; see requireCaller.
+	jwtSecret string
 }
 
 // NewServer creates a MarketplaceService handler backed by the given DB.
 // bcast is optional — when nil, streaming subscription RPCs return
 // Unavailable errors to clients.
+//
+// Streams that carry per-user data reject every caller under this
+// constructor because there is no secret to verify them with. Use
+// NewServerWithAuth in production.
 func NewServer(q *db.Q, bcast *sse.Broadcaster) *Server {
 	return &Server{q: q, bcast: bcast}
+}
+
+// NewServerWithAuth is NewServer plus the JWT secret that streaming handlers
+// use to authenticate callers directly (see Server.jwtSecret).
+func NewServerWithAuth(q *db.Q, bcast *sse.Broadcaster, jwtSecret string) *Server {
+	return &Server{q: q, bcast: bcast, jwtSecret: jwtSecret}
+}
+
+// callerAddr resolves the authenticated wallet address for a request.
+// It prefers a caller already placed in the context (in case a streaming
+// interceptor is added later) and otherwise verifies the bearer token or
+// session cookie on the request itself. Returns "" when the caller cannot be
+// authenticated.
+func (s *Server) callerAddr(ctx context.Context, hdr http.Header) string {
+	if v, ok := ctx.Value(auth.CallerKey).(string); ok && v != "" {
+		// The interceptor stores "apikey:<label>" for API-key callers, which is
+		// a machine principal, not a wallet. A per-wallet notification stream
+		// has no meaningful address for it, so it is NOT a caller here — see
+		// the doc comment on SubscribeNotifications.
+		if !strings.HasPrefix(v, "apikey:") {
+			return strings.ToLower(v)
+		}
+		return ""
+	}
+	if s.jwtSecret == "" {
+		return ""
+	}
+	verify := func(tok string) string {
+		if tok == "" {
+			return ""
+		}
+		addr, err := auth.VerifyAccessToken(tok, s.jwtSecret)
+		if err != nil {
+			return ""
+		}
+		return strings.ToLower(addr)
+	}
+
+	if raw := hdr.Get("Authorization"); strings.HasPrefix(raw, "Bearer ") {
+		bearer := strings.TrimPrefix(raw, "Bearer ")
+		if !strings.HasPrefix(bearer, auth.APIKeyPrefix) {
+			if a := verify(bearer); a != "" {
+				return a
+			}
+		}
+	}
+
+	// Browser-initiated gRPC-Web calls carry the JWT in a wallet-bound session
+	// cookie. Several mw_a_<prefix> (and legacy mw_s_) cookies can be present
+	// at once after a wallet switch, so try EVERY candidate and accept the
+	// first that verifies — stopping at the first one would reject a live
+	// session whenever a stale cookie happened to sort ahead of it, and could
+	// resolve the caller to the previous wallet when the stale one still
+	// verifies. Mirrors jwtMiddleware in api/rest.go and ws/handler.go.
+	for _, part := range strings.Split(hdr.Get("Cookie"), ";") {
+		p := strings.TrimSpace(part)
+		if !strings.HasPrefix(p, "mw_s_") && !strings.HasPrefix(p, "mw_a_") {
+			continue
+		}
+		eq := strings.IndexByte(p, '=')
+		if eq < 0 {
+			continue
+		}
+		if a := verify(p[eq+1:]); a != "" {
+			return a
+		}
+	}
+	return ""
 }
 
 // ── GetListing ──────────────────────────────────────────────────────────────
@@ -420,6 +500,14 @@ func (s *Server) GetActivity(ctx context.Context, req *connect.Request[GetActivi
 
 	// Route to correct query based on filter params.
 	switch {
+	// A half-specified token filter used to fall through to the default
+	// branch, so a client asking for one collection silently received GLOBAL
+	// recent activity with no error — unfiltered data that looks filtered.
+	// There is no collection-only query, so reject the combination instead of
+	// inventing an answer.
+	case (collection != "") != (tokenID != ""):
+		return nil, connect.NewError(connect.CodeInvalidArgument,
+			errString("collection and token_id must be provided together"))
 	case collection != "" && tokenID != "" && address != "":
 		tokenRows, terr := s.q.GetTokenActivityByAddress(ctx, collection, tokenID, address, limit)
 		if terr != nil {
@@ -441,6 +529,13 @@ func (s *Server) GetActivity(ctx context.Context, req *connect.Request[GetActivi
 		return nil, connect.NewError(connect.CodeInternal, err)
 	}
 
+	// NOTE: ActivityEvent.from_addr / to_addr (proto fields 7 and 8) are left
+	// unset here and in subscription_stream.go, because db.ActivityRow carries
+	// no counterparty columns — the activity queries never select them. They
+	// are therefore always the empty string on the wire. Populating them means
+	// widening the activity queries and ActivityRow; removing them from the
+	// proto would be a breaking wire change. Until one of those happens,
+	// clients must not read these two fields.
 	events := make([]*ActivityEvent, 0, len(rows))
 	for i := range rows {
 		events = append(events, &ActivityEvent{

@@ -98,25 +98,27 @@ func encryptWebhookSecret(secret string) string {
 }
 
 // decryptWebhookSecret reverses encryptWebhookSecret. Legacy plaintext rows
-// (no prefix) are returned unchanged. An undecryptable row (key rotated away)
-// returns "" so the delivery goes unsigned rather than signed with garbage.
-func decryptWebhookSecret(stored string) string {
+// (no prefix) are returned unchanged. A row that was encrypted but cannot be
+// decrypted (key rotated away, key unset, corrupt blob) returns an error
+// rather than "": the caller must NOT fall back to an unsigned delivery,
+// because a receiver that only checks for header presence would keep trusting
+// an endpoint whose signature it can no longer verify. Callers drop the
+// config instead, so the delivery visibly fails.
+func decryptWebhookSecret(stored string) (string, error) {
 	if !strings.HasPrefix(stored, webhookSecretPrefix) {
-		return stored
+		return stored, nil
 	}
 	aead := webhookAEAD()
 	if aead == nil {
-		log.Error().Msg("db: encrypted webhook secret found but WEBHOOK_ENC_KEY unset or invalid — delivery will be unsigned")
-		return ""
+		return "", fmt.Errorf("db: encrypted webhook secret found but WEBHOOK_ENC_KEY unset or invalid")
 	}
 	blob, err := hex.DecodeString(strings.TrimPrefix(stored, webhookSecretPrefix))
 	if err != nil || len(blob) < aead.NonceSize() {
-		return ""
+		return "", fmt.Errorf("db: malformed encrypted webhook secret")
 	}
 	pt, err := aead.Open(nil, blob[:aead.NonceSize()], blob[aead.NonceSize():], nil)
 	if err != nil {
-		log.Error().Msg("db: webhook secret decrypt failed (rotated key?) — delivery will be unsigned")
-		return ""
+		return "", fmt.Errorf("db: webhook secret decrypt failed (rotated key?)")
 	}
-	return string(pt)
+	return string(pt), nil
 }

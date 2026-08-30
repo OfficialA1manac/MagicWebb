@@ -306,6 +306,12 @@ func (r *Runner) ReindexCollection(ctx context.Context, collectionAddr string, f
 	if err != nil {
 		return 0, fmt.Errorf("reindex: block number: %w", err)
 	}
+	// head is unsigned: on a chain whose head is still below headLag this
+	// subtraction wraps to ~2^64, the check below passes, and the scan loop
+	// walks a practically endless block range issuing FilterLogs calls.
+	if head < headLag {
+		return 0, fmt.Errorf("reindex: chain head %d is below head lag %d", head, headLag)
+	}
 	target := head - headLag
 	if target <= fromBlock {
 		return 0, fmt.Errorf("reindex: target block %d <= fromBlock %d", target, fromBlock)
@@ -905,7 +911,14 @@ func (r *Runner) runListingExpirySweeper(ctx context.Context) {
 				// Notify the seller that their listing expired.
 				title := l.Name
 				if title == "" {
-					title = fmt.Sprintf("%s #%s", l.Collection[:10], l.TokenID)
+					// An empty or truncated collection value would panic this
+					// worker; supervise restarts it, but the tick is lost and
+					// the same row panics again on every retry.
+					short := l.Collection
+					if len(short) > 10 {
+						short = short[:10]
+					}
+					title = fmt.Sprintf("%s #%s", short, l.TokenID)
 				}
 				r.h.notify(ctx, l.Seller, "listing_expired",
 					"Your listing expired — "+title+" was not purchased",
@@ -954,7 +967,14 @@ var pendingReturnsSelector = crypto.Keccak256([]byte("pendingReturns(address)"))
 // the row; a positive balance verifies it (UI banner) and notifies once.
 func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 	auctionAddr := common.HexToAddress(r.cfg.AuctionAddr)
-	ticker := time.NewTicker(1 * time.Second)
+	// Each tick makes ONE eth_call per pending row (up to 200), so a 1-second
+	// interval meant up to 200 RPC round trips per second against a single
+	// endpoint — enough for a public RPC to rate-limit us, and slow enough
+	// that a tick could not finish inside its own period, so ticks queued up
+	// behind each other. This sweeper is the notification half of the refund
+	// story, so it rides the refund cadence rather than introducing another
+	// knob. The batch stays at 200 so a backlog still drains quickly.
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.RefundTick, 30*time.Second))
 	defer ticker.Stop()
 	for {
 		select {

@@ -58,15 +58,15 @@ func TestListingsService_HandleList_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri", "collection_verified", "total_supply",
+			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", true, int64(0),
+			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0),
 		).AddRow(
 			"0xcol2", "2", "0xseller2", "2000000000000000000", int64(1),
 			"erc1155", now.Add(48*time.Hour), now, "0xtx2",
-			"Token Two", "https://example.com/2.png", false, int64(100),
+			"Token Two", "https://example.com/2.png", false, "0xcreator1", int64(100),
 		))
 
 	svc := NewListingsService(db.New(mock), nil)
@@ -101,11 +101,11 @@ func TestListingsService_HandleList_WithCollectionFilter(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri", "collection_verified", "total_supply",
+			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", true, int64(0),
+			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0),
 		))
 
 	svc := NewListingsService(db.New(mock), nil)
@@ -136,7 +136,7 @@ func TestListingsService_HandleList_Empty(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri", "collection_verified", "total_supply",
+			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}))
 
 	svc := NewListingsService(db.New(mock), nil)
@@ -190,11 +190,11 @@ func TestListingsService_HandleGet_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri", "collection_verified",
+			"name", "image_uri", "collection_verified", "collection_creator",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", false,
+			"Token One", "https://example.com/1.png", false, "0xcreator1",
 		))
 
 	svc := NewListingsService(db.New(mock), nil)
@@ -316,14 +316,14 @@ func TestAuctionsService_HandleList_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(1), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "", "", int16(100),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", "", true))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", "", true, "0xcreator1"))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -351,14 +351,14 @@ func TestAuctionsService_HandleList_Filtered(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50, "0xcol1", "active").
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(2), "0xcol1", "2", "0xseller2", "erc1155",
 				"10000000000000000000", "15000000000000000000", "0xbidder1", int16(200),
-				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", "", true))
+				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", "", true, "0xcreator1"))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -386,14 +386,14 @@ func TestAuctionsService_HandleGet_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(int64(42)).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(42), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "6000000000000000000", "0xbidder1", int16(150),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", "", true))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", "", true, "0xcreator1"))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -1165,7 +1165,7 @@ func TestListingsService_HandleList_InvalidLimit(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
-			"name", "image_uri", "collection_verified", "total_supply",
+			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}))
 
 	svc := NewListingsService(db.New(mock), nil)
@@ -1188,7 +1188,7 @@ func TestAuctionsService_HandleList_InvalidLimit(t *testing.T) {
 
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
 
 	// limit=-5 is clamped by the handler to 1 (n < 1 → n = 1)
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
@@ -1258,7 +1258,7 @@ func TestLimitClamping(t *testing.T) {
 			WillReturnRows(pgxmock.NewRows([]string{
 				"collection", "token_id", "seller", "price_wei", "amount",
 				"standard", "expires_at", "listed_at", "tx_hash",
-				"name", "image_uri", "collection_verified", "total_supply",
+				"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 			}))
 
 		url := "/api/v1/listings"

@@ -440,6 +440,12 @@ type ListingRow struct {
 	TotalSupply int64  `json:"total_supply"` // collection-level total supply (0 when unindexed)
 	// Denormalised from collections
 	CollectionVerified bool `json:"collection_verified"`
+	// CollectionCreator is the collection's ERC-173 owner() as resolved by the
+	// verifier (migration 036); "" when never resolved. Shipped alongside
+	// CollectionVerified because the UI badge upgrades from "Verified NFT" to
+	// "Authentic" only when BOTH are present — without this field every card
+	// renderer was permanently stuck on the lesser badge.
+	CollectionCreator string `json:"collection_creator"`
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -468,7 +474,7 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false)
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
@@ -478,7 +484,7 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 		collection, tokenID).
 		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
-			&r.CollectionVerified)
+			&r.CollectionVerified, &r.CollectionCreator)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("listing not found")
 	}
@@ -542,7 +548,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false),
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
 		        0 AS total_supply
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
@@ -560,7 +566,7 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
-			&r.CollectionVerified, &r.TotalSupply); err != nil {
+			&r.CollectionVerified, &r.CollectionCreator, &r.TotalSupply); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -589,6 +595,9 @@ type AuctionRow struct {
 	// CollectionVerified mirrors ListingRow: the collection answers ERC-165 for
 	// a standard NFT interface and its metadata has resolved (migration 034).
 	CollectionVerified bool `json:"collection_verified"`
+	// CollectionCreator mirrors ListingRow: ERC-173 owner() from migration 036,
+	// "" when never resolved. Required for the "Authentic" badge upgrade.
+	CollectionCreator string `json:"collection_creator"`
 }
 
 // auctionSelectCols is the canonical SELECT projection for an AuctionRow.
@@ -599,7 +608,7 @@ const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.selle
 		        a.reserve_price_wei::text, a.highest_bid_wei::text, COALESCE(a.highest_bidder,''),
 		        a.min_increment_bps, a.starts_at, a.ends_at, a.status::text, a.create_tx,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false)`
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')`
 
 const auctionFromJoin = ` FROM auctions a
 		 LEFT JOIN nft_metadata m ON m.collection=a.collection AND m.token_id=a.token_id
@@ -610,7 +619,8 @@ func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
 	var r AuctionRow
 	err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 		&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
-		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI, &r.CollectionVerified)
+		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI,
+		&r.CollectionVerified, &r.CollectionCreator)
 	return r, err
 }
 
@@ -649,10 +659,13 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 	var r AuctionRow
 	err := q.reader().QueryRow(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+` WHERE a.auction_id=$1`, auctionID).
+		// Must stay in lockstep with auctionSelectCols and scanAuctionRow. This
+		// is a QueryRow (not Rows) so it cannot reuse scanAuctionRow directly;
+		// any column added to auctionSelectCols must be added here too.
 		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
 			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx,
-			&r.Name, &r.ImageURI, &r.CollectionVerified)
+			&r.Name, &r.ImageURI, &r.CollectionVerified, &r.CollectionCreator)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("auction not found: %d", auctionID)
 	}
@@ -661,6 +674,7 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 
 type AuctionsFilter struct {
 	Collection  string
+	TokenID     string // exact token within Collection; "" = every token
 	Seller      string
 	Status      string // "active" | "settled" | "cancelled" | "" = all
 	MinPriceWei string // minimum reserve price in wei (inclusive)
@@ -677,6 +691,13 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 	if f.Collection != "" {
 		args = append(args, f.Collection)
 		where += fmt.Sprintf(" AND a.collection=$%d", len(args))
+	}
+	// token_id is TEXT-cast on the way out (auctionSelectCols) because the
+	// column is numeric; compare as text so the caller can pass the same string
+	// the API hands back without worrying about numeric formatting.
+	if f.TokenID != "" {
+		args = append(args, f.TokenID)
+		where += fmt.Sprintf(" AND a.token_id::text=$%d", len(args))
 	}
 	if f.Seller != "" {
 		args = append(args, f.Seller)

@@ -1469,7 +1469,7 @@ func (e *executableSchema) Complexity(typeName, field string, childComplexity in
 			return 0, false
 		}
 
-		return e.complexity.Subscription.AuctionUpdated(childComplexity, args["auctionId"].(*int)), true
+		return e.complexity.Subscription.AuctionUpdated(childComplexity, args["auctionID"].(*int)), true
 
 	case "Subscription.listingUpdated":
 		if e.complexity.Subscription.ListingUpdated == nil {
@@ -3207,20 +3207,20 @@ func (ec *executionContext) field_Subscription_auctionUpdated_args(ctx context.C
 	if err != nil {
 		return nil, err
 	}
-	args["auctionId"] = arg0
+	args["auctionID"] = arg0
 	return args, nil
 }
 func (ec *executionContext) field_Subscription_auctionUpdated_argsAuctionID(
 	ctx context.Context,
 	rawArgs map[string]any,
 ) (*int, error) {
-	if _, ok := rawArgs["auctionId"]; !ok {
+	if _, ok := rawArgs["auctionID"]; !ok {
 		var zeroVal *int
 		return zeroVal, nil
 	}
 
-	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("auctionId"))
-	if tmp, ok := rawArgs["auctionId"]; ok {
+	ctx = graphql.WithPathContext(ctx, graphql.NewPathWithField("auctionID"))
+	if tmp, ok := rawArgs["auctionID"]; ok {
 		return ec.unmarshalOInt2ᚖint(ctx, tmp)
 	}
 
@@ -10593,7 +10593,7 @@ func (ec *executionContext) _Subscription_auctionUpdated(ctx context.Context, fi
 	}()
 	resTmp, err := ec.ResolverMiddleware(ctx, func(rctx context.Context) (any, error) {
 		ctx = rctx // use context from middleware stack in children
-		return ec.resolvers.Subscription().AuctionUpdated(rctx, fc.Args["auctionId"].(*int))
+		return ec.resolvers.Subscription().AuctionUpdated(rctx, fc.Args["auctionID"].(*int))
 	})
 	if err != nil {
 		ec.Error(ctx, err)

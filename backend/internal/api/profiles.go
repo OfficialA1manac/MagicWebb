@@ -83,8 +83,10 @@ func profileIsEmpty(p *db.ProfileRow) bool {
 	return p.DisplayName == "" && p.Tag == "" && p.Bio == "" && p.AvatarURI == ""
 }
 
-// cachedBytes normalises a cache hit to raw JSON. The memory backend returns
-// the []byte we stored; the Redis backend JSON-round-trips it into a string.
+// cachedBytes normalises a cache hit to raw JSON. Cache writers MUST store
+// the JSON as a string, not []byte: the Redis backend JSON-round-trips the
+// stored value, and a []byte comes back base64-encoded. The []byte case below
+// covers legacy in-memory entries written before that rule.
 func cachedBytes(v any) []byte {
 	switch b := v.(type) {
 	case []byte:
@@ -134,7 +136,13 @@ func (s *ProfilesService) handleGet(c *fiber.Ctx) error {
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	s.merged.Set(s.profileCacheKey(addr), body)
+	// A fanout request never reads siblings, so its (possibly empty) result
+	// must not become the answer served to normal callers for the full TTL.
+	// Stored as a string: the Redis backend JSON-round-trips values, and a
+	// []byte would come back base64-encoded.
+	if c.Get(profileFanoutHeader) == "" {
+		s.merged.Set(s.profileCacheKey(addr), string(body))
+	}
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)
 }
@@ -252,7 +260,7 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 	// Refresh the read cache so the edit is visible immediately on this
 	// network (writes are never proxied — editing stays local per network).
 	if body, err := json.Marshal(resp); err == nil {
-		s.merged.Set(s.profileCacheKey(addr), body)
+		s.merged.Set(s.profileCacheKey(addr), string(body))
 	}
 	return c.JSON(resp)
 }

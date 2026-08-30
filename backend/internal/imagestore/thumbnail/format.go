@@ -89,9 +89,15 @@ func NegotiateFormat(acceptHeader string) Format {
 			continue
 		}
 		for _, f := range available {
-			if ae.matches(f.MimeType()) {
-				return f
+			if !ae.matches(f.MimeType()) {
+				continue
 			}
+			// RFC 9110 §12.5.1: the most specific matching media range wins.
+			// "image/jpeg;q=0, */*" must not serve JPEG via the wildcard.
+			if q, ok := effectiveQuality(parsed, f.MimeType()); !ok || q <= 0 {
+				continue
+			}
+			return f
 		}
 	}
 
@@ -120,6 +126,36 @@ func (ae acceptEntry) matches(mime string) bool {
 	return ae.mime == mime
 }
 
+// effectiveQuality returns the quality value that applies to mime, taken from
+// the most specific media range that matches it (exact type > subtype wildcard
+// > full wildcard), per RFC 9110 §12.5.1. The bool reports whether any range
+// matched at all.
+func effectiveQuality(entries []acceptEntry, mime string) (float64, bool) {
+	best := -1
+	q := 0.0
+	for _, ae := range entries {
+		var spec int
+		switch {
+		case ae.mime == mime:
+			spec = 2
+		case ae.mime == "image/*" && strings.HasPrefix(mime, "image/"):
+			spec = 1
+		case ae.mime == "*/*":
+			spec = 0
+		default:
+			continue
+		}
+		if spec > best {
+			best = spec
+			q = ae.quality
+		}
+	}
+	if best < 0 {
+		return 0, false
+	}
+	return q, true
+}
+
 // parseAccept parses an HTTP Accept header value into ordered entries.
 // Entries are sorted by quality (descending), with ties broken by specificity
 // (exact match > subtype wildcard > full wildcard).
@@ -139,7 +175,9 @@ func parseAccept(header string) []acceptEntry {
 
 		// Split on ";" to separate media type from parameters.
 		subparts := strings.Split(part, ";")
-		mime := strings.TrimSpace(subparts[0])
+		// Media type/subtype tokens are case-insensitive (RFC 9110 §8.3.1),
+		// so normalize before storing — "Image/WebP" must match "image/webp".
+		mime := strings.ToLower(strings.TrimSpace(subparts[0]))
 		if mime == "" {
 			continue
 		}

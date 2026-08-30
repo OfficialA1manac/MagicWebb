@@ -82,6 +82,10 @@ type Election struct {
 	// Peer client connections.
 	clientsMu sync.RWMutex
 	clients   map[string]proto.KeeperElectionClient // addr → client
+	// dialing tracks peers with a live connectPeer goroutine. Run() is
+	// called again after every Release(), so without this guard each cycle
+	// leaks another dialer + grpc.ClientConn per peer.
+	dialing map[string]struct{}
 
 	// gRPC server for receiving heartbeats.
 	srv                                     *grpc.Server
@@ -156,6 +160,7 @@ func New(srv *grpc.Server, peerAddrs []string, myAddr string, opts ...Option) *E
 		leaderID:      "",
 		lastHeartbeat: time.Time{},
 		clients:       make(map[string]proto.KeeperElectionClient),
+		dialing:       make(map[string]struct{}),
 		srv:           srv,
 		gateReady:     make(chan struct{}),
 		lockCtx:       nil,
@@ -214,8 +219,17 @@ func (e *Election) Run(ctx context.Context) error {
 	// gateReady is closed in becomeLeaderLocked(), which only fires
 	// when this instance wins the election. Followers block here
 	// until failover (3s heartbeat timeout triggers new election).
+	//
+	// Copy the channel under the lock: Release(), resign(), Heartbeat() and
+	// heartbeatTick() all REASSIGN e.gateReady while holding mu, so reading
+	// the field bare is a data race the race detector fails on — and a reader
+	// that latched the old channel would wait on one nobody will ever close.
+	e.mu.RLock()
+	gate := e.gateReady
+	e.mu.RUnlock()
+
 	select {
-	case <-e.gateReady:
+	case <-gate:
 		return nil
 	case <-ctx.Done():
 		return ctx.Err()
@@ -228,7 +242,13 @@ func (e *Election) Run(ctx context.Context) error {
 //   - The leader voluntarily yields
 //   - Shutdown is called
 func (e *Election) LockCtx() context.Context {
-	<-e.gateReady // wait for first acquisition
+	// Same reassignment race as Run(): copy the channel under the lock before
+	// receiving on it.
+	e.mu.RLock()
+	gate := e.gateReady
+	e.mu.RUnlock()
+
+	<-gate // wait for first acquisition
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	return e.lockCtx
@@ -488,7 +508,17 @@ func (e *Election) resign() {
 	// failure detector (which requires leaderID != instanceID) from ever
 	// firing, so the instance would never re-elect.
 	e.leaderID = ""
-	e.lastHeartbeat = time.Time{}
+	// START the failover window rather than clearing it. With a zero
+	// timestamp AND an empty leaderID the failure detector could never fire,
+	// so after a resign this instance stayed a follower for the rest of the
+	// process lifetime unless some peer claimed leadership. On a
+	// single-instance deployment (no peers) one degraded chain-probe streak
+	// therefore stopped keeper work permanently: nothing re-elected, lockCtx
+	// stayed cancelled, and the next Run() blocked on gateReady forever.
+	e.lastHeartbeat = time.Now()
+	// The counter that caused this resign must not survive it, or the
+	// re-elected leader immediately yields again on the stale streak.
+	e.degradedCnt.Store(0)
 	if e.lockCancel != nil {
 		e.lockCancel()
 		e.lockCancel = nil
@@ -504,9 +534,29 @@ func (e *Election) resign() {
 func (e *Election) connectPeers(ctx context.Context) {
 	for _, addr := range e.peers {
 		addr := addr // capture
+		// Idempotency guard. The runner calls Run() again after every
+		// Release(), and Run() calls connectPeers() each time. Without this,
+		// every cycle started a second dialer per peer: each one dialled its
+		// own grpc.ClientConn, overwrote e.clients[addr], and then blocked
+		// forever on a connection nothing would ever close.
+		e.clientsMu.Lock()
+		if _, dialing := e.dialing[addr]; dialing {
+			e.clientsMu.Unlock()
+			continue
+		}
+		e.dialing[addr] = struct{}{}
+		e.clientsMu.Unlock()
+
 		e.wg.Add(1)
 		go func() {
 			defer e.wg.Done()
+			// Clear the marker on exit so a later Run() can re-dial a peer
+			// whose dialer has genuinely stopped (e.ctx cancelled).
+			defer func() {
+				e.clientsMu.Lock()
+				delete(e.dialing, addr)
+				e.clientsMu.Unlock()
+			}()
 			// Use the election's base context (e.ctx) so peer connections
 			// survive across Run()/Release() cycles.
 			e.connectPeer(e.ctx, addr)
@@ -652,7 +702,13 @@ func (e *Election) electionLoop() {
 			lastHB := e.lastHeartbeat
 			e.mu.RUnlock()
 
-			if state == StateFollower && leaderID != "" && leaderID != e.instanceID {
+			// Gate on the TIMESTAMP, not on leaderID being non-empty. After a
+			// resign() there is no known leader (leaderID == ""), which is
+			// exactly when this instance most needs to re-elect itself; the
+			// old leaderID != "" condition made that state permanent. A zero
+			// lastHB still means "never heard anything", which is startup —
+			// the initial candidacy path owns that case, so skip it here.
+			if state == StateFollower && leaderID != e.instanceID && !lastHB.IsZero() {
 				if time.Since(lastHB) > heartbeatInterval*missedThreshold {
 					log.Warn().
 						Str("leader", leaderID).
@@ -717,6 +773,15 @@ func (e *Election) heartbeatTick(ctx context.Context) {
 					Msg("keeper: peer has lower-ID leader — resigning")
 				e.state = StateFollower
 				e.leaderID = resp.LeaderId
+				// Restart the failover window. lastHeartbeat was last set when
+				// this instance BECAME leader; if it led for longer than
+				// heartbeatInterval*missedThreshold, the failure detector would
+				// see a stale timestamp on its very next tick, call
+				// becomeLeader(), conflict with the same lower-ID leader again,
+				// and flap — reopening a split-brain window for keeper
+				// single-flight work each time. Heartbeat() already does this
+				// on its equivalent branch.
+				e.lastHeartbeat = time.Now()
 				if e.lockCancel != nil {
 					e.lockCancel()
 					e.lockCancel = nil

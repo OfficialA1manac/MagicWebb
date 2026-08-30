@@ -188,7 +188,14 @@ func signTypedData(typedData apitypes.TypedData, key *cryptoecdsa.PrivateKey) ([
 // Steps 1-3 require Safe-threshold signatures once. After that, the keeper
 // can pull within the allowance without further signatures.
 
-const feeSweepGas = 80_000
+// feeSweepGas is the gas LIMIT for executeAllowanceTransfer, not an estimate of
+// what it costs. The real path is: signature recovery (ecrecover) → allowance
+// bookkeeping (several SSTOREs) → Safe.execTransactionFromModule → the native
+// transfer itself. That comfortably exceeds the previous 80,000 limit, so every
+// sweep reverted out-of-gas and burned keeper funds on each tick. Unused gas is
+// refunded, so a generous ceiling costs nothing while a tight one costs the
+// whole transaction.
+const feeSweepGas = 300_000
 
 // runFeeSweeper periodically checks the Gnosis Safe's native balance. When the
 // balance exceeds FeeSweepMinWei, it signs and broadcasts a transfer to the

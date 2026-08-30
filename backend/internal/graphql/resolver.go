@@ -505,7 +505,7 @@ func (r *queryResolver) Offers(ctx context.Context, collection *string, tokenID 
 	if status != nil {
 		f.Status = *status
 	}
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 100 {
 		f.Limit = *limit
 	} else {
 		f.Limit = 50
@@ -584,7 +584,7 @@ func (r *queryResolver) TokenAttributes(ctx context.Context, collection string, 
 // TokenActivity returns on-chain activity for a token.
 func (r *queryResolver) TokenActivity(ctx context.Context, collection string, tokenID string, limit *int) ([]*TokenActivity, error) {
 	l := 30
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 100 {
 		l = *limit
 	}
 	rows, err := r.q.GetTokenActivity(ctx, strings.ToLower(collection), tokenID, l)
@@ -605,7 +605,7 @@ func (r *queryResolver) TokenActivity(ctx context.Context, collection string, to
 // Activity returns the marketplace activity feed.
 func (r *queryResolver) Activity(ctx context.Context, limit *int, address *string, collection *string, tokenID *string) ([]*Activity, error) {
 	l := int32(50)
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 200 {
 		l = int32(*limit)
 	}
 
@@ -705,7 +705,7 @@ func (r *queryResolver) Notifications(ctx context.Context, address string, limit
 		return nil, fmt.Errorf("unauthorized")
 	}
 	l := 50
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 100 {
 		l = *limit
 	}
 	rows, err := r.q.ListNotifications(ctx, strings.ToLower(address), l)
@@ -777,7 +777,7 @@ func (r *queryResolver) Search(ctx context.Context, query string, limit *int) ([
 
 	// Fallback to direct DB access.
 	l := 20
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 50 {
 		l = *limit
 	}
 	rows, err := r.q.Search(ctx, query, l)
@@ -830,7 +830,7 @@ func (r *queryResolver) Trending(ctx context.Context, window *string, limit *int
 		w = *window
 	}
 	l := 20
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 100 {
 		l = *limit
 	}
 	rows, err := r.q.GetTrendingCollections(ctx, w, l)
@@ -861,7 +861,7 @@ func (r *queryResolver) SavedSearches(ctx context.Context, address string, page 
 		return nil, fmt.Errorf("unauthorized")
 	}
 	l := 50
-	if limit != nil && *limit > 0 {
+	if limit != nil && *limit > 0 && *limit <= 100 {
 		l = *limit
 	}
 	p := ""

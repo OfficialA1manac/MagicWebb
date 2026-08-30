@@ -730,24 +730,22 @@ func TestRefillTokens_StopsOnDone(t *testing.T) {
 	conn := newTestConn()
 	conn.msgTokens = 0
 
-	go conn.refillTokens()
+	exited := make(chan struct{})
+	go func() {
+		conn.refillTokens()
+		close(exited)
+	}()
 
 	// Let it run briefly to confirm it's alive.
 	time.Sleep(100 * time.Millisecond)
 
-	// Close done and verify the goroutine exits promptly.
-	// We can't easily observe goroutine exit, but we can verify
-	// that closing done doesn't panic and the channel stays closed.
 	close(conn.done)
 
-	// Poll: if the goroutine is still running after 2s, something's wrong.
-	// We use a timeout-based check — no assertion needed; the absence
-	// of deadlock/timeout at test end is sufficient.
+	// Observe the actual goroutine exit rather than a timeout that never fires.
 	select {
+	case <-exited:
 	case <-time.After(2 * time.Second):
-		t.Fatal("refillTokens may not have stopped — test timed out")
-	default:
-		// No timeout — test passes.
+		t.Fatal("refillTokens did not stop after done was closed")
 	}
 }
 

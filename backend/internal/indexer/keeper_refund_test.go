@@ -3,6 +3,7 @@ package indexer
 import (
 	"bytes"
 	"context"
+	"strings"
 	"testing"
 	"time"
 
@@ -62,21 +63,31 @@ func TestCollectLosersExcludesWinnerOnSettle(t *testing.T) {
 	r := &Runner{q: db.New(mock)}
 
 	now := time.Unix(1_700_000_000, 0)
+	// Fixtures must be REAL 20-byte hex. "0xloser1" is not decodable, so
+	// common.HexToAddress collapsed it to the zero address — and so did the
+	// expectation, making the identity assertion below pass for any order and
+	// any value the function returned.
+	const (
+		winnerAddr = "0xAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+		loser1Addr = "0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+		loser2Addr = "0xcccccccccccccccccccccccccccccccccccccccc"
+	)
 	rows := mock.NewRows([]string{"bidder", "effective_wei", "bid_count", "last_bid_at"}).
-		AddRow("0xWINNER", "5000", int64(2), now).
-		AddRow("0xloser1", "3000", int64(1), now).
-		AddRow("0xloser2", "1000", int64(1), now)
+		AddRow(winnerAddr, "5000", int64(2), now).
+		AddRow(loser1Addr, "3000", int64(1), now).
+		AddRow(loser2Addr, "1000", int64(1), now)
 	mock.ExpectQuery(`FROM effective_bids`).WithArgs(int64(5)).WillReturnRows(rows)
 
 	got, err := r.collectLosers(context.Background(),
-		db.RefundableAuction{AuctionID: 5, Status: "settled", Winner: "0xwinner"})
+		db.RefundableAuction{AuctionID: 5, Status: "settled",
+			Winner: strings.ToLower(winnerAddr)})
 	if err != nil {
 		t.Fatal(err)
 	}
 	if len(got) != 2 {
 		t.Fatalf("losers = %d, want 2 (winner excluded)", len(got))
 	}
-	if got[0] != common.HexToAddress("0xloser1") || got[1] != common.HexToAddress("0xloser2") {
+	if got[0] != common.HexToAddress(loser1Addr) || got[1] != common.HexToAddress(loser2Addr) {
 		t.Fatalf("losers = %v", got)
 	}
 }

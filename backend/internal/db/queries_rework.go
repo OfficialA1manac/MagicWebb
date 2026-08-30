@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"github.com/jackc/pgx/v5"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
@@ -1107,7 +1108,16 @@ func (q *Q) GetWebhookConfigsForEvent(ctx context.Context, eventType webhook.Mar
 		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &events, &r.Active, &r.CreatedAt); err != nil {
 			return nil, err
 		}
-		r.Secret = decryptWebhookSecret(r.Secret)
+		secret, decErr := decryptWebhookSecret(r.Secret)
+		if decErr != nil {
+			// Never deliver unsigned for a config that HAS a secret — the
+			// receiver would accept an unverifiable payload. Drop the config
+			// so the event visibly fails to deliver instead.
+			log.Error().Err(decErr).Int64("config_id", r.ID).
+				Msg("db: webhook secret undecryptable — skipping delivery for this config")
+			continue
+		}
+		r.Secret = secret
 		// Convert string events to typed events.
 		for _, e := range events {
 			r.Events = append(r.Events, webhook.MarketplaceEventType(e))
@@ -1173,7 +1183,15 @@ func (q *Q) ListWebhookConfigs(ctx context.Context, userAddr string) ([]WebhookC
 		if err := rows.Scan(&r.ID, &r.UserAddr, &r.URL, &r.Secret, &r.Events, &r.Active); err != nil {
 			return nil, err
 		}
-		r.Secret = decryptWebhookSecret(r.Secret)
+		secret, decErr := decryptWebhookSecret(r.Secret)
+		if decErr != nil {
+			// The listing never exposes Secret (json:"-"); blank it rather
+			// than failing the whole list for one unreadable row.
+			log.Warn().Err(decErr).Int64("config_id", r.ID).
+				Msg("db: webhook secret undecryptable")
+			secret = ""
+		}
+		r.Secret = secret
 		out = append(out, r)
 	}
 	return out, rows.Err()

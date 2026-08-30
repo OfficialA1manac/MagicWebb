@@ -34,7 +34,11 @@ ALTER TABLE offers              ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NUL
 ALTER TABLE sales               ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE trending_scores     ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
 ALTER TABLE keeper_gas_logs     ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
-ALTER TABLE royalties           ADD COLUMN IF NOT EXISTS chain_id BIGINT NOT NULL DEFAULT 0;
+-- NOTE: royalties is deliberately absent. This migration shipped without it;
+-- the column is added by 035_cr_round2_fixes.sql instead. Migrations are
+-- append-only — goose never re-runs 022, so adding it back here would give
+-- fresh databases the column from 022 and live ones from 035, and 035's Down
+-- would then drop a column that 022 had created. Keep the delta in 035 only.
 
 -- ── Backfill existing rows with the deployment chain_id ─────────────────
 DO $$
@@ -56,7 +60,7 @@ BEGIN
     UPDATE sales               SET chain_id = dc_chain_id WHERE chain_id = 0;
     UPDATE trending_scores     SET chain_id = dc_chain_id WHERE chain_id = 0;
     UPDATE keeper_gas_logs     SET chain_id = dc_chain_id WHERE chain_id = 0;
-    UPDATE royalties           SET chain_id = dc_chain_id WHERE chain_id = 0;
+    -- royalties backfill lives in 035, alongside the column it adds.
   END IF;
 END $$;
 

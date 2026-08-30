@@ -23,6 +23,9 @@ import (
 //
 // ── GQL-1 Benchmark: Request size reduction (POST full query vs GET hash) ─
 //
+// Sample of 10 of the registered queries (init() registers 20 in total);
+// the totals below describe this sample, not the whole registry.
+//
 // Top 5 most impactful queries (sorted by bytes saved):
 //
 //   Query                        POST (bytes)   Hash (bytes)   Reduction
@@ -42,7 +45,7 @@ import (
 //   Trending (homepage)                95             64          33%
 //
 //   ───────────────────────────  ─────────────  ─────────────  ─────────
-//   TOTAL (10 queries)               2,287           640          72%
+//   TOTAL (10-query sample)          2,287           640          72%
 //
 // Run: cd tools/bench-persisted && go run . to regenerate this table.
 //

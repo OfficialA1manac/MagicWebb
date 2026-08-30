@@ -29,8 +29,13 @@ func (s *AuctionsService) RegisterRoutes(api fiber.Router) {
 func (s *AuctionsService) handleList(c *fiber.Ctx) error {
 	f := db.AuctionsFilter{
 		Collection: c.Query("collection"),
-		Seller:     c.Query("seller"),
-		Status:     c.Query("status"),
+		// token_id narrows to ONE token. Without it the token page had to pull
+		// the first 50 auctions in a collection and find its own token client
+		// side, which silently found nothing once a collection had more than
+		// 50 auctions ahead of it in the ends_at ordering.
+		TokenID: c.Query("token_id"),
+		Seller:  c.Query("seller"),
+		Status:  c.Query("status"),
 	}
 	if lim := c.Query("limit"); lim != "" {
 		if n, err := strconv.Atoi(lim); err == nil {

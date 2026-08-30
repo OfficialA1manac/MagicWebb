@@ -56,11 +56,14 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 	}
 
 	if v, ok := s.merged.Get("wallet-nfts:" + addr); ok {
-		if body, ok2 := v.([]byte); ok2 {
+		// cachedBytes, not a []byte assertion: the Redis backend
+		// JSON-round-trips cache values into strings, so a bare assertion
+		// discards every hit whenever REDIS_URL is set.
+		if body := cachedBytes(v); body != nil {
 			src := "db"
-			if sv, ok3 := s.merged.Get("wallet-nfts-src:" + addr); ok3 {
-				if str, ok4 := sv.(string); ok4 {
-					src = str
+			if sv, ok := s.merged.Get("wallet-nfts-src:" + addr); ok {
+				if b := cachedBytes(sv); b != nil {
+					src = string(b)
 				}
 			}
 			c.Set("X-MW-Wallet-Source", src)
@@ -89,7 +92,9 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	s.merged.Set("wallet-nfts:"+addr, body)
+	// Stored as a string — see cachedBytes: a []byte would return from Redis
+	// base64-encoded and be served as the response body.
+	s.merged.Set("wallet-nfts:"+addr, string(body))
 	s.merged.Set("wallet-nfts-src:"+addr, source)
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)

@@ -89,7 +89,11 @@ func NewGrpcEventBridge(ctx context.Context, port int, peerAddrs []string, event
 
 	// SSE-3: Optional mTLS for inter-instance bridge connections.
 	serverOpts := []grpc.ServerOption{}
-	if creds := loadTLSCredentials(); creds != nil {
+	creds, err := loadTLSCredentials()
+	if err != nil {
+		return nil, err
+	}
+	if creds != nil {
 		serverOpts = append(serverOpts, grpc.Creds(creds))
 		log.Info().Msg("grpc: bridge server using mTLS")
 	}
@@ -292,7 +296,11 @@ func (b *GrpcEventBridge) dialPeer(ctx context.Context, peer string) (*peerConn,
 
 	// SSE-3: Use TLS when certificates are configured; fall back to insecure.
 	dialOpts := []grpc.DialOption{}
-	if creds := loadTLSCredentials(); creds != nil {
+	creds, err := loadTLSCredentials()
+	if err != nil {
+		return nil, err
+	}
+	if creds != nil {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(creds))
 	} else {
 		dialOpts = append(dialOpts, grpc.WithTransportCredentials(insecure.NewCredentials()))
@@ -342,19 +350,26 @@ func (b *GrpcEventBridge) drainOutbox(pc *peerConn, peer string) {
 
 // loadTLSCredentials reads TLS certificate and key from GRPC_TLS_CERT and
 // GRPC_TLS_KEY env vars. When GRPC_TLS_CA_CERT is set, it configures mTLS
-// with client certificate verification (SSE-3). Returns nil when no cert
+// with client certificate verification (SSE-3). Returns (nil, nil) when no cert
 // is configured — callers fall back to insecure credentials.
-func loadTLSCredentials() credentials.TransportCredentials {
+//
+// A misconfigured CA is a hard error: the operator asked for mTLS, so silently
+// returning credentials with no ClientAuth/RootCAs would accept any client
+// certificate and lose peer authentication without anyone noticing.
+func loadTLSCredentials() (credentials.TransportCredentials, error) {
 	certFile := os.Getenv("GRPC_TLS_CERT")
 	keyFile := os.Getenv("GRPC_TLS_KEY")
 	if certFile == "" || keyFile == "" {
-		return nil
+		return nil, nil
 	}
 
+	// Same fail-CLOSED rule as the CA branch below: the operator set
+	// GRPC_TLS_CERT/KEY, so they asked for TLS. Warning and then serving the
+	// event bridge in plaintext silently downgrades the transport for the whole
+	// mesh; a bad path or unreadable key is a config error worth failing on.
 	cert, err := tls.LoadX509KeyPair(certFile, keyFile)
 	if err != nil {
-		log.Warn().Err(err).Msg("grpc: TLS cert/key load failed, falling back to insecure")
-		return nil
+		return nil, fmt.Errorf("grpc: GRPC_TLS_CERT/GRPC_TLS_KEY load failed: %w", err)
 	}
 
 	tlsCfg := &tls.Config{
@@ -366,24 +381,22 @@ func loadTLSCredentials() credentials.TransportCredentials {
 	if caFile := os.Getenv("GRPC_TLS_CA_CERT"); caFile != "" {
 		caPEM, err := os.ReadFile(caFile)
 		if err != nil {
-			log.Error().Err(err).Str("ca", caFile).Msg("grpc: CA cert read failed; mTLS NOT enabled")
-		} else {
-			caPool := x509.NewCertPool()
-			if caPool.AppendCertsFromPEM(caPEM) {
-				tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
-				tlsCfg.ClientCAs = caPool
-				// Client side of the mesh: trust peer server certs signed by
-				// the same CA. Without RootCAs, dialPeer verifies against the
-				// system trust store and every private-CA peer connect fails.
-				tlsCfg.RootCAs = caPool
-				log.Info().Msg("grpc: mTLS enabled with client certificate verification")
-			} else {
-				log.Error().Str("ca", caFile).Msg("grpc: CA cert contains no usable certificates; mTLS NOT enabled")
-			}
+			return nil, fmt.Errorf("grpc: GRPC_TLS_CA_CERT %q read failed: %w", caFile, err)
 		}
+		caPool := x509.NewCertPool()
+		if !caPool.AppendCertsFromPEM(caPEM) {
+			return nil, fmt.Errorf("grpc: GRPC_TLS_CA_CERT %q contains no usable certificates", caFile)
+		}
+		tlsCfg.ClientAuth = tls.RequireAndVerifyClientCert
+		tlsCfg.ClientCAs = caPool
+		// Client side of the mesh: trust peer server certs signed by
+		// the same CA. Without RootCAs, dialPeer verifies against the
+		// system trust store and every private-CA peer connect fails.
+		tlsCfg.RootCAs = caPool
+		log.Info().Msg("grpc: mTLS enabled with client certificate verification")
 	}
 
-	return credentials.NewTLS(tlsCfg)
+	return credentials.NewTLS(tlsCfg), nil
 }
 
 func (b *GrpcEventBridge) sleep(ctx context.Context, backoff *time.Duration) {

@@ -211,6 +211,16 @@ func (s *Server) SubscribeActivity(ctx context.Context, req *connect.Request[Sub
 }
 
 // SubscribeNotifications streams notification events to clients.
+//
+// Notifications belong to ONE wallet, so this stream requires a caller
+// authenticated as that wallet (JWT bearer token or session cookie) and
+// refuses to stream any other address's notifications.
+//
+// API-key callers are deliberately rejected: an API key authenticates a
+// machine principal ("apikey:<label>"), not a wallet, so there is no address
+// it could legitimately subscribe to. Machine clients that need notification
+// data should read it through the per-user REST/GraphQL endpoints, which
+// carry their own authorization.
 func (s *Server) SubscribeNotifications(ctx context.Context, req *connect.Request[SubscribeNotificationsRequest], stream *connect.ServerStream[SubscribeNotificationsResponse]) error {
 	if s.bcast == nil {
 		return connect.NewError(connect.CodeUnavailable, fmt.Errorf("broadcaster not available"))
@@ -222,7 +232,24 @@ func (s *Server) SubscribeNotifications(ctx context.Context, req *connect.Reques
 	}
 	defer cancel()
 
+	// Notifications are per-user data, so the requested address must belong to
+	// the authenticated caller. filterAddress arrives in the request body and
+	// is attacker-controlled on its own; without this check any client could
+	// subscribe with someone else's address and read their notifications.
+	// Streaming RPCs never pass through the unary auth interceptor, so this
+	// handler authenticates the caller itself (see Server.callerAddr).
 	filterAddress := strings.ToLower(req.Msg.GetAddress())
+	caller := s.callerAddr(ctx, req.Header())
+	if caller == "" {
+		return connect.NewError(connect.CodeUnauthenticated,
+			fmt.Errorf("notification stream requires an authenticated caller"))
+	}
+	if filterAddress == "" {
+		filterAddress = caller
+	} else if filterAddress != caller {
+		return connect.NewError(connect.CodePermissionDenied,
+			fmt.Errorf("cannot subscribe to notifications for another address"))
+	}
 
 	for {
 		select {
@@ -241,15 +268,24 @@ func (s *Server) SubscribeNotifications(ctx context.Context, req *connect.Reques
 				continue
 			}
 
-			// If address filter is set, try to check if this notification is for them.
-			// The event payload should contain an "address" or "user" field.
-			if filterAddress != "" {
-				var meta struct {
-					Address string `json:"address"`
-				}
-				if err := json.Unmarshal(payload, &meta); err == nil && meta.Address != "" && !strings.EqualFold(meta.Address, filterAddress) {
-					continue
-				}
+			// Deliver ONLY notifications provably addressed to this subscriber.
+			// This filter used to fail OPEN: an unmarshal error, or a payload
+			// with no matching field, fell through to Send, so notifications
+			// meant for one wallet reached every subscriber on the stream.
+			//
+			// The field is user_addr, NOT address: the payload is a marshalled
+			// sse.NotificationEvent, whose recipient lives in User/UserAddr.
+			// The other two consumers of this same event — ws/handler.go and
+			// graphql/resolver.go — both match on UserAddr; matching anything
+			// else here means matching nothing at all.
+			var meta struct {
+				UserAddr string `json:"user_addr"`
+			}
+			if err := json.Unmarshal(payload, &meta); err != nil {
+				continue
+			}
+			if !strings.EqualFold(meta.UserAddr, filterAddress) {
+				continue
 			}
 
 			if err := stream.Send(&SubscribeNotificationsResponse{Payload: payload}); err != nil {

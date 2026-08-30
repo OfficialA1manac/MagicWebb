@@ -266,7 +266,9 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// work over HTTP/1.1, HTTP/2, or any gRPC-compatible transport.
 	// Not rate-limited — each RPC is a simple DB query comparable to the
 	// equivalent REST endpoint.
-	connectSrv := connectv1.NewServer(q, bcast)
+	// WithAuth: streaming RPCs bypass the unary auth interceptor below, so the
+	// notification stream needs the secret to authenticate its own callers.
+	connectSrv := connectv1.NewServerWithAuth(q, bcast, cfg.JWTSecret)
 
 	// ── gRPC interceptors: metrics, tiered rate limiting, auth, deadlines ────
 	// Applied to every Connect-RPC handler. Order matters:
