@@ -609,6 +609,7 @@ func (q *Q) MarkNotificationsRead(ctx context.Context, addr string) error {
 type ProfileRow struct {
 	Address     string `json:"address"`
 	DisplayName string `json:"display_name"`
+	Tag         string `json:"tag"`
 	Bio         string `json:"bio"`
 	AvatarURI   string `json:"avatar_uri"`
 	BannerURI   string `json:"banner_uri"`
@@ -619,10 +620,10 @@ type ProfileRow struct {
 func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
 	p := &ProfileRow{Address: strings.ToLower(addr)}
 	err := q.reader().QueryRow(ctx,
-		`SELECT display_name, bio, COALESCE(avatar_uri,''), COALESCE(banner_uri,''),
+		`SELECT display_name, COALESCE(tag,''), bio, COALESCE(avatar_uri,''), COALESCE(banner_uri,''),
 		        COALESCE(twitter,''), COALESCE(website,'')
 		 FROM profiles WHERE address=$1`, strings.ToLower(addr)).
-		Scan(&p.DisplayName, &p.Bio, &p.AvatarURI, &p.BannerURI, &p.Twitter, &p.Website)
+		Scan(&p.DisplayName, &p.Tag, &p.Bio, &p.AvatarURI, &p.BannerURI, &p.Twitter, &p.Website)
 	if err == pgx.ErrNoRows {
 		return p, nil // empty profile is valid
 	}
@@ -635,13 +636,13 @@ func (q *Q) GetProfile(ctx context.Context, addr string) (*ProfileRow, error) {
 // derived badge in SetCollectionVerification.
 func (q *Q) UpsertProfile(ctx context.Context, p ProfileRow) error {
 	_, err := q.writer().Exec(ctx,
-		`INSERT INTO profiles(address, display_name, bio, avatar_uri, banner_uri, twitter, website, updated_at)
-		 VALUES($1,$2,$3,NULLIF($4,''),NULLIF($5,''),NULLIF($6,''),NULLIF($7,''), now())
+		`INSERT INTO profiles(address, display_name, tag, bio, avatar_uri, banner_uri, twitter, website, updated_at)
+		 VALUES($1,$2,NULLIF($3,''),$4,NULLIF($5,''),NULLIF($6,''),NULLIF($7,''),NULLIF($8,''), now())
 		 ON CONFLICT(address) DO UPDATE
-		 SET display_name=EXCLUDED.display_name, bio=EXCLUDED.bio, avatar_uri=EXCLUDED.avatar_uri,
+		 SET display_name=EXCLUDED.display_name, tag=EXCLUDED.tag, bio=EXCLUDED.bio, avatar_uri=EXCLUDED.avatar_uri,
 		     banner_uri=EXCLUDED.banner_uri, twitter=EXCLUDED.twitter, website=EXCLUDED.website,
 		     updated_at=now()`,
-		strings.ToLower(p.Address), p.DisplayName, p.Bio, p.AvatarURI, p.BannerURI, p.Twitter, p.Website)
+		strings.ToLower(p.Address), p.DisplayName, p.Tag, p.Bio, p.AvatarURI, p.BannerURI, p.Twitter, p.Website)
 	return err
 }
 

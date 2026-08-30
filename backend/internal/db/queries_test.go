@@ -743,7 +743,9 @@ func TestRetryLifecycleSimulateBumpExclude(t *testing.T) {
 
 // Regression for the infinite 30s re-fetch loop on empty-tokenURI tokens:
 // ListTokensMissingMetadata's third UNION arm
-//   (JOIN nft_metadata WHERE image_uri IS NULL OR image_uri = '')
+//
+//	(JOIN nft_metadata WHERE image_uri IS NULL OR image_uri = '')
+//
 // was removed. The mock's regex anchors on the END of the new (2-arm) query:
 // `... AND m.collection IS NULL ) src GROUP BY ... LIMIT $1`, which exists
 // only after the third arm is removed.
@@ -927,6 +929,68 @@ func TestAcceptOfferAndRecordSaleRollsBackOnSaleFailure(t *testing.T) {
 		"0xc", "1", "0xseller", "0xbidder",
 		"1000", "15", "0", "0xacc_tx", 9, at); err == nil {
 		t.Fatal("expected error when sale insert fails")
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// ── Profiles: tag column (038) ──────────────────────────────────────────────
+
+func TestGetProfileScansTag(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	rows := mock.NewRows([]string{
+		"display_name", "tag", "bio", "avatar_uri", "banner_uri", "twitter", "website",
+	}).AddRow("Alice", "OG Minter", "hi", "", "", "", "")
+	mock.ExpectQuery(`SELECT display_name, COALESCE\(tag,''\), bio`).
+		WithArgs("0xabc").WillReturnRows(rows)
+
+	p, err := q.GetProfile(context.Background(), "0xABC")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if p.Tag != "OG Minter" || p.DisplayName != "Alice" {
+		t.Fatalf("GetProfile = %+v; want tag 'OG Minter', display_name 'Alice'", p)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestGetProfileNoRowsIsEmptyProfile(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectQuery(`SELECT display_name, COALESCE\(tag,''\), bio`).
+		WithArgs("0xabc").WillReturnError(pgx.ErrNoRows)
+
+	p, err := q.GetProfile(context.Background(), "0xabc")
+	if err != nil || p.Tag != "" || p.DisplayName != "" {
+		t.Fatalf("no-rows GetProfile = %+v, %v; want empty profile, nil", p, err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestUpsertProfileWritesTag(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectExec(`INSERT INTO profiles\(address, display_name, tag, bio`).
+		WithArgs("0xabc", "Alice", "OG Minter", "hi", "", "", "", "").
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	err := q.UpsertProfile(context.Background(), ProfileRow{
+		Address: "0xABC", DisplayName: "Alice", Tag: "OG Minter", Bio: "hi",
+	})
+	if err != nil {
+		t.Fatal(err)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)

@@ -350,7 +350,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	ms.RegisterRoutes(api)
 	NewWalletService(q, cfg.ExplorerURL, cfg.RedisURL).RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
-	NewProfilesService(q).RegisterRoutes(api, cfg)
+	NewProfilesService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)

@@ -42,6 +42,27 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
     .count-pop{animation:count-pop 0.4s cubic-bezier(0.34,1.56,0.64,1);}
   </style>
 
+  <!-- Global (unscoped): these classes land on JS-generated innerHTML which
+       never carries Astro's scoping attribute — a scoped block would not
+       match them (same trap the net-switcher rebuild comments describe). -->
+  <style is:global>
+    /* Grid pagination controls — match the page's inline-style aesthetic. */
+    .pf-pager{display:flex;align-items:center;justify-content:center;gap:0.75rem;margin-top:1rem;}
+    .pf-pager button{padding:0.375rem 0.875rem;border-radius:0.625rem;background:rgba(255,255,255,0.05);border:1px solid rgba(255,255,255,0.12);color:rgba(255,255,255,0.7);font-size:0.75rem;font-weight:700;cursor:pointer;font-family:inherit;transition:all 0.2s;}
+    .pf-pager button:hover:not(:disabled){background:rgba(125,211,252,0.12);border-color:rgba(125,211,252,0.3);color:#7dd3fc;}
+    .pf-pager button:disabled{opacity:0.3;cursor:not-allowed;}
+    .pf-pager .pf-page-info{font-size:0.6875rem;color:rgba(255,255,255,0.35);font-weight:600;font-family:'JetBrains Mono',ui-monospace,monospace;white-space:nowrap;}
+    /* The full wallet address is an unbroken 42-char mono string — without
+       this it forces horizontal overflow at narrow viewports. */
+    .pf-addr{overflow-wrap:anywhere;word-break:break-all;}
+    /* Modest mobile type step-down (inline styles need !important to lose). */
+    @media (max-width:480px){
+      #profile-root h1{font-size:1.125rem !important;}
+      #profile-root .count-pop{font-size:1.25rem !important;}
+      #profile-root .pf-addr{font-size:0.6875rem !important;}
+    }
+  </style>
+
   <script is:inline>
     (function(){if(typeof window==='undefined')return;
       function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/\"/g,'&quot;');}
@@ -145,6 +166,17 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           const displayName = (profile && profile.display_name) || shortAddr(targetAddr);
           const bio         = (profile && profile.bio) || '';
           const avatar      = (profile && profile.avatar_uri) || '';
+          // User-set tag (backend: <=32 chars, letters/digits/space/dash/_).
+          // When present it replaces the deterministic collector badge pill.
+          const userTag     = (profile && profile.tag) ? String(profile.tag) : '';
+          // Carry-over: the profile row may come from another network's
+          // deployment — show a subtle hint when source_chain differs.
+          var MW_CHAIN_NAMES = {114:'Coston2',19:'Songbird',14:'Flare'};
+          var srcChain = (profile && profile.source_chain) ? Number(profile.source_chain) : 0;
+          var curChainId = Number((window.MW_CHAIN_ID)||'114');
+          var carryOverHint = (srcChain && srcChain !== curChainId)
+            ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.3);font-style:italic;margin-top:0.375rem;">Profile from '+esc(MW_CHAIN_NAMES[srcChain]||('chain '+srcChain))+'</p>'
+            : '';
 
           // Compute user's total earnings from listings + auctions
           const totalListedWei = listings.reduce(function(s,l){try{return s+BigInt(l.price_wei||'0');}catch(_){return s;}},0n);
@@ -322,11 +354,12 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               '<div style="flex:1;min-width:0;">'+
                 '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;">'+
                   '<h1 style="font-size:1.5rem;font-weight:800;color:#fafafa;">'+esc(displayName)+'</h1>'+
-                  '<span class="vb is-holder sm" title="Collector badge — a fun label derived from this wallet address.">'+esc(mwHolderBadge(targetAddr))+'</span>'+
+                  '<span class="vb is-holder sm" title="'+(userTag?'Profile tag — set by this user.':'Collector badge — a fun label derived from this wallet address.')+'">'+esc(userTag||mwHolderBadge(targetAddr))+'</span>'+
                   (createdColls.length?'<a class="vb is-creator sm" href="/docs/faq#creator" title="Collection creator of '+esc(createdColls.map(function(c){return c.name||c.address;}).join(', '))+'." aria-label="Collection creator"><span class="vb-star" aria-hidden="true">★</span>Creator</a>':'')+
                 '</div>'+
-                '<p style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(targetAddr)+'</p>'+
-                (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;">'+esc(bio)+'</p>':'')+
+                '<p class="pf-addr" style="font-size:0.75rem;color:rgba(255,255,255,0.3);font-family:JetBrains Mono,monospace;margin-top:0.25rem;overflow-wrap:anywhere;word-break:break-all;">'+esc(targetAddr)+'</p>'+
+                (bio?'<p style="font-size:0.875rem;color:rgba(255,255,255,0.55);margin-top:0.75rem;max-width:36rem;line-height:1.5;overflow-wrap:anywhere;">'+esc(bio)+'</p>':'')+
+                carryOverHint+
                 '<p style="font-size:0.75rem;color:#7dd3fc;margin-top:0.5rem;font-weight:700;">'+allNFTsCount+' NFT'+(allNFTsCount!==1?'s':'')+' — '+nfts.length+' in wallet, '+(listings.length+auctions.length)+' on market'+
                   ' · <span id="wallet-balance" style="color:#fde68a;">…</span> <span class="mw-cur" style="color:rgba(253,224,138,0.7);">'+cur()+'</span></p>'+
               '</div>'+
@@ -384,6 +417,43 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             setTimeout(function(){ var el = document.getElementById('nfts'); if(el) el.scrollIntoView({behavior:'smooth'}); }, 100);
           }
 
+          // ── Client-side grid pagination (10 items/page) ──────────────────
+          // Per-tab page index, reset on every loadProfileData (fresh closure).
+          // Note: batch-listing checkbox selection lives in the DOM, so it
+          // resets when the user changes page — acceptable for now.
+          var PAGE_SIZE = 10;
+          var _tabPages = { nfts: 1, listings: 1, auctions: 1 };
+          function pageOf(tabId, total){
+            var pages = Math.max(1, Math.ceil(total/PAGE_SIZE));
+            var p = Math.min(Math.max(1, _tabPages[tabId]||1), pages);
+            _tabPages[tabId] = p;
+            return { page: p, pages: pages };
+          }
+          function pageSlice(items, tabId){
+            items = items || [];
+            var pg = pageOf(tabId, items.length);
+            return items.slice((pg.page-1)*PAGE_SIZE, pg.page*PAGE_SIZE);
+          }
+          function renderPager(tabId, total){
+            var pg = pageOf(tabId, total);
+            if (pg.pages <= 1) return '';
+            return '<div class="pf-pager">'+
+              '<button type="button" data-pg-prev="'+tabId+'"'+(pg.page<=1?' disabled':'')+'>← Prev</button>'+
+              '<span class="pf-page-info">Page '+pg.page+' of '+pg.pages+'</span>'+
+              '<button type="button" data-pg-next="'+tabId+'"'+(pg.page>=pg.pages?' disabled':'')+'>Next →</button>'+
+            '</div>';
+          }
+          function wirePager(tc, tabId){
+            tc.querySelectorAll('[data-pg-prev],[data-pg-next]').forEach(function(btn){
+              btn.addEventListener('click', function(){
+                if (btn.disabled) return;
+                var delta = btn.hasAttribute('data-pg-next') ? 1 : -1;
+                _tabPages[tabId] = (_tabPages[tabId]||1) + delta;
+                renderTab(tabId); // re-render current page slice (rewires batch bar too)
+              });
+            });
+          }
+
           // Tab switching
           function renderTab(id){
             const tc = document.getElementById('tab-content');
@@ -392,12 +462,13 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               case 'nfts': {
                 // Read-only deployments have no marketplace contract: no List/batch UI.
                 var own = isOwnProfileFor(targetAddr) && !!window.MW_MARKETPLACE;
-                tc.innerHTML = (own ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:0.5rem;">Tick unlisted NFTs to list several at once (max 50), or use each card\u2019s List \u2192 link.</p>'+renderBatchBar() : '') + renderNFTGrid(combinedNFTs, own);
+                tc.innerHTML = (own ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:0.5rem;">Tick unlisted NFTs to list several at once (max 50), or use each card\u2019s List \u2192 link.</p>'+renderBatchBar() : '') + renderNFTGrid(pageSlice(combinedNFTs,'nfts'), own) + renderPager('nfts', combinedNFTs.length);
                 if(own) wireBatchBar(tc);
+                wirePager(tc,'nfts');
                 break;
               }
-              case 'listings': tc.innerHTML = renderListingsGrid(listings); break;
-              case 'auctions': tc.innerHTML = renderAuctionsList(auctions); break;
+              case 'listings': tc.innerHTML = renderListingsGrid(pageSlice(listings,'listings')) + renderPager('listings', listings.length); wirePager(tc,'listings'); break;
+              case 'auctions': tc.innerHTML = renderAuctionsList(pageSlice(auctions,'auctions')) + renderPager('auctions', auctions.length); wirePager(tc,'auctions'); break;
               case 'offers':
                 var html = '';
                 if(offersSent.length) html += '<h4 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.75rem;">Sent ('+offersSent.length+')</h4>'+renderOffers(offersSent,'sent');
@@ -455,6 +526,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1.25rem;padding:2rem;max-width:480px;width:100%;box-shadow:0 25px 60px rgba(0,0,0,0.5);animation:modalSlideUp 0.25s ease;';
 
               const currentDisplayName = profile && profile.display_name ? esc(profile.display_name) : '';
+              const currentTag = profile && profile.tag ? esc(profile.tag) : '';
               const currentBio = profile && profile.bio ? esc(profile.bio) : '';
               const currentAvatar = profile && profile.avatar_uri ? esc(profile.avatar_uri) : '';
               const currentTwitter = profile && profile.twitter ? esc(profile.twitter) : '';
@@ -468,6 +540,10 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
                 '<form id="edit-profile-form" style="display:flex;flex-direction:column;gap:1rem;">'+
                   '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Display Name</label>'+
                     '<input name="display_name" maxlength="64" value="'+currentDisplayName+'" placeholder="Your display name" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">'+
+                  '</div>'+
+                  '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Tag</label>'+
+                    '<input name="tag" maxlength="32" value="'+currentTag+'" placeholder="'+esc(mwHolderBadge(targetAddr))+'" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">'+
+                    '<p style="font-size:0.625rem;color:rgba(255,255,255,0.25);margin-top:0.375rem;">Shown next to your name. Up to 32 characters — letters, digits, spaces, dashes, underscores. Leave empty to keep your collector badge.</p>'+
                   '</div>'+
                   '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Bio</label>'+
                     '<textarea name="bio" maxlength="500" placeholder="Tell the community about yourself…" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;resize:vertical;min-height:80px;transition:border-color 0.2s;box-sizing:border-box;">'+currentBio+'</textarea>'+
@@ -526,6 +602,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
                 const formData = new FormData(form);
                 const payload = {
               display_name: (formData.get('display_name')||'').trim(),
+              tag: (formData.get('tag')||'').trim(),
               bio: (formData.get('bio')||'').trim(),
               avatar_uri: (formData.get('avatar_uri')||'').trim(),
               twitter: (formData.get('twitter')||'').trim(),

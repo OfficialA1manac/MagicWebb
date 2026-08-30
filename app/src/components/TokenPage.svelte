@@ -45,6 +45,14 @@
   let live = $state(false);
   let now = $state(Date.now());
   let syncing = $state(''); // optimistic chip text after a confirmed tx
+  // On-chain fallback for tokens the DB has never indexed (every
+  // explorer-sourced NFT on read-only networks): metadata read straight from
+  // the contract via tokenURI/uri. When set, the normal shell renders with a
+  // "not indexed" note instead of the error state.
+  let onchain = $state(false);
+  let ocName = $state('');
+  let ocImg = $state('');
+  let ocStd = $state<'erc721' | 'erc1155' | null>(null);
 
   // forms
   let panel = $state<'none' | 'list' | 'auction' | 'offer' | 'edit'>('none');
@@ -62,9 +70,9 @@
   const chain = currentChain();
   const sym = chain.currency;
 
-  let std = $derived((listing?.standard || collection?.standard || 'erc721') as 'erc721' | 'erc1155');
-  let name = $derived(listing?.name || auction?.name || (collection?.name ? `${collection.name} #${tid}` : `#${tid}`));
-  let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || '', tid));
+  let std = $derived((listing?.standard || collection?.standard || ocStd || 'erc721') as 'erc721' | 'erc1155');
+  let name = $derived(listing?.name || auction?.name || (collection?.name ? `${collection.name} #${tid}` : ocName || `#${tid}`));
+  let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || ocImg, tid));
   let verified = $derived(!!(collection?.verified ?? listing?.collection_verified ?? auction?.collection_verified));
   let creatorAddr = $derived(collection?.creator_addr || '');
   let isOwner = $derived(!!me && (std === 'erc1155' ? myBalance1155 > 0n : owner?.toLowerCase() === me.toLowerCase()));
@@ -105,6 +113,59 @@
     } catch { /* unknown owner: UI simply hides owner actions */ }
   }
 
+  /** ipfs:// → public gateway; everything else passes through. */
+  function ipfsToHttp(u: string): string {
+    return u.startsWith('ipfs://') ? 'https://ipfs.io/ipfs/' + u.slice(7) : u;
+  }
+
+  /**
+   * DB knows nothing about this token — read metadata straight from the
+   * contract before giving up: tokenURI (721) then uri (1155), metadata
+   * fetched via the media proxy (SSRF-safe) with a direct fetch as backup.
+   * Returns true when the token verifiably exists on-chain.
+   */
+  async function loadOnChainFallback(): Promise<boolean> {
+    try {
+      const pub = await publicClient();
+      let uri = '';
+      try {
+        uri = (await pub.readContract({ address: coll as Address, abi: erc721Abi, functionName: 'tokenURI', args: [BigInt(tid)] })) as string;
+        ocStd = 'erc721';
+      } catch {
+        try {
+          uri = (await pub.readContract({ address: coll as Address, abi: erc1155Abi, functionName: 'uri', args: [BigInt(tid)] })) as string;
+          ocStd = 'erc1155';
+        } catch { return false; }
+      }
+      if (!uri) return false;
+      // ERC-1155 metadata URIs may embed {id} as 64 lowercase hex digits.
+      uri = uri.replace('{id}', BigInt(tid).toString(16).padStart(64, '0'));
+
+      let meta: Record<string, unknown> | null = null;
+      if (uri.startsWith('data:application/json;base64,')) {
+        try { meta = JSON.parse(atob(uri.slice(uri.indexOf(',') + 1))); } catch { /* malformed inline JSON */ }
+      } else if (uri.startsWith('data:')) {
+        try { meta = JSON.parse(decodeURIComponent(uri.slice(uri.indexOf(',') + 1))); } catch { /* malformed inline JSON */ }
+      } else {
+        const httpUri = ipfsToHttp(uri);
+        try {
+          const r = await fetch('/api/v1/media?url=' + encodeURIComponent(httpUri) + '&id=' + encodeURIComponent(tid));
+          if (r.ok) meta = JSON.parse(await r.text());
+        } catch { /* proxy miss — try direct */ }
+        if (!meta) {
+          try { const r = await fetch(httpUri); if (r.ok) meta = JSON.parse(await r.text()); } catch { /* gateway/CORS miss */ }
+        }
+      }
+      // The tokenURI call succeeding is proof enough the token exists —
+      // render even when the metadata fetch failed (name falls back to #id).
+      ocName = meta && typeof meta.name === 'string' && meta.name ? meta.name : '';
+      const rawImg = meta && typeof meta.image === 'string' && meta.image ? meta.image
+        : meta && typeof meta.image_url === 'string' && meta.image_url ? meta.image_url : '';
+      ocImg = rawImg ? ipfsToHttp(rawImg) : '';
+      return true;
+    } catch { return false; }
+  }
+
   async function load(initial = false) {
     if (initial) loading = true;
     error = '';
@@ -120,7 +181,16 @@
     listing = l && l.price_wei ? l : null;
     collection = c; traits = t ?? {}; activity = a ?? []; offers = o ?? [];
     auction = (au ?? []).find((x) => String(x.token_id) === String(tid)) ?? null;
-    if (!c && !l && !auction) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
+    if (!c && !l && !auction) {
+      // Unindexed token (common on read-only networks where NFTs come from
+      // the explorer, never the DB): fall back to on-chain reads before
+      // showing the error. Skip the RPC round-trips on reloads that already
+      // proved the token exists.
+      if (!onchain) onchain = await loadOnChainFallback();
+      if (!onchain) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
+    } else {
+      onchain = false;
+    }
     await loadOwner();
     // Deep link from profile "List →": open the list panel once ownership confirms.
     if (initial && location.hash === '#list' && isOwner && !listing && !auctionLive) panel = 'list';
@@ -213,6 +283,10 @@
           creator <a href={explorerAddress(creatorAddr)} target="_blank" rel="noopener">{shortAddr(creatorAddr)}</a>
           <CreatorBadge name={collection?.name || ''} />
         </div>
+      {/if}
+
+      {#if onchain}
+        <p class="tp-hint tp-onchain">Not indexed by the marketplace — showing on-chain data.</p>
       {/if}
 
       {#if syncing}<div class="tp-sync" role="status"><span class="tp-spin" aria-hidden="true"></span>{syncing}</div>{/if}
@@ -376,6 +450,7 @@
   .tp-price { font-size: clamp(1.75rem, 5vw, 2.25rem); font-weight: 600; line-height: 1; } .tp-price small { font-size: .5em; opacity: .7; }
   .tp-sub { font-size: 13px; color: rgba(255,255,255,.55); }
   .tp-hint { font-size: 12px; color: rgba(255,255,255,.5); margin: 0; line-height: 1.5; }
+  .tp-onchain { color: rgba(255,255,255,.35); font-style: italic; }
   .tp-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
   .btn { min-height: 44px; padding: 0 16px; border-radius: 12px; font-weight: 700; font-size: 15px; border: 1px solid transparent; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; }
   .btn.sm { min-height: 36px; font-size: 13px; padding: 0 12px; flex: 0 0 auto; }

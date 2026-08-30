@@ -87,6 +87,11 @@ const networks = KNOWN_NETWORKS.map((n) => {
       }
       *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
       html { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--ink-950); color: var(--white); -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
+      /* Belt-and-braces on both roots: body's overflow-x propagates to the
+         viewport (leaving body itself visible), so clip the html element too —
+         otherwise an unbroken string (e.g. a full 0x… address) widens the
+         layout viewport and pinch-zoom-out shows dead space on the right. */
+      html { overflow-x: hidden; }
       body { min-height: 100vh; overflow-x: hidden; }
       a { color: inherit; text-decoration: none; }
       button { font-family: inherit; cursor: pointer; border: none; }
