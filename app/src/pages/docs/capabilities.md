@@ -17,7 +17,9 @@ a person is all three at different moments:
 
 Every write is a wallet transaction on the network you are viewing. The marketplace fee is
 **1.5%, paid by the seller, only when something sells**. Listing, auctioning, bidding and
-offering are free (gas only). Every amount you escrow is refundable.
+offering are free (gas only). Escrow you put up stays withdrawable until it becomes a sale:
+winning bids and accepted offers pay the seller, while outbid, cancelled, declined, expired
+and failed-payout amounts are all refundable.
 
 ## Which networks?
 
@@ -52,9 +54,19 @@ to a different site, so you connect your wallet again on arrival.
 | Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations), optional min-increment %) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
-| Settle after it ends (NFT → winner, proceeds → seller minus 1.5%) | — | ✓ anyone | ✓ |
+| Settle after it ends (NFT → winner, proceeds → seller minus 1.5%) | — | ✓ if you won it | ✓ |
 | Cancel early | — | — | ✓ only while there are no bids |
 | Last 3 minutes: every bid extends the end by 3 min (max 30 min total) | rule | rule | rule |
+
+**Who can settle.** Three parties, and no one else: the marketplace's own keeper (which
+settles the moment the auction ends, so normally nobody has to do anything), the seller, and
+the winner. A passer-by cannot settle someone else's auction. This never traps money — if
+you did not win, your escrow is withdrawable at any time, and if an auction is somehow left
+unsettled for three days anyone may force-cancel it and return every bid.
+
+**Bids must take the lead.** A bid that clears neither the reserve nor the leader's total
+plus the minimum increment is rejected outright rather than parked as escrow — you never
+end up with money locked behind a position that cannot win.
 
 ## Offers (escrowed)
 
@@ -73,6 +85,22 @@ to a different site, so you connect your wallet again on arrival.
 
 Everyone: full-text search over NFTs and collections, trending, collection pages with traits,
 activity feed, live updates over WebSocket. No results are hidden from viewers.
+
+Long lists — your NFTs, listings, auctions and offers — are paged rather than truncated, so
+a large wallet shows everything it holds.
+
+A token page works even for an NFT the indexer has never seen: if the marketplace has no
+record of it, the page reads the collection straight from the chain and renders what it
+finds. Newly minted or just-transferred NFTs are therefore viewable immediately.
+
+## Your profile
+
+Connect a wallet and you can set a display name, a short bio, links, and a **tag** — a
+label of your own choosing that replaces the automatically derived collector badge.
+
+Profiles are shared across networks. What you set on one network carries over to the others,
+so you fill it in once rather than once per network. Your NFTs, listings and auctions remain
+per-network, because those live in each network's own contracts.
 
 ## Refunds
 

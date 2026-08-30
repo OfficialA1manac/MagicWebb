@@ -33,8 +33,11 @@ error CannotCancel();
 ///     auto-refunded** — funds stay escrowed so they can top up and reclaim the lead.
 ///     An `OutbidNotification` is emitted when the lead changes.
 ///   - To take the lead, a bidder's new cumulative must clear the reserve and beat
-///     the current leader by the min increment. Sub-threshold bids still escrow
-///     (accumulate) but do not lead.
+///     the current leader by the min increment. Sub-threshold bids REVERT
+///     (`BidTooLow`) — they do not escrow. Accumulating below the lead was
+///     removed: it burned gas for a position that could never win and let a
+///     griefer extend the anti-snipe timer with 1-wei bids. A bidder who cannot
+///     afford the lead reclaims their escrow with `withdrawLoserFunds()`.
 ///
 /// Settlement (keeper + parties only — funds still never trapped):
 ///   1. KEEPER_ROLE — settles the instant `endsAt` passes (1s ticker).
@@ -100,7 +103,7 @@ contract AuctionHouse is MarketplaceCore {
         uint64        startsAt;
         uint16        minIncrementBps;   // seller's min-raise %, capped 50%; bid() floors the step at MIN_BID_INCREMENT
         bool          settled;
-        bool          active;            // seller activates after creation; bids only when true
+        bool          active;            // VESTIGIAL: set true by _create; bid() never reads it. Kept for ABI/storage compat
         TokenStandard standard;
         address       collection;
         uint64        endsAt;
@@ -494,6 +497,27 @@ contract AuctionHouse is MarketplaceCore {
             // written by create() and is never mutated. Pulling from an arbitrary
             // `from` is the whole point of an escrowless marketplace — the seller
             // approved this contract at listing time.
+            //
+            // DELIBERATE ASYMMETRY: this is `transferFrom`, while the direct-sale
+            // path (MarketplaceCore._deliver) uses `safeTransferFrom`. The
+            // difference is who can veto the transfer.
+            //   - Direct sale: the buyer is msg.sender. A reverting
+            //     onERC721Received only reverts their own purchase. Safe transfer
+            //     costs them nothing and protects them from buying into a
+            //     contract that cannot hold the NFT.
+            //   - Auction settle: the winner is NOT the caller, and the auction
+            //     has already closed at a price they committed to. With
+            //     safeTransferFrom, a winner whose contract reverts in
+            //     onERC721Received would land in the `catch` below, take a FULL
+            //     refund, and leave the seller with no sale — a free post-hoc
+            //     veto on an auction they already won. transferFrom removes that
+            //     veto: delivery succeeds and the seller gets paid.
+            // The trade-off is that a winning contract with no ERC-721 handling
+            // receives a token it may be unable to move. That is the winner's own
+            // contract and their own bid; it is strictly preferable to letting
+            // them cancel a concluded auction at the seller's expense.
+            // ERC-1155 has no unsafe transfer variant, so that branch cannot make
+            // the same choice — see the `catch` path for how it degrades.
             // slither-disable-next-line arbitrary-send-erc20
             try IERC721(coll).transferFrom(sel, winner, tid) { delivered = true; }
             catch {}

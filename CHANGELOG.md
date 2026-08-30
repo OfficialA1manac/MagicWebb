@@ -7,6 +7,79 @@ DB + API + docs, `v22..v28` = iter-audit fixes rolled in from
 multiple rounds, `v29` = full-stack chain-id + gas-cap + chunk-abort
 hardening).
 
+**Versioning changed after v29.** The `vNN` audit-ledger numbering
+tracked audit rounds, not the product. From `v3.0` on, releases are
+numbered by the deployed contract/protocol generation instead —
+`v3.x` is the third contract generation, the one with
+`MarketplaceManager`, timelocked upgrades and on-chain durations.
+The two schemes do not overlap: `v29` precedes `v3.0` in time.
+
+## v3.1 — 2026-08-29 — Rules overhaul, badges, unpausable protocol
+
+Live on Coston2 from block 34619862. Songbird and Flare run the same
+build in read-only network mode (UI, wallet, profiles; no contracts).
+
+### Protocol
+
+- **Settle authority is closed to three parties**: `KEEPER_ROLE`
+  (the instant `endsAt` passes), the seller, and the auction winner.
+  No third party can settle someone else's auction. Escrow is still
+  never trapped: non-leading escrow is withdrawable at any time and
+  `forceCancel()` remains permissionless at `endsAt + 3d`.
+- **"Pausable entries, unstoppable exits."** No exit path
+  (`withdrawLoserFunds`, `refundExpiredOffer`, `cancelOffer`,
+  `withdrawRefund`, `forceCancel`) can be halted by anyone.
+- **`refundExpiredOffer` is no longer keeper-only** — a bidder can
+  always reclaim their own expired escrow, so a dead keeper cannot
+  strand it. `KEEPER_ROLE` is required only to refund someone else.
+- **15 auction durations**, validated and expiry-computed on chain.
+  Anti-snipe extensions are hard-capped at 30 minutes past the
+  original end, so no auction can be kept alive indefinitely.
+- **Sub-threshold bids revert** instead of accumulating: escrow that
+  can never lead only burned gas and let a griefer push the timer.
+- **Keeper fleet is self-replenishing** — keepers may add and remove
+  keepers, so the fleet survives admin renunciation. Deploy scripts
+  now *require* `KEEPER_ADDR`; deploying without one and then
+  renouncing admin would have sealed `KEEPER_ROLE` forever.
+
+### Frontend
+
+- **Badges**: Verified NFT (ERC-165 + metadata resolved), upgraded to
+  **Authentic** when the collection's ERC-173 creator is known, plus
+  a Creator badge on profiles.
+- **Editable profile tag**, cross-network profile carry-over,
+  profile pagination, and an on-chain fallback so a token page still
+  renders for NFTs the indexer has never seen.
+
+### Safety / operations
+
+- Server shutdown no longer loses data: teardown cancels first, then
+  drains, then closes sinks; `log.Fatal` in the run path was replaced
+  with returned errors so the keeper's Postgres advisory lock is
+  always released.
+- Real invariant suites for the marketplace, auction house and offer
+  book — the previous ones asserted properties that could not fail.
+- Deployment drift detector: every network's live build SHA is
+  compared against `origin/main`.
+
+## v3.0 — 2026-08 — Third contract generation, multi-network
+
+- **`MarketplaceManager`** as the roles registry (admin, keeper,
+  fee-manager) and trust anchor for **timelocked UUPS upgrades**.
+  The 1.5% fee stays immutable in the cores.
+- **Durations computed on chain** — the client sends a duration, not
+  an absolute expiry it could lie about.
+- **Frontend rebuilt on Astro + Svelte**; the server-rendered HTMX UI
+  was removed entirely.
+- **Per-network chain profiles** with a read-only network mode: a
+  network with no contracts serves UI, wallet and profiles while
+  running no indexer or keepers.
+- **Deploy matrix over `deployments/*.json`** — one Fly template per
+  network, addresses from a single source of truth, and a network
+  switcher that links only to networks that actually exist.
+- **Realtime event catalog** as the single list of event types shared
+  by every transport (WS, SSE, gRPC bridge).
+
 ## v29 — 2026-06-24 — Full-stack Round 4 (cross-layer)
 
 The **$75k+ full-stack audit** engagement surfaced six findings

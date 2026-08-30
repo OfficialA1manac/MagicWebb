@@ -22,7 +22,14 @@ for(const f of files){
     if(d.status!=="deployed" && v!==null) throw new Error(f+": "+k+" must be null when status is "+d.status);
     if(v) known.add(v.toLowerCase());
   }
-  for(const s of d.superseded||[]) for(const [k,v] of Object.entries(s)) if(/^0x/.test(v)) known.add(v.toLowerCase());
+  // superseded entries are historical and have drifted in shape: older ones are
+  // flat {marketplace:"0x..."} maps, newer ones nest under {note, contracts:{...}}.
+  // Walk arbitrarily deep so a future shape change cannot silently hide retired
+  // addresses from the stray-address gate below.
+  (function walk(v){
+    if(typeof v==="string"){ if(/^0x[0-9a-fA-F]{40}$/.test(v)) known.add(v.toLowerCase()); return; }
+    if(v && typeof v==="object") for(const x of Object.values(v)) walk(x);
+  })(d.superseded||[]);
   for(const c of d.trackedCollections||[]) known.add(c.toLowerCase());
 }
 fs.writeFileSync(".deployments-known.tmp",[...known].join("\n"));

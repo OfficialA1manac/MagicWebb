@@ -40,15 +40,21 @@ error PrincipalChanged();
 ///     escrowed; the offerer pays no fee.
 ///   - Only ONE offer per buyer per NFT. Calling makeOffer again on the same NFT
 ///     EDITS the position — the old principal is refunded atomically and the new
-///     principal replaces it. Units and expiry can also be updated in the same call.
+///     principal replaces it, so the buyer nets only the difference. Units are
+///     updated too, but the EXPIRY IS NOT: the original expiresAt keeps counting
+///     down and the duration argument is ignored on an edit, so a buyer cannot
+///     extend an offer's life by repeatedly editing it. An already-expired
+///     position cannot be edited at all (`OfferExpired`).
 ///   - Bidder can cancel their own offer before expiry via cancelOffer(), receiving a
 ///     full principal refund.
 ///   - There is NO individual withdrawal while the position is active. A position is
 ///     locked until accept / reject / expiry / edit.
 ///   - acceptOffer DEDUCTS a 1.5% platform fee from the principal; the seller receives 98.5%.
 ///   - rejectOffer (owner), cancelOffer (bidder, before expiry), or refundExpiredOffer
-///     (keeper, after expiry) returns the FULL principal to the bidder — an offer
-///     that never sells costs nothing.
+///     (after expiry) returns the FULL principal to the bidder — an offer that never
+///     sells costs nothing. refundExpiredOffer is NOT keeper-only: the bidder can
+///     always reclaim their OWN expired escrow, so a dead keeper can never strand it.
+///     Only moving someone ELSE's expired escrow requires KEEPER_ROLE.
 ///
 /// Non-custodial. No royalties. No off-chain signatures. Nothing is pausable —
 /// no entry or exit path (makeOffer/accept/reject/cancel/refund) can ever be halted.
@@ -341,7 +347,10 @@ contract OfferBook is MarketplaceCore {
 
     /// @notice Bidder cancels their own offer before it expires, receiving a full
     ///         principal refund. Callable only by the bidder and only before expiry.
-    ///         Once expired, only the keeper can refund via refundExpiredOffer.
+    ///         Once expired, this path reverts and the refund moves to
+    ///         refundExpiredOffer — which the bidder can still call themselves
+    ///         for their own position (KEEPER_ROLE is required only to refund
+    ///         someone else's). The escrow is never stuck either way.
     function cancelOffer(address coll, uint256 tokenId) external nonReentrant {
         Position memory p = positions[coll][tokenId][msg.sender];
         if (p.principal == 0) revert NoOffer();

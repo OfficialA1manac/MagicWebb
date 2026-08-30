@@ -92,14 +92,14 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     ///         withdrawRefund() once the recipient can accept ETH.
     mapping(address => uint256) public pendingReturns;
 
+    /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
+    event PushFailed(address indexed to, uint256 amount);
+
     /// @notice Optional MarketplaceManager — the roles registry (keeper, admin)
     ///         and the trust anchor for timelocked upgrades. address(0) = no
     ///         roles and a permanently frozen implementation. It has no power
     ///         over funds and cannot halt any user action.
     ///         Was immutable in v1; now upgradeable storage.
-    /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
-    event PushFailed(address indexed to, uint256 amount);
-
     address public manager;
 
     /// @notice Implementation queued for upgrade, or address(0) when none is

@@ -4,7 +4,15 @@
 >
 > **Also removed:** `MagicWebbNFT.sol` (first-party NFT contract) — the system is now purely a marketplace for external collections.
 >
-> **Auction/offer durations** are now constrained to 6 fixed durations shared across all cores: 3 min, 15 min, 30 min, 1 hr, 4 hr, 24 hr (defined in `MarketplaceCore.sol`). Auctions **auto-activate** on creation (no separate `activateAuction()` call). Offer **top-ups no longer refresh** the expiry timer.
+> **Auction/offer durations** are constrained to **15** fixed durations shared across all cores: 1, 3, 5, 10, 15, 30 and 45 min, then 1, 2, 4, 8, 12, 16, 20 and 24 hr (defined in `MarketplaceCore.sol`). Auctions **auto-activate** on creation (no separate `activateAuction()` call) — the `Auction.active` flag is vestigial and `bid()` never reads it. Offer **top-ups no longer refresh** the expiry timer.
+>
+> **⚠️ Post-audit architectural change (v3, August 2026) — read before the body of this report.** Three claims made repeatedly below were true at audit time and are **false today**. They have been corrected in place in the sections that follow; this note exists so a reader who samples the document does not carry away the old model:
+>
+> 1. **Nothing is pausable.** The `entryGate` modifier and the manager's entry-halting power were **removed**. There is no circuit breaker, no pause, and no `OPERATOR_ROLE`. The design is now *"unpausable entries, unstoppable exits"* — the manager holds only `DEFAULT_ADMIN_ROLE`, `KEEPER_ROLE` and `FEE_MANAGER_ROLE`, none of which can halt or reprice a trade or touch escrow.
+> 2. **The cores are UUPS-upgradeable behind a timelock**, not immutable. `feeRecipient` and `manager` moved from `immutable` to upgradeable storage. Full immutability is the documented END STATE, reached by renouncing `DEFAULT_ADMIN_ROLE` — see `docs/IMMUTABILITY_TRANSITION.md`. Until then, "immutable" in this report means "no privileged runtime control", not "no upgrade path".
+> 3. **`settle()` is authorized**, to the keeper, the seller, or the winner — not permissionless. This is a deliberate product rule. Escrow recovery stays manager-independent (see Phase 1, "Critical design invariant").
+>
+> `MIN_PRICE` is **1 ether**, not the 0.01 ETH quoted in the original Round-1 text.
 
 **Audit Date:** June 24, 2026
 **Auditor:** Codebuff AI Security Analysis (Buffy + Gemini deep-thinker + Slither + manual line-by-line)
@@ -27,7 +35,9 @@
 
 ## Executive Summary
 
-The Magic Webb system is a complete, immutable NFT marketplace consisting of four core escrow contracts (`Marketplace`, `AuctionHouse`, `OfferBook`, `MarketplaceCore`) and a role-based circuit-breaker (`MarketplaceManager`). The architecture follows the **"pausable entries, unstoppable exits"** design: the manager can halt new activity but can never trap escrowed funds.
+The Magic Webb system is a complete NFT marketplace consisting of four core escrow contracts (`Marketplace`, `AuctionHouse`, `OfferBook`, `MarketplaceCore`) and a role registry (`MarketplaceManager`). The architecture follows an **"unpausable entries, unstoppable exits"** design: no role can halt, censor or reprice any user action, and none can trap escrowed funds. The manager's only powers are authorizing keepers, pointing at future token modules, and queueing timelocked implementation upgrades — it never touches funds or trade flow.
+
+The cores are UUPS-upgradeable behind a timelock rather than immutable. That upgrade path is the one remaining privileged capability in the system, and retiring it — by renouncing `DEFAULT_ADMIN_ROLE` once a keeper fleet is provably in place — is the documented end state (`docs/IMMUTABILITY_TRANSITION.md`). **An auditor should treat the upgrade path, not a pause switch, as the primary trust assumption.**
 
 The codebase demonstrates elite-tier Solidity engineering. Multiple prior audit findings (C-01 through C-03, M-01 through M-02, audit-#1 through audit-#6) have already been identified and remediated, covering settlement-stall attacks, anti-snipe griefing, offer-expiry manipulation, pull-fallback patterns, and gas-cap compatibility.
 
@@ -53,7 +63,7 @@ MarketplaceCore (abstract)
 ├── AuctionHouse     — English auctions (cumulative bidding, anti-snipe)
 └── OfferBook        — On-chain offers (stacked positions, compound model)
 
-MarketplaceManager   — Role registry + entry-only circuit breaker
+MarketplaceManager   — Role registry + timelocked upgrade anchor (NO circuit breaker)
 ```
 
 **Inheritance chain:**
@@ -61,11 +71,17 @@ MarketplaceManager   — Role registry + entry-only circuit breaker
 - All three cores are `nonReentrant` on every state-changing external function
 - `MarketplaceManager` extends `AccessControl` (OpenZeppelin)
 
-**Key immutables (set at construction, never change):**
-- `feeRecipient` — wallet receiving 1.5% platform fees
-- `manager` — optional circuit-breaker; `address(0)` = ungated
-- `PLATFORM_FEE_BPS` — 150 (1.5%), hardcoded constant
-- `MIN_PRICE` — 0.01 ETH, hardcoded constant
+**Fee and price parameters:**
+
+| Parameter | Kind | Value | Notes |
+|:----------|:-----|:------|:------|
+| `PLATFORM_FEE_BPS` | `constant` — genuinely immutable | 150 (1.5%) | Seller-pays, charged only on a completed sale. Cannot be changed without a core upgrade. |
+| `MIN_PRICE` | `constant` — genuinely immutable | 1 ether | Was 0.01 ETH at Round 1. |
+| `feeRecipient` | upgradeable storage | set at initialize | Was `immutable` in v1. Moved so a future upgrade can redirect fees; **no runtime setter exists**, so changing it still requires a timelocked upgrade. |
+| `manager` | upgradeable storage | set at initialize | Was `immutable` in v1. `address(0)` = no roles and a permanently frozen implementation. |
+
+The `initialize()` path rejects an EOA or a typo'd address for `manager`, so the
+role registry cannot be pointed at something that silently answers no calls.
 
 ### Inheritance & Visibility Review
 
@@ -76,12 +92,30 @@ All public/external functions have appropriate visibility. Internal helpers are 
 | Modifier       | Used By           | Assessment |
 |:---------------|:------------------|:-----------|
 | `nonReentrant` | All state-changing external functions in all 3 cores | ✅ Correct |
-| `entryGate`    | Entry-path functions (list, buy, create, bid, makeOffer, acceptOffer) | ✅ Correct — fails open if no manager |
 | `onlyRole()`   | MarketplaceManager only | ✅ Standard OZ pattern |
 
-**Critical design invariant verified (as of the audited revision):** EXIT paths (settle, refundLosers, withdrawRefund, cancel, cancelEarly, rejectOffer, refundExpiredOffer) never consult the manager. ✅ *(⚠️ `reclaim` and `settleUnstuck` were removed post-audit — stall window eliminated.)*
+*(The `entryGate` modifier listed here at Round 1 no longer exists — entry paths are ungated. See "Critical design invariant" below.)*
 
-> **v3 update (2026-08-28):** `settle()` now consults the manager for KEEPER_ROLE, and is authorized only for the keeper, the seller, or the winner — a deliberate product rule. Escrow recovery remains fully manager-independent: `forceCancel()` (permissionless, endsAt + 3 days), `withdrawLoserFunds()`, `refundLosers()`, and `withdrawRefund()` never consult the manager, so funds can never be trapped. The cores are also UUPS-upgradeable behind a timelock (instant on testnets during the testing phase) rather than immutable; full immutability is the documented end state via admin renunciation — see docs/IMMUTABILITY_TRANSITION.md.
+**Critical design invariant (current):** no role can halt any user action, and no
+role can trap escrowed funds.
+
+- **Entries** — `list`, `batchList`, `buy`, `createAuction`, `bid`, `makeOffer`,
+  `acceptOffer` — consult no role at all. The `entryGate` modifier and the
+  manager's pause power were removed in v3; there is no path by which the
+  manager, the admin, or a compromised key can stop a user from trading.
+- **Exits** — `withdrawLoserFunds`, `refundLosers`, `withdrawRefund`, `cancel`,
+  `cancelEarly`, `rejectOffer`, `cancelOffer`, `forceCancel` (permissionless at
+  `endsAt + 3 days`) — never consult the manager. Escrow recovery is therefore
+  fully manager-independent even if the manager address is compromised or dead.
+- **`refundExpiredOffer` is not keeper-only:** a bidder can always reclaim their
+  OWN expired escrow. `KEEPER_ROLE` is required only to move someone *else's*.
+  An idle or key-lost keeper cannot strand funds.
+- **The one authorized path is `settle()`**, restricted to `KEEPER_ROLE`, the
+  seller, or the winner — a deliberate product rule, not a safety mechanism. It
+  cannot trap value: if it is never called, `forceCancel()` refunds every bid
+  after three days, and non-leading escrow is withdrawable throughout.
+
+*(⚠️ `reclaim` and `settleUnstuck` were removed post-audit — stall window eliminated.)*
 
 ### Event Emission Review
 
@@ -109,12 +143,26 @@ All state-changing operations emit events with correct indexed parameters. The `
 | `AuctionHouseSettleSafety.t.sol` | 5 tests | C-01 (transferFrom), C-02 (seller-fault detection), feeRecipient rejection, ERC-1155 buyer-fault | *(⚠️ buyer-fault stall tests removed post-audit — stall window eliminated.)*
 | `AuditFuzz.t.sol` | 19 tests | Anti-snipe 1k bids, seller-fault, buyer-fault, offer fallback, batch cap, griefing half-batch, M-01 expiry, ~~C-03 stalled refunds (⚠️ OBSOLETE—stall removed)~~, M-02 gas cap + 9 Round-2 regression tests (L-04/L-05/M-03 PushFailed coverage and NothingToWithdraw selector) |
 | `Marketplace.t.sol` | 19 tests | List/buy, cancel, expiry, ERC-1155, batch list, relist-after-sale, fuzz fee |
-| `MarketplaceCore.t.sol` | 5 tests | Constructor guards, immutability, fee routing, no-pause |
-| `MarketplaceManager.t.sol` | 18 tests | Roles, circuit breaker, entry gating, exit-only invariant, registry, constructor validation |
+| `MarketplaceCore.t.sol` | 5 tests | Constructor/initializer guards, fee routing, absence of any pause |
+| `MarketplaceManager.t.sol` | 18 tests | Roles, exit-independence invariant, registry, initializer validation |
 | `OfferBook.t.sol` | 14 tests | Make/accept/reject/expiry, compounding, ERC-1155, fuzz fee |
-| `OfferBookInvariant.t.sol` | 1 invariant | Escrow balance == sum of active principals |
+| `OfferBookInvariant.t.sol` | 2 invariants | Escrow balance == sum of active principals; `refundExpiredOffer` exercised |
+| `MarketplaceInvariant.t.sol` | 3 invariants | Full listing lifecycle (list/batchList/editPrice/buy/cancel/cleanExpired) under 128k fuzz calls |
+| `AuctionHouseInvariant.t.sol` | 3 invariants | Two-sided escrow accounting, leader-bid integrity, `refundLosers`/`withdrawLoserFunds`/`forceCancel` |
 
-**Total: 146 tests + 1 invariant (134 Round 1 + 9 Round 2 regression tests + 3 Round 3 regression tests)** — all passing
+**Total (verified by `forge test` at the time of this revision): 137 tests across
+9 suites — all passing, 0 failed, 0 skipped.**
+
+> **Invariant suites rewritten (August 2026).** The three suites above previously
+> asserted properties that **could not fail** — e.g. `MarketplaceInvariant`
+> checked `ghost == 0 || ghost == 1 ether` where those were the only two values
+> ever assigned, and `OfferBookInvariant`'s "refund expired" action actually
+> called `rejectOffer`, leaving `refundExpiredOffer` — the unstoppable-exit path
+> the CI audit gate depends on — with zero invariant coverage. Both were rewritten
+> to assert real conservation properties, the auction balance check was made
+> two-sided (holding *less* than owed used to pass), and all three suites are now
+> gated in `.github/workflows/audit.yml`. Reviewers comparing against an earlier
+> revision of this report should not treat the old pass rate as evidence.
 
 ### Test Suite — Resolved Regression
 
@@ -189,14 +237,39 @@ Top-up offers cannot reduce an existing position's expiry. ✅
 | Non-receiving seller bricks `buy()` | **MITIGATED** — `_pay()` falls back to `pendingReturns` |
 | Non-receiving bidder bricks `refundLosers()` | **MITIGATED** — `gas:50_000` per call, fallback to `pendingReturns` |
 | Non-receiving bidder bricks `rejectOffer()` | **MITIGATED** — `_pushPullRefund()` falls back to `pendingReturns` |
-| Manager compromise halts entries | **BY DESIGN** — exits always work; funds never trapped |
+| Manager compromise halts entries | **NOT POSSIBLE** — entries consult no role since v3; there is no pause to seize |
+| Manager compromise seizes escrow | **NOT POSSIBLE** — exits never consult the manager |
+| Admin key compromise upgrades a core to a malicious implementation | **THE REAL RISK** — mitigated only by the upgrade timelock (instant on testnet today) and, ultimately, by admin renunciation. This is the trust assumption to focus on. |
+| Keeper key compromise | **BOUNDED** — a keeper can settle an ended auction to its rightful winner and refund expired offers to their rightful bidder. It cannot redirect funds, and it cannot settle early. |
 | 200-batch `refundLosers` with 100% griefing receivers | **MITIGATED** — `gas:50_000` per call, credits to `pendingReturns`, no OOG cascade |
 
 #### 3.8 Access Control
 
-The core contracts (`Marketplace`, `AuctionHouse`, `OfferBook`) have **zero** privileged functions. No admin, no pause, no upgrade. All state-changing functions are either permissionless or seller-owner-only (for `cancel` and `rejectOffer`).
+The core contracts (`Marketplace`, `AuctionHouse`, `OfferBook`) have **no pause,
+no fee control, and no ability to move user funds**. State-changing functions are
+permissionless, seller/owner-only (`cancel`, `rejectOffer`), or — for `settle()`
+alone — restricted to keeper/seller/winner.
 
-The `MarketplaceManager` uses OpenZeppelin `AccessControl` with role-based permissions. The deploy script correctly transfers admin + operator roles to `CREATOR_ADDR` and renounces deployer roles. ✅
+They are, however, **UUPS-upgradeable**, which is a privileged capability and the
+system's principal trust assumption. It is constrained rather than open:
+
+| Control | Mechanism |
+|:--------|:----------|
+| Who may queue an upgrade | `DEFAULT_ADMIN_ROLE` on `MarketplaceManager` |
+| Delay before it may be installed | `upgradeDelay()`, enforced via `upgradeEta` — **instant during the current testnet phase**, which an auditor should treat as the live setting until mainnet |
+| Cancellation | `pendingImplementation` can be cleared before the ETA |
+| Retirement | Renouncing `DEFAULT_ADMIN_ROLE` freezes the implementation permanently |
+
+`MarketplaceManager` uses OpenZeppelin `AccessControl` with exactly three roles:
+`DEFAULT_ADMIN_ROLE`, `KEEPER_ROLE`, and `FEE_MANAGER_ROLE` (reserved; the 1.5%
+fee itself is a constant and unreachable from any role). **There is no
+`OPERATOR_ROLE`** — Round 1 referred to one that no longer exists.
+
+`KEEPER_ROLE` holders may add and remove other keepers, so the keeper fleet stays
+self-replenishing after admin renunciation. The deploy scripts now **require**
+`KEEPER_ADDR`: deploying with no keeper and then renouncing admin would seal
+`KEEPER_ROLE` permanently, since granting it needs admin-or-keeper and neither
+would exist. ✅
 
 #### 3.9 Fund Safety Invariants
 
@@ -295,9 +368,21 @@ slot 2: endsAt (8) + tokenId (32) → actually tokenId is uint256 → separate s
 
 **Location:** `MarketplaceManager.sol`
 
-**Description:** `DEFAULT_ADMIN_ROLE` is the admin for all roles (operator, keeper, fee_manager). If the admin key is compromised, the attacker can grant/revoke any role. However, per the architectural invariant, the manager can only halt entries — it cannot move funds.
+**Description:** `DEFAULT_ADMIN_ROLE` is the admin for all roles (keeper,
+fee_manager — there is no operator role). If the admin key is compromised the
+attacker can grant or revoke any role.
 
-**Impact:** Minimal. The worst case is halted entries (no fund loss).
+**Impact — RE-ASSESSED (v3): no longer minimal.** The Round-1 rationale ("the
+worst case is halted entries") is void twice over: entries can no longer be
+halted at all, and `DEFAULT_ADMIN_ROLE` now also queues **UUPS implementation
+upgrades**. A compromised admin key cannot pause or seize anything directly, but
+it can install a new core implementation, which is unbounded. The only controls
+are the upgrade timelock — **instant during the current testnet phase** — and
+renouncing the role, which retires the capability for good.
+
+**Recommendation:** hold `DEFAULT_ADMIN_ROLE` in a multisig for as long as it
+exists, set a non-zero `upgradeDelay()` before mainnet, and complete the
+renunciation described in `docs/IMMUTABILITY_TRANSITION.md`.
 
 ### I-05: Missing Event on Failed Push Payments (Informational)
 
@@ -678,24 +763,37 @@ Three new tests added as regression guards:
 
 1. Monitor ~~`AuctionStalled`~~ events — ⚠️ OBSOLETE: stall mechanism removed; `settle()` reverts on transfer failure, keeper retries.
 2. Monitor `pendingReturns` balances — if growing, indicates receiving-contract issues.
-3. Monitor `EntriesPaused` / `EntriesUnpaused` — circuit breaker activity.
+3. ~~Monitor `EntriesPaused` / `EntriesUnpaused`~~ — ⚠️ OBSOLETE: no circuit breaker exists; these events were removed with `entryGate`. Nothing to monitor, because nothing can be paused.
 4. ~~Set up alerts for `AuctionReclaimed`~~ — ⚠️ OBSOLETE: `reclaim()` removed with stall window.
+5. **Monitor `UpgradeQueued`** — this is now the highest-signal security event in the system. Any queued implementation change should be expected, reviewed against the ETA, and cancellable before it installs. Alert on it unconditionally.
+6. **Monitor keeper liveness and balance** — auctions settle on their own only while a funded keeper is running. A dead keeper degrades UX (sellers/winners must settle manually) but never traps funds; `forceCancel()` remains permissionless at `endsAt + 3 days`.
+7. **Monitor `AuctionSettlementFailed`** — emitted when a seller has moved the NFT away or revoked approval. The winner is refunded automatically; the event is the signal that a seller defaulted on delivery.
 
 ---
 
 ## Final Security Posture Assessment
 
-**Rating: PRODUCTION-READY**
+**Rating: TESTNET-READY. Mainnet remains gated on an external audit and on the
+custody/immutability steps below — this document is an internal analysis, not an
+external audit sign-off.**
 
-The Magic Webb NFT marketplace system demonstrates exceptional security engineering across both audit passes:
+The Magic Webb NFT marketplace system demonstrates strong security engineering
+across all passes:
 
 - **Zero critical or high vulnerabilities** in the current codebase.
-- **Comprehensive defense-in-depth:** pull-fallback patterns, CEI compliance, `nonReentrant` guards, permissionless settlement, seller-fault detection, buyer-fault stalls with safety valves.
-- **True immutability:** Core contracts have zero privileged functions post-deploy. The manager can halt new activity but cannot move funds.
+- **Comprehensive defense-in-depth:** pull-fallback patterns, CEI compliance, `nonReentrant` guards, seller-fault detection.
+- **No pause, no fee control, no fund-moving role.** Entries consult no role; exits never consult the manager. A fully compromised manager cannot stop a trade or seize escrow.
 - **Flare-optimized:** Gas limits, block times, and network characteristics are accounted for.
-- **Hardened observability:** Every push-failure path now emits `PushFailed` with correct indexed `to` + amount data; every empty-credit `withdrawRefund()` reverts with the canonical `NothingToWithdraw` selector (single selector across all cores). *(⚠️ Post-audit: `settleUnstuck()`/`reclaim()`-specific PushFailed coverage removed with stall mechanism.)*
+- **Hardened observability:** Every push-failure path emits `PushFailed` with correct indexed `to` + amount data; every empty-credit `withdrawRefund()` reverts with the canonical `NothingToWithdraw` selector (single selector across all cores). *(⚠️ Post-audit: `settleUnstuck()`/`reclaim()`-specific PushFailed coverage removed with stall mechanism.)*
 - **Code cleanliness:** Zero silent-fallback helpers remaining; zero unused parameters; zero divergent error selectors.
-- **Well-tested:** 134 Round-1 tests + 9 Round-2 regression tests = **143 tests + 1 invariant** (all passing).
+- **Well-tested:** 137 tests across 9 suites, including three rewritten invariant suites, all passing.
+
+**Open items before a mainnet rating would be justified:**
+
+1. **External audit.** Every pass recorded here is internal or AI-assisted. No third-party firm has reviewed this code.
+2. **Retire or constrain the upgrade path.** `upgradeDelay()` is instant during the testnet phase. Mainnet needs a real timelock, a multisig on `DEFAULT_ADMIN_ROLE`, and ultimately the renunciation in `docs/IMMUTABILITY_TRANSITION.md`. Until then "immutable" describes the destination, not the deployed state.
+3. **Prove the keeper fleet before renouncing.** Renouncing admin with fewer than two live keeper keys permanently seals `KEEPER_ROLE`. The deploy scripts now require `KEEPER_ADDR`, but the pre-renunciation checklist is a human step.
+4. **`settle()` uses `transferFrom`, not `safeTransferFrom`,** for ERC-721. This is deliberate — documented at the call site — so that a winning contract cannot veto a concluded auction by reverting in `onERC721Received`. The trade-off is that a winner contract with no ERC-721 handling may receive a token it cannot move. An external auditor should confirm they agree with that trade-off.
 
 ### Round 1 (pre-existing remediation) — resolved:
 

@@ -77,13 +77,21 @@ primary_region = "iad"
   RPC_URLS = "https://songbird-api.flare.network/ext/C/rpc"
   SIWE_DOMAIN = "magicwebb-songbird.fly.dev"
   FRONTEND_URL = "https://magicwebb-songbird.fly.dev"
-
+  # NETWORK_NAME / NATIVE_CURRENCY / EXPLORER_URL are deliberately NOT set.
+  # backend/internal/chain/profile carries the correct Songbird values
+  # (explorer https://songbird-explorer.flare.network, currency SGB), a test
+  # cross-checks them against app/src/lib/chains.ts and deployments/*.json, and
+  # config.go only falls back to the profile when the env var is empty. Setting
+  # them here would create a second source of truth that goes stale silently.
+  # RESET_ON_ADDRESS_CHANGE is also unset on purpose: this is a mainnet-class
+  # network, so a contract-address change requires a deliberate manual chainwipe
+  # rather than an automatic boot-time wipe of chain-derived tables.
 
   # Contract addresses come from deployments/<network>.json (CI fills them).
   # While that record says "not-deployed" they are filled with "" and the
   # backend boots in READ-ONLY NETWORK MODE: UI + API serve, no indexer or
-  # keepers. The switcher on other networks links here only once deployed.
-  # than linking to it.
+  # keepers. The switcher on other networks links here only once deployed,
+  # rendering it as unavailable rather than linking to an app with no contracts.
   MARKETPLACE_ADDR = "CHANGE_ME_MARKETPLACE_ADDR"
   AUCTION_ADDR = "CHANGE_ME_AUCTION_ADDR"
   OFFERBOOK_ADDR = "CHANGE_ME_OFFERBOOK_ADDR"
