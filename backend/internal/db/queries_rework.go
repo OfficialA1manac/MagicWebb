@@ -1230,3 +1230,52 @@ func (q *Q) ListTraitValues(ctx context.Context, collection string) (map[string]
 	}
 	return out, rows.Err()
 }
+
+// BlobNeedingThumbs identifies a full-size image blob that has no thumbnail
+// children yet.
+type BlobNeedingThumbs struct {
+	SHA256    string
+	Mime      string
+	SourceURI string
+}
+
+// ListBlobsMissingThumbnails returns full-size blobs that have no thumbnail
+// rows, oldest first.
+//
+// Thumbnails are generated only at ingest (indexer/metadata.go), which means
+// every blob stored before that hook landed has zero variants — and the
+// ?size= serve path silently falls through to the FULL-SIZE bytea on a miss
+// (api/media.go), so those images keep shipping at full weight no matter what
+// the frontend requests. This backs the one-shot backfill in cmd/thumbbackfill.
+//
+// parent_hash IS NULL selects originals (thumbnails carry their parent's hash);
+// the NOT EXISTS clause skips any original already backfilled.
+func (q *Q) ListBlobsMissingThumbnails(ctx context.Context, limit int) ([]BlobNeedingThumbs, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT b.sha256, b.mime, b.source_uri
+		   FROM nft_image_blobs b
+		  WHERE b.parent_hash IS NULL
+		    AND NOT EXISTS (
+		          SELECT 1 FROM nft_image_blobs t
+		           WHERE t.parent_hash = b.sha256
+		            AND t.thumb_width IS NOT NULL)
+		  ORDER BY b.inserted_at ASC
+		  LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+
+	var out []BlobNeedingThumbs
+	for rows.Next() {
+		var b BlobNeedingThumbs
+		if err := rows.Scan(&b.SHA256, &b.Mime, &b.SourceURI); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
