@@ -4,12 +4,12 @@
   "chainId": 114,
   "status": "deployed",
   "deployedAt": "2026-08-28",
-  "indexFromBlock": 34619862,
+  "indexFromBlock": 34729709,
   "contracts": {
-    "marketplace": "0x74ABb995ffcF8f1F8CC5170d19dDa3705a2640A9",
-    "auctionHouse": "0x102849c42AeFa93D52757A19f57398125242fD02",
-    "offerBook": "0xf58a8ff08FD33AF4969617dD97495A0ab770B4Af",
-    "marketplaceManager": "0xBf55A1D9E5c87A6A30414503eB84974971cbBe2F",
+    "marketplace": "0x69558deFEbBBc8b7b2e09a7572abFd05435a7D30",
+    "auctionHouse": "0x6286FA2C766D55d7c9f30493c1e94C8520D60fE9",
+    "offerBook": "0x840E412cb2DCF4454A950132E8BAd5C53a81118d",
+    "marketplaceManager": "0xA4DB12d4F41c573EcCb4EBC16f50948b0487d30f",
     "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
   },
   "trackedCollections": [
