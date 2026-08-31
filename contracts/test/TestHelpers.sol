@@ -46,13 +46,25 @@ contract TestHelpers {
         return OfferBook(address(proxy));
     }
 
+    /// @dev v3.2 initialize takes (admin, keeper). The 1-arg helper keeps the
+    ///      old call sites compiling by installing a sentinel keeper that no
+    ///      test impersonates; tests that need a specific keeper call
+    ///      `setKeeper` as the admin, or use the 2-arg overload.
+    address internal constant TEST_SENTINEL_KEEPER = address(uint160(uint256(keccak256("mw.test.sentinel-keeper"))));
+
     function _deployMarketplaceManager(address admin)
+        internal returns (MarketplaceManager)
+    {
+        return _deployMarketplaceManager(admin, TEST_SENTINEL_KEEPER);
+    }
+
+    function _deployMarketplaceManager(address admin, address keeper)
         internal returns (MarketplaceManager)
     {
         MarketplaceManager impl = new MarketplaceManager();
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin)
+            abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, keeper)
         );
         return MarketplaceManager(address(proxy));
     }

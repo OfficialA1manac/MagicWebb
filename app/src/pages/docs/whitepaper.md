@@ -146,7 +146,7 @@ This is a deliberate choice:
 
 - A token would create an alignment between the platform and short-term price action that we do not want. We are building infrastructure, not a meme.
 - The Flare Network already has FLR; introducing a second token to a niche venue would fragment liquidity.
-- There is nothing to govern on-chain: the contracts have no admin, no pause, and no upgrade path. The fee rate is a compile-time constant and `feeRecipient` is immutable — both fixed at deploy.
+- There is nothing to govern on-chain. The fee rate is a compile-time constant, and nothing on the protocol is pausable. On **mainnet deployments** (Songbird, Flare) the deploy script renounces the sole admin as its final action, so from block one there is no admin, no upgrade path, no keeper rotation, and `feeRecipient` can never change. The **Coston2 testnet** deployment intentionally keeps a single admin so the marketplace can iterate before mainnet — testnet state carries no real value.
 
 If user feedback ever justifies governance, it will be added via a separate mechanism — not retroactively jammed in by minting a token.
 
@@ -167,8 +167,9 @@ If user feedback ever justifies governance, it will be added via a separate mech
 
 | Risk | What happens | What we do |
 |---|---|---|
-| Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty, no upgradeability that could change behavior post-deploy |
-| Deployer key compromised | No effect on a live market | Contracts have no admin, pause, or upgrade path — nothing about a deployed market can be changed. `feeRecipient` is immutable; set it to a multisig at deploy |
+| Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty; mainnet deployments are sealed at deploy (admin renounced), so no upgrade can change behavior post-deploy |
+| Deployer key compromised | No effect on a live mainnet market | The deployer holds no power after deploy. Mainnet deployments renounce the admin in the deploy transaction itself — no admin, no pause, no upgrade path survives. `feeRecipient` is fixed at deploy to a multisig |
+| Keeper key compromised | Automation only | The keeper can only settle auctions to their recorded winner/seller, push refunds to their owners, and clean expired listings — it cannot move, redirect, or block any user's funds, and it cannot enroll other keepers |
 | Frontend disappears | Inconvenient | Contracts remain callable via Flarescan or any wallet's "contract interaction" panel |
 | Indexer lags | Stale UI | Frontend shows "syncing" badge; on-chain trades still settle in real time |
 | Approval phishing | Drained NFTs | Per-collection approvals; user education in app; we never request blanket setApprovalForAll for unknown contracts |

@@ -2,8 +2,9 @@
 
 Open, non-custodial NFT marketplace on the Flare family of networks. No user accounts, no
 login, no admin console: anyone with a wallet on a supported network can list, bid, offer
-and buy. (Protocol roles are a separate matter — a `DEFAULT_ADMIN_ROLE` holder manages
-roles and queued upgrades and `KEEPER_ROLE` automates settlement; see
+and buy. (Protocol authority is a separate matter — v3.2: a single `admin`
+address handles queued upgrades and keeper replacement until renounced, and a
+single `keeper` address automates settlement; see
 `IMMUTABILITY_TRANSITION.md`. No role can pause trading entries or exits.) This document is
 the map; `USER_CAPABILITIES.md` is what each kind of user can do; `NETWORKS.md` is how a
 network is provisioned.
@@ -127,7 +128,7 @@ clears it on `tx-indexed` (or on the next REST refresh). Nothing waits 30 second
 | `Marketplace` | fixed-price listings | `list / list1155 / batchList(≤50) / cancel / editPrice / buy` · `buy` requires `msg.value == price` · listing is free |
 | `AuctionHouse` | English auctions, cumulative bids | `create / create1155 / bid / settle / cancelEarly / refundLosers / withdrawLoserFunds` · min increment 1 native · anti-snipe +3 min, 30 min cap · settle: keeper (instant) or seller/winner only; forceCancel (+3d, permissionless) is the never-stuck escrow backstop |
 | `OfferBook` | escrowed offers | `makeOffer / makeOffer1155 / acceptOffer / cancelOffer / rejectOffer / refundExpiredOffer` · collection must be opted in via `setOfferEligible` (ERC-173 owner) |
-| `MarketplaceManager` | role registry + timelocked upgrades | `KEEPER_ROLE` (instant settlement + refund sweeps), `DEFAULT_ADMIN_ROLE` (roles, queueUpgrade). Nothing is pausable — no entry or exit path can ever be halted |
+| `MarketplaceManager` | single-keeper authority anchor + timelocked upgrades | v3.2: `keeper` (one address — instant settlement, refund sweeps, expired-listing cleanup; cannot alter the keeper set) and `admin` (setKeeper, queueUpgrade; `renounceAdmin()` seals the deployment forever — mainnets seal at deploy). No role registry, no grant path. Nothing is pausable — no entry or exit path can ever be halted |
 
 Deployed addresses: `deployments/<network>.json` (single source of truth).
 

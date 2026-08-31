@@ -44,11 +44,13 @@ error CannotCancel();
 ///   2. Seller OR auction winner — settle any time after `endsAt` if the
 ///      keeper has not already done so.
 ///   No third party can ever settle someone else's auction. Escrow can still
-///   never be stuck: all non-leading escrow is withdrawable at any time via
-///   withdrawLoserFunds(), and `forceCancel()` (permissionless, endsAt + 3d)
-///   finalises any auction nobody settled, unlocking refundLosers() for the
-///   leader too. Worst case — seller vanished AND keeper dead — the leader
-///   waits 3 days for escrow recovery; no path leaves funds locked forever.
+///   never be stuck for a NON-leader: all non-leading escrow is withdrawable at
+///   any time via withdrawLoserFunds(). `forceCancel()` (endsAt + 3d, same
+///   keeper+seller+winner authority as settle — v3.2 removed the permissionless
+///   tier) finalises an auction nobody settled, unlocking refundLosers() for
+///   the leader too. Worst case — seller vanished AND keeper dead — the LEADER
+///   force-cancels their own auction after 3 days; no path leaves funds locked
+///   forever, but no outsider can trigger it either.
 ///   NFT → winner; 1.5% fee → feeRecipient; winningBid−fee → seller.
 ///   The winner's escrow is consumed.
 ///   - `refundLosers(id, batch)` is callable by ANYONE after settlement and returns
@@ -87,8 +89,8 @@ contract AuctionHouse is MarketplaceCore {
     ///         the auction on a failed transfer and returns the winner's escrow
     ///         on the spot (see AuctionSettlementFailed). forceCancel() remains
     ///         only as a backstop for an auction nobody ever called settle() on
-    ///         (lost seller + dead keeper) — permissionless, so escrow is
-    ///         recoverable by anyone driving refundLosers() afterwards.
+    ///         (lost seller + dead keeper) — callable by keeper/seller/winner
+    ///         (v3.2), after which anyone may drive refundLosers().
     uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
     /// @notice Flat FLOOR on the overtaking increment: 1 FLR/C2FLR/SGB (1
     ///         ether). The seller's percentage increment (`minIncrementBps`,
@@ -444,9 +446,9 @@ contract AuctionHouse is MarketplaceCore {
     ///         Losers are refunded separately via refundLosers.
     ///
     ///         Escrow backstop: if the seller is lost AND the keeper is dead,
-    ///         forceCancel() (permissionless, endsAt + 3 days) finalises the
+    ///         the WINNER can forceCancel() (endsAt + 3 days) to finalise the
     ///         auction so refundLosers releases every bidder's escrow — an
-    ///         auction can NEVER be stuck.
+    ///         auction can NEVER be stuck for its parties.
     // slither-disable-next-line reentrancy-eth
     function settle(uint256 id) external nonReentrant {
         Auction storage a = auctions[id];
@@ -625,17 +627,26 @@ contract AuctionHouse is MarketplaceCore {
         emit AuctionCancelled(id);
     }
 
-    // ── Force cancel (permissionless safety valve for permanently-failed delivery) ──
+    // ── Force cancel (party/keeper safety valve for permanently-failed delivery) ──
 
-    /// @notice Permissionless safety valve: after `endsAt + SELLER_DEFAULT_WINDOW`,
-    ///         anyone can force-cancel an auction whose settle() has permanently
-    ///         failed (seller moved the NFT away or revoked approval, making
-    ///         delivery impossible). This sets `a.settled = true`, unlocking
+    /// @notice Safety valve: after `endsAt + SELLER_DEFAULT_WINDOW`, the
+    ///         auction's PARTIES (seller, leader) or the keeper can
+    ///         force-cancel an auction whose settle() has permanently failed
+    ///         (seller moved the NFT away or revoked approval, making delivery
+    ///         impossible). This sets `a.settled = true`, unlocking
     ///         refundLosers() so ALL bidders — including the trapped leader —
     ///         recover their escrow. Before the window, settle() must be
     ///         retried normally (the keeper does this every tick). The NFT
     ///         stays with whoever holds it; forceCancel is purely an escrow
     ///         recovery path, not a trade reversal.
+    ///
+    ///         v3.2 (owner decision 2026-08-31): this was permissionless;
+    ///         it is now restricted to the same authority set as settle() —
+    ///         keeper + seller + winner. Nobody else may trigger the 3-day
+    ///         rescue. The leader's own recovery interest is preserved (the
+    ///         leader IS an authorized caller); non-leading bidders were never
+    ///         dependent on this path — withdrawLoserFunds() lets them pull
+    ///         their own escrow at any time before settlement.
     ///
     ///         Design rationale: the contract docstring promises "funds are
     ///         never trapped" — without this path, a seller who permanently
@@ -648,6 +659,16 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         if (a.seller == address(0) || a.settled) revert NotActive();
         if (block.timestamp < a.endsAt + SELLER_DEFAULT_WINDOW) revert AuctionLive();
+        // Same authority shape as settle(): parties first, then the keeper
+        // probe via the manager. No permissionless tier.
+        bool authorized = (msg.sender == a.seller || msg.sender == a.leader);
+        if (!authorized && manager != address(0)) {
+            (bool ok, bytes memory data) = manager.staticcall(
+                abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
+            );
+            authorized = ok && data.length == 32 && abi.decode(data, (bool));
+        }
+        if (!authorized) revert NotAuthorized();
         a.settled = true;
         emit AuctionForceCancelled(id);
     }

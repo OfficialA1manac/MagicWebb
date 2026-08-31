@@ -156,7 +156,7 @@ Each branch is a copy-on-write clone — zero additional storage cost until data
 cd contracts
 forge build
 forge test                       # full unit/scenario suite
-forge script script/DeployCoston2.s.sol --rpc-url coston2 --broadcast   # deploy (needs funded key)
+forge script script/DeployV32.s.sol --rpc-url coston2 --broadcast       # deploy (needs funded key + ADMIN/FEE_RECIPIENT/KEEPER addrs)
 slither .                        # static analysis
 ```
 

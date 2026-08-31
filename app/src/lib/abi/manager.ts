@@ -15,19 +15,6 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "FEE_MANAGER_ROLE",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "KEEPER_ROLE",
     "inputs": [],
     "outputs": [
@@ -54,20 +41,7 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "addKeeper",
-    "inputs": [
-      {
-        "name": "k",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "auctionHouse",
+    "name": "admin",
     "inputs": [],
     "outputs": [
       {
@@ -82,69 +56,6 @@ export const managerAbi = [
     "type": "function",
     "name": "cancelUpgrade",
     "inputs": [],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "feeDistributor",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "getRoleAdmin",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "governanceModule",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "grantRole",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
     "outputs": [],
     "stateMutability": "nonpayable"
   },
@@ -177,7 +88,12 @@ export const managerAbi = [
     "name": "initialize",
     "inputs": [
       {
-        "name": "admin",
+        "name": "admin_",
+        "type": "address",
+        "internalType": "address"
+      },
+      {
+        "name": "keeper_",
         "type": "address",
         "internalType": "address"
       }
@@ -187,20 +103,7 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "marketplace",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "offerBook",
+    "name": "keeper",
     "inputs": [],
     "outputs": [
       {
@@ -252,7 +155,14 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "removeKeeper",
+    "name": "renounceAdmin",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "setKeeper",
     "inputs": [
       {
         "name": "k",
@@ -262,162 +172,6 @@ export const managerAbi = [
     ],
     "outputs": [],
     "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "renounceRole",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "revokeRole",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setCoreContracts",
-    "inputs": [
-      {
-        "name": "marketplace_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "auctionHouse_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "offerBook_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setFeeDistributor",
-    "inputs": [
-      {
-        "name": "fd",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setGovernanceModule",
-    "inputs": [
-      {
-        "name": "gm",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setStakingModule",
-    "inputs": [
-      {
-        "name": "sm",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "setTokenAddress",
-    "inputs": [
-      {
-        "name": "token_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
-    "name": "stakingModule",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "supportsInterface",
-    "inputs": [
-      {
-        "name": "interfaceId",
-        "type": "bytes4",
-        "internalType": "bytes4"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bool",
-        "internalType": "bool"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "token",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -497,6 +251,19 @@ export const managerAbi = [
   },
   {
     "type": "event",
+    "name": "AdminRenounced",
+    "inputs": [
+      {
+        "name": "lastAdmin",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
     "name": "AuditLog",
     "inputs": [
       {
@@ -554,91 +321,16 @@ export const managerAbi = [
   },
   {
     "type": "event",
-    "name": "ModuleSet",
+    "name": "KeeperSet",
     "inputs": [
       {
-        "name": "slot",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "addr",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RoleAdminChanged",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "previousAdminRole",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "newAdminRole",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RoleGranted",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "account",
+        "name": "previousKeeper",
         "type": "address",
         "indexed": true,
         "internalType": "address"
       },
       {
-        "name": "sender",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "RoleRevoked",
-    "inputs": [
-      {
-        "name": "role",
-        "type": "bytes32",
-        "indexed": true,
-        "internalType": "bytes32"
-      },
-      {
-        "name": "account",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "sender",
+        "name": "newKeeper",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -698,12 +390,7 @@ export const managerAbi = [
   },
   {
     "type": "error",
-    "name": "NotContract",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "NotKeeperOrAdmin",
+    "name": "NotAdmin",
     "inputs": []
   },
   {

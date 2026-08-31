@@ -3,7 +3,7 @@ pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {MarketplaceManager, ZeroAddr, NotKeeperOrAdmin} from "../src/MarketplaceManager.sol";
+import {MarketplaceManager, ZeroAddr, NotAdmin} from "../src/MarketplaceManager.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
@@ -17,30 +17,120 @@ contract MarketplaceManagerTest is Test, TestHelpers {
     AuctionHouse ah;
     OfferBook ob;
     address admin = address(0xAD);
+    address keeper = address(0xCAFE);
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        mgr = _deployMarketplaceManager(admin);
+        mgr = _deployMarketplaceManager(admin, keeper);
         mp = _deployMarketplace(feeRecipient, address(mgr));
         ah = _deployAuctionHouse(feeRecipient, address(mgr));
         ob = _deployOfferBook(feeRecipient, address(mgr));
-        vm.prank(admin);
-        mgr.setCoreContracts(address(mp), address(ah), address(ob));
     }
 
-    function test_rolesAssigned() public view {
+    // ── Authority shim truth table ───────────────────────────────────────────
+
+    function test_shim_truthTable() public view {
         assertTrue(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin));
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), keeper));
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), admin), "admin is not keeper");
+        assertFalse(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), keeper), "keeper is not admin");
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0x999)));
+        assertFalse(mgr.hasRole(keccak256("SOME_OTHER_ROLE"), admin), "unknown roles answer false");
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0)), "zero address never holds a role");
     }
 
-    function test_grantKeeperRole() public {
+    function test_initialize_rejectsZeroAddresses() public {
+        MarketplaceManager impl = new MarketplaceManager();
+        vm.expectRevert(ZeroAddr.selector);
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, address(0), keeper));
+        vm.expectRevert(ZeroAddr.selector);
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, address(0)));
+    }
+
+    // ── Single keeper: only the admin can replace it, nobody can add ─────────
+
+    function test_setKeeper_adminReplaces() public {
+        address k2 = address(0xAA2);
+        vm.prank(admin);
+        mgr.setKeeper(k2);
+        assertEq(mgr.keeper(), k2);
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), k2));
+        // ONE keeper: the old key lost authority the moment it was replaced.
+        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), keeper), "replaced keeper must lose authority");
+    }
+
+    function test_setKeeper_keeperCannotChangeKeeperSet() public {
+        // The v3.1 self-replenishing fleet is gone: the keeper key itself has
+        // ZERO ability to alter settlement authority.
+        vm.prank(keeper);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.setKeeper(address(0xE011));
+    }
+
+    function test_setKeeper_strangerReverts() public {
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.setKeeper(address(0x999));
+    }
+
+    function test_setKeeper_zeroAddressRejected() public {
+        vm.prank(admin);
+        vm.expectRevert(ZeroAddr.selector);
+        mgr.setKeeper(address(0));
+    }
+
+    function test_noGrantSurfaceExists() public {
+        // The AccessControl grant machinery must be gone at the ABI level:
+        // calling the old selectors hits the fallback and reverts.
+        (bool ok,) = address(mgr).call(abi.encodeWithSignature("addKeeper(address)", address(0xB0B)));
+        assertFalse(ok, "addKeeper must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("grantRole(bytes32,address)", mgr.KEEPER_ROLE(), address(0xB0B)));
+        assertFalse(ok, "grantRole must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("removeKeeper(address)", keeper));
+        assertFalse(ok, "removeKeeper must not exist");
+    }
+
+    // ── renounceAdmin: the one-way seal ──────────────────────────────────────
+
+    function test_renounceAdmin_seals() public {
+        vm.prank(admin);
+        mgr.renounceAdmin();
+        assertEq(mgr.admin(), address(0));
+        assertFalse(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin));
+
+        // Keeper survives the seal and keeps settling.
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), keeper));
+
+        // Every admin path is dead — including for the ex-admin.
+        // (The fresh impl is created BEFORE expectRevert: CREATE would
+        // otherwise consume the expected revert.)
+        address nextImpl = address(new MarketplaceManager());
         vm.startPrank(admin);
-        mgr.grantRole(mgr.KEEPER_ROLE(), address(0xB0B));
-        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xB0B)));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.setKeeper(address(0xAA2));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.queueUpgrade(address(this));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.cancelUpgrade();
+        vm.expectRevert(NotAdmin.selector);
+        mgr.renounceAdmin();
+        vm.expectRevert();
+        mgr.upgradeTo(nextImpl);
         vm.stopPrank();
     }
 
+    function test_renounceAdmin_onlyAdmin() public {
+        vm.prank(keeper);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.renounceAdmin();
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.renounceAdmin();
+    }
+
+    // ── Core wiring (unchanged consult protocol) ─────────────────────────────
+
     function test_coreRejectsEOAManager() public {
-        // Deploy a Marketplace impl, then try to deploy proxy with an EOA as manager
         address rando = address(0x999);
         Marketplace impl = new Marketplace();
         vm.expectRevert(BadManager.selector);
@@ -48,7 +138,6 @@ contract MarketplaceManagerTest is Test, TestHelpers {
     }
 
     function test_coreRejectsNonManagerContract() public {
-        // Deploy a Marketplace impl, try to deploy proxy with a non-manager contract as manager
         MockERC721 nonManager = new MockERC721();
         Marketplace impl = new Marketplace();
         vm.expectRevert();
@@ -72,62 +161,6 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         assertEq(s, address(0xBEEF));
     }
 
-    // ── Keeper fleet: self-replenishing, survives admin renounce ────────
-
-    function test_keeperFleet_adminEnrolls() public {
-        vm.prank(admin);
-        mgr.addKeeper(address(0xFEE1));
-        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xFEE1)));
-        vm.prank(admin);
-        mgr.removeKeeper(address(0xFEE1));
-        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0xFEE1)));
-    }
-
-    function test_keeperFleet_keeperEnrollsKeeper_afterAdminRenounce() public {
-        address k1 = address(0xAA1);
-        address k2 = address(0xAA2);
-        vm.prank(admin);
-        mgr.addKeeper(k1);
-        // Full immutability: the admin renounces itself. (Cache the role first:
-        // vm.prank binds to the NEXT call, which a getter would consume.)
-        bytes32 adminRole = mgr.DEFAULT_ADMIN_ROLE();
-        vm.prank(admin);
-        mgr.renounceRole(adminRole, admin);
-        // A live keeper can still rotate in a replacement key forever.
-        vm.prank(k1);
-        mgr.addKeeper(k2);
-        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), k2));
-        // And retire itself.
-        vm.prank(k1);
-        mgr.removeKeeper(k1);
-        assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), k1));
-    }
-
-    function test_keeperFleet_strangerCannotEnroll() public {
-        vm.prank(address(0x999));
-        vm.expectRevert(NotKeeperOrAdmin.selector);
-        mgr.addKeeper(address(0x999));
-    }
-
-    function test_keeperFleet_keeperCannotEvictOthers() public {
-        address k1 = address(0xAA1);
-        address k2 = address(0xAA2);
-        vm.startPrank(admin);
-        mgr.addKeeper(k1);
-        mgr.addKeeper(k2);
-        vm.stopPrank();
-        vm.prank(k1);
-        vm.expectRevert(NotKeeperOrAdmin.selector);
-        mgr.removeKeeper(k2);
-        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), k2));
-    }
-
-    function test_keeperFleet_zeroAddressRejected() public {
-        vm.prank(admin);
-        vm.expectRevert(ZeroAddr.selector);
-        mgr.addKeeper(address(0));
-    }
-
     // ── Manager upgrade timelock (v3: weak-link fix) ─────────────────────
 
     function _newImpl() internal returns (address) {
@@ -137,7 +170,7 @@ contract MarketplaceManagerTest is Test, TestHelpers {
     function test_manager_queueUpgrade_nonAdminReverts() public {
         address next = _newImpl();
         vm.prank(address(0x999));
-        vm.expectRevert();
+        vm.expectRevert(NotAdmin.selector);
         mgr.queueUpgrade(next);
     }
 

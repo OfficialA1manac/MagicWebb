@@ -133,7 +133,7 @@ contract OfferBookTest is Test, TestHelpers {
         // manager is set in setUp → refundExpiredOffer requires KEEPER_ROLE.
         // Grant bob KEEPER_ROLE.
         MarketplaceManager mgr = MarketplaceManager(ob.manager());
-        mgr.grantRole(mgr.KEEPER_ROLE(), bob);
+        mgr.setKeeper(bob);
 
         vm.prank(alice);
         ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, uint64(3 minutes));

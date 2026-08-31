@@ -37,7 +37,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Open an active auction → enter bid amount
 2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
 3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed. If the automatic transfer fails (e.g., your wallet is a contract that cannot receive ETH), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
-4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days anyone can call the permissionless `forceCancel` to release every bidder's escrow. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 1.5% platform fee (98.5%).
+4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days the **winner or seller** (or the keeper) can call `forceCancel` to release every bidder's escrow — the same parties as settle, and nobody else. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 1.5% platform fee (98.5%).
 
 ## Auction fees
 - Bidding is free — you send only your bid amount.

@@ -65,7 +65,7 @@ templates.
 
 Nothing in the app has to change. The whole procedure is:
 
-1. Deploy contracts: `contracts/script/DeploySongbird.s.sol` (or `DeployFlareMainnet.s.sol`)
+1. Deploy contracts: `contracts/script/DeployV32.s.sol` with `SEAL=true` (mainnets seal at deploy — admin renounced in-script; fee recipient must be a Safe)
    with `PRIVATE_KEY`, `CREATOR_ADDR` (fee recipient — a multisig on mainnet), optional
    `KEEPER_ADDR`. See `docs/DEPLOY_CHECKLIST.md`.
 2. Record the result in `deployments/<network>.json` (`status: "deployed"`, addresses,

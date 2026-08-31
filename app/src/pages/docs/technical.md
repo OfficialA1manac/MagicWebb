@@ -49,7 +49,7 @@ The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or 
 
 **Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-Deploy scripts accept `CREATOR_ADDR` as the `feeRecipient`. After deploy, the `CONTRACT_ADMIN` role (managed via `MarketplaceManager`) is granted to a multisig, and the deployer must call `renounceRole` to complete the immutability transition — see [`docs/IMMUTABILITY_TRANSITION.md`](https://github.com/OfficialA1manac/MagicWebb/blob/main/docs/IMMUTABILITY_TRANSITION.md) for the exact sequence. No `FEE_BPS` variable exists — the rate is fixed in code.
+The unified deploy script (`DeployV32.s.sol`) takes `FEE_RECIPIENT_ADDR` as the `feeRecipient` and `KEEPER_ADDR` as the network's single keeper — the only address that may ever settle on the keeper tier, with no mechanism anywhere to enroll another. With `SEAL=true` (mainnets) the script requires the fee recipient to be a multisig contract and calls `renounceAdmin()` as its final action, completing the immutability transition inside the deploy transaction itself; unsealed (testnet) deployments keep a single admin (`ADMIN_ADDR`) for iteration — see [`docs/IMMUTABILITY_TRANSITION.md`](https://github.com/OfficialA1manac/MagicWebb/blob/main/docs/IMMUTABILITY_TRANSITION.md). No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
@@ -97,7 +97,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 
 1. Seller creates an auction with reserve and end time (and optional minimum bid increment / anti-snipe behavior per contract rules).
 2. Bidders place bids. Outbid losers receive **full** prior-bid balances in `pendingReturns` (no fee **applied** on bids). The leader may **compound** a higher bid by sending only the **increment**; other bidders send the **full** new high amount. The app prompts `withdrawRefund` when appropriate (see §3.4).
-3. After `endsAt`, **anyone** may call `settle` once (permissionless finalizer). That transaction transfers the NFT to the highest bidder, **then** **applies** the immutable platform fee to the winning `highestBid` and pays the seller—**fee is applied only on this winning settlement**, not on intermediate bids. The app prompts `settle` when you view the auction (see §3.4); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
+3. After `endsAt`, `settle` may be called once by the **keeper, the seller, or the winning bidder** — no other party can settle someone else's auction (the keeper bot does it automatically the moment the auction ends). That transaction transfers the NFT to the highest bidder, **then** **applies** the immutable platform fee to the winning `highestBid` and pays the seller—**fee is applied only on this winning settlement**, not on intermediate bids. The app prompts `settle` when you view the auction (see §3.4); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
 
 ## 5. Security model
 

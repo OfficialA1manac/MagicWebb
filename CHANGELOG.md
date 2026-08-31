@@ -25,10 +25,13 @@ build in read-only network mode (UI, wallet, profiles; no contracts).
   (the instant `endsAt` passes), the seller, and the auction winner.
   No third party can settle someone else's auction. Escrow is still
   never trapped: non-leading escrow is withdrawable at any time and
-  `forceCancel()` remains permissionless at `endsAt + 3d`.
-- **"Pausable entries, unstoppable exits."** No exit path
-  (`withdrawLoserFunds`, `refundExpiredOffer`, `cancelOffer`,
-  `withdrawRefund`, `forceCancel`) can be halted by anyone.
+  `forceCancel()` at `endsAt + 3d` is callable by the same
+  keeper/seller/winner set (v3.2 removed the permissionless tier).
+- **Nothing is pausable — entries included.** No entry or exit path
+  (`list`, `bid`, `withdrawLoserFunds`, `refundExpiredOffer`,
+  `cancelOffer`, `withdrawRefund`, `forceCancel`) can be halted by
+  anyone. (An earlier entry here said "pausable entries" — no pause
+  machinery exists anywhere in the contract set.)
 - **`refundExpiredOffer` is no longer keeper-only** — a bidder can
   always reclaim their own expired escrow, so a dead keeper cannot
   strand it. `KEEPER_ROLE` is required only to refund someone else.

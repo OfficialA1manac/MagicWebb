@@ -1,6 +1,15 @@
 # Token integration hooks
 
-`MarketplaceManager` reserves four address slots for a future native token and the
+> **FORECLOSED in v3.2 (2026-08-31).** The four module slots and their
+> admin-gated setters were DELETED from `MarketplaceManager` along with the
+> entire AccessControl role registry (owner decision: single fixed keeper, no
+> role granting, sealed mainnet deployments). On a sealed network there is no
+> admin to call any setter, so the slot architecture below cannot exist there
+> even in principle. A future token / fee-distributor / staking / governance
+> rollout requires a NEW contract generation and user migration. This document
+> is retained as the design record of what such a generation would wire up.
+
+`MarketplaceManager` (v3.1 — removed in v3.2) reserved four address slots for a future native token and the
 modules that would surround it. This document exists because the contract points at
 it twice (`MarketplaceManager.sol:32` and `:93`) and because the slots are easy to
 misread as live wiring.

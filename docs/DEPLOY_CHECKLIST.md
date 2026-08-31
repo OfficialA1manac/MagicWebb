@@ -16,14 +16,19 @@ are hard gates for Flare (chain 14).
 ## Deploy
 ```bash
 cd contracts
-PRIVATE_KEY=0x… CREATOR_ADDR=0x… KEEPER_ADDR=0x… \
-forge script script/Deploy<Network>.s.sol --rpc-url <rpc> --broadcast -vvvv
+# Testnet (Coston2): admin retained for iteration
+PRIVATE_KEY=0x… ADMIN_ADDR=0x… FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
+forge script script/DeployV32.s.sol --rpc-url <rpc> --broadcast -vvvv
+# Mainnet (Songbird/Flare): sealed at deploy — admin renounced in-script,
+# FEE_RECIPIENT_ADDR must be a Safe/contract, ADMIN_ADDR is ignored
+PRIVATE_KEY=0x… SEAL=true FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
+forge script script/DeployV32.s.sol --rpc-url <rpc> --broadcast -vvvv
 ```
-The script itself asserts, on-chain, after deploying:
-`feeRecipient == creator` on all three market contracts, `manager` wiring,
-creator holds `DEFAULT_ADMIN_ROLE`, deployer has renounced it (when
-`creator != deployer`; a self-deploying creator keeps it), keeper holds
-`KEEPER_ROLE` (load-bearing: the keeper is a settlement authority).
+The script itself asserts, on-chain, after deploying: `feeRecipient` matches
+on all three market contracts, `manager` wiring, `keeper()` == KEEPER_ADDR
+and the `hasRole` shim answers for it (load-bearing: the keeper is a
+settlement authority), and — sealed — that `admin() == address(0)` so no
+authority of any kind survives the deploy transaction.
 
 ## After
 - [ ] Copy addresses + deploy block into `deployments/<network>.json`; run
@@ -45,9 +50,10 @@ cannot accept listings at all. Redeploy:
 ```bash
 cd contracts
 export PRIVATE_KEY=0x…            # funded Coston2 deployer
-export CREATOR_ADDR=0x…           # fee recipient (can be the same EOA on testnet)
+export ADMIN_ADDR=0x…             # single admin (testnet iteration authority)
+export FEE_RECIPIENT_ADDR=0x…     # fee recipient (can be an EOA on testnet)
 export KEEPER_ADDR=0x…            # address of the backend KEEPER_KEY
-forge script script/DeployCoston2.s.sol \
+forge script script/DeployV32.s.sol \
   --rpc-url https://coston2-api.flare.network/ext/C/rpc --broadcast -vv
 ```
 

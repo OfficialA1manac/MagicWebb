@@ -736,6 +736,39 @@ func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, er
 	return q.ListAuctions(ctx, AuctionsFilter{Status: "active", Limit: limit})
 }
 
+// ExpiredListingRef identifies one expired-but-still-active listing for the
+// keeper's on-chain cleanExpired sweep. Only the contract-call key is
+// carried: (collection, token_id, seller) is the listings PK.
+type ExpiredListingRef struct {
+	Collection string
+	TokenID    string // decimal uint256
+	Seller     string
+}
+
+// GetExpiredActiveListings returns listings whose expiry has passed but whose
+// row is still active — the on-chain listing struct still exists and only a
+// KEEPER_ROLE caller may delete it (Marketplace.cleanExpired). Bounded and
+// oldest-first so a backlog drains deterministically.
+func (q *Q) GetExpiredActiveListings(ctx context.Context) ([]ExpiredListingRef, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT collection, token_id, seller FROM listings
+		  WHERE active = TRUE AND expires_at < now()
+		  ORDER BY expires_at ASC LIMIT 50`)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []ExpiredListingRef
+	for rows.Next() {
+		var r ExpiredListingRef
+		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 	rows, err := q.reader().Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+

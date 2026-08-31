@@ -11,7 +11,8 @@ import {
     NotSettled,
     BidTooLow,
     BidOverflow,
-    NotSeller
+    NotSeller,
+    NotAuthorized
 } from "../src/AuctionHouse.sol";
 import {
     OfferBook,
@@ -886,6 +887,8 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.warp(block.timestamp + 3 days + 1 hours);
         vm.expectEmit(true, false, false, false, address(ah));
         emit AuctionForceCancelled(id);
+        // v3.2: the trapped LEADER rescues themselves — no permissionless tier.
+        vm.prank(bob);
         ah.forceCancel(id);
         assertTrue(_settled(id), "settled after forceCancel");
         // Now refundLosers is unlocked — bob can be refunded.
@@ -919,8 +922,26 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.warp(block.timestamp + 24 hours + 3 days + 1 hours);
         vm.expectEmit(true, false, false, false, address(ah));
         emit AuctionForceCancelled(id);
+        // v3.2: forceCancel is party/keeper-gated — the seller triggers it.
+        vm.prank(seller);
         ah.forceCancel(id);
         assertTrue(_settled(id), "forceCancel settled no-leader auction");
+    }
+
+    /// v3.2 regression flip: forceCancel used to be permissionless; now a
+    /// third party must be rejected even after the 3-day window.
+    function test_forceCancel_strangerReverts() public {
+        (uint256 id,) = _auction7d();
+        _bid(id, alice, 2 ether);
+        vm.warp(block.timestamp + 24 hours + 3 days + 1 hours);
+        vm.prank(address(0x5717A2)); // neither seller, nor leader, nor keeper
+        vm.expectRevert(NotAuthorized.selector);
+        ah.forceCancel(id);
+        assertFalse(_settled(id), "stranger must not force-cancel");
+        // The trapped LEADER can always rescue themselves.
+        vm.prank(alice);
+        ah.forceCancel(id);
+        assertTrue(_settled(id), "leader force-cancel succeeds");
     }
 
     function test_forceCancel_multipleBidders_allRefunded() public {
@@ -952,10 +973,11 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(carol);
         vm.expectRevert(AuctionLive.selector);
         ah.withdrawLoserFunds(id);
-        // Warp past grace window, force cancel.
+        // Warp past grace window, force cancel — v3.2: seller triggers it.
         vm.warp(block.timestamp + 3 days + 1 hours);
         vm.expectEmit(true, false, false, false, address(ah));
         emit AuctionForceCancelled(id);
+        vm.prank(seller);
         ah.forceCancel(id);
         assertTrue(_settled(id));
         // Refund carol.

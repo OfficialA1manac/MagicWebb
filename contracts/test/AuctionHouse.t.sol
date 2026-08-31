@@ -443,7 +443,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_keeperAlwaysAllowed() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -461,7 +461,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_thirdPartyBlocked() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -480,7 +480,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_sellerAllowedImmediately() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -503,7 +503,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_sellerAllowedAfter5Min() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -523,7 +523,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_winnerAllowedAfter5Min() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -542,7 +542,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_settle_randomBlockedForever() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
@@ -562,7 +562,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     function test_refundLosers_permissionlessWithManager() public {
         MarketplaceManager gatedMgr = _deployMarketplaceManager(address(this));
         AuctionHouse gated = _deployAuctionHouse(feeRecipient, address(gatedMgr));
-        gatedMgr.grantRole(gatedMgr.KEEPER_ROLE(), bob);
+        gatedMgr.setKeeper(bob);
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);

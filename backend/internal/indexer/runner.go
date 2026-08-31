@@ -1017,15 +1017,28 @@ func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 	}
 }
 
-// ── Auction Keeper (on-chain settlement) ──────────────────────────────────
-// Three-tier settlement gate:
-//   1. KEEPER_ROLE — settles immediately after endsAt (this 1s ticker).
-//   2. Seller or auction winner — settles after endsAt + 5 minutes.
-//   3. Permissionless — anyone settles after endsAt + 25 hours.
+// ── Auction Keeper (on-chain settlement + expired-listing cleanup) ────────
+// Settlement authority (v3.2 — matches AuctionHouse.settle exactly):
+//   1. the single KEEPER — settles immediately after endsAt (this 1s ticker);
+//   2. the auction's seller or winner — any time after endsAt.
+// Nobody else can ever settle; there is no permissionless or time-widened
+// tier. (An earlier version of this comment described a 3-tier gate with a
+// 25-hour permissionless fallback — that never matched the contract.)
 // If no MarketplaceManager is deployed (manager==address(0)), settlement
-// is fully permissionless immediately. Funds are never trapped.
+// is fully permissionless immediately. Funds are never trapped: losers
+// self-serve via withdrawLoserFunds/withdrawRefund, and forceCancel
+// (keeper/seller/winner, endsAt + 3d) rescues a stuck auction.
+//
+// The same loop also drives Marketplace.cleanExpired on a slower cadence:
+// expired listings are keeper-cleaned on-chain (the owner's requirement that
+// the keeper "handles everything that expires"). cleanExpired had NO backend
+// caller before v3.2 — expired listings simply accumulated on-chain.
 
 var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
+
+// cleanExpired(address coll, uint256 id, address seller) — keeper-gated
+// removal of an expired listing (Marketplace.sol).
+var cleanExpiredSelector = crypto.Keccak256([]byte("cleanExpired(address,uint256,address)"))[:4]
 
 func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	keeperKeyHex := strings.TrimPrefix(r.cfg.KeeperKey, "0x")
@@ -1042,6 +1055,9 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	log.Info().Str("keeper", keeperAddr.Hex()).Msg("keeper: started")
 	ticker := time.NewTicker(1 * time.Second)
 	defer ticker.Stop()
+	// Expired-listing cleanup runs on a slower cadence than settlement (each
+	// clean is a paid tx and listings carry no escrow urgency).
+	cleanTick := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -1090,8 +1106,64 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				}
 				log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: cancel-inactive confirmed")
 			}
+
+			// Expired-listing sweep, every 60 ticks (~1/min). cleanExpired is
+			// keeper-gated on-chain; a listing already cleaned (or cancelled
+			// by its seller) reverts harmlessly and is retried never — the DB
+			// row is marked inactive by the Cancelled event either way.
+			cleanTick++
+			if cleanTick >= 60 {
+				cleanTick = 0
+				r.cleanExpiredListings(ctx, key, keeperAddr, signer, chainIDBig)
+			}
 		}
 	}
+}
+
+// cleanExpiredListings removes expired-but-still-active listings on-chain via
+// Marketplace.cleanExpired. Bounded per pass; failures are logged and retried
+// on the next pass.
+func (r *Runner) cleanExpiredListings(ctx context.Context, key *cryptoecdsa.PrivateKey, keeperAddr common.Address, signer types.Signer, chainIDBig *big.Int) {
+	marketplaceAddr := common.HexToAddress(r.cfg.MarketplaceAddr)
+	if marketplaceAddr == (common.Address{}) {
+		return // read-only network: no contracts
+	}
+	expired, err := r.q.GetExpiredActiveListings(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("keeper: get expired listings")
+		return
+	}
+	for _, l := range expired {
+		tokenID, ok := new(big.Int).SetString(l.TokenID, 10)
+		if !ok {
+			log.Error().Str("tokenId", l.TokenID).Msg("keeper: bad token id in expired listing")
+			continue
+		}
+		txHash, err := r.sendCleanExpired(ctx, key, keeperAddr, marketplaceAddr, signer, chainIDBig,
+			common.HexToAddress(l.Collection), tokenID, common.HexToAddress(l.Seller))
+		if err != nil {
+			log.Error().Err(err).Str("collection", l.Collection).Str("tokenId", l.TokenID).
+				Msg("keeper: cleanExpired tx failed")
+			continue
+		}
+		if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
+			log.Error().Err(err).Str("collection", l.Collection).Str("tokenId", l.TokenID).Str("tx", txHash.Hex()).
+				Msg("keeper: cleanExpired receipt not confirmed; will retry next pass")
+			continue
+		}
+		log.Info().Str("collection", l.Collection).Str("tokenId", l.TokenID).Str("tx", txHash.Hex()).
+			Msg("keeper: cleanExpired confirmed")
+	}
+}
+
+func (r *Runner) sendCleanExpired(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, coll common.Address, tokenID *big.Int, seller common.Address) (common.Hash, error) {
+	idBytes := make([]byte, 32)
+	tokenID.FillBytes(idBytes)
+	data := append([]byte(nil), cleanExpiredSelector...)
+	data = append(data, common.LeftPadBytes(coll.Bytes(), 32)...)
+	data = append(data, idBytes...)
+	data = append(data, common.LeftPadBytes(seller.Bytes(), 32)...)
+	return r.sendRaw(ctx, key, from, to, signer, chainID, data, 120_000)
 }
 
 func (r *Runner) sendSettle(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, auctionID int64) (common.Hash, error) {

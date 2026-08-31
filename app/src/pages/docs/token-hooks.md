@@ -6,8 +6,13 @@ description: "Future token integration points anchored in the manager contract."
 
 # Token Integration Points
 
-Status: **architecture slots only — no token logic is implemented or deployed.**
-Anchor contract: `contracts/src/MarketplaceManager.sol`.
+Status: **foreclosed as of v3.2 — the slots below were removed from the
+contracts.** The v3.2 redesign deleted the module slots, their setters, and
+the role registry that gated them: the marketplace has a single fixed keeper,
+no role granting, and mainnet deployments are sealed (no admin) at deploy.
+Any future token architecture would ship as a new contract generation, not by
+wiring these slots. This page is retained as that future generation's design
+record.
 
 ## Where the hooks live
 

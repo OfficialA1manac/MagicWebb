@@ -115,9 +115,10 @@ the winner is refunded in full and the auction finalises without a sale.
 ### Can an auction get stuck? Can the seller cancel it?
 No, and no. Once any bid clears the reserve the seller can **never** cancel — bidders
 committed capital in good faith. And an auction can never be stuck: losing bidders can
-withdraw at any time, and if both the seller and the keeper vanish, after 3 days anyone
-can call the permissionless `forceCancel` to unlock every bidder's escrow. Nothing on
-the protocol is pausable, so no one can freeze an auction either.
+withdraw at any time, and if the keeper never settles, after 3 days the **seller or the
+winning bidder** can call `forceCancel` to unlock every bidder's escrow (only those
+parties and the keeper may trigger it — no outsider can force-cancel someone else's
+auction). Nothing on the protocol is pausable, so no one can freeze an auction either.
 
 ---
 
@@ -146,8 +147,12 @@ independent audit has been completed.
 - Reentrancy guards on every state-changing function (checks-effects-interactions).
 - Pull-payment fallback: if a push refund or payout fails, funds are parked for manual
   withdrawal rather than locked.
-- Immutable fee recipient and fee rate — they cannot be changed after deployment.
-- No admin keys, no pause, no upgrade proxy.
+- The fee rate is a compile-time constant — it cannot be changed on any deployment.
+- Nothing is pausable — no entry or exit path can ever be halted.
+- Mainnet deployments are sealed at deploy: the admin is renounced in the deploy
+  transaction, after which there are no admin keys, no upgrades, and the fee
+  recipient and single keeper are fixed forever. (The Coston2 testnet keeps one
+  admin so the marketplace can iterate before mainnet.)
 
 ### What happens to my funds if something fails mid-transaction?
 Transactions are atomic: either the whole trade completes or it reverts with no fee
