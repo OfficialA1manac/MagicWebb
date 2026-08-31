@@ -69,7 +69,7 @@ func TestListingsService_HandleList_Success(t *testing.T) {
 			"Token Two", "https://example.com/2.png", false, "0xcreator1", int64(100),
 		))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings", svc.handleList)
 	})
@@ -108,7 +108,7 @@ func TestListingsService_HandleList_WithCollectionFilter(t *testing.T) {
 			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0),
 		))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings", svc.handleList)
 	})
@@ -139,7 +139,7 @@ func TestListingsService_HandleList_Empty(t *testing.T) {
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings", svc.handleList)
 	})
@@ -166,7 +166,7 @@ func TestListingsService_HandleList_DBError(t *testing.T) {
 		WithArgs(50).
 		WillReturnError(fiber.ErrInternalServerError)
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings", svc.handleList)
 	})
@@ -197,7 +197,7 @@ func TestListingsService_HandleGet_Success(t *testing.T) {
 			"Token One", "https://example.com/1.png", false, "0xcreator1",
 		))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id", svc.handleGet)
 	})
@@ -224,7 +224,7 @@ func TestListingsService_HandleGet_NotFound(t *testing.T) {
 		WithArgs("0xcol1", "1").
 		WillReturnError(pgx.ErrNoRows) // GetListing maps this to "listing not found"
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id", svc.handleGet)
 	})
@@ -246,7 +246,7 @@ func TestListingsService_HandleGet_DBError(t *testing.T) {
 		WithArgs("0xcol1", "1").
 		WillReturnError(fiber.ErrInternalServerError)
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id", svc.handleGet)
 	})
@@ -269,7 +269,7 @@ func TestListingsService_HandlePreflight_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows([]string{"listed", "orphaned", "price_wei", "seller_owns"}).
 			AddRow(true, false, "1000000000000000000", true))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id/preflight", svc.handlePreflight)
 	})
@@ -293,7 +293,7 @@ func TestListingsService_HandlePreflight_MissingSeller(t *testing.T) {
 	defer mock.Close()
 
 	// No DB expectation — the handler should return 400 before any query
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings/:collection/:id/preflight", svc.handlePreflight)
 	})
@@ -1168,7 +1168,7 @@ func TestListingsService_HandleList_InvalidLimit(t *testing.T) {
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
 		}))
 
-	svc := NewListingsService(db.New(mock), nil)
+	svc := NewListingsService(db.New(mock), nil, nil)
 	app := newAppForService(t, func(app *fiber.App) {
 		app.Get("/api/v1/listings", svc.handleList)
 	})
@@ -1248,7 +1248,7 @@ func TestLimitClamping(t *testing.T) {
 	}
 	for _, tc := range tests {
 		mock, _ := pgxmock.NewPool()
-		svc := NewListingsService(db.New(mock), nil)
+		svc := NewListingsService(db.New(mock), nil, nil)
 		app := newAppForService(t, func(app *fiber.App) {
 			app.Get("/api/v1/listings", svc.handleList)
 		})

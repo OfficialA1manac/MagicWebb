@@ -5,6 +5,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/ethereum/go-ethereum/common"
@@ -52,7 +53,23 @@ func chunk(data []byte, i int) []byte {
 // priority-stack `onTransferBatch`.
 const maxBatchLength = 1024
 
-func addrStr(b []byte) string   { return common.BytesToAddress(b).Hex() }
+// addrStr renders a 20-byte address as LOWERCASE hex.
+//
+// common.Address.Hex() returns EIP-55 CHECKSUMMED output ("0x687DE6fA…"), and
+// this helper feeds all 30 address-extraction sites in this file. Every reader
+// in the codebase lowercases before querying, and the address columns are
+// case-sensitive CHAR(42) — so writing checksummed here made rows invisible to
+// every per-address and per-token query: profile listings read 0, token pages
+// reported "Not listed for sale", and collections.listed_count stayed 0 while
+// the unfiltered /listings page (which compares no address) rendered fine.
+//
+// Lowercase is the storage convention the rest of the schema already uses —
+// profiles, saved_searches and the RLS policies all assume it explicitly
+// (011_rls_rework.sql, 024_rls_audit_fixes.sql). Migration 039 backfills the
+// rows written before this fix.
+func addrStr(b []byte) string {
+	return strings.ToLower(common.BytesToAddress(b).Hex())
+}
 func bigInt(b []byte) *big.Int  { return new(big.Int).SetBytes(b) }
 func bigStr(b []byte) string    { return bigInt(b).String() }
 func tsUnix(b []byte) time.Time { return time.Unix(bigInt(b).Int64(), 0) }
