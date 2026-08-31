@@ -42,6 +42,12 @@
   let myBalance1155 = $state(0n);
   let me = $state<string | null>(null);
   let offerEligible = $state<boolean | null>(null);
+  // ERC-173 owner() of the collection CONTRACT — distinct from the token's
+  // owner. OfferBook.setOfferEligible reverts for anyone else, so the
+  // "Enable offers" button is shown only to this address. null = unknown
+  // (read failed or not yet loaded); the button stays hidden rather than
+  // offering a transaction that is guaranteed to revert.
+  let collOwner = $state<string | null>(null);
   let live = $state(false);
   let now = $state(Date.now());
   let syncing = $state(''); // optimistic chip text after a confirmed tx
@@ -77,6 +83,7 @@
   let creatorAddr = $derived(collection?.creator_addr || '');
   let isOwner = $derived(!!me && (std === 'erc1155' ? myBalance1155 > 0n : owner?.toLowerCase() === me.toLowerCase()));
   let isSeller = $derived(!!me && !!listing && listing.seller.toLowerCase() === me.toLowerCase());
+  let isCollOwner = $derived(!!me && !!collOwner && collOwner.toLowerCase() === me.toLowerCase());
   let isAuctionSeller = $derived(!!me && !!auction && auction.seller.toLowerCase() === me.toLowerCase());
   let auctionLive = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() > now);
   let auctionEnded = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() <= now);
@@ -111,6 +118,17 @@
         owner = (await pub.readContract({ address: coll as Address, abi: erc721Abi, functionName: 'ownerOf', args: [BigInt(tid)] })) as string;
       }
     } catch { /* unknown owner: UI simply hides owner actions */ }
+    // Collection contract owner (ERC-173), independent of token ownership and
+    // of standard — works for ERC-1155 too since it is just a selector call.
+    // Falls back to the indexer's creator_addr when the contract has no
+    // owner() (or the read fails), which is the deployer in every collection
+    // this marketplace has minted.
+    if (collOwner === null) {
+      try {
+        const pub = await publicClient();
+        collOwner = (await pub.readContract({ address: coll as Address, abi: erc721Abi, functionName: 'owner' })) as string;
+      } catch { collOwner = creatorAddr || null; }
+    }
   }
 
   /** ipfs:// → public gateway; everything else passes through. */
@@ -374,9 +392,14 @@
           {/if}
         </div>
       {/if}
-      {#if canTrade && offerEligible === false && isOwner}
+      {#if canTrade && offerEligible === false && isCollOwner}
+        <!-- Shown ONLY to the collection contract's ERC-173 owner. Gating on
+             token ownership here (as this once did) put a guaranteed-revert
+             "Only the owner can do that" in front of every holder. -->
         <button class="btn g" onclick={doEnableOffers}>Enable offers for this collection</button>
-        <p class="tp-hint">Only the collection contract owner can do this; the transaction is rejected otherwise.</p>
+        <p class="tp-hint">You own this collection's contract, so you can switch offers on for everyone.</p>
+      {:else if canTrade && offerEligible === false && isOwner}
+        <p class="tp-hint">Offers are off for this collection. Only the collection contract's owner can enable them — listing and auctions are unaffected.</p>
       {/if}
 
       <!-- ── inline forms ──────────────────────────────────────────── -->

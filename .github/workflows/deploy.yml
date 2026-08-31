@@ -316,7 +316,7 @@ jobs:
         # confusion this job exists to end.
         run: |
           set -euo pipefail
-          printf 'app = "magicwebb"\nprimary_region = "iad"\n\n[build]\n  dockerfile = "Dockerfile"\n' > fly.toml
+          printf 'app = "magicwebb"\nprimary_region = "sin"\n\n[build]\n  dockerfile = "Dockerfile"\n' > fly.toml
           cat fly.toml
       - name: Build and push image
         id: fly_build

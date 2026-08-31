@@ -19,30 +19,85 @@
 -- no-op and rows already lowercase are never touched.
 --
 -- ORDER MATTERS: collections.address is the FK target for listings.collection,
--- nft_ownership.collection and auctions.collection. collections is ALREADY
--- lowercase (written by a different path), so children can be lowered directly
--- and will continue to match. Goose wraps this in a transaction.
+-- nft_ownership.collection and auctions.collection, so collections is merged
+-- to lowercase FIRST (see below — it can hold BOTH casings of one contract,
+-- so this is a merge, not an update), then children are lowered, then the
+-- checksummed parent rows are deleted. Goose wraps this in a transaction.
 
 -- +goose Up
 -- +goose StatementBegin
 
--- Sanity guard: if collections.address were ever non-lowercase, lowering the
--- children below would break the foreign keys. Fail loudly rather than corrupt.
+-- collections FIRST: address is the FK target for every child table below,
+-- so a checksummed collections row must become lowercase before children are
+-- lowered, or the child updates violate their FKs.
 --
--- NOTE: 001_init.sql annotates this column "-- checksummed EIP-55", but that
--- comment is stale: the live API returns collections.address lowercase
--- (verified against production 2026-08-30), because collections are written by
--- a different path than the chain-log handlers. This guard verifies rather than
--- trusts either the comment or that observation.
-DO $$
-DECLARE bad INT;
-BEGIN
-  SELECT count(*) INTO bad FROM collections WHERE address <> lower(address);
-  IF bad > 0 THEN
-    RAISE EXCEPTION
-      'collections.address has % non-lowercase row(s); lower collections first or the child FKs will break', bad;
-  END IF;
-END $$;
+-- A plain UPDATE is NOT enough. Observed on coston2 (2026-08-31, the boot
+-- failure that took the network down): the indexer wrote the CHECKSUMMED row
+-- (carrying deploy_block, verified, and all children) and a second write path
+-- later inserted an EMPTY lowercase row for the same contract — so lowering
+-- the checksummed key collides with the shell's PK. Merge instead:
+--
+--   1. upsert a lowercase twin for every checksummed row, folding the real
+--      row's data into the shell (verified/deploy_block/… win over defaults);
+--   2. repoint children at the lowercase twin (the child UPDATEs below —
+--      their FK now resolves because the twin exists);
+--   3. delete the checksummed parent, which is childless after (2).
+--
+-- tracked_collections is handled here too: both casings of the same contract
+-- were tracked, so lowering the checksummed one would collide with its PK.
+-- search_vec is a GENERATED column and must not appear in the insert list.
+INSERT INTO collections (address, name, symbol, standard, deploy_block, tracked,
+                         created_at, verified, chain_id,
+                         standard_verified, verification_checked_at, creator_addr)
+SELECT lower(address), name, symbol, standard, deploy_block, tracked,
+       created_at, verified, chain_id,
+       standard_verified, verification_checked_at, creator_addr
+  FROM collections
+ WHERE address <> lower(address)
+ON CONFLICT (address) DO UPDATE SET
+  -- The checksummed row is the indexer's (real deploy_block, real verification);
+  -- the lowercase shell was inserted with defaults. Keep the strongest value.
+  verified          = collections.verified OR EXCLUDED.verified,
+  standard_verified = collections.standard_verified OR EXCLUDED.standard_verified,
+  deploy_block      = CASE WHEN collections.deploy_block = 0
+                           THEN EXCLUDED.deploy_block
+                           ELSE collections.deploy_block END,
+  creator_addr      = COALESCE(collections.creator_addr, EXCLUDED.creator_addr),
+  created_at        = LEAST(collections.created_at, EXCLUDED.created_at);
+
+DELETE FROM tracked_collections t
+ WHERE t.address <> lower(t.address)
+   AND EXISTS (SELECT 1 FROM tracked_collections d WHERE d.address = lower(t.address));
+UPDATE tracked_collections SET address = lower(address) WHERE address <> lower(address);
+
+-- Same defensive shape for children keyed by (collection, token_id): if a row
+-- somehow exists under BOTH casings, keep the lowercase one and drop the
+-- checksummed duplicate rather than colliding mid-migration.
+DELETE FROM nft_tokens t
+ WHERE t.collection <> lower(t.collection)
+   AND EXISTS (SELECT 1 FROM nft_tokens d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id);
+DELETE FROM nft_metadata t
+ WHERE t.collection <> lower(t.collection)
+   AND EXISTS (SELECT 1 FROM nft_metadata d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id);
+DELETE FROM nft_attributes t
+ WHERE t.collection <> lower(t.collection)
+   AND EXISTS (SELECT 1 FROM nft_attributes d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id
+                  AND d.trait_type = t.trait_type);
+
+UPDATE nft_attributes
+   SET collection = lower(collection)
+ WHERE collection <> lower(collection);
+
+UPDATE royalties
+   SET collection = lower(collection)
+ WHERE collection <> lower(collection);
+
+UPDATE trending_scores
+   SET collection = lower(collection)
+ WHERE collection <> lower(collection);
 
 UPDATE listings
    SET collection = lower(collection),
@@ -91,6 +146,11 @@ UPDATE nft_tokens
 UPDATE nft_metadata
    SET collection = lower(collection)
  WHERE collection <> lower(collection);
+
+-- Every child now points at the lowercase twin, so the checksummed parent is
+-- childless — remove it. This is the last statement touching collections, so
+-- a FK violation here means a child table was missed above: fail loudly.
+DELETE FROM collections WHERE address <> lower(address);
 
 -- +goose StatementEnd
 
