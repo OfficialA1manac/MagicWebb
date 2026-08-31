@@ -69,7 +69,10 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
       function weiToFLR(w,d){d=d||4;try{const bi=BigInt(w||'0');const div=BigInt('1000000000000000000');const whole=(bi/div).toString();const frac=(bi%div).toString().padStart(18,'0').slice(0,d);return whole+'.'+frac;}catch(_){return'0.'+'0'.repeat(d);}}
       function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
       function timeAgo(t){if(!t)return'';const d=Math.floor((Date.now()-new Date(t).getTime())/1000);if(d<60)return d+'s';if(d<3600)return Math.floor(d/60)+'m';if(d<86400)return Math.floor(d/3600)+'h';return Math.floor(d/86400)+'d';}
-      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
+      // size = 128|256|512 requests a pre-generated thumbnail. Without it the
+      // backend serves the FULL-SIZE blob (measured 1.69MB vs 7.9KB at 256).
+      // Mirrors src/lib/image-uri.ts -- inline scripts cannot import; keep in sync.
+      function resolveImageUri(uri,tid,size){if(!uri)return'';if(uri.startsWith('data:'))return uri;if(uri.startsWith('/api/v1/img/'))uri='/img/'+uri.slice(12);if(uri.startsWith('/img/'))return size?uri+'?size='+size:uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
       function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
 
       function isEthAddr(s){
@@ -204,7 +207,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               const coll=it.collection||''; const tid=it.token_id||it.tokenID||'';
               const nm=it.name||('#'+esc(tid));
               const encC=encodeURIComponent(coll); const encT=encodeURIComponent(tid);
-              const src=resolveImageUri(it.image_uri,it.token_id);
+              const src=resolveImageUri(it.image_uri,it.token_id,256);
               const price=it.price_wei?weiToFLR(it.price_wei,4):'';
               // Auction-escrowed tokens (merged below) have no price_wei but are
               // NOT listable — batchList would revert on them.
@@ -586,7 +589,8 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               modal.style.cssText = 'background:rgba(18,18,22,1);border:1px solid rgba(255,255,255,0.08);border-radius:1.25rem;padding:2rem;max-width:480px;width:100%;box-shadow:0 25px 60px rgba(0,0,0,0.5);animation:modalSlideUp 0.25s ease;';
 
               const currentDisplayName = profile && profile.display_name ? esc(profile.display_name) : '';
-              const currentTag = profile && profile.tag ? esc(profile.tag) : '';
+              const currentTagRaw = profile && profile.tag ? String(profile.tag) : '';
+              const currentTag = currentTagRaw ? esc(currentTagRaw) : '';
               const currentBio = profile && profile.bio ? esc(profile.bio) : '';
               const currentAvatar = profile && profile.avatar_uri ? esc(profile.avatar_uri) : '';
               const currentTwitter = profile && profile.twitter ? esc(profile.twitter) : '';
@@ -603,8 +607,27 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
                     '<input name="display_name" maxlength="64" value="'+currentDisplayName+'" placeholder="Your display name" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">'+
                   '</div>'+
                   '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Tag</label>'+
-                    '<input name="tag" maxlength="32" value="'+currentTag+'" placeholder="'+esc(mwHolderBadge(targetAddr))+'" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">'+
-                    '<p style="font-size:0.625rem;color:rgba(255,255,255,0.25);margin-top:0.375rem;">Shown next to your name. Up to 32 characters — letters, digits, spaces, dashes, underscores. Leave empty to keep your collector badge.</p>'+
+                    // Dropdown of the 97 collector-badge names plus a Custom
+                    // escape hatch. The presets all satisfy the backend's
+                    // isValidProfileTag (letters/digits only) and the 32-byte
+                    // cap, so no backend or migration change is needed.
+                    // A saved tag that is not in the list opens in Custom mode.
+                    (function(){
+                      var isPreset = currentTagRaw && MW_HOLDER_NAMES.indexOf(currentTagRaw) >= 0;
+                      var custom   = !!currentTagRaw && !isPreset;
+                      var sel = '<select id="tag-select" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">'+
+                        '<option value=""'+(!currentTagRaw?' selected':'')+'>(keep collector badge — '+esc(mwHolderBadge(targetAddr))+')</option>';
+                      for(var i=0;i<MW_HOLDER_NAMES.length;i++){
+                        var n = MW_HOLDER_NAMES[i];
+                        sel += '<option value="'+esc(n)+'"'+(isPreset && n===currentTagRaw?' selected':'')+'>'+esc(n)+'</option>';
+                      }
+                      sel += '<option value="__custom__"'+(custom?' selected':'')+'>Custom…</option></select>';
+                      // The real field the form submits. Hidden while a preset
+                      // is chosen; revealed and focused when Custom is picked.
+                      sel += '<input id="tag-custom" name="tag" maxlength="32" value="'+currentTag+'" placeholder="'+esc(mwHolderBadge(targetAddr))+'" style="'+(custom?'':'display:none;')+'width:100%;margin-top:0.5rem;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;transition:border-color 0.2s;box-sizing:border-box;">';
+                      return sel;
+                    })()+
+                    '<p style="font-size:0.625rem;color:rgba(255,255,255,0.25);margin-top:0.375rem;">Shown next to your name. Pick one of the collector badges, or choose Custom… for your own (up to 32 characters — letters, digits, spaces, dashes, underscores). Leave as “keep collector badge” to use the one derived from your wallet.</p>'+
                   '</div>'+
                   '<div><label style="display:block;font-size:0.6875rem;font-weight:700;color:rgba(255,255,255,0.4);text-transform:uppercase;margin-bottom:0.375rem;">Bio</label>'+
                     '<textarea name="bio" maxlength="500" placeholder="Tell the community about yourself…" style="width:100%;padding:0.75rem;border-radius:0.625rem;border:1px solid rgba(255,255,255,0.08);background:rgba(255,255,255,0.04);color:#fafafa;font-size:0.875rem;font-family:inherit;outline:none;resize:vertical;min-height:80px;transition:border-color 0.2s;box-sizing:border-box;">'+currentBio+'</textarea>'+
@@ -627,6 +650,25 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
               overlay.appendChild(modal);
               document.body.appendChild(overlay);
+
+              // Tag: the <select> drives the hidden #tag-custom input, which is
+              // the field the form actually submits (name="tag"). Choosing a
+              // preset copies it in; choosing Custom… reveals it for typing.
+              // FormData therefore needs no special-casing in the submit path.
+              const tagSel = modal.querySelector('#tag-select');
+              const tagCustom = modal.querySelector('#tag-custom');
+              if (tagSel && tagCustom) {
+                tagSel.addEventListener('change', function(){
+                  if (tagSel.value === '__custom__') {
+                    tagCustom.style.display = '';
+                    tagCustom.value = '';
+                    tagCustom.focus();
+                  } else {
+                    tagCustom.style.display = 'none';
+                    tagCustom.value = tagSel.value; // '' = keep collector badge
+                  }
+                });
+              }
 
               // Focus first input
               const firstInput = modal.querySelector('input[name="display_name"]');
@@ -674,7 +716,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               document.addEventListener('keydown', escHandler);
 
               // Focus/blur border color
-              modal.querySelectorAll('input, textarea').forEach(function(el){
+              modal.querySelectorAll('input, textarea, select').forEach(function(el){
                 el.addEventListener('focus', function(){this.style.borderColor = 'rgba(125,211,252,0.4)';});
                 el.addEventListener('blur', function(){this.style.borderColor = 'rgba(255,255,255,0.08)';});
               });

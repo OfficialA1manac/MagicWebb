@@ -82,7 +82,12 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	// the free-tier limit is never exhausted, and don't pre-allocate
 	// idle connections (MinConns=0).
 	cfg.MaxConns = 10
-	cfg.MinConns = 0
+	// Keep a small warm floor. With MinConns=0 the pool drained to nothing
+	// after MaxConnIdleTime, so the next visitor paid a full TCP + TLS + SCRAM
+	// handshake to Neon before their query even started — a first-request cliff
+	// on any low-traffic network. Two connections cost almost nothing against a
+	// 10-connection ceiling and keep the common case warm.
+	cfg.MinConns = 2
 
 	// Close idle connections after 4 minutes — before Neon's ~5-minute
 	// server-side idle timeout, so the pool never hands out a connection

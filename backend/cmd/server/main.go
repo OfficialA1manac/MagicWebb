@@ -180,9 +180,28 @@ func run() error {
 	// Degrades to local-only delivery if the listen conn is unavailable.
 	bcast := sse.NewGrpcBridged(ctx, config.C.GRPCPort, config.C.GRPCPeers)
 
-	// Shared (Postgres) rate limiter + nonce store, so limits and single-use
-	// SIWE nonces hold across instances.
-	rl := ratelimit.NewPg(pool)
+	// Rate limiter: IN-MEMORY, deliberately not Postgres-backed.
+	//
+	// The Postgres limiter ran TWO round trips before EVERY /api/v1 handler —
+	// a SELECT (Remaining) plus an INSERT..ON CONFLICT..RETURNING (Allow), the
+	// latter a WAL write. Because it runs as middleware, ahead of the handler,
+	// no cache could ever remove it. Measured against production: the same DB
+	// query cost 1.63-2.07s through REST (rate-limited) versus 0.78-0.97s
+	// through Connect-RPC (not rate-limited) — a ~1s tax on every single
+	// request, and the reason six identical requests showed zero speedup.
+	//
+	// TRADE-OFF, recorded because docs/NETWORKS.md documents the Postgres
+	// backing as intentional: in-memory counters are PER-PROCESS, so with N
+	// machines the effective limit is N x the configured value. That is
+	// acceptable today because every network runs a single machine
+	// (fly.toml: auto_stop_machines = "off", min_machines_running = 1). If this
+	// ever scales beyond one machine per network, move the limiter to Redis —
+	// NOT back to Postgres, which puts a synchronous write on the read path.
+	//
+	// SIWE nonces stay Postgres-backed below: single-use enforcement is a
+	// correctness property that must hold across instances, and the nonce path
+	// is hit once per sign-in rather than on every read.
+	rl := ratelimit.New()
 	ns := nonce.NewPg(pool)
 	rs := auth.NewPgRefreshStore(pool) // refresh token family rotation
 	al := auth.NewPgAuditLogger(pool)  // async auth audit log

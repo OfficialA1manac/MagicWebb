@@ -15,16 +15,48 @@ describe('resolveImageUri', () => {
     expect(resolveImageUri('')).toBe('');
   });
 
-  // ── /api/v1/img/ URIs (self-hosted blobs) bypass proxy ───────────────
-  it('returns /api/v1/img/ URI as-is (no proxy)', () => {
+  // ── self-hosted blobs bypass the proxy and use the unlimited /img/ path ──
+  // /api/v1/img/ is matched by the /api/v1 prefix rate-limit middleware
+  // (measured in production: x-ratelimit-limit 30), so a full grid exhausts the
+  // bucket on first paint. Stored image_uri rows still carry the old prefix, so
+  // the resolver rewrites it rather than requiring a data migration.
+  it('rewrites /api/v1/img/ to the unlimited /img/ path (no proxy)', () => {
     const sha = 'abc123def4567890abcdef1234567890abcdef1234567890abcdef1234567890';
-    const uri = '/api/v1/img/' + sha;
-    expect(resolveImageUri(uri)).toBe(uri);
+    expect(resolveImageUri('/api/v1/img/' + sha)).toBe('/img/' + sha);
   });
 
-  it('returns /api/v1/img/ URI as-is with token ID present', () => {
-    const uri = '/api/v1/img/somehash';
-    expect(resolveImageUri(uri, '42')).toBe(uri);
+  it('rewrites /api/v1/img/ with token ID present', () => {
+    expect(resolveImageUri('/api/v1/img/somehash', '42')).toBe('/img/somehash');
+  });
+
+  it('passes an already-rewritten /img/ URI through unchanged', () => {
+    expect(resolveImageUri('/img/somehash')).toBe('/img/somehash');
+  });
+
+  // ── thumbnail size negotiation ───────────────────────────────────────
+  // The backend generates 128/256/512 variants at ingest and serves them from
+  // ?size=N. Without the parameter it falls through to the FULL-SIZE blob:
+  // measured 1,693,489 B versus 7,904 B at size=256.
+  it('appends ?size= for self-hosted blobs when a size is requested', () => {
+    expect(resolveImageUri('/api/v1/img/somehash', '1', 256)).toBe('/img/somehash?size=256');
+    expect(resolveImageUri('/img/somehash', '1', 128)).toBe('/img/somehash?size=128');
+    expect(resolveImageUri('/img/somehash', '1', 512)).toBe('/img/somehash?size=512');
+  });
+
+  it('omits ?size= when no size is requested', () => {
+    expect(resolveImageUri('/api/v1/img/somehash', '1')).toBe('/img/somehash');
+  });
+
+  it('never appends ?size= to proxied external URLs', () => {
+    // The media proxy does not resize; a size there would be a dead parameter.
+    const out = resolveImageUri('https://nft.storage/a.png', '1', 256);
+    expect(out.startsWith('/api/v1/media?url=')).toBe(true);
+    expect(out).not.toContain('size=');
+  });
+
+  it('does not append ?size= to data: URIs', () => {
+    const uri = 'data:image/png;base64,iVBORw0KGgo=';
+    expect(resolveImageUri(uri, '1', 256)).toBe(uri);
   });
 
   // ── data: URIs (inline base64) bypass proxy ──────────────────────────
@@ -163,8 +195,7 @@ describe('resolveImageUri', () => {
   });
 
   it.each(pages)('%s: /api/v1/img/ URI bypasses proxy consistently', () => {
-    const uri = '/api/v1/img/somehash';
-    expect(resolveImageUri(uri)).toBe(uri);
+    expect(resolveImageUri('/api/v1/img/somehash')).toBe('/img/somehash');
   });
 
   it.each(pages)('%s: external URL goes through proxy consistently', () => {

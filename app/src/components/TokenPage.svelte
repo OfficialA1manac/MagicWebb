@@ -72,7 +72,7 @@
 
   let std = $derived((listing?.standard || collection?.standard || ocStd || 'erc721') as 'erc721' | 'erc1155');
   let name = $derived(listing?.name || auction?.name || (collection?.name ? `${collection.name} #${tid}` : ocName || `#${tid}`));
-  let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || ocImg, tid));
+  let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || ocImg, tid, 512));
   let verified = $derived(!!(collection?.verified ?? listing?.collection_verified ?? auction?.collection_verified));
   let creatorAddr = $derived(collection?.creator_addr || '');
   let isOwner = $derived(!!me && (std === 'erc1155' ? myBalance1155 > 0n : owner?.toLowerCase() === me.toLowerCase()));

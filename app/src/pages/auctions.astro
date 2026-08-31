@@ -146,7 +146,10 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
         try { const bi = BigInt(weiStr); if(bi <= 0n) return null; return bi.toString(); }
         catch(_) { return null; }
       }
-      function resolveImageUri(uri,tid){if(!uri)return'';if(uri.startsWith('/api/v1/img/')||uri.startsWith('data:'))return uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
+      // size = 128|256|512 requests a pre-generated thumbnail. Without it the
+      // backend serves the FULL-SIZE blob (measured 1.69MB vs 7.9KB at 256).
+      // Mirrors src/lib/image-uri.ts -- inline scripts cannot import; keep in sync.
+      function resolveImageUri(uri,tid,size){if(!uri)return'';if(uri.startsWith('data:'))return uri;if(uri.startsWith('/api/v1/img/'))uri='/img/'+uri.slice(12);if(uri.startsWith('/img/'))return size?uri+'?size='+size:uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
       // Mirrors components/VerifiedBadge.svelte with link={false}. Duplicated
       // per page in the same way resolveImageUri is, because is:inline scripts
       // cannot import. Emits a <span> (never an <a>): these badges sit inside
@@ -256,7 +259,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
             const endsAt = a.ends_at ? (new Date(a.ends_at).getTime()/1000) : 0;
             const tLeft = timeLeft(endsAt);
             const ending = endsAt - now < 180;
-            const imgSrc = resolveImageUri(a.image_uri, a.token_id);
+            const imgSrc = resolveImageUri(a.image_uri, a.token_id, 256);
             const isActive = a.status === 'active';
             const statusColor = isActive ? 'rgba(167,139,250,0.35)' : 'rgba(255,255,255,0.1)';
 

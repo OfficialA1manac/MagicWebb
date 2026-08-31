@@ -2,9 +2,9 @@
 package api
 
 import (
-	"net"
 	"context"
 	"encoding/json"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -181,8 +181,23 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// thumbnails + JSON payloads. gzip at level 5 is only ~1-2% larger
 	// than the default level 6 — a negligible trade-off for the Brotli
 	// bandwidth savings. CPU cost is amortized by CDN immutable caching.
+	// Skip bodies that compression cannot help. Images (GIF/JPEG/PNG/WebP/AVIF)
+	// and video are ALREADY compressed — running Brotli-5 over a 1.7MB GIF is
+	// pure CPU on the critical path for ~0% saving, and this runs on a
+	// burst-credit shared-cpu-1x where exhausted credits throttle everything.
+	// Tiny bodies are skipped for the same reason: a 599-byte JSON response
+	// cannot meaningfully shrink but still pays the compressor.
 	app.Use(compress.New(compress.Config{
 		Level: 5,
+		Next: func(c *fiber.Ctx) bool {
+			ct := strings.ToLower(string(c.Response().Header.ContentType()))
+			if strings.HasPrefix(ct, "image/") || strings.HasPrefix(ct, "video/") ||
+				strings.HasPrefix(ct, "audio/") || ct == "application/zip" ||
+				ct == "application/gzip" {
+				return true // skip compression
+			}
+			return len(c.Response().Body()) < 1024
+		},
 	}))
 
 	// /healthz is deliberately NOT registered here. Fiber v2 matches routes in
@@ -343,7 +358,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// Domain-specific route registrations.
 	registerTxObserve(api, rl) // instant lane (tx_observe.go)
 	registerEventCatalog(api)  // real-time event catalog (tx_observe.go)
-	NewListingsService(q, eth).RegisterRoutes(api)
+	// 10s TTL: short enough that a new listing or a cancel shows up promptly
+	// (the WS tx-indexed event also drives a client refresh), long enough to
+	// absorb the burst of identical requests a grid page fires on load.
+	listingsCache := cache.NewRedisOrMemory(cfg.RedisURL, 10*time.Second)
+	NewListingsService(q, eth, listingsCache).RegisterRoutes(api)
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
 	NewCollectionsService(q, trendingCache).RegisterRoutes(api)
@@ -359,13 +378,26 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
-	// Image-by-hash route: registered at app level (NOT under the rate-limited
-	// /api/v1 group) because it serves locally-stored blobs from the database
-	// — there is no outbound HTTP fetch involved, so the SSRF / abuse surface
-	// is minimal (it can only serve bytes already committed to the image store).
-	// Pages with 48+ listing cards each load their image from this endpoint;
-	// rate limiting that would block legitimate page loads. The /api/v1/media
-	// proxy endpoint (which DOES make outbound fetches) remains rate-limited.
+	// Image-by-hash route. It serves locally-stored blobs from the database —
+	// no outbound HTTP fetch, so the SSRF / abuse surface is minimal (it can
+	// only serve bytes already committed to the image store). Pages with 48+
+	// listing cards each load their image from here, so rate limiting it would
+	// block legitimate page loads. The /api/v1/media proxy endpoint (which DOES
+	// make outbound fetches) remains rate-limited.
+	//
+	// It is served from /img/ rather than /api/v1/img/ because registering it
+	// at app level was NOT enough to escape the limiter. In Fiber v2,
+	// app.Group("/api/v1", handler) mounts that handler as PREFIX middleware,
+	// so both the 60/min group (above) and the 30/min search group matched
+	// /api/v1/img/* regardless of registration order. Measured in production:
+	// GET /api/v1/img/<sha> returned `x-ratelimit-limit: 30`, meaning a
+	// 48-card grid exhausted the search bucket on first paint while this
+	// comment claimed the route was unlimited.
+	//
+	// The old path stays registered as a permanent alias: image URLs are
+	// content-addressed and persisted in nft_metadata.image_uri rows, so links
+	// already written to the database and to clients must keep resolving.
+	app.Get("/img/:sha256", ms.HandleImageByHash())
 	app.Get("/api/v1/img/:sha256", ms.HandleImageByHash())
 
 	// Server-time endpoint (used by auction countdown timers). Moved

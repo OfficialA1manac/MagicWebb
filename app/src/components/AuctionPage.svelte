@@ -52,7 +52,7 @@
   let amLeader = $derived(!!me && !!a && a.highest_bidder?.toLowerCase() === me.toLowerCase());
   let minTopUp = $derived(a ? minimumTopUp({ currentHighestWei: highest, reserveWei: BigInt(a.reserve_price_wei || '0'), myCumulativeWei: myCumulative, minIncrementBps: a.min_increment_bps }) : 0n);
   let name = $derived(a?.name || `#${a?.token_id ?? ''}`);
-  let img = $derived(resolveImageUri(a?.image_uri, a?.token_id));
+  let img = $derived(resolveImageUri(a?.image_uri, a?.token_id, 512));
   let antiSnipe = $derived(isLive && endsMs - now < 3 * 60 * 1000);
 
   async function j<T>(u: string): Promise<T | null> { try { const r = await fetch(u); return r.ok ? (await r.json()) as T : null; } catch { return null; } }
