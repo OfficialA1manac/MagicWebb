@@ -75,7 +75,7 @@ func TestDeactivateAndSaleIsSellerScopedAndAtomic(t *testing.T) {
 
 	at := time.Unix(1_700_000_000, 0)
 	mock.ExpectBegin()
-	mock.ExpectExec(`UPDATE listings SET active=false WHERE collection=\$1 AND token_id=\$2 AND seller=\$3`).
+	mock.ExpectExec(`UPDATE listings SET active=false, chain_cleaned=true WHERE collection=\$1 AND token_id=\$2 AND seller=\$3`).
 		WithArgs("0xc", "1", "0xs").
 		WillReturnResult(pgxmock.NewResult("UPDATE", 1))
 	mock.ExpectExec(`INSERT INTO sales`).

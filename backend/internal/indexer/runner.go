@@ -1151,6 +1151,12 @@ func (r *Runner) cleanExpiredListings(ctx context.Context, key *cryptoecdsa.Priv
 				Msg("keeper: cleanExpired receipt not confirmed; will retry next pass")
 			continue
 		}
+		// Confirmed on-chain: mark immediately rather than waiting for the
+		// Cancelled event to index, so the next pass never re-sends.
+		if err := r.q.MarkListingChainCleaned(ctx, l.Collection, l.TokenID, l.Seller); err != nil {
+			log.Warn().Err(err).Str("collection", l.Collection).Str("tokenId", l.TokenID).
+				Msg("keeper: mark chain_cleaned failed (Cancelled event will cover it)")
+		}
 		log.Info().Str("collection", l.Collection).Str("tokenId", l.TokenID).Str("tx", txHash.Hex()).
 			Msg("keeper: cleanExpired confirmed")
 	}

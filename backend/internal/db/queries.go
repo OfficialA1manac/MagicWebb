@@ -461,9 +461,21 @@ func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
 }
 
 // DeactivateListing closes one seller's listing for a token (multi-listing key).
+// Driven by the on-chain Cancelled event (seller cancel() or keeper
+// cleanExpired), so the struct is gone from chain state: chain_cleaned too.
 func (q *Q) DeactivateListing(ctx context.Context, collection, tokenID, seller string) error {
 	_, err := q.writer().Exec(ctx,
-		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2 AND seller=$3`,
+		`UPDATE listings SET active=false, chain_cleaned=true WHERE collection=$1 AND token_id=$2 AND seller=$3`,
+		collection, tokenID, seller)
+	return err
+}
+
+// MarkListingChainCleaned records that the keeper's cleanExpired receipt
+// confirmed on-chain removal — belt-and-braces against the window before the
+// Cancelled event is indexed, so the sweep never re-sends for a cleaned row.
+func (q *Q) MarkListingChainCleaned(ctx context.Context, collection, tokenID, seller string) error {
+	_, err := q.writer().Exec(ctx,
+		`UPDATE listings SET chain_cleaned=true WHERE collection=$1 AND token_id=$2 AND seller=$3`,
 		collection, tokenID, seller)
 	return err
 }
@@ -745,14 +757,16 @@ type ExpiredListingRef struct {
 	Seller     string
 }
 
-// GetExpiredActiveListings returns listings whose expiry has passed but whose
-// row is still active — the on-chain listing struct still exists and only a
-// KEEPER_ROLE caller may delete it (Marketplace.cleanExpired). Bounded and
-// oldest-first so a backlog drains deterministically.
+// GetExpiredActiveListings returns expired listings whose ON-CHAIN struct has
+// not been removed yet (chain_cleaned=false) — only a KEEPER_ROLE caller may
+// delete those (Marketplace.cleanExpired). Deliberately NOT keyed on `active`:
+// the listing-expiry sweeper flips active=false within seconds of expiry,
+// long before this ~60s pass runs, so an active-based query raced it and
+// always lost. Bounded and oldest-first so a backlog drains deterministically.
 func (q *Q) GetExpiredActiveListings(ctx context.Context) ([]ExpiredListingRef, error) {
 	rows, err := q.reader().Query(ctx,
 		`SELECT collection, token_id, seller FROM listings
-		  WHERE active = TRUE AND expires_at < now()
+		  WHERE chain_cleaned = FALSE AND expires_at < now()
 		  ORDER BY expires_at ASC LIMIT 50`)
 	if err != nil {
 		return nil, err
@@ -1631,8 +1645,9 @@ func (q *Q) DeactivateAndSale(ctx context.Context,
 	}
 	// Seller-keyed: listings PK is (collection, token_id, seller) — other
 	// holders' stacked 1155 listings for the same token must stay active.
+	// A Sold event means buy() deleted the on-chain struct: chain_cleaned too.
 	if _, err := tx.Exec(ctx,
-		`UPDATE listings SET active=false WHERE collection=$1 AND token_id=$2 AND seller=$3`,
+		`UPDATE listings SET active=false, chain_cleaned=true WHERE collection=$1 AND token_id=$2 AND seller=$3`,
 		collection, tokenID, seller); err != nil {
 		_ = tx.Rollback(ctx)
 		return fmt.Errorf("deactivate: %w", err)
