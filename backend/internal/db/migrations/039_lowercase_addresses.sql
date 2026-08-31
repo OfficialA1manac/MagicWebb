@@ -87,6 +87,34 @@ DELETE FROM nft_attributes t
                 WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id
                   AND d.trait_type = t.trait_type);
 
+-- Composite-PK tables that include an address column get the same treatment:
+-- rows already present under BOTH casings collide when lowered (observed on
+-- coston2: trending_scores held (checksummed, '24h') AND (lowercase, '24h'),
+-- and the plain UPDATE below died on trending_scores_pkey). Keep the
+-- lowercase row, drop the checksummed duplicate, then lower what remains.
+DELETE FROM trending_scores t
+ WHERE t.collection <> lower(t.collection)
+   AND EXISTS (SELECT 1 FROM trending_scores d
+                WHERE d.collection = lower(t.collection) AND d."window" = t."window");
+DELETE FROM royalties t
+ WHERE t.collection <> lower(t.collection)
+   AND EXISTS (SELECT 1 FROM royalties d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id);
+-- listings PK (collection, token_id, seller) and nft_ownership PK
+-- (collection, token_id, owner) lower TWO columns; compare on both lowered.
+DELETE FROM listings t
+ WHERE (t.collection <> lower(t.collection) OR t.seller <> lower(t.seller))
+   AND EXISTS (SELECT 1 FROM listings d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id
+                  AND d.seller = lower(t.seller)
+                  AND (d.collection <> t.collection OR d.seller <> t.seller));
+DELETE FROM nft_ownership t
+ WHERE (t.collection <> lower(t.collection) OR t.owner <> lower(t.owner))
+   AND EXISTS (SELECT 1 FROM nft_ownership d
+                WHERE d.collection = lower(t.collection) AND d.token_id = t.token_id
+                  AND d.owner = lower(t.owner)
+                  AND (d.collection <> t.collection OR d.owner <> t.owner));
+
 UPDATE nft_attributes
    SET collection = lower(collection)
  WHERE collection <> lower(collection);
