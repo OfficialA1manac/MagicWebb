@@ -1,7 +1,9 @@
 # ── Auto-deploy on push to main ──────────────────────────────────────────────
 #
-# Flow:  push to main  →  make test (Go race) + frontend (astro check, vitest, guard)  →  fly deploy --remote-only --strategy rolling
-#                                                                                      └─ smoke check: curl /healthz
+# Flow:  push to main  →  make test (Go race) + frontend (astro check, vitest, guard)
+#                      →  build ONCE: fly deploy --build-only --push  →  one image ref
+#                      →  per-network legs: fly deploy --image <ref> --strategy rolling
+#                                           └─ smoke check /readyz, then the SHA sync gate
 #
 # Why a separate workflow instead of extending `ci.yml`:
 #   * The existing `ci.yml` runs 4 jobs in parallel on PR + push (backend,
@@ -255,31 +257,122 @@ jobs:
           echo "networks=$json" >> "$GITHUB_OUTPUT"
           echo "deploying: $json"
 
-  deploy:
-    name: fly deploy (${{ matrix.network }})
+  # ───────────────────────────────────────────────────────────────────────────
+  # Build the image ONCE, for every network.
+  #
+  # Every network runs byte-identical application code. Nothing network-specific
+  # can reach the image: the Dockerfile declares a single ARG (REOWN_PROJECT_ID,
+  # shared by all three apps) and COPYs only app/ and backend/ — never
+  # deployments/, contracts/, or fly.toml. The Astro bundle is network-agnostic
+  # by design: backend/cmd/server/ui.go injects window.MW_CHAIN_ID /
+  # MW_MARKETPLACE / MW_NETWORK_URLS into every HTML response from the runtime
+  # config, and app/src/lib/chains.ts prefers those over its PUBLIC_* build-time
+  # fallbacks ("one Astro build serves every network").
+  #
+  # Building once instead of three times:
+  #   * touches a Fly builder ONCE, so a builder outage has one third the
+  #     surface (see the retry below for why that matters);
+  #   * removes a real drift risk — the Dockerfile uses `npm install
+  #     --legacy-peer-deps` (not `npm ci`) and curls the Zig tarball at build
+  #     time, so three builds of one commit are not guaranteed identical;
+  #   * makes deploy-leg concurrency a non-question: image-only legs cannot
+  #     contend on a builder.
+  # ───────────────────────────────────────────────────────────────────────────
+  build:
+    name: Build image (once, for all networks)
     needs: [plan]
     runs-on: ubuntu-latest
-    # Must exceed the fly --wait-timeout (10m) plus build, smoke check and sync
-    # gate, so a stuck release is caught by fly's bounded wait — with its own
-    # error text — rather than by the job timeout killing the step mid-flight.
-    timeout-minutes: 30
+    # 3 bounded build attempts plus checkout/install overhead.
+    timeout-minutes: 45
+    outputs:
+      image: ${{ steps.fly_build.outputs.image }}
+    steps:
+      - uses: actions/checkout@v4.2.0
+        with:
+          fetch-depth: 0
+      - name: Install flyctl
+        run: |
+          set -euo pipefail
+          curl -fsSL https://fly.io/install.sh | sh
+          echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
+          chmod +x "$HOME/.fly/bin/"* 2>/dev/null || true
+          if ! "$HOME/.fly/bin/flyctl" version; then
+            echo "::error title=flyctl install failed::flyctl is not executable after install.sh"
+            exit 1
+          fi
+      - name: Stamp build SHA into Go source
+        # A generated Go file the remote builder cannot ignore; its init()
+        # sets MWServerBuildSHA, which /healthz echoes as X-MW-Build-SHA and
+        # tools/check-fly-sync.sh compares against origin/main. Stamped here
+        # rather than per-leg because the image is now shared — all three
+        # networks advertise this one SHA, which is exactly what the gate wants.
+        run: |
+          echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
+      - name: Minimal fly.toml for the build
+        # `--build-only` needs only an app to own the registry repo and a
+        # Dockerfile path. The [env] block is runtime config and is generated
+        # per-network in the deploy legs below, so deliberately not set here —
+        # duplicating it would imply the image depends on it, which is the
+        # confusion this job exists to end.
+        run: |
+          set -euo pipefail
+          printf 'app = "magicwebb"\nprimary_region = "iad"\n\n[build]\n  dockerfile = "Dockerfile"\n' > fly.toml
+          cat fly.toml
+      - name: Build and push image
+        id: fly_build
+        # Bounded retry. On 2026-08-30 (run 33355471009) two legs died on
+        # `Waiting for depot builder... / error releasing builder:
+        # deadline_exceeded / failed to list workers: transport:
+        # authentication handshake failed: EOF` — Fly's depot builder was
+        # simply unavailable, twice per leg, ~5 minutes each. It is transient
+        # infrastructure, so retry; the last attempt drops to Fly's legacy
+        # remote builder, which is a different backend and survives a depot
+        # outage.
+        timeout-minutes: 40
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          REOWN_PROJECT_ID: ${{ secrets.REOWN_PROJECT_ID }}
+        run: |
+          set -o pipefail
+          IMAGE="registry.fly.io/magicwebb:sha-${GITHUB_SHA}"
+          for attempt in 1 2 3; do
+            extra=""
+            if [ "$attempt" -eq 3 ]; then
+              extra="--depot=false"
+              echo "::warning title=depot fallback::attempt 3 builds on Fly's legacy remote builder (--depot=false)"
+            fi
+            echo "── build attempt ${attempt}/3 ${extra}"
+            if flyctl deploy --build-only --push --remote-only $extra \
+                 --image-label "sha-${GITHUB_SHA}" \
+                 --build-arg REOWN_PROJECT_ID="${REOWN_PROJECT_ID}" 2>&1 | tee /tmp/fly-build.log; then
+              echo "  built and pushed ${IMAGE}"
+              echo "image=${IMAGE}" >> "$GITHUB_OUTPUT"
+              exit 0
+            fi
+            echo "  attempt ${attempt} failed"
+            [ "$attempt" -lt 3 ] && sleep 15
+          done
+          echo "::error title=fly build failed after 3 attempts::$(tail -c 3000 /tmp/fly-build.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
+          exit 1
+
+  deploy:
+    name: fly deploy (${{ matrix.network }})
+    needs: [plan, build]
+    runs-on: ubuntu-latest
+    # No build happens here any more — just the rolling release, its bounded
+    # --wait-timeout (10m), the smoke check and the sync gate.
+    timeout-minutes: 20
     strategy:
       fail-fast: false
-      # Serialize the legs. All networks build the SAME image (identical
-      # Dockerfile and build args — only the generated fly.toml env differs),
-      # so running them in parallel puts three identical builds on Fly's shared
-      # remote builder at once. The logs show them contending:
-      # "Deduplicating step ID …, another build is calculating it", and on three
-      # consecutive deploys exactly one leg then stalled inside the builder for
-      # >12 minutes — songbird (33295011979), coston2 (33339253223), songbird
-      # again (33340769236) — leaving that one network drifted while the others
-      # went green.
+      # No max-parallel. The legs pull one already-built image ref and never
+      # touch a builder, so they cannot contend.
       #
-      # Sequential legs cost wall-clock (~2m30s each instead of all at once) but
-      # let Fly's layer cache serve legs 2 and 3, and remove the contention
-      # entirely. The stronger fix is to build ONCE and deploy that image ref to
-      # all three apps; this is the low-risk step toward it.
-      max-parallel: 1
+      # (Historical note: 933719f added `max-parallel: 1` on the theory that
+      # three identical parallel builds contend on Fly's shared builder. Run
+      # 33355471009 was the first run with that serialization and disproved it —
+      # the coston2 leg ran FIRST and ALONE and still failed, on depot builder
+      # unavailability. Serialization cost ~20 minutes of wall clock and fixed
+      # nothing. The build job above addresses the actual failure.)
       matrix:
         network: ${{ fromJson(needs.plan.outputs.networks) }}
     steps:
@@ -299,11 +392,6 @@ jobs:
             echo "::error title=flyctl install failed::flyctl is not executable after install.sh"
             exit 1
           fi
-      - name: Stamp build SHA into Go source
-        # A generated Go file the remote builder cannot ignore; its init()
-        # sets MWServerBuildSHA, which /healthz echoes as X-MW-Build-SHA.
-        run: |
-          echo "package api; func init() { MWServerBuildSHA = \"$GITHUB_SHA\" }" > backend/internal/api/build_sha_gen.go
       - name: Validate deployments/ (source of truth)
         run: bash tools/check-deployments.sh
       - name: Generate fly.toml from template + deployments/${{ matrix.network }}.json
@@ -354,31 +442,29 @@ jobs:
           if [ -n "$UNRESOLVED" ]; then echo "::error::unresolved placeholders in fly.toml: ${UNRESOLVED}"; exit 1; fi
           echo "  generated fly.toml for ${NETWORK} (app $(jq -r .app.flyApp "$DEP"), status ${STATUS})"
           grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS)\s*=' fly.toml
-      - name: Deploy (Fly remote build → rolling release)
+      - name: Deploy image (rolling release)
         id: fly_deploy
-        # STEP-level bound, which is what actually contains this failure.
-        # --wait-timeout below only bounds the RELEASE wait (health checks after
-        # an image exists); it does NOT bound the remote BUILD. Observed on
-        # 2026-08-30: the coston2 leg stalled ~28 minutes inside the builder on
-        # `#14 [go-build 1/8] FROM docker.io/library/golang:1.26-bookworm`, sailed
-        # past --wait-timeout untouched, and was killed by the JOB timeout — which
-        # then let the always() sync gate report DRIFT on a never-updated app.
-        # A step timeout bounds build + release together and fails the leg
-        # loudly instead. 12m is ~5x the ~2m30s a healthy leg takes.
-        timeout-minutes: 12
+        # No build happens here: the image was built once by the `build` job and
+        # this leg only rolls it out. That removes the failure this step used to
+        # have to contain — a remote build stalling inside the builder, which
+        # --wait-timeout does not bound because it covers only the RELEASE wait.
+        # With build gone, the step bound only needs to cover that release wait
+        # plus the image pull.
+        timeout-minutes: 15
         env:
           FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          IMAGE: ${{ needs.build.outputs.image }}
         run: |
           set -o pipefail
-          echo "  deploying commit $GITHUB_SHA to ${{ matrix.network }}"
+          [ -n "${IMAGE:-}" ] || { echo "::error::build job produced no image ref"; exit 1; }
+          echo "  deploying $IMAGE (commit $GITHUB_SHA) to ${{ matrix.network }}"
           # --wait-timeout bounds the release wait. Without it fly can sit on a
           # rolling release until the JOB timeout kills it mid-deploy, and the
           # always() sync gate below then reports DRIFT against a half-deployed
           # app — which reads as a deploy-integrity failure when the real cause
           # is "the deploy never finished". A bounded wait fails with fly's own
-          # diagnostics instead. 10m is well above the ~2m30s a healthy deploy
-          # takes here, so it only trips on a genuinely stuck release.
-          if fly deploy --remote-only --strategy rolling --wait-timeout 600 --build-arg REOWN_PROJECT_ID=${{ secrets.REOWN_PROJECT_ID }} 2>&1 | tee /tmp/fly-deploy.log; then
+          # diagnostics instead.
+          if fly deploy --image "$IMAGE" --strategy rolling --wait-timeout 600 2>&1 | tee /tmp/fly-deploy.log; then
             exit 0
           fi
           echo "::error title=fly deploy failed (${{ matrix.network }})::$(tail -c 3000 /tmp/fly-deploy.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
