@@ -338,6 +338,14 @@ type Handler struct {
 	eventsSent atomic.Int64           // total events pushed to all WS clients
 	connCount  atomic.Int64           // total connections established (lifetime)
 
+	// Single broadcaster subscription shared by all connections. One
+	// dispatcher goroutine marshals each event once and fans the same bytes
+	// out to every connection (see StartDispatcher), instead of every
+	// connection subscribing and re-marshalling independently.
+	dispatchOnce   sync.Once
+	dispatchCancel func()
+	dispatchDone   chan struct{}
+
 	// WS metrics: connection-level rate limiting + rejection counters.
 	// Exposed via Prometheus /metrics for Grafana dashboards.
 	msgRateLimited      atomic.Int64 // messages rejected by per-connection token bucket
@@ -366,6 +374,96 @@ func (h *Handler) serverTimeMs() int64 {
 		return h.serverTime()
 	}
 	return time.Now().UnixMilli()
+}
+
+// StartDispatcher subscribes to the broadcaster ONCE and fans every event out
+// to all connections from a single goroutine. The payload and envelope are
+// marshalled once per event (not once per connection) and the payload is
+// decoded once for filtering — collapsing the old per-connection cost of 2N
+// marshals + 2N unmarshals (N = connected clients) down to 2 marshals + 1
+// decode per event. The same []byte is enqueued to every connection; that is
+// safe because writePump copies before coalescing (see the note in writePump).
+//
+// Call once, after construction (e.g. from api.Mount). It is NOT started in
+// NewHandler so tests that build a Handler via a struct literal don't leak a
+// goroutine. Returns false if the broadcaster is at capacity.
+func (h *Handler) StartDispatcher() bool {
+	eventCh, cancel, ok := h.bcast.SubscribeRaw()
+	if !ok {
+		return false
+	}
+	h.dispatchCancel = cancel
+	h.dispatchDone = make(chan struct{})
+	go func() {
+		defer cancel()
+		for {
+			select {
+			case ev, ok := <-eventCh:
+				if !ok {
+					return
+				}
+				payload, err := json.Marshal(ev.Data)
+				if err != nil {
+					continue
+				}
+				// Decode the payload ONCE for every connection's filters.
+				// nil ev = empty payload; malformed = non-empty but undecodable.
+				var parsed *eventPayload
+				malformed := false
+				if len(payload) > 0 {
+					var p eventPayload
+					if json.Unmarshal(payload, &p) != nil {
+						malformed = true
+					} else {
+						parsed = &p
+					}
+				}
+				env := Message{
+					Type: MessageType(ev.Type),
+					Data: json.RawMessage(payload),
+					Seq:  ev.Seq,
+				}
+				msg, err := json.Marshal(env)
+				if err != nil {
+					continue
+				}
+				etype := string(ev.Type)
+				h.mu.RLock()
+				for _, conn := range h.conns {
+					if !conn.allowedNotificationParsed(etype, parsed) {
+						continue
+					}
+					if !conn.isSubscribedToEventParsed(etype, parsed, malformed) {
+						continue
+					}
+					select {
+					case conn.send <- msg:
+						h.eventsSent.Add(1)
+					default:
+						// Slow client — drop (do not count as sent).
+					}
+				}
+				h.mu.RUnlock()
+			case <-h.dispatchDone:
+				return
+			}
+		}
+	}()
+	return true
+}
+
+// StopDispatcher stops the dispatcher goroutine and releases its broadcaster
+// subscription. Idempotent. Primarily for tests; in production the dispatcher
+// lives for the process lifetime, like the broadcaster.
+func (h *Handler) StopDispatcher() {
+	h.dispatchOnce.Do(func() {
+		if h.dispatchDone != nil {
+			close(h.dispatchDone)
+		}
+		if h.dispatchCancel != nil {
+			h.dispatchCancel()
+		}
+	})
 }
 
 // HandleWebSocket is the Fiber handler for GET /ws.
@@ -409,22 +507,6 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 	}
 	if err := upgrader.Upgrade(c.Context(), func(wsConn *websocket.Conn) {
 
-		// Subscribe to broadcaster for raw push events (no SSE formatting).
-		eventCh, cancel, ok := h.bcast.SubscribeRaw()
-		if !ok {
-			// The handshake is already complete, so there is no HTTP status
-			// left to send. Refuse with a close frame carrying the reason;
-			// 1013 (try again later) is what a client should back off on.
-			_ = wsConn.WriteControl(
-				websocket.CloseMessage,
-				websocket.FormatCloseMessage(websocket.CloseTryAgainLater, "too many subscribers"),
-				time.Now().Add(time.Second),
-			)
-			_ = wsConn.Close()
-			h.releaseIP(ip)
-			return
-		}
-
 		conn := &Connection{
 			id:   uuid.New().String(),
 			conn: wsConn,
@@ -434,101 +516,48 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 			done: make(chan struct{}),
 		}
 
+		// Welcome first: enqueue it before registering the connection so it
+		// can never be preceded by a dispatched event. The send channel is
+		// freshly made with cap 64 and empty, so this never blocks.
+		welcome := Message{
+			Type: MsgAck,
+			Data: mustJSON(AckData{
+				Status:  "ok",
+				Message: "connected",
+			}),
+		}
+		if welcomeData, err := json.Marshal(welcome); err == nil {
+			conn.send <- welcomeData
+		}
+
+		// Register the connection so the dispatcher (StartDispatcher) begins
+		// fanning events to it. There is no per-connection broadcaster
+		// subscription anymore — one shared dispatcher marshals once and
+		// broadcasts the same bytes to every registered connection.
 		h.mu.Lock()
 		h.conns[conn.id] = conn
 		h.mu.Unlock()
 		h.connCount.Add(1)
 
-		// Write pump: forwards broadcaster events to the WebSocket as JSON
-		// envelopes. Raw Event objects are marshalled directly — no SSE parsing
-		// or conversion needed.
-		go func() {
-			defer func() {
-				cancel()
-				h.mu.Lock()
-				delete(h.conns, conn.id)
-				h.mu.Unlock()
-				h.releaseIP(ip)
-				_ = wsConn.Close()
-			}()
-			defer conn.once.Do(func() { close(conn.done) })
-
-			// Send a welcome message
-			welcome := Message{
-				Type: MsgAck,
-				Data: mustJSON(AckData{
-					Status:  "ok",
-					Message: "connected",
-				}),
-			}
-			welcomeData, _ := json.Marshal(welcome)
-			select {
-			case conn.send <- welcomeData:
-			default:
-			}
-
-			// Read raw broadcaster events and forward to WebSocket.
-			// Subscription filtering is applied per-event-type so clients
-			// only receive events matching their subscribed channels.
-			for {
-				select {
-				case ev, ok := <-eventCh:
-					if !ok {
-						return
-					}
-					// Skip expensive marshalling when no subscription matches.
-					// The isSubscribedToEvent method does its own coarse pre-check
-					// under a single lock — we just call it directly now.
-					payload, err := json.Marshal(ev.Data)
-					if err != nil {
-						continue
-					}
-					// Phase 3 RBAC: notification events carry a user_addr target.
-					// Unsubscribed connections receive all events by default, but
-					// notifications are private — they must match the authenticated
-					// wallet. This also double-checks subscribed connections: even
-					// if a subscriber's channel filter passes, the notification must
-					// still belong to them. Reuses eventPayload (from subscriptions.go)
-					// to avoid JSON tag drift; the extra field parsing is negligible.
-					if !conn.allowedNotification(string(ev.Type), payload) {
-						continue
-					}
-					// Filter by client's channel subscriptions (with per-entity
-					// scoping when payload is available).
-					if !conn.isSubscribedToEvent(string(ev.Type), payload) {
-						continue
-					}
-					env := Message{
-						Type: MessageType(ev.Type),
-						Data: json.RawMessage(payload),
-						Seq:  ev.Seq,
-					}
-					msg, err := json.Marshal(env)
-					if err != nil {
-						continue
-					}
-					select {
-					case conn.send <- msg:
-						h.eventsSent.Add(1)
-					default:
-						// Slow client — drop
-						// We do NOT increment eventsSent — the event was dropped
-					}
-				case <-conn.done:
-					return
-				}
-			}
-		}()
-
 		// Read pump: handles client-to-server messages
 		go conn.readPump(h)
 
-		// Write pump: sends messages from the send channel to the WebSocket
+		// Write pump: sends messages from the send channel to the WebSocket.
+		// Blocks until the connection closes (readPump closes conn.done on a
+		// read error/disconnect; writePump also closes it on its own errors).
 		conn.writePump()
 
-		// writePump blocks until the connection closes. Returning from the
-		// callback is what tears the hijacked connection down, so this is
-		// the correct place to block.
+		// Connection closed — tear it down. This cleanup used to live in the
+		// per-connection broadcaster-pump goroutine's defer; with that
+		// goroutine gone, it runs here after writePump returns.
+		conn.once.Do(func() { close(conn.done) })
+		h.mu.Lock()
+		delete(h.conns, conn.id)
+		h.mu.Unlock()
+		h.releaseIP(ip)
+		_ = wsConn.Close()
+
+		// Returning from the callback tears the hijacked connection down.
 	}); err != nil {
 		// Upgrade has already written the handshake-failure status and body
 		// (400/403/405 depending on which check failed). Returning the error
@@ -937,13 +966,33 @@ func (c *Connection) unsubscribe(channels []string) {
 // the payload once for per-entity scoping (W5). Both checks happen under a
 // single lock acquisition.
 func (c *Connection) isSubscribedToEvent(eventType string, payloadBytes []byte) bool {
+	// Decode once, then delegate to the shared matcher so the byte-taking and
+	// pre-decoded paths cannot drift.
+	var ev *eventPayload
+	malformed := false
+	if len(payloadBytes) > 0 {
+		var parsed eventPayload
+		if err := json.Unmarshal(payloadBytes, &parsed); err != nil {
+			malformed = true
+		} else {
+			ev = &parsed
+		}
+	}
+	return c.isSubscribedToEventParsed(eventType, ev, malformed)
+}
+
+// isSubscribedToEventParsed is isSubscribedToEvent with the payload already
+// decoded (ev, or nil when the payload was empty) — so the shared dispatcher
+// can decode ONCE per event instead of once per connection. `malformed` means
+// a non-empty payload failed to decode; matching the byte path, that errs on
+// the side of delivery.
+func (c *Connection) isSubscribedToEventParsed(eventType string, ev *eventPayload, malformed bool) bool {
 	c.subMu.RLock()
 	defer c.subMu.RUnlock()
 	if len(c.subscriptions) == 0 {
 		return true // no subscriptions → receive all
 	}
 	// Coarse prefix pre-check: does any channel match this event category?
-	// Skip expensive JSON parsing if no channel would match.
 	hasAnyMatch := false
 	for ch := range c.subscriptions {
 		if channelMatchesPrefix(ch, eventType) {
@@ -954,15 +1003,8 @@ func (c *Connection) isSubscribedToEvent(eventType string, payloadBytes []byte) 
 	if !hasAnyMatch {
 		return false
 	}
-	// Parse the event payload once (not per-channel) for efficiency.
-	// If parsing fails (malformed), err on the side of delivery.
-	var ev *eventPayload
-	if len(payloadBytes) > 0 {
-		var parsed eventPayload
-		if err := json.Unmarshal(payloadBytes, &parsed); err != nil {
-			return true // malformed payload → deliver
-		}
-		ev = &parsed
+	if malformed {
+		return true // malformed payload → deliver
 	}
 	for ch := range c.subscriptions {
 		if channelMatchesEvent(ch, eventType, ev) {
@@ -990,7 +1032,21 @@ func (c *Connection) allowedNotification(eventType string, payload []byte) bool 
 	if json.Unmarshal(payload, &notif) != nil {
 		return false
 	}
-	return strings.EqualFold(notif.UserAddr, c.addr)
+	return c.allowedNotificationParsed(eventType, &notif)
+}
+
+// allowedNotificationParsed is allowedNotification with the payload already
+// decoded, for the shared dispatcher's decode-once path. A nil ev (empty or
+// undecodable payload) denies a notification, matching the byte path where an
+// unmarshal failure returns false.
+func (c *Connection) allowedNotificationParsed(eventType string, ev *eventPayload) bool {
+	if eventType != "notification" {
+		return true
+	}
+	if c.addr == "" || ev == nil {
+		return false
+	}
+	return strings.EqualFold(ev.UserAddr, c.addr)
 }
 
 // BroadcastTo sends an event to WebSocket clients, respecting per-connection

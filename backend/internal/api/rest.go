@@ -245,6 +245,10 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	)
 	wsHandler := ws.NewHandler(cfg, bcast, q, wsClient, func() int64 { return atomic.LoadInt64(serverTimeMs) })
 	GlobalWSStats = wsHandler // WS metrics exposed via Prometheus /metrics endpoint
+	// One shared broadcaster subscription + dispatcher goroutine for all WS
+	// connections (marshal-once fan-out). Started here rather than in
+	// NewHandler so struct-literal test handlers don't spawn a goroutine.
+	wsHandler.StartDispatcher()
 	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	// GraphQL endpoint for rich data queries.
