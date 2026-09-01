@@ -259,13 +259,13 @@ function WalletButton() {
   // messaging surface with the switch action. The wallet chip only carries a
   // compact amber warning dot so the state is still visible in the nav.
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: wrongNetwork ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
+    <div className="wc-pill" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: wrongNetwork ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
       <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
         <span title={wrongNetwork ? `Wallet is on the wrong network — switch to ${targetChain.name}` : undefined} style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: wrongNetwork ? '#fcd34d' : '#7dd3fc', boxShadow: wrongNetwork ? '0 0 8px rgba(251,191,36,0.6)' : '0 0 8px rgba(125,211,252,0.5)', position: 'relative' }}>
           <span style={{ position: 'absolute', inset: '-3px', borderRadius: '50%', background: wrongNetwork ? 'rgba(251,191,36,0.25)' : 'rgba(125,211,252,0.2)', animation: 'pulse-ring 1.5s ease-out infinite' }} />
         </span>
-        <span style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
-        <span style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>
+        <span className="wc-label" style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
+        <span className="wc-badge" style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>
         <button
           onClick={copyAddress}
           title="Click to copy"
@@ -288,6 +288,8 @@ function WalletButton() {
       </div>
       <button
         onClick={() => disconnect()}
+        className="wc-disconnect"
+        aria-label="Disconnect wallet"
         style={{
           padding: '0.25rem 0.625rem',
           borderRadius: '0.5rem',
@@ -311,7 +313,8 @@ function WalletButton() {
           e.currentTarget.style.background = 'transparent';
         }}
       >
-        Disconnect
+        <span className="wc-dc-full">Disconnect</span>
+        <span className="wc-dc-min" aria-hidden="true">✕</span>
       </button>
     </div>
   );

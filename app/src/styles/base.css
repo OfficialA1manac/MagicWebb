@@ -82,6 +82,21 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
   img, video, svg { max-width: 100%; height: auto; }
 }
 
+/* ── Connected-wallet pill (WalletConnect.tsx) ──────────────────────────── */
+/* Signed-in, the pill holds dot + WALLET + WC badge + address + Disconnect —
+   wider than a phone. Collapse decorations first, then the Disconnect label
+   becomes ✕ (aria-label preserved on the button). */
+.wc-dc-min { display: none; }
+@media (max-width: 600px) {
+  .wc-label, .wc-badge { display: none; }
+}
+@media (max-width: 480px) {
+  .wc-pill { gap: 0.375rem !important; padding: 0.375rem 0.5rem !important; }
+  .wc-dc-full { display: none; }
+  .wc-dc-min { display: inline; }
+  .wc-disconnect { min-width: 40px; min-height: 40px; }
+}
+
 /* ── Notification bell sign-in button (injected by BaseLayout script) ─── */
 .notif-signin {
   min-height: 40px; padding: 0 14px; border-radius: 10px;

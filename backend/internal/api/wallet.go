@@ -210,9 +210,37 @@ func (s *WalletService) mergeExplorerNFTs(ctx context.Context, addr string, dbRo
 		}
 	}
 
+	// Index the explorer items so DB rows can be ENRICHED, not just deduped.
+	// A DB ownership row can exist while its metadata/media joins are still
+	// empty (e.g. right after an indexer checkpoint reset) — it would win the
+	// merge and shadow an explorer item that carries a perfectly good live
+	// image URL, rendering the wallet grid as placeholders. Live-read rule:
+	// whatever field the DB doesn't have yet, take from the explorer.
+	byKey := make(map[string]blockscoutNFTItem, len(items))
+	for _, it := range items {
+		k := strings.ToLower(it.collectionAddr()) + "/" + it.ID
+		byKey[k] = it
+	}
 	seen := make(map[string]bool, len(dbRows))
-	for _, r := range dbRows {
-		seen[strings.ToLower(r.Collection)+"/"+r.TokenID] = true
+	for i := range dbRows {
+		k := strings.ToLower(dbRows[i].Collection) + "/" + dbRows[i].TokenID
+		seen[k] = true
+		if it, ok := byKey[k]; ok {
+			if dbRows[i].ImageURI == "" {
+				if it.ImageURL != "" {
+					dbRows[i].ImageURI = it.ImageURL
+				} else if it.Metadata.Image != "" {
+					dbRows[i].ImageURI = it.Metadata.Image
+				}
+			}
+			if dbRows[i].Name == "" {
+				if it.Metadata.Name != "" {
+					dbRows[i].Name = it.Metadata.Name
+				} else if n := strings.TrimSpace(it.Token.Name); n != "" {
+					dbRows[i].Name = n
+				}
+			}
+		}
 	}
 	out := dbRows
 	for _, it := range items {
