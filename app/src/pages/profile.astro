@@ -137,20 +137,28 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         if (_loading) return;
         _loading = true;
         const encAddr = encodeURIComponent(targetAddr);
-        // Instant paint. If a last-known-good snapshot exists for this
-        // address, render it immediately and mark the DOM good, then
-        // revalidate live below (on success it re-renders fresh with live
-        // wiring; on failure the guard keeps this snapshot). Otherwise keep
-        // the server-rendered skeleton on first paint, and only swap in the
-        // lightweight loader on later reloads (wallet switch).
-        if (root.dataset.mwLoaded !== '1') {
+        // Instant paint, scoped to THIS address. "Good" DOM means it was
+        // rendered for targetAddr (root.dataset.mwAddr) — not merely that
+        // some profile is on screen. On a wallet switch (A→B) we must not
+        // keep A's view: restore B's snapshot if we have one, else show the
+        // loader. On first paint, keep the server-rendered skeleton.
+        var haveCurrent = root.dataset.mwLoaded === '1' && root.dataset.mwAddr === targetAddr;
+        if (!haveCurrent) {
           var _snap = _lkgLoad(targetAddr);
           if (_snap) {
             root.innerHTML = _snap;
             root.dataset.mwLoaded = '1';
+            root.dataset.mwAddr = targetAddr;
             root.dataset.mwStale = '1';
-          } else if (!root.querySelector('.shimmer')) {
-            root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+          } else {
+            // No snapshot for this address. Show the loader unless the
+            // server skeleton is still up (first paint). Clear mwLoaded so
+            // the failure guard below knows there is no good data yet.
+            if (!root.querySelector('.shimmer')) {
+              root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+            }
+            root.dataset.mwLoaded = '';
+            delete root.dataset.mwStale;
           }
         }
         try {
@@ -181,30 +189,64 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // overwrite good data with a degraded view — keep last-known-good
           // and retry.
           var nftDegraded = !!(nftRes && nftRes.headers && nftRes.headers.get('X-MW-Degraded'));
-          var failed = nftDegraded || [pRes, nftRes, ppRes].some(function(r){
+          // Do we already have a good render FOR THIS ADDRESS to protect?
+          var haveGood = root.dataset.mwLoaded === '1' && root.dataset.mwAddr === targetAddr;
+          // Hard failure: profile / wallet / composite unreachable.
+          var hardFailed = [pRes, nftRes, ppRes].some(function(r){
             return !r || (!r.ok && r.status !== 404);
           });
-          if (failed) {
-            var ra = 5;
-            [pRes, nftRes, ppRes].some(function(r){
+          // A degraded wallet must never OVERWRITE good data — but on first
+          // paint (no good data yet) it must NOT block: the DB-side wallet
+          // list plus all the composite data are available and should render.
+          var degradedBlock = nftDegraded && haveGood;
+
+          // Backoff + address-scoped retry. Retry-After (429) wins; otherwise
+          // grow 5→10→20→30s (capped) so a long outage doesn't hammer the
+          // backend every 5s. The scheduled retry aborts if the user switched
+          // wallets in the meantime (targetAddr is no longer the active one).
+          function scheduleRetry(hdrRes){
+            var ra = 0;
+            (hdrRes || []).some(function(r){
               if (r && r.headers && r.headers.get('Retry-After')) { ra = Math.min(30, parseInt(r.headers.get('Retry-After'), 10) || 5); return true; }
               return false;
             });
-            // Good DOM present (fresh render OR restored snapshot)? Keep it and
-            // retry — never repaint the header with defaults on a blip.
-            if (root.dataset.mwLoaded === '1') {
-              setTimeout(function(){ loadProfileData(targetAddr); }, ra * 1000);
-              return;
+            if (!ra) {
+              var n = parseInt(root.dataset.mwRetries || '0', 10) || 0;
+              ra = Math.min(30, 5 * Math.pow(2, Math.min(n, 3)));
+              root.dataset.mwRetries = String(n + 1);
             }
-            // First paint, no snapshot: a transient 429 or explorer blip must
-            // resolve to real data, not a confident zero state. Show a retry
-            // notice and keep trying; do NOT set mwLoaded, do NOT render zeros.
-            root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.5;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Couldn’t reach the marketplace — retrying…</p></div>';
-            setTimeout(function(){ loadProfileData(targetAddr); }, ra * 1000);
+            setTimeout(function(){
+              if (targetAddr === _lastRenderedAddr) loadProfileData(targetAddr);
+            }, ra * 1000);
+          }
+
+          if (hardFailed || degradedBlock) {
+            // Have good data for this address? Keep it and retry — never
+            // repaint with defaults on a blip.
+            if (haveGood) { scheduleRetry([pRes, nftRes, ppRes]); return; }
+            // No good data for this address: restore a snapshot if we have
+            // one, else show a retry notice. Never render a confident zero
+            // state, never set mwLoaded.
+            var snap = _lkgLoad(targetAddr);
+            if (snap) {
+              root.innerHTML = snap;
+              root.dataset.mwLoaded = '1';
+              root.dataset.mwAddr = targetAddr;
+              root.dataset.mwStale = '1';
+            } else {
+              root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.5;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Couldn’t reach the marketplace — retrying…</p></div>';
+            }
+            scheduleRetry([pRes, nftRes, ppRes]);
             return;
           }
           root.dataset.mwLoaded = '1';
+          root.dataset.mwAddr = targetAddr;
           delete root.dataset.mwStale;
+          // First paint reached here with a degraded wallet (explorer down):
+          // we render the DB-only inventory now rather than block, and retry
+          // in the background to enrich it once the explorer recovers. A clean
+          // load resets the backoff counter.
+          if (nftDegraded) { scheduleRetry([]); } else { root.dataset.mwRetries = '0'; }
 
           const profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
           let nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
@@ -848,8 +890,10 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
           // Save a last-known-good snapshot of the fully rendered profile
           // (session-scoped) so the next navigation or a transient failure
-          // repaints real data instantly instead of a zero state.
-          _lkgSave(targetAddr, root.innerHTML);
+          // repaints real data instantly instead of a zero state. Skip when
+          // the wallet inventory was degraded — don't persist an incomplete
+          // NFT grid as "good"; the background retry will save the full one.
+          if (!nftDegraded) _lkgSave(targetAddr, root.innerHTML);
 
         } catch(e) {
           // Reset last-rendered guard so the user isn't stuck — future wallet

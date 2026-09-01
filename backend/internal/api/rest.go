@@ -14,9 +14,10 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
-	"github.com/gofiber/fiber/v2/middleware/etag"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/etag"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
@@ -249,7 +250,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// One shared broadcaster subscription + dispatcher goroutine for all WS
 	// connections (marshal-once fan-out). Started here rather than in
 	// NewHandler so struct-literal test handlers don't spawn a goroutine.
-	wsHandler.StartDispatcher()
+	// A false return means the broadcaster is at capacity and NO events will
+	// reach any WS client — surface it loudly rather than failing silently.
+	if !wsHandler.StartDispatcher() {
+		log.Error().Msg("ws: StartDispatcher failed (broadcaster at capacity) — real-time push is DISABLED for this process")
+	}
 	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	// GraphQL endpoint for rich data queries.
@@ -616,16 +621,23 @@ var browserCacheReadPrefixes = []string{
 // repeat view paint instantly while it revalidates in the background.
 func browserCacheReads() fiber.Handler {
 	return func(c *fiber.Ctx) error {
+		err := c.Next()
+		// Set the header on the way out, and only for a successful read: a 5xx
+		// or other error body must not be cached even briefly. 200 and 304
+		// (the etag middleware runs inside this one) both get it; anything
+		// else does not. GET-only, allowlisted prefixes only.
 		if c.Method() == fiber.MethodGet {
-			p := c.Path()
-			for _, pre := range browserCacheReadPrefixes {
-				if strings.HasPrefix(p, pre) {
-					c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
-					break
+			if st := c.Response().StatusCode(); st == fiber.StatusOK || st == fiber.StatusNotModified {
+				p := c.Path()
+				for _, pre := range browserCacheReadPrefixes {
+					if strings.HasPrefix(p, pre) {
+						c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
+						break
+					}
 				}
 			}
 		}
-		return c.Next()
+		return err
 	}
 }
 

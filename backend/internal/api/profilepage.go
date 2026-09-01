@@ -2,9 +2,10 @@ package api
 
 import (
 	"strings"
+	"sync"
 
 	"github.com/gofiber/fiber/v2"
-	"golang.org/x/sync/errgroup"
+	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -52,50 +53,62 @@ func (s *ProfilePageService) handleGet(c *fiber.Ctx) error {
 	}
 
 	var resp profilePageResponse
-	g, ctx := errgroup.WithContext(c.Context())
 
-	g.Go(func() error {
+	// Best-effort, section-level: a single failing list must not withhold the
+	// whole page. Each section that errors is logged and left empty; the
+	// response is always 200. Profile identity and wallet NFTs live in their
+	// own endpoints (the client's last-known-good guard keys off those), so an
+	// empty list section here degrades gracefully rather than blanking a good
+	// profile. All sections run concurrently, metrics included.
+	var wg sync.WaitGroup
+	ctx := c.Context()
+	run := func(name string, fn func() error) {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			if err := fn(); err != nil {
+				log.Warn().Err(err).Str("section", name).Str("addr", addr).
+					Msg("profile-page: section failed, serving it empty")
+			}
+		}()
+	}
+
+	run("listings", func() error {
 		rows, err := s.q.ListActiveListings(ctx, db.ListingsFilter{Seller: addr, Sort: "recent", Limit: 24})
 		resp.Listings = rows
 		return err
 	})
-	g.Go(func() error {
+	run("auctions", func() error {
 		rows, err := s.q.ListAuctions(ctx, db.AuctionsFilter{Seller: addr, Limit: 20})
 		resp.Auctions = rows
 		return err
 	})
-	g.Go(func() error {
+	run("offersSent", func() error {
 		rows, err := s.q.ListOffers(ctx, db.OffersFilter{Bidder: addr, Limit: 50})
 		resp.OffersSent = rows
 		return err
 	})
-	g.Go(func() error {
+	run("offersReceived", func() error {
 		rows, err := s.q.ListOffers(ctx, db.OffersFilter{Owner: addr, Limit: 50})
 		resp.OffersReceived = rows
 		return err
 	})
-	g.Go(func() error {
+	run("activity", func() error {
 		rows, err := s.q.GetRecentTransactionsByAddress(ctx, addr, 20)
 		resp.Activity = rows
 		return err
 	})
-	g.Go(func() error {
+	run("createdCollections", func() error {
 		rows, err := s.q.ListCollectionsByCreator(ctx, addr)
 		resp.CreatedCollections = rows
 		return err
 	})
+	run("metrics", func() error {
+		resp.Metrics = s.metrics.BuildResponse(ctx)
+		return nil
+	})
 
-	if err := g.Wait(); err != nil {
-		// One failed sub-query fails the whole request. The client treats a
-		// non-200 as a failed refresh and keeps its last-known-good render +
-		// retries (see profile.astro), which is exactly what we want — a
-		// partial profile must never overwrite a good one with blanks.
-		return writeErr(c, fiber.StatusInternalServerError, "internal error")
-	}
-
-	// Metrics never errors (BuildResponse returns a map); run it after the
-	// group so a slow metrics build doesn't hold the errgroup context.
-	resp.Metrics = s.metrics.BuildResponse(c.Context())
+	wg.Wait()
 
 	// Guarantee [] not null so the client's Array checks are simple.
 	if resp.Listings == nil {

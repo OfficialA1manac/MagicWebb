@@ -381,16 +381,16 @@ describe('_loading flag — prevents overlapping calls', () => {
     // The loading indicator should still be the original one — NOT re-entered
     expect(root.innerHTML).toContain('Loading profile');
 
-    // Resolve the first fetch: the ADDR_A load completes, and the deferred
-    // wallet change immediately starts a follow-up load for ADDR_B (which
-    // hangs on its own profile fetch) — the change is never silently dropped.
-    // Since the last-known-good guard (2026-09-01), a reload no longer wipes
-    // the rendered page with the loader: ADDR_A's data stays visible while
-    // ADDR_B's fetch is in flight.
+    // Resolve the first fetch: the ADDR_A load completes and saves its
+    // snapshot, and the deferred wallet change immediately starts a follow-up
+    // load for ADDR_B (which hangs on its own profile fetch). ADDR_B has no
+    // snapshot, so the loader shows for B rather than leaving A's (a different
+    // wallet's) data on screen — the render must stay in sync with the wallet.
     resolveFirstFetch();
     await vi.runAllTimersAsync();
     await vi.runAllTimersAsync();
-    expect(root.innerHTML).not.toContain('Loading profile');
+    expect(root.innerHTML).toContain('Loading profile');
+    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toBeTruthy();
 
     // Resolve the follow-up fetch: the page now shows the new wallet.
     resolveFirstFetch();
@@ -1186,5 +1186,25 @@ describe('Item 0 — sync hardening', () => {
     expect(root.innerHTML).toContain('Kept NFT'); // instant snapshot
     await settle();                                 // degraded revalidation runs
     expect(root.innerHTML).toContain('Kept NFT');   // degraded did not wipe it
+  });
+
+  it('renders available data on first paint even when the wallet is degraded', async () => {
+    // Explorer down (X-MW-Degraded) but profile + composite are fine, and no
+    // snapshot exists. Degraded must NOT block a first paint — the DB-side
+    // data is available and should render, not a "retrying" spinner.
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      const url = String(_url);
+      if (url.includes('/api/v1/wallet/')) return resp([], { headers: { 'X-MW-Degraded': 'explorer-unavailable' } });
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg First', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/profile-page')) return resp(composite({ listings: [{ collection: '0xC', token_id: '9', price_wei: '1000000000000000000' }] }));
+      return resp([]);
+    });
+
+    setupProfilePage({ pathname: '/profile' });
+    await settle();
+    const root = document.getElementById('profile-root')!;
+    expect(root.innerHTML).toContain('Deg First'); // rendered, not blocked
+    expect(root.innerHTML).not.toContain('retrying');
+    expect(root.dataset.mwLoaded).toBe('1');
   });
 });
