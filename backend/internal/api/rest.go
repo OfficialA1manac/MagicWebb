@@ -403,7 +403,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)
-	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
+	metricsSvc := NewMetricsService(q, activityCache, wsHandler)
+	metricsSvc.RegisterRoutes(api)
+	// Composite: one request for all of the profile page's lists (see
+	// ProfilePageService). Reuses the metrics service's BuildResponse.
+	NewProfilePageService(q, metricsSvc).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
 	// Image-by-hash route. It serves locally-stored blobs from the database —
@@ -601,6 +605,7 @@ var browserCacheReadPrefixes = []string{
 	"/api/v1/metrics",
 	"/api/v1/activity",
 	"/api/v1/profile",
+	"/api/v1/profile-page",
 }
 
 // browserCacheReads sets a short private cache + stale-while-revalidate on
