@@ -32,6 +32,24 @@ function okJson(body: any) {
   } as Response);
 }
 
+// The /api/v1/profile-page composite shape. The profile page fetches this
+// once for all its lists; override individual sections as a test needs.
+function composite(overrides: Record<string, any> = {}) {
+  return {
+    listings: [],
+    auctions: [],
+    offersSent: [],
+    offersReceived: [],
+    metrics: {},
+    activity: [],
+    createdCollections: [],
+    ...overrides,
+  };
+}
+function okComposite(overrides: Record<string, any> = {}) {
+  return okJson(composite(overrides));
+}
+
 function emptyProfileData() {
   return {
     profile: okJson({ display_name: 'Test User', bio: '', avatar_uri: '', verified: false }),
@@ -138,11 +156,7 @@ describe('Profile address resolution', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: '', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL: ' + url));
     });
   });
@@ -217,11 +231,7 @@ describe('_lastRenderedAddr guard', () => {
         return okJson({ display_name: 'User' + profileCallCount, bio: '', avatar_uri: '', verified: false });
       }
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
   });
@@ -482,11 +492,7 @@ describe('Debounce behavior', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'User', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
   });
@@ -643,11 +649,7 @@ describe('emptyWalletNotice', () => {
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'Seller', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
       // Has listings but no NFTs
-      if (url.includes('/api/v1/listings')) return okJson([{ collection: ADDR_A, token_id: '1', price_wei: '1000000000000000000' }]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite({ listings: [{ collection: ADDR_A, token_id: '1', price_wei: '1000000000000000000' }] });
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -665,11 +667,7 @@ describe('emptyWalletNotice', () => {
       if (url.includes('/api/v1/wallet/')) return okJson([
         { collection: ADDR_A, token_id: '1', name: 'Test NFT', image_uri: '/api/v1/img/abc123', units: '1', standard: 'erc721' }
       ]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -686,11 +684,7 @@ describe('emptyWalletNotice', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'NewUser', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -771,11 +765,7 @@ describe('Edit Profile Modal', () => {
 
       // All other endpoints: return empty
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL: ' + url));
     });
 

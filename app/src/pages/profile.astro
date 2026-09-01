@@ -154,18 +154,18 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           }
         }
         try {
-          const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
+          // Three parallel requests, down from nine. The profile-page
+          // composite returns every list the page needs in one round trip
+          // (listings, auctions, offers sent/received, metrics, activity,
+          // created collections). Profile and wallet stay separate: profile
+          // carries cross-chain carry-over, and the wallet endpoint carries
+          // the explorer-merge + X-MW-Degraded signal the last-known-good
+          // guard below depends on.
+          const [pRes, nftRes, ppRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
         fetch('/api/v1/wallet/'+encAddr+'/nfts').catch(function(){return null;}),
-        fetch('/api/v1/listings?seller='+encAddr+'&limit=24').catch(function(){return null;}),
-        fetch('/api/v1/auctions?seller='+encAddr+'&limit=20').catch(function(){return null;}),
-        fetch('/api/v1/offers?bidder='+encAddr+'&limit=50').catch(function(){return null;}),
-        fetch('/api/v1/offers?owner='+encAddr+'&limit=50').catch(function(){return null;}),
-        fetch('/api/v1/metrics').catch(function(){return null;}),
-        fetch('/api/v1/activity?address='+encAddr+'&limit=20').catch(function(){return null;})
+        fetch('/api/v1/profile-page/'+encAddr).catch(function(){return null;})
       ]);
-          // Creator badge: does this address own (ERC-173) any indexed collection?
-          const collRes = await fetch('/api/v1/collections?limit=200').catch(function(){return null;});
 
           function ok(r){return r&&r.ok;}
           async function safeJson(r){try{return await r.json();}catch(_){return null;}}
@@ -181,12 +181,12 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // overwrite good data with a degraded view — keep last-known-good
           // and retry.
           var nftDegraded = !!(nftRes && nftRes.headers && nftRes.headers.get('X-MW-Degraded'));
-          var failed = nftDegraded || [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes].some(function(r){
+          var failed = nftDegraded || [pRes, nftRes, ppRes].some(function(r){
             return !r || (!r.ok && r.status !== 404);
           });
           if (failed) {
             var ra = 5;
-            [pRes, nftRes, listRes].some(function(r){
+            [pRes, nftRes, ppRes].some(function(r){
               if (r && r.headers && r.headers.get('Retry-After')) { ra = Math.min(30, parseInt(r.headers.get('Retry-After'), 10) || 5); return true; }
               return false;
             });
@@ -208,15 +208,18 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
           const profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
           let nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
-          let listings    = ok(listRes) ? (await safeJson(listRes)) : [];
-          let auctions    = ok(aucRes)  ? (await safeJson(aucRes))  : [];
-          let offersSent  = ok(offSentRes) ? (await safeJson(offSentRes)) : [];
-          let offersRecv  = ok(offRecvRes) ? (await safeJson(offRecvRes)) : [];
-          const metrics     = ok(metRes)  ? ((await safeJson(metRes)) || {})  : {};
-          let allColls    = ok(collRes) ? (await safeJson(collRes)) : [];
-          if (!Array.isArray(allColls)) allColls = [];
-          const createdColls = allColls.filter(function(c){ return c && c.creator_addr && String(c.creator_addr).toLowerCase() === targetAddr.toLowerCase(); });
-          let activity    = ok(actRes)  ? (await safeJson(actRes))  : [];
+          // The profile-page composite; every list comes off this one object.
+          const pp = (ok(ppRes) ? (await safeJson(ppRes)) : null) || {};
+          let listings    = pp.listings || [];
+          let auctions    = pp.auctions || [];
+          let offersSent  = pp.offersSent || [];
+          let offersRecv  = pp.offersReceived || [];
+          const metrics     = pp.metrics || {};
+          // Created collections come pre-filtered by creator from the server
+          // (no more pulling 200 collections to filter client-side).
+          let createdColls = pp.createdCollections || [];
+          if (!Array.isArray(createdColls)) createdColls = [];
+          let activity    = pp.activity || [];
 
           if (!Array.isArray(nfts)) nfts = [];
           if (!Array.isArray(listings)) listings = [];
