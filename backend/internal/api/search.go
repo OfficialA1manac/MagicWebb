@@ -25,7 +25,9 @@ func NewSearchService(q *db.Q) *SearchService {
 
 // RegisterRoutes registers the search route under the given router group.
 func (s *SearchService) RegisterRoutes(api fiber.Router) {
-	api.Get("/search", s.handleSearch)
+	// The group prefix is now /api/v1/search (see rest.go — the limiter must
+	// not leak onto the whole API), so this handler mounts at the group root.
+	api.Get("/", s.handleSearch)
 }
 
 func (s *SearchService) handleSearch(c *fiber.Ctx) error {

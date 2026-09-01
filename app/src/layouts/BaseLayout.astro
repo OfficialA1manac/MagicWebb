@@ -169,6 +169,16 @@ const networks = KNOWN_NETWORKS.map((n) => {
       .net-tag { font-size: 0.5625rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
       .notif-dropdown { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 20rem; max-width: 90vw; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 1rem; overflow: hidden; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
       .notif-dropdown.open { display: block; }
+      /* Phones: the panel is right-anchored to a MID-ROW bell, so a 20rem
+         panel's left edge lands ~75px off-screen at 390px. Re-anchor the
+         containing block to the sticky nav and inset both dropdowns to the
+         nav's mobile padding — full-width sheets, nothing clipped. */
+      @media (max-width: 640px) {
+        #notif-bell-container { position: static; }
+        .net-switcher { position: static; }
+        .notif-dropdown { left: 0.75rem; right: 0.75rem; width: auto; max-width: none; }
+        .net-menu { left: 0.75rem; right: 0.75rem; width: auto; }
+      }
       .notif-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--white-10); font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; }
       .notif-list { max-height: 20rem; overflow-y: auto; }
       .notif-list a { display: block; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
@@ -374,7 +384,14 @@ const networks = KNOWN_NETWORKS.map((n) => {
         // (bid, listing, offer, auction, activity, notification).
         // The MW_WS client auto-connects on page load and dispatches
         // CustomEvents for each push message received from /ws.
-        window.addEventListener('mw-ws-event', function () { load(); });
+        // Debounced: every WS push used to fire a /api/v1/notifications
+        // fetch immediately — on a busy chain this alone drained the
+        // per-IP rate budget and starved the profile page (2026-09-01).
+        var _notifT = null;
+        window.addEventListener('mw-ws-event', function () {
+          if (_notifT) return;
+          _notifT = setTimeout(function () { _notifT = null; load(); }, 3000);
+        });
         window.addEventListener('mw-ws-open', function () { load(); });
         // Also refresh on wallet-related custom events
         window.addEventListener('mw-wallet-changed', function () { load(); });

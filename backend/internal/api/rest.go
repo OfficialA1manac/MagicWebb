@@ -338,7 +338,14 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// Key prefixes ("search", "admin", "api") scoped per-tier prevent
 	// cross-tier bucket interference — a search at 30/min uses a different
 	// bucket from a listing at 60/min even for the same client IP.
-	apiSearch := app.Group("/api/v1", tieredRateLimitMiddleware(rl, "search", 30, time.Minute))
+	// Scoped to /api/v1/search ONLY. This group previously used the bare
+	// "/api/v1" prefix, and Fiber v2 mounts group handlers as PREFIX
+	// middleware — so the 30/min search limiter silently matched EVERY
+	// /api/v1 route and the real budget was 30/min, not 60 (same mechanism
+	// as the /img/ bug documented below; the general case survived until a
+	// profile page + wallet-app switch burned the bucket and rendered a
+	// zero-state, 2026-09-01).
+	apiSearch := app.Group("/api/v1/search", tieredRateLimitMiddleware(rl, "search", 30, time.Minute))
 
 	// ── CACHE-1: Distributed-ready caches for read-heavy endpoints ──────
 	// When REDIS_URL is configured and the go-redis dependency is compiled

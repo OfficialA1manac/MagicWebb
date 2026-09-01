@@ -366,10 +366,13 @@ describe('_loading flag — prevents overlapping calls', () => {
     // Resolve the first fetch: the ADDR_A load completes, and the deferred
     // wallet change immediately starts a follow-up load for ADDR_B (which
     // hangs on its own profile fetch) — the change is never silently dropped.
+    // Since the last-known-good guard (2026-09-01), a reload no longer wipes
+    // the rendered page with the loader: ADDR_A's data stays visible while
+    // ADDR_B's fetch is in flight.
     resolveFirstFetch();
     await vi.runAllTimersAsync();
     await vi.runAllTimersAsync();
-    expect(root.innerHTML).toContain('Loading profile');
+    expect(root.innerHTML).not.toContain('Loading profile');
 
     // Resolve the follow-up fetch: the page now shows the new wallet.
     resolveFirstFetch();

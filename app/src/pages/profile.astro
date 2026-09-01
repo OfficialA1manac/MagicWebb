@@ -129,7 +129,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         const encAddr = encodeURIComponent(targetAddr);
         // First paint already shows the server-rendered skeleton — keep it.
         // Only swap in the lightweight loader on later reloads (wallet switch).
-        if (!root.querySelector('.shimmer')) root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+        if (root.dataset.mwLoaded !== '1' && !root.querySelector('.shimmer')) root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
         try {
           const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
@@ -146,6 +146,25 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
           function ok(r){return r&&r.ok;}
           async function safeJson(r){try{return await r.json();}catch(_){return null;}}
+
+          // NEVER repaint the header with defaults on a failed refresh. A 429
+          // or network blip used to be indistinguishable from "owns nothing"
+          // and re-rendered a confident zero-state (0 NFTs, deterministic
+          // badge, raw address) over good data. On failure: keep the current
+          // DOM, retry after Retry-After (or 5s), and stop.
+          var failed = [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes].some(function(r){
+            return !r || (!r.ok && r.status !== 404);
+          });
+          if (failed && root.dataset.mwLoaded === '1') {
+            var ra = 5;
+            [pRes, nftRes, listRes].some(function(r){
+              if (r && r.headers && r.headers.get('Retry-After')) { ra = Math.min(30, parseInt(r.headers.get('Retry-After'), 10) || 5); return true; }
+              return false;
+            });
+            setTimeout(function(){ loadProfileData(targetAddr); }, ra * 1000);
+            return;
+          }
+          root.dataset.mwLoaded = '1';
 
           const profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
           let nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
