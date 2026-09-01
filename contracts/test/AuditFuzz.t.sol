@@ -114,7 +114,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, dt, 500, 0);
+        id = ah.create(address(nft), tid, 1 ether, dt);
         vm.stopPrank();
     }
 
@@ -146,20 +146,20 @@ contract AuditFuzzTest is Test, TestHelpers {
         ob.setOfferEligible(coll, true);
     }
 
-    function _createWithIncrement(uint128 reserve, uint16 minIncBps, uint128 minIncFlat)
+    function _createWithReserve(uint128 reserve)
         internal returns (uint256 id, uint256 tid)
     {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, reserve, uint64(24 hours), minIncBps, minIncFlat);
+        id = ah.create(address(nft), tid, reserve, uint64(24 hours));
         vm.stopPrank();
     }
 
-    function _setupLeader(uint128 reserve, uint16 minIncBps, uint128 minIncFlat, address leader, uint128 leaderBid)
+    function _setupLeader(uint128 reserve, address leader, uint128 leaderBid)
         internal returns (uint256 id)
     {
-        (uint256 id_,) = _createWithIncrement(reserve, minIncBps, minIncFlat);
+        (uint256 id_,) = _createWithReserve(reserve);
         vm.deal(leader, uint256(leaderBid) + 10 ether);
         _bid(id_, leader, leaderBid);
         (address l,) = _leader(id_);
@@ -281,7 +281,7 @@ contract AuditFuzzTest is Test, TestHelpers {
     // ── 50% griefing 200-batch ────────────────────────────────────────────────
 
     function test_refundLosersGriefingHalfBatchDoesNotOOG() public {
-        (uint256 id,) = _createWithIncrement(1 ether, 0, 0);
+        (uint256 id,) = _createWithReserve(1 ether);
         _bid(id, alice, 1 ether);
         address[] memory eoas = new address[](100);
         for (uint256 i; i < 100; ++i) {
@@ -390,7 +390,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         uint256 tid = nft.mint(seller);
         vm.startPrank(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(3 minutes), 0, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         uint64 origEnd = uint64(block.timestamp + 3 minutes);
         assertEq(ah.originalEndsAt(id), origEnd, "originalEndsAt recorded at create");
@@ -432,7 +432,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
         nft2.setApprovalForAll(address(ah2), true);
-        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
+        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days));
         vm.stopPrank();
         vm.prank(address(griefer));
         ah2.bid{value: 1 ether}(id2);
@@ -486,7 +486,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
         nft2.setApprovalForAll(address(ah2), true);
-        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
+        uint256 id2 = ah2.create(address(nft2), tid2, 1 ether, uint64(1 days));
         vm.stopPrank();
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
@@ -508,7 +508,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(address(badSeller));
         uint256 tid2 = nft2.mint(address(badSeller));
         nft2.setApprovalForAll(address(ah), true);
-        uint256 id2 = ah.create(address(nft2), tid2, 1 ether, uint64(1 days), 500, 0);
+        uint256 id2 = ah.create(address(nft2), tid2, 1 ether, uint64(1 days));
         vm.stopPrank();
         vm.prank(alice);
         ah.bid{value: 2 ether}(id2);
@@ -528,7 +528,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(1 days), 500, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(1 days));
         vm.stopPrank();
         vm.deal(alice, 2 ether);
         _bid(id, alice, 2 ether);
@@ -688,7 +688,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.startPrank(seller);
         multi.mint(seller, 99, 10);
         multi.setApprovalForAll(address(ah), true);
-        uint256 id1155 = ah.create1155(address(multi), 99, 10, 1 ether, uint64(24 hours), 500, 0);
+        uint256 id1155 = ah.create1155(address(multi), 99, 10, 1 ether, uint64(24 hours));
         vm.stopPrank();
         assertEq(id1155, 2, "create1155() produced auction id 2");
         AuctionHouse.Auction memory a1155 = ah.getAuction(id1155);
@@ -706,7 +706,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         leaderTotal = uint128(bound(leaderTotal, 1 ether, 50 ether));
         uint256 floor = ah.MIN_BID_INCREMENT();
         uint128 reserve = leaderTotal >= 2 ether ? leaderTotal / 2 : uint128(1 ether);
-        uint256 id = _setupLeader(reserve, 0, 0, alice, leaderTotal);
+        uint256 id = _setupLeader(reserve, alice, leaderTotal);
         uint256 expectedMinNext = uint256(leaderTotal) + floor;
         vm.deal(bob, 100 ether);
         vm.prank(bob);
@@ -721,18 +721,14 @@ contract AuditFuzzTest is Test, TestHelpers {
         assertEq(t2, uint128(expectedMinNext), "leaderTotal = leaderTotal + MIN_BID_INCREMENT");
     }
 
-    function testFuzz_increment_minNextCalculation(uint16 minIncBps, uint128 minIncFlat, uint128 leaderTotal) public {
-        minIncBps = uint16(bound(minIncBps, 0, 5000));
-        minIncFlat = uint128(bound(minIncFlat, 0, 1 ether));
+    function testFuzz_increment_minNextCalculation(uint128 leaderTotal) public {
+        // v3.3: ONE rule — overtaking costs exactly leaderTotal + 1 native
+        // token, marketplace-wide. No seller percentage, no flat override.
         leaderTotal = uint128(bound(leaderTotal, 1 ether, 50 ether));
-        uint256 incPct = uint256(leaderTotal) * minIncBps / 10_000;
-        uint256 inc = incPct > minIncFlat ? incPct : minIncFlat;
-        uint256 floor = ah.MIN_BID_INCREMENT();
-        if (inc < floor) inc = floor;
-        uint256 minNext256 = uint256(leaderTotal) + inc;
+        uint256 minNext256 = uint256(leaderTotal) + ah.MIN_BID_INCREMENT();
         uint256 minReserve = leaderTotal / 2;
         if (minReserve < 1 ether) minReserve = 1 ether;
-        uint256 id = _setupLeader(uint128(minReserve), minIncBps, minIncFlat, alice, leaderTotal);
+        uint256 id = _setupLeader(uint128(minReserve), alice, leaderTotal);
         if (minNext256 > type(uint128).max) {
             vm.deal(bob, type(uint128).max);
             vm.prank(bob);
@@ -759,7 +755,7 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     function testFuzz_increment_nearMaxBidOverflow(uint128 leaderTotal) public {
         leaderTotal = uint128(bound(leaderTotal, type(uint128).max - 1 ether, type(uint128).max - 1));
-        uint256 id = _setupLeader(leaderTotal / 2, 0, 0, alice, leaderTotal);
+        uint256 id = _setupLeader(leaderTotal / 2, alice, leaderTotal);
         uint256 floor = ah.MIN_BID_INCREMENT();
         uint256 minNext256 = uint256(leaderTotal) + floor;
         if (minNext256 > type(uint128).max) {

@@ -1107,12 +1107,14 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: cancel-inactive confirmed")
 			}
 
-			// Expired-listing sweep, every 60 ticks (~1/min). cleanExpired is
-			// keeper-gated on-chain; a listing already cleaned (or cancelled
-			// by its seller) reverts harmlessly and is retried never — the DB
-			// row is marked inactive by the Cancelled event either way.
+			// Expired-listing sweep, every 2 ticks (~2s — owner decision
+			// 2026-08-31: everything that expires is handled instantly).
+			// cleanExpired is keeper-gated on-chain; a listing already cleaned
+			// (or cancelled by its seller) reverts harmlessly — the DB row is
+			// marked chain_cleaned by the Cancelled event either way, and the
+			// query only returns rows with real on-chain work.
 			cleanTick++
-			if cleanTick >= 60 {
+			if cleanTick >= 2 {
 				cleanTick = 0
 				r.cleanExpiredListings(ctx, key, keeperAddr, signer, chainIDBig)
 			}

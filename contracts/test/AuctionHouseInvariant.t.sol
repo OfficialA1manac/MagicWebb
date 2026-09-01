@@ -21,7 +21,6 @@ contract AuctionHouseHandler is Test {
     /// @notice Every wei the handler has ever sent into the AuctionHouse.
     uint256 public ghostDeposited;
 
-    uint16 public constant MIN_INC_BPS = 500; // 5% — matches create() below
 
     constructor(AuctionHouse _ah, MockERC721 _nft) {
         ah = _ah;
@@ -34,7 +33,7 @@ contract AuctionHouseHandler is Test {
         vm.startPrank(seller);
         tokenId = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(24 hours), MIN_INC_BPS, 0);
+        auctionId = ah.create(address(nft), tokenId, 1 ether, uint64(24 hours));
         vm.stopPrank();
     }
 
@@ -79,10 +78,8 @@ contract AuctionHouseHandler is Test {
         } else if (a.leaderTotal == 0) {
             minTotal = uint256(a.reserve); // no leader yet: must clear the reserve
         } else {
-            uint256 inc = (uint256(a.leaderTotal) * a.minIncrementBps) / 10_000;
-            uint256 floorInc = uint256(ah.MIN_BID_INCREMENT());
-            if (inc < floorInc) inc = floorInc;
-            minTotal = uint256(a.leaderTotal) + inc;
+            // v3.3: flat marketplace-wide increment — leader + 1 native token.
+            minTotal = uint256(a.leaderTotal) + uint256(ah.MIN_BID_INCREMENT());
         }
 
         uint256 need = minTotal > prevCum ? minTotal - prevCum : 1;

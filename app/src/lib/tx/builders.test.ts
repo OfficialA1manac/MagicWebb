@@ -64,16 +64,15 @@ describe('marketplace builders (ABI: list(coll,id,uint128 price,uint64 duration)
 });
 
 describe('auction builders', () => {
-  it('create: (coll,id,reserve,duration,minIncBps,minIncFlat)', () => {
-    const r = buildCreate(NFT, 9n, E, 14400, 500, 0n);
+  it('create: (coll,id,reserve,duration) — v3.3, no increment params', () => {
+    const r = buildCreate(NFT, 9n, E, 14400);
     expect(r.address).toBe(AH);
     expect(r.functionName).toBe('create');
-    expect(r.args).toEqual([NFT, 9n, E, 14400n, 500, 0n]);
+    expect(r.args).toEqual([NFT, 9n, E, 14400n]);
   });
   it('create1155 inserts amount', () => {
-    expect(buildCreate(NFT, 9n, E, 14400, 0, 0n, 'erc1155', 3n).args).toEqual([NFT, 9n, 3n, E, 14400n, 0, 0n]);
+    expect(buildCreate(NFT, 9n, E, 14400, 'erc1155', 3n).args).toEqual([NFT, 9n, 3n, E, 14400n]);
   });
-  it('rejects increment above 50%', () => { expect(() => buildCreate(NFT, 9n, E, 14400, 5001)).toThrowError(TxError); });
   it('bid is payable with the top-up amount', () => {
     const r = buildBid(42n, 2n * E);
     expect(r.args).toEqual([42n]); expect(r.value).toBe(2n * E);

@@ -1,6 +1,9 @@
-// English auctions — AuctionHouse.sol.
-//   create(coll, id, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
-//   create1155(coll, id, uint128 amount, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
+// English auctions — AuctionHouse.sol (v3.3).
+//   create(coll, id, uint128 reserve, uint64 duration)
+//   create1155(coll, id, uint128 amount, uint128 reserve, uint64 duration)
+//   Increment rule: ONE for the whole marketplace on every network — taking
+//   the lead costs exactly leaderTotal + 1 native token (C2FLR/SGB/FLR).
+//   No seller percentage, no per-auction knobs.
 //   bid(id) payable — cumulative: msg.value ADDS to your previous bids on this auction
 //   settle(id)  cancelEarly(id)  withdrawLoserFunds(id)  refundLosers(id, address[])  withdrawRefund()
 import type { Address } from 'viem';
@@ -13,7 +16,6 @@ import { assertDuration, assertPrice } from './marketplace';
 import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 
 export const MIN_BID_INCREMENT_WEI = 10n ** 18n; // AuctionHouse.MIN_BID_INCREMENT = 1 ether
-export const MAX_MIN_INCREMENT_BPS = 5000;
 
 export function auctionAddress(): Address {
   const a = currentChain().contracts.auctionHouse;
@@ -22,14 +24,13 @@ export function auctionAddress(): Address {
 }
 
 // ── builders ───────────────────────────────────────────────────────────────
-export function buildCreate(nft: Address, tokenId: bigint, reserveWei: bigint, duration: number, minIncBps = 0, minIncFlatWei = 0n, std: TokenStandard = 'erc721', amount = 1n): TxRequest {
+export function buildCreate(nft: Address, tokenId: bigint, reserveWei: bigint, duration: number, std: TokenStandard = 'erc721', amount = 1n): TxRequest {
   assertPrice(reserveWei); assertDuration(duration);
-  if (minIncBps < 0 || minIncBps > MAX_MIN_INCREMENT_BPS) throw new TxError('Invalid', 'Minimum increment must be between 0% and 50%.');
   if (std === 'erc1155') {
     if (amount < 1n) throw new TxError('Invalid', 'Amount must be at least 1.');
-    return { address: auctionAddress(), abi: auctionHouseAbi, functionName: 'create1155', args: [nft, tokenId, amount, reserveWei, BigInt(duration), minIncBps, minIncFlatWei] };
+    return { address: auctionAddress(), abi: auctionHouseAbi, functionName: 'create1155', args: [nft, tokenId, amount, reserveWei, BigInt(duration)] };
   }
-  return { address: auctionAddress(), abi: auctionHouseAbi, functionName: 'create', args: [nft, tokenId, reserveWei, BigInt(duration), minIncBps, minIncFlatWei] };
+  return { address: auctionAddress(), abi: auctionHouseAbi, functionName: 'create', args: [nft, tokenId, reserveWei, BigInt(duration)] };
 }
 
 export function buildBid(auctionId: bigint, amountWei: bigint): TxRequest {
@@ -51,22 +52,20 @@ export function buildRefundLosers(id: bigint, batch: Address[]): TxRequest {
  * ≥ current leader + 1 native. Returns the extra amount to send this time.
  */
 export function minimumTopUp(opts: { currentHighestWei: bigint; reserveWei: bigint; myCumulativeWei: bigint; minIncrementBps?: number }): bigint {
-  // Mirrors AuctionHouse.bid(): overtaking needs leader + max(leader*bps/10000, 1 ether).
-  let inc = MIN_BID_INCREMENT_WEI;
-  if (opts.minIncrementBps && opts.currentHighestWei > 0n) {
-    const pct = (opts.currentHighestWei * BigInt(opts.minIncrementBps)) / 10_000n;
-    if (pct > inc) inc = pct;
-  }
-  const target = opts.currentHighestWei > 0n ? opts.currentHighestWei + inc : opts.reserveWei;
+  // Mirrors AuctionHouse.bid() v3.3: overtaking needs leader + 1 native token,
+  // flat, marketplace-wide. Cumulative escrow counts: leader 500, you have 200
+  // escrowed → send 301+. (minIncrementBps is accepted and ignored so callers
+  // rendering pre-v3.3 auction rows don't break.)
+  const target = opts.currentHighestWei > 0n ? opts.currentHighestWei + MIN_BID_INCREMENT_WEI : opts.reserveWei;
   const need = target - opts.myCumulativeWei;
   return need > 0n ? need : 0n;
 }
 
 // ── flows ──────────────────────────────────────────────────────────────────
-export interface CreateAuctionArgs { nft: Address; tokenId: bigint; reserveWei: bigint; duration: number; minIncBps?: number; minIncFlatWei?: bigint; std?: TokenStandard; amount?: bigint; name?: string }
+export interface CreateAuctionArgs { nft: Address; tokenId: bigint; reserveWei: bigint; duration: number; std?: TokenStandard; amount?: bigint; name?: string }
 
 export function createAuction(a: CreateAuctionArgs, hooks?: TxHooks): Promise<TxResult> {
-  const req = buildCreate(a.nft, a.tokenId, a.reserveWei, a.duration, a.minIncBps, a.minIncFlatWei, a.std, a.amount);
+  const req = buildCreate(a.nft, a.tokenId, a.reserveWei, a.duration, a.std, a.amount);
   const sym = currentChain().currency;
   return runTx({
     title: `Auction ${a.name ?? `#${a.tokenId}`}`,

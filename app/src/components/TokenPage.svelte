@@ -66,7 +66,6 @@
   let duration = $state<number>(DEFAULT_DURATION);
   let bidIn = $state('');
   let qtyIn = $state('1');   // ERC-1155 units for list/auction/offer panels
-  let incPctIn = $state(''); // optional auction minimum-raise % (0-50)
   let formErr = $state('');
   let myCumWei = $state(0n); // caller's cumulative escrow on the live auction
 
@@ -256,12 +255,6 @@
     if (myBalance1155 > 0n && n > myBalance1155) { formErr = `You hold ${myBalance1155} unit${myBalance1155 === 1n ? '' : 's'}.`; return null; }
     return n.toString();
   }
-  function parseIncPct(): number | undefined {
-    if (!incPctIn.trim()) return undefined;
-    const n = Number(incPctIn);
-    if (!Number.isFinite(n) || n < 0 || n > 50) { formErr = 'Minimum raise must be 0-50%.'; return -1 as never; }
-    return Math.round(n * 100); // percent -> bps
-  }
   function parsePrice(): string | null {
     try { const w = toWei(priceIn); if (w < 10n ** 18n) { formErr = `Minimum is 1 ${sym}.`; return null; } return w.toString(); } catch { formErr = 'Enter a number like 12.5'; return null; }
   }
@@ -270,7 +263,7 @@
   const doList = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.list({ nft: coll, tokenId: tid, priceWei: p, duration, std, amount: q, name }), 'Listed · syncing'); };
   const doEdit = () => { const p = parsePrice(); if (p) act(() => MW.editPrice({ nft: coll, tokenId: tid, newPriceWei: p, name }), 'Price updated · syncing'); };
   const doCancel = () => act(() => MW.cancelListing({ nft: coll, tokenId: tid, name }), 'Listing cancelled · syncing');
-  const doAuction = () => { const p = parsePrice(); const q = p && parseQty(); const inc = parseIncPct(); if ((inc as unknown as number) === -1) return; if (p && q) act(() => MW.createAuction({ nft: coll, tokenId: tid, reserveWei: p, duration, std, amount: q, minIncBps: inc, name }), 'Auction created · syncing'); };
+  const doAuction = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.createAuction({ nft: coll, tokenId: tid, reserveWei: p, duration, std, amount: q, name }), 'Auction created · syncing'); };
   const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumWei.toString() }), 'Bid placed · syncing'); };
   const doSettle = () => auction && act(() => MW.settle({ auctionId: String(auction!.auction_id), name }), 'Settled · syncing');
   const doCancelAuction = () => auction && act(() => MW.cancelAuction({ auctionId: String(auction!.auction_id), name }), 'Auction cancelled · syncing');
@@ -414,8 +407,7 @@
             <input id="qty-in" class="tp-input mono" inputmode="numeric" placeholder="1" bind:value={qtyIn} />
           {/if}
           {#if panel === 'auction'}
-            <label class="tp-label" for="inc-in">Minimum raise % <span class="tp-dim">(optional, 0–50)</span></label>
-            <input id="inc-in" class="tp-input mono" inputmode="decimal" placeholder="default: 1 {sym} flat" bind:value={incPctIn} />
+            <p class="tp-hint">Bids raise the lead by at least 1 {sym} — the same rule for every auction.</p>
           {/if}
           {#if panel !== 'edit'}<DurationPicker bind:value={duration} label={panel === 'auction' ? 'Auction length' : 'Valid for'} />{/if}
           {#if formErr}<div class="tp-formerr" role="alert">{formErr}</div>{/if}

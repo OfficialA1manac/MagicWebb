@@ -95,7 +95,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 
 ### 4.3 Auction settlement
 
-1. Seller creates an auction with reserve and end time (and optional minimum bid increment / anti-snipe behavior per contract rules).
+1. Seller creates an auction with reserve and end time. The bid increment is fixed marketplace-wide: taking the lead requires a cumulative total of at least the leader's total + 1 native token (no per-auction increment settings).
 2. Bidders place bids. Outbid losers receive **full** prior-bid balances in `pendingReturns` (no fee **applied** on bids). The leader may **compound** a higher bid by sending only the **increment**; other bidders send the **full** new high amount. The app prompts `withdrawRefund` when appropriate (see §3.4).
 3. After `endsAt`, `settle` may be called once by the **keeper, the seller, or the winning bidder** — no other party can settle someone else's auction (the keeper bot does it automatically the moment the auction ends). That transaction transfers the NFT to the highest bidder, **then** **applies** the immutable platform fee to the winning `highestBid` and pays the seller—**fee is applied only on this winning settlement**, not on intermediate bids. The app prompts `settle` when you view the auction (see §3.4); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
 

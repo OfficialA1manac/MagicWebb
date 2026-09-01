@@ -51,7 +51,7 @@ to a different site, so you connect your wallet again on arrival.
 | Action | Viewer | Buyer | Seller / owner |
 |---|---|---|---|
 | Watch live countdown, bids, anti-snipe extensions | ✓ | ✓ | ✓ |
-| Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations), optional min-increment %) | — | — | ✓ |
+| Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations)) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
 | Settle after it ends (NFT → winner, proceeds → seller minus 1.5%) | — | ✓ if you won it | ✓ |
@@ -65,7 +65,7 @@ you did not win, your escrow is withdrawable at any time, and if an auction is s
 unsettled for three days anyone may force-cancel it and return every bid.
 
 **Bids must take the lead.** A bid that clears neither the reserve nor the leader's total
-plus the minimum increment is rejected outright rather than parked as escrow — you never
+plus the flat 1-native-token increment is rejected outright rather than parked as escrow — you never
 end up with money locked behind a position that cannot win.
 
 ## Offers (escrowed)

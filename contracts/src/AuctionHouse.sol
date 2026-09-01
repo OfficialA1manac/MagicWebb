@@ -14,7 +14,7 @@ error BidTooLow();
 error InvalidWindow();
 error NotApproved();
 error BidOverflow();
-error BadIncrement();
+
 error NotSettled();
 error NothingToWithdraw();
 error BatchTooLarge();
@@ -71,8 +71,6 @@ error CannotCancel();
 ///      A 15-second skew is negligible against these magnitudes and cannot be
 ///      exploited to force premature settlement or indefinitely extend an auction.
 contract AuctionHouse is MarketplaceCore {
-    /// @notice Cap on minIncrementBps (50%). Prevents seller griefing via absurd increments.
-    uint16 public constant MAX_MIN_INCREMENT_BPS = 5_000;
     /// @notice Anti-snipe: bids inside this closing window extend the auction by it.
     uint64 public constant EXTENSION_WINDOW     = 3 minutes;
 
@@ -92,18 +90,19 @@ contract AuctionHouse is MarketplaceCore {
     ///         (lost seller + dead keeper) — callable by keeper/seller/winner
     ///         (v3.2), after which anyone may drive refundLosers().
     uint64 public constant SELLER_DEFAULT_WINDOW = 3 days;
-    /// @notice Flat FLOOR on the overtaking increment: 1 FLR/C2FLR/SGB (1
-    ///         ether). The seller's percentage increment (`minIncrementBps`,
-    ///         capped at MAX_MIN_INCREMENT_BPS = 50%) can RAISE the required
-    ///         step above this floor but never lower it. `minIncrementFlat`
-    ///         is deprecated and ignored by bid() — it was uncapped and let a
-    ///         seller make the first leader unbeatable.
+    /// @notice THE overtaking increment: exactly 1 native token (C2FLR / SGB /
+    ///         FLR) marketplace-wide, on every network. v3.3 (owner decision
+    ///         2026-08-31) removed seller-chosen percentage increments
+    ///         entirely: to take the lead, a bidder's new CUMULATIVE must be
+    ///         at least leaderTotal + 1 token. The struct's minIncrementBps /
+    ///         minIncrementFlat fields are vestigial storage — written 0,
+    ///         never read.
     uint128 public constant MIN_BID_INCREMENT  = 1 ether;
 
     struct Auction {
         address       seller;
         uint64        startsAt;
-        uint16        minIncrementBps;   // seller's min-raise %, capped 50%; bid() floors the step at MIN_BID_INCREMENT
+        uint16        minIncrementBps;   // VESTIGIAL (v3.3): always 0; kept for storage layout
         bool          settled;
         bool          active;            // VESTIGIAL: set true by _create; bid() never reads it. Kept for ABI/storage compat
         TokenStandard standard;
@@ -239,24 +238,22 @@ contract AuctionHouse is MarketplaceCore {
     // ── Create (free) ───────────────────────────────────────────────────────────
 
     /// @notice Create an ERC-721 auction. Starts immediately.
-    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000 =
-    ///                   0–50%). bid() uses max(leader*bps/10000, 1 ether).
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
     /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
-    function create(address coll, uint256 tokenId, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
+    /// @dev v3.3: no increment parameters. The overtake step is the
+    ///      marketplace-wide MIN_BID_INCREMENT (1 native token) — sellers
+    ///      cannot raise or lower it.
+    function create(address coll, uint256 tokenId, uint128 reserve, uint64 duration)
         external nonReentrant returns (uint256 id)
     {
-        return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, _expiryFor(duration), minIncBps, minIncFlat);
+        return _create(TokenStandard.ERC721, coll, tokenId, 1, reserve, _expiryFor(duration));
     }
 
-    /// @notice Create an ERC-1155 auction. Starts immediately.
-    /// @param minIncBps  Optional minimum-raise percentage in bps (0–5000). See create().
-    /// @param minIncFlat DEPRECATED — accepted for ABI backwards-compatibility but IGNORED by bid().
-    function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 duration, uint16 minIncBps, uint128 minIncFlat)
+    /// @notice Create an ERC-1155 auction. Starts immediately. See create().
+    function create1155(address coll, uint256 tokenId, uint128 amount, uint128 reserve, uint64 duration)
         external nonReentrant returns (uint256 id)
     {
         if (amount == 0) revert InvalidAmount();
-        return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, _expiryFor(duration), minIncBps, minIncFlat);
+        return _create(TokenStandard.ERC1155, coll, tokenId, amount, reserve, _expiryFor(duration));
     }
 
     function _create(
@@ -265,13 +262,10 @@ contract AuctionHouse is MarketplaceCore {
         uint256 tokenId,
         uint128 amount,
         uint128 reserve,
-        uint64  endsAt,
-        uint16  minIncBps,
-        uint128 minIncFlat
+        uint64  endsAt
     ) internal returns (uint256 id) {
         // endsAt was produced by _expiryFor(): in the future, one of the fifteen durations.
         if (endsAt <= block.timestamp) revert InvalidWindow();
-        if (minIncBps > MAX_MIN_INCREMENT_BPS) revert BadIncrement();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
 
         if (standard == TokenStandard.ERC721) {
@@ -288,19 +282,17 @@ contract AuctionHouse is MarketplaceCore {
         Auction storage a = auctions[id];
         a.seller          = msg.sender;
         a.startsAt        = startsAt;
-        // Increment rule (v3): bid() requires max(leader*minIncBps/10000,
-        // MIN_BID_INCREMENT) to overtake — the 1-ether floor kills 1-wei
-        // griefing loops (audit-#5) and the 50% bps cap (checked above)
-        // bounds seller-chosen increments. minIncFlat is stored for ABI
-        // compatibility but never consulted by bid().
-        a.minIncrementBps = minIncBps;
+        // v3.3: the overtake step is the marketplace-wide MIN_BID_INCREMENT
+        // (1 native token). The per-auction increment fields are vestigial
+        // storage kept for layout compatibility — written 0, never read.
+        a.minIncrementBps = 0;
         a.standard        = standard;
         a.collection      = coll;
         a.endsAt          = endsAt;
         a.tokenId         = tokenId;
         a.reserve         = reserve;
         a.amount          = amount;
-        a.minIncrementFlat = minIncFlat;
+        a.minIncrementFlat = 0;
 
         // Auction starts ACTIVE — seller creating the auction is activating it.
         // Bids are accepted immediately after creation. There is no separate
@@ -367,22 +359,16 @@ contract AuctionHouse is MarketplaceCore {
         } else if (newTotal > a.leaderTotal) {
             // Overtaking the leader requires clearing the min increment — a bidder
             // may not sit above the leader without taking the lead.
-            // v3 rule: the increment is the seller's percentage (capped at
-            // MAX_MIN_INCREMENT_BPS by _create) floored at MIN_BID_INCREMENT.
-            // minIncrementFlat is DEPRECATED and fully IGNORED: it was
-            // uncapped, so a hostile seller could set uint128.max and make
-            // the first leader unbeatable (every overtake would revert
-            // BidOverflow). The percentage path cannot do that: at the 50%
-            // cap, minNext = 1.5x leader, always reachable below uint128.max
-            // until leaderTotal is astronomically large.
-            uint256 inc = uint256(a.leaderTotal) * a.minIncrementBps / 10_000;
-            if (inc < MIN_BID_INCREMENT) inc = MIN_BID_INCREMENT;
+            // v3.3 (owner decision 2026-08-31): ONE increment rule for the
+            // whole marketplace on every network — overtaking costs exactly
+            // leaderTotal + 1 native token (MIN_BID_INCREMENT). No seller
+            // percentage, no per-auction knobs. Example: leader at 500, a
+            // bidder with 200 escrowed must send 301+ so their cumulative
+            // reaches 501+. a.minIncrementBps is VESTIGIAL storage: written 0
+            // by _create, never read.
+            uint256 inc = MIN_BID_INCREMENT;
             // L-11 fix: keep the min-next comparison in uint256 to avoid
             // silent truncation when leaderTotal + inc exceeds uint128 max.
-            // The downcast to uint128 is only done after the comparison
-            // passes; if the threshold overflows uint128, revert BidOverflow
-            // so the bidder knows the ceiling and can (in principle) request
-            // an on-chain increment parameter update from the seller.
             uint256 minNext256 = uint256(a.leaderTotal) + inc;
             if (minNext256 > type(uint128).max) revert BidOverflow();
             uint128 minNext = uint128(minNext256);

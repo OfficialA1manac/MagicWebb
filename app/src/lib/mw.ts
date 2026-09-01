@@ -59,8 +59,8 @@ export const MW = {
     flow(p.name ?? `List ${p.items.length} NFTs`, undefined, true, (h) => M.batchList({ items: p.items.map((i) => ({ coll: addr(i.nft), id: big(i.tokenId), price: big(i.priceWei), duration: i.duration })), name: p.name }, h)),
 
   // ── auctions ───────────────────────────────────────────────────────────
-  createAuction: (p: { nft: string; tokenId: string; reserveWei: string; duration: number; minIncBps?: number; std?: 'erc721' | 'erc1155'; amount?: string; name?: string }) =>
-    flow(`Auction ${p.name ?? `#${p.tokenId}`}`, undefined, true, (h) => A.createAuction({ nft: addr(p.nft), tokenId: big(p.tokenId), reserveWei: big(p.reserveWei), duration: p.duration, minIncBps: p.minIncBps, std: p.std, amount: p.amount ? big(p.amount) : undefined, name: p.name }, h), { label: 'See live auctions', href: '/auctions' }),
+  createAuction: (p: { nft: string; tokenId: string; reserveWei: string; duration: number; std?: 'erc721' | 'erc1155'; amount?: string; name?: string }) =>
+    flow(`Auction ${p.name ?? `#${p.tokenId}`}`, undefined, true, (h) => A.createAuction({ nft: addr(p.nft), tokenId: big(p.tokenId), reserveWei: big(p.reserveWei), duration: p.duration, std: p.std, amount: p.amount ? big(p.amount) : undefined, name: p.name }, h), { label: 'See live auctions', href: '/auctions' }),
   bid: (p: { auctionId: string; amountWei: string; name?: string; myCumulativeWei?: string }) =>
     flow(`Bid on ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.bid({ auctionId: big(p.auctionId), amountWei: big(p.amountWei), name: p.name, myCumulativeWei: p.myCumulativeWei ? big(p.myCumulativeWei) : undefined }, h)),
   settle: (p: { auctionId: string; name?: string }) => flow(`Settle ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.settle({ auctionId: big(p.auctionId), name: p.name }, h)),

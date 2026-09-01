@@ -27,7 +27,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 
 ## Create an auction
 1. Open any token you own → click **Auction**
-2. Set reserve price (at least 1 native token), end time, min increment (bps, e.g. 500 = 5%)
+2. Set reserve price (at least 1 native token) and end time. The bid increment is the same for every auction on every network: taking the lead costs the current leader's total + 1 native token (C2FLR/SGB/FLR) — cumulative, so what you already have escrowed counts
 3. Click **Create auction** — approve AuctionHouse if prompted
 4. Auction starts immediately. A bid in the final 3 minutes extends the end time by 3 minutes (anti-snipe).
 5. If nobody bids within 30 minutes, the auction is cancelled automatically.
@@ -36,7 +36,7 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 ## Bid on an auction
 1. Open an active auction → enter bid amount
 2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
-3. If someone outbids you, your full bid is returned to your wallet automatically — no action needed. If the automatic transfer fails (e.g., your wallet is a contract that cannot receive ETH), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
+3. Bids are cumulative: to take the lead your TOTAL escrow must beat the leader's total by at least 1 native token (e.g. leader at 500 and you have 200 escrowed → send 301+). If you're outbid, your escrow stays in place so you can top up and retake the lead; the moment the auction settles, the keeper refunds every non-winner automatically within seconds. You can also pull your escrow yourself at any time before settlement via **Withdraw** (withdrawLoserFunds). If an automatic transfer fails (e.g., your wallet is a contract that cannot receive funds), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
 4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days the **winner or seller** (or the keeper) can call `forceCancel` to release every bidder's escrow — the same parties as settle, and nobody else. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 1.5% platform fee (98.5%).
 
 ## Auction fees

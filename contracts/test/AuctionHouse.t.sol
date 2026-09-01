@@ -49,7 +49,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 500, 0);
+        id = ah.create(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
     }
 
@@ -156,7 +156,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         uint64 end = uint64(block.timestamp + 1 hours);
-        uint256 id = ah.create(address(nft), tid, 1 ether, 1 hours, 500, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, 1 hours);
         vm.stopPrank();
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
@@ -317,7 +317,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         multi.mint(seller, 7, 5);
         multi.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(24 hours), 500, 0);
+        uint256 id = ah.create1155(address(multi), 7, 5, 1 ether, uint64(24 hours));
         vm.stopPrank();
         _bid(id, alice, 2 ether);
         vm.warp(block.timestamp + 30 hours);
@@ -334,7 +334,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, amt, uint64(24 hours), 0, 0);
+        uint256 id = ah.create(address(nft), tid, amt, uint64(24 hours));
         vm.stopPrank();
         _bid(id, alice, amt);
         vm.warp(block.timestamp + 30 hours);
@@ -345,20 +345,33 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
     }
 
-    function test_bid_percentIncrementHonored() public {
-        // 50% min-raise: overtaking 10 ether requires >= 15 ether (pct > 1-ether floor).
+    function test_bid_flatOneTokenIncrement() public {
+        // v3.3: ONE rule everywhere — overtaking costs exactly leader + 1
+        // native token, and cumulative escrow counts. Alice leads at 10;
+        // bob's 10.999... total must revert, 11 total takes the lead.
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 5000, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
         _bid(id, alice, 10 ether);
         vm.prank(bob);
         vm.expectRevert(BidTooLow.selector);
-        ah.bid{value: 14 ether}(id);
-        _bid(id, bob, 15 ether);
-        (address l,) = _leader(id);
-        assertEq(l, bob, "bob overtakes at exactly leader + 50%");
+        ah.bid{value: 11 ether - 1}(id);
+        _bid(id, bob, 11 ether);
+        (address l, uint128 t) = _leader(id);
+        assertEq(l, bob, "bob overtakes at exactly leader + 1 token");
+        assertEq(t, 11 ether, "leaderTotal is bob's cumulative");
+        // Owner's worked example: leader 500 total, challenger already has
+        // 200 escrowed -> must send 301+ so cumulative reaches 501+.
+        vm.prank(alice); // alice has 10 escrowed, leader is 11
+        vm.expectRevert(BidTooLow.selector);
+        ah.bid{value: 1 ether}(id); // 10 + 1 = 11 == leader, not leader+1
+        vm.prank(alice);
+        ah.bid{value: 2 ether}(id); // 10 + 2 = 12 >= 11 + 1
+        (address l2, uint128 t2) = _leader(id);
+        assertEq(l2, alice, "top-up counts existing escrow toward the +1 rule");
+        assertEq(t2, 12 ether, "cumulative model intact");
     }
 
     function test_bid_flatIncrementIgnored() public {
@@ -367,7 +380,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 0, type(uint128).max);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
         _bid(id, alice, 1 ether);
         _bid(id, bob, 2 ether); // leader + 1-ether floor, no BidOverflow
@@ -395,7 +408,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
         uint64 end = uint64(block.timestamp + 1 hours);
-        uint256 id = ah.create(address(nft), tid, 1 ether, 1 hours, 500, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, 1 hours);
         vm.stopPrank();
         _bid(id, alice, 2 ether);
         vm.warp(end - 1 minutes);
@@ -425,7 +438,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
-        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours), 0, 0);
+        uint256 id = ah.create(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
         _bid(id, alice, 1 ether);
         vm.prank(bob);
@@ -447,7 +460,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -465,7 +478,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -484,7 +497,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -507,7 +520,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -527,7 +540,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -546,7 +559,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(24 hours), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(24 hours));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);
@@ -566,7 +579,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(gated), true);
-        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes), 500, 0);
+        uint256 id = gated.create(address(nft), tid, 1 ether, uint64(3 minutes));
         vm.stopPrank();
         vm.prank(alice);
         gated.bid{value: 1 ether}(id);

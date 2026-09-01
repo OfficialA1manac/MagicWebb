@@ -15,19 +15,6 @@ export const auctionHouseAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_MIN_INCREMENT_BPS",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint16",
-        "internalType": "uint16"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
     "name": "MAX_TOTAL_EXTENSION",
     "inputs": [],
     "outputs": [
@@ -276,16 +263,6 @@ export const auctionHouseAbi = [
         "name": "duration",
         "type": "uint64",
         "internalType": "uint64"
-      },
-      {
-        "name": "minIncBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "minIncFlat",
-        "type": "uint128",
-        "internalType": "uint128"
       }
     ],
     "outputs": [
@@ -325,16 +302,6 @@ export const auctionHouseAbi = [
         "name": "duration",
         "type": "uint64",
         "internalType": "uint64"
-      },
-      {
-        "name": "minIncBps",
-        "type": "uint16",
-        "internalType": "uint16"
-      },
-      {
-        "name": "minIncFlat",
-        "type": "uint128",
-        "internalType": "uint128"
       }
     ],
     "outputs": [
@@ -1240,11 +1207,6 @@ export const auctionHouseAbi = [
   {
     "type": "error",
     "name": "BadImplementation",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "BadIncrement",
     "inputs": []
   },
   {

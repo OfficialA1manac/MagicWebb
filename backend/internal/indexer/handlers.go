@@ -272,7 +272,10 @@ func (h *handlers) onAuctionCreated(ctx context.Context, l types.Log) error {
 		ReservePriceWei: reserve,
 		HighestBidWei:   "0",
 		HighestBidder:   "",
-		MinIncrementBps: 500,
+		// v3.3: the increment is a flat 1 native token marketplace-wide; the
+		// contract's per-auction bps field is vestigial and always 0. Kept in
+		// the row so old API consumers keep a stable shape.
+		MinIncrementBps: 0,
 		StartsAt:        startsAt,
 		EndsAt:          endsAt,
 		Status:          "active",
