@@ -48,6 +48,12 @@
   // (read failed or not yet loaded); the button stays hidden rather than
   // offering a transaction that is guaranteed to revert.
   let collOwner = $state<string | null>(null);
+  // The owner's SAVED profile tag (live from /api/v1/profile). The badge chip
+  // previously showed only the DETERMINISTIC collector name derived from the
+  // address, so a user's custom tag (e.g. "KawaiiMint") never appeared on
+  // token/listing pages and edits looked like they didn't propagate
+  // (reported 2026-09-01). Refetched on every owner change — always current.
+  let ownerTag = $state('');
   let live = $state(false);
   let now = $state(Date.now());
   let syncing = $state(''); // optimistic chip text after a confirmed tx
@@ -117,6 +123,13 @@
         owner = (await pub.readContract({ address: coll as Address, abi: erc721Abi, functionName: 'ownerOf', args: [BigInt(tid)] })) as string;
       }
     } catch { /* unknown owner: UI simply hides owner actions */ }
+    // Live profile tag for the owner badge — never cached client-side.
+    if (owner) {
+      const prof = await j<{ tag?: string }>(`/api/v1/profile/${owner.toLowerCase()}`);
+      ownerTag = prof?.tag || '';
+    } else {
+      ownerTag = '';
+    }
     // Collection contract owner (ERC-173), independent of token ownership and
     // of standard — works for ERC-1155 too since it is just a selector call.
     // Falls back to the indexer's creator_addr when the contract has no
@@ -298,7 +311,7 @@
       <h1 class="tp-title">{name}</h1>
       <div class="tp-meta mono">
         <a href={explorerAddress(coll)} target="_blank" rel="noopener">{shortAddr(coll)}</a> · #{tid} · {std.toUpperCase()}
-        {#if owner} · owner <a href={`/profile/${owner}`}>{isOwner ? 'you' : shortAddr(owner)}</a> <span class="vb is-holder sm" title={HOLDER_BADGE_TIP}>{holderBadgeName(owner)}</span>{/if}
+        {#if owner} · owner <a href={`/profile/${owner}`}>{isOwner ? 'you' : shortAddr(owner)}</a> <span class="vb is-holder sm" title={HOLDER_BADGE_TIP}>{ownerTag || holderBadgeName(owner)}</span>{/if}
       </div>
       {#if creatorAddr}
         <div class="tp-meta mono">

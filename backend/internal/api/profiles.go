@@ -55,7 +55,10 @@ func NewProfilesService(q *db.Q, cfg *config.Config) *ProfilesService {
 		q:       q,
 		chainID: cfg.ChainID,
 		httpc:   &http.Client{Timeout: 3 * time.Second},
-		merged:  cache.NewRedisOrMemory(cfg.RedisURL, 60*time.Second),
+		// 5s: live-read requirement (owner directive 2026-09-01). Saves refresh
+		// this cache in-place, so 5s only bounds staleness on paths that miss
+		// that refresh (e.g. a future second instance without Redis).
+		merged:  cache.NewRedisOrMemory(cfg.RedisURL, 5*time.Second),
 	}
 	// Chain 114 first, then the catalogue order for the rest.
 	for _, wantFirst := range []bool{true, false} {

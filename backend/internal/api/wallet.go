@@ -40,7 +40,11 @@ func NewWalletService(q *db.Q, explorerURL, redisURL string) *WalletService {
 		q:           q,
 		explorerURL: strings.TrimRight(explorerURL, "/"),
 		httpc:       &http.Client{Timeout: 5 * time.Second},
-		merged:      cache.NewRedisOrMemory(redisURL, 30*time.Second),
+		// 2s: live-read requirement (owner directive 2026-09-01 — nothing
+		// user-visible may lag >1s beyond transport). The cache only
+		// deduplicates bursts (grid + header ask together); every navigation
+		// re-reads the wallet live.
+		merged:      cache.NewRedisOrMemory(redisURL, 2*time.Second),
 	}
 }
 
@@ -92,10 +96,18 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 	if err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	// Stored as a string — see cachedBytes: a []byte would return from Redis
-	// base64-encoded and be served as the response body.
-	s.merged.Set("wallet-nfts:"+addr, string(body))
-	s.merged.Set("wallet-nfts-src:"+addr, source)
+	// Never cache a DEGRADED view. When an explorer is configured but the
+	// fan-out failed (source stays "db"), this response may be missing the
+	// wallet's whole explorer inventory — caching it made the profile show
+	// "0 NFTs" for a full TTL after one explorer hiccup (reported 2026-09-01
+	// as the profile being "thrown off after switching tabs"). Serve it, but
+	// let the next request retry live.
+	if !(s.explorerURL != "" && source == "db") {
+		// Stored as a string — see cachedBytes: a []byte would return from
+		// Redis base64-encoded and be served as the response body.
+		s.merged.Set("wallet-nfts:"+addr, string(body))
+		s.merged.Set("wallet-nfts-src:"+addr, source)
+	}
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)
 }
