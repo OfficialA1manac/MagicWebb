@@ -91,6 +91,14 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 
 	merged, source := s.mergeExplorerNFTs(c.Context(), addr, nfts)
 	c.Set("X-MW-Wallet-Source", source)
+	// Signal a degraded inventory: an explorer is configured but its fan-out
+	// failed, so this list may be missing the wallet's explorer-held NFTs.
+	// The client treats this like a failed refresh and keeps last-known-good
+	// rather than repainting a shrunken/empty grid. (Cache hits never reach
+	// here — degraded views are never cached; see below.)
+	if s.explorerURL != "" && source == "db" {
+		c.Set("X-MW-Degraded", "explorer-unavailable")
+	}
 
 	body, err := json.Marshal(merged)
 	if err != nil {

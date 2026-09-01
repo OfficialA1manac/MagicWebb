@@ -172,6 +172,10 @@ func TestWalletNFTs_ExplorerMerge(t *testing.T) {
 	if got := resp.Header.Get("X-MW-Wallet-Source"); got != "db+explorer" {
 		t.Fatalf("X-MW-Wallet-Source = %q, want db+explorer", got)
 	}
+	// A healthy merge is not degraded.
+	if got := resp.Header.Get("X-MW-Degraded"); got != "" {
+		t.Fatalf("X-MW-Degraded = %q, want empty on a healthy merge", got)
+	}
 	var nfts []db.OwnedNFT
 	decodeJSON(t, resp, &nfts)
 	if len(nfts) != 2 {
@@ -209,6 +213,11 @@ func TestWalletNFTs_ExplorerDown(t *testing.T) {
 	}
 	if got := resp.Header.Get("X-MW-Wallet-Source"); got != "db" {
 		t.Fatalf("X-MW-Wallet-Source = %q, want db", got)
+	}
+	// Explorer configured but unreachable → degraded marker so the client
+	// keeps its last-known-good grid instead of trusting the db-only list.
+	if got := resp.Header.Get("X-MW-Degraded"); got != "explorer-unavailable" {
+		t.Fatalf("X-MW-Degraded = %q, want explorer-unavailable", got)
 	}
 	var nfts []db.OwnedNFT
 	decodeJSON(t, resp, &nfts)
