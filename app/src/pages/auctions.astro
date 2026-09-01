@@ -18,7 +18,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
     <!-- Header -->
     <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;">
       <div>
-        <h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+        <h1 style="font-size:clamp(1.35rem,5vw,1.75rem);font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
           <span style="width:2.5rem;height:2.5rem;border-radius:0.875rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(167,139,250,0.45);">♕</span>
           Live Auctions
           <span style="position:relative;width:0.625rem;height:0.625rem;border-radius:50%;background:#a78bfa;animation:pulse 2s infinite;margin-left:0.25rem;"></span>
@@ -86,7 +86,7 @@ const sortParam = urlParams.get('sort') || 'ends_asc';
       </div>
 
       <!-- Action buttons -->
-      <div style="display:flex;gap:0.5rem;align-items:end;">
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:end;">
         <button id="apply-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);color:#fafafa;font-weight:800;font-size:0.75rem;border:none;cursor:pointer;font-family:inherit;transition:all 0.2s;box-shadow:0 0 16px -4px rgba(167,139,250,0.35);">Apply</button>
         <button id="clear-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;">Clear</button>
         <button id="save-search-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(252,211,77,0.08);border:1px solid rgba(252,211,77,0.2);color:#fcd34d;font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">★ Save</button>

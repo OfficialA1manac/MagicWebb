@@ -50,12 +50,36 @@ body { padding-bottom: calc(var(--tabbar-h) + env(safe-area-inset-bottom)); }
 }
 
 /* ── Responsive grid fixes for legacy inline styles ─────────────────────── */
-/* Pages that hardcode 1fr 1fr collapse to one column on narrow screens. */
+/* Pages that hardcode fixed column counts collapse on narrow screens:
+   1fr 1fr → one column; repeat(2..4, 1fr) (stat tiles) → auto-fit so they
+   wrap to whatever fits instead of cramming N columns into 360px. */
 @media (max-width: 767px) {
   [style*="grid-template-columns:1fr 1fr"],
   [style*="grid-template-columns: 1fr 1fr"] { grid-template-columns: 1fr !important; }
+  [style*="grid-template-columns:repeat(2,1fr)"],
+  [style*="grid-template-columns: repeat(2, 1fr)"],
+  [style*="grid-template-columns:repeat(3,1fr)"],
+  [style*="grid-template-columns: repeat(3, 1fr)"],
+  [style*="grid-template-columns:repeat(4,1fr)"],
+  [style*="grid-template-columns: repeat(4, 1fr)"] {
+    grid-template-columns: repeat(auto-fit, minmax(110px, 1fr)) !important;
+  }
   main { padding-left: 0; padding-right: 0; }
   .net-switcher .net-btn { padding: 0 0.5rem; }
+  /* iOS Safari auto-zooms any focused input under 16px — force 16px and a
+     44px touch target on every form control at phone widths. !important is
+     required to beat the pages' inline style attributes. */
+  input, select, textarea { font-size: 16px !important; min-height: 44px; }
+  /* Filter bars (#filter-bar on listings/auctions): the inline min-widths
+     (120–200px) force one field per row at 360px, stacking a ~450px wall of
+     filters above the grid. Two-up instead. */
+  #filter-bar > div { min-width: 0 !important; flex: 1 1 45% !important; }
+  #filter-bar > div[style*="align-items:end"] { flex: 1 1 100% !important; }
+  /* Long hex identifiers (addresses, tx hashes) must wrap, not push the
+     viewport sideways. Scoped to monospace runs, which is where they live. */
+  code, .font-mono { overflow-wrap: anywhere; }
+  /* Media never widens its container. */
+  img, video, svg { max-width: 100%; height: auto; }
 }
 
 /* ── Notification bell sign-in button (injected by BaseLayout script) ─── */

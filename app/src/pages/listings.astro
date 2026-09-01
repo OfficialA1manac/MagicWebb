@@ -19,13 +19,13 @@ const sortParam = urlParams.get('sort') || 'recent';
     <!-- Header -->
     <div class="reveal" style="display:flex;flex-wrap:wrap;align-items:center;justify-content:space-between;gap:1rem;margin-bottom:1.5rem;">
       <div>
-        <h1 style="font-size:1.75rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
+        <h1 style="font-size:clamp(1.35rem,5vw,1.75rem);font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
           <span style="width:2.5rem;height:2.5rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.125rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">✦</span>
           Current Listings
         </h1>
         <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Fixed-price sales across every tracked collection.</p>
       </div>
-      <div style="display:flex;gap:0.75rem;align-items:center;">
+      <div style="display:flex;flex-wrap:wrap;gap:0.75rem;align-items:center;">
         <span id="listing-count-badge" class="count-badge" style="padding:0.375rem 0.75rem;border-radius:2rem;background:rgba(125,211,252,0.1);border:1px solid rgba(125,211,252,0.2);color:#7dd3fc;font-size:0.75rem;font-weight:700;">— active</span>
         <a href="/profile#nfts" id="list-nft-btn" style="display:inline-flex;align-items:center;gap:0.5rem;padding:0.625rem 1.25rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.8125rem;transition:all 0.2s;box-shadow:0 0 22px -6px rgba(56,189,248,0.45),0 4px 12px -4px rgba(14,165,233,0.3);cursor:pointer;border:none;font-family:inherit;"
            title="Connect your wallet to list an NFT">
@@ -73,7 +73,7 @@ const sortParam = urlParams.get('sort') || 'recent';
       </div>
 
       <!-- Action buttons -->
-      <div style="display:flex;gap:0.5rem;align-items:end;">
+      <div style="display:flex;flex-wrap:wrap;gap:0.5rem;align-items:end;">
         <button id="apply-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);color:#09090b;font-weight:800;font-size:0.75rem;border:none;cursor:pointer;font-family:inherit;transition:all 0.2s;box-shadow:0 0 16px -4px rgba(56,189,248,0.35);">Apply</button>
         <button id="clear-filters-btn" style="padding:0.5rem 1rem;border-radius:0.5rem;background:rgba(255,255,255,0.04);border:1px solid rgba(255,255,255,0.08);color:rgba(255,255,255,0.5);font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;">Clear</button>
         <button id="save-search-btn" style="padding:0.5rem 0.75rem;border-radius:0.5rem;background:rgba(252,211,77,0.08);border:1px solid rgba(252,211,77,0.2);color:#fcd34d;font-weight:700;font-size:0.75rem;cursor:pointer;font-family:inherit;transition:all 0.2s;display:none;">★ Save</button>
