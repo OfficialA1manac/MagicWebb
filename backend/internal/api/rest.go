@@ -14,6 +14,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
+	"github.com/gofiber/fiber/v2/middleware/etag"
 	"github.com/gofiber/fiber/v2/middleware/cors"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
@@ -332,7 +333,23 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		})
 	}
 
-	api := app.Group("/api/v1", rateLimitMiddleware(rl))
+	api := app.Group("/api/v1", rateLimitMiddleware(rl), browserCacheReads(), etag.New(etag.Config{
+		// Weak validators: JSON bodies are byte-stable per render but we don't
+		// need octet-exact semantics. Skip non-GET and the media/image proxies
+		// (already long-lived immutable, large/binary — hashing buys nothing).
+		Weak: true,
+		Next: func(c *fiber.Ctx) bool {
+			if c.Method() != fiber.MethodGet {
+				return true
+			}
+			p := c.Path()
+			return strings.HasPrefix(p, "/api/v1/media") || strings.HasPrefix(p, "/api/v1/img")
+		},
+	}))
+	// etag runs AFTER the rate limiter, so a 304 still consumes a token and
+	// carries X-RateLimit-* — no free-polling loophole. compress is app-level
+	// (outer), so etag hashes the UNcompressed body and compress runs on
+	// unwind; 304s have empty bodies and compress skips them.
 
 	// RL-1: Tiered rate-limit groups for expensive/privileged endpoints.
 	// Separate groups at /api/v1 prefix (not nested) because each service
@@ -570,6 +587,41 @@ func buildOrigins(frontendURL, env string) string {
 		origins += ",http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
 	}
 	return origins
+}
+
+// browserCacheReadPrefixes are the public, non-user-scoped read collections
+// safe to cache briefly in the browser. Deliberately excludes /wallet (sets
+// its own degraded-aware header) and anything user-scoped (notifications,
+// saved searches) — those must never be cached.
+var browserCacheReadPrefixes = []string{
+	"/api/v1/listings",
+	"/api/v1/auctions",
+	"/api/v1/offers",
+	"/api/v1/collections",
+	"/api/v1/metrics",
+	"/api/v1/activity",
+	"/api/v1/profile",
+}
+
+// browserCacheReads sets a short private cache + stale-while-revalidate on
+// GET responses for the allowlisted public read endpoints. Registered BEFORE
+// the etag middleware so the header is present on a 304 as well as a 200.
+// max-age=2 matches the wallet service's 2s live-read TTL (owner directive:
+// nothing user-visible may lag more than ~1s beyond transport); SWR lets a
+// repeat view paint instantly while it revalidates in the background.
+func browserCacheReads() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		if c.Method() == fiber.MethodGet {
+			p := c.Path()
+			for _, pre := range browserCacheReadPrefixes {
+				if strings.HasPrefix(p, pre) {
+					c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
+					break
+				}
+			}
+		}
+		return c.Next()
+	}
 }
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────
