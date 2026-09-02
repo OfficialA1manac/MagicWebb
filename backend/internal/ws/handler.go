@@ -392,10 +392,19 @@ func (h *Handler) StartDispatcher() bool {
 	if !ok {
 		return false
 	}
-	h.dispatchCancel = cancel
+	// Wrap cancel so it runs at most once: the goroutine defers it AND
+	// StopDispatcher may call it, and the underlying drain loop in the
+	// broadcaster blocks on the channel — a double invocation could hang.
+	var cancelOnce sync.Once
+	safeCancel := func() { cancelOnce.Do(cancel) }
+	h.dispatchCancel = safeCancel
 	h.dispatchDone = make(chan struct{})
+
+	// Reusable connection snapshot buffer — reused across events so the hot
+	// path allocates nothing steady-state.
+	var connBuf []*Connection
 	go func() {
-		defer cancel()
+		defer safeCancel()
 		for {
 			select {
 			case ev, ok := <-eventCh:
@@ -428,8 +437,20 @@ func (h *Handler) StartDispatcher() bool {
 					continue
 				}
 				etype := string(ev.Type)
+				// Snapshot the connection list under a SHORT read lock, then
+				// fan out WITHOUT holding h.mu. Holding the lock across every
+				// send let a waiting writer (connect/disconnect churn, or a GC
+				// pause) starve the dispatcher; while it stalled, the single
+				// shared broadcaster buffer backed up and dropped events for
+				// EVERY client at once. Copying out keeps the lock hold O(N)
+				// pointer-copies and never blocks on a slow client.
 				h.mu.RLock()
+				connBuf = connBuf[:0]
 				for _, conn := range h.conns {
+					connBuf = append(connBuf, conn)
+				}
+				h.mu.RUnlock()
+				for _, conn := range connBuf {
 					if !conn.allowedNotificationParsed(etype, parsed) {
 						continue
 					}
@@ -443,7 +464,6 @@ func (h *Handler) StartDispatcher() bool {
 						// Slow client — drop (do not count as sent).
 					}
 				}
-				h.mu.RUnlock()
 			case <-h.dispatchDone:
 				return
 			}

@@ -348,7 +348,16 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 				return true
 			}
 			p := c.Path()
-			return strings.HasPrefix(p, "/api/v1/media") || strings.HasPrefix(p, "/api/v1/img")
+			// Skip: media/img proxies (already immutable/binary); the
+			// user-scoped JWT endpoints (an ETag with no Cache-Control would
+			// let a browser heuristically cache a user's own notifications /
+			// saved searches); and profile-page, whose body embeds live WS
+			// counters so its hash never matches — pure hashing cost, no 304.
+			return strings.HasPrefix(p, "/api/v1/media") ||
+				strings.HasPrefix(p, "/api/v1/img") ||
+				strings.HasPrefix(p, "/api/v1/notifications") ||
+				strings.HasPrefix(p, "/api/v1/saved-searches") ||
+				strings.HasPrefix(p, "/api/v1/profile-page")
 		},
 	}))
 	// etag runs AFTER the rate limiter, so a 304 still consumes a token and

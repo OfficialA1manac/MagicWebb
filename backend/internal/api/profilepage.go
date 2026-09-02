@@ -28,10 +28,13 @@ type ProfilePageService struct {
 	metrics *MetricsService
 }
 
+// NewProfilePageService constructs the composite service. It reuses the
+// metrics service's BuildResponse for the platform-metrics section.
 func NewProfilePageService(q *db.Q, metrics *MetricsService) *ProfilePageService {
 	return &ProfilePageService{q: q, metrics: metrics}
 }
 
+// RegisterRoutes mounts GET /profile-page/:addr on the given router group.
 func (s *ProfilePageService) RegisterRoutes(api fiber.Router) {
 	api.Get("/profile-page/:addr", s.handleGet)
 }
@@ -46,6 +49,8 @@ type profilePageResponse struct {
 	CreatedCollections []db.CollectionRow `json:"createdCollections"`
 }
 
+// handleGet fans out to every profile-page list concurrently and returns them
+// as one JSON object. Best-effort: a failing section is served empty, not 500.
 func (s *ProfilePageService) handleGet(c *fiber.Ctx) error {
 	addr := strings.ToLower(c.Params("addr"))
 	if !isValidHexAddress(addr) {
