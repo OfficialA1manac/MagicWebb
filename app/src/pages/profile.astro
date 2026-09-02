@@ -111,6 +111,16 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
       // the in-flight load settles (see the finally block in loadProfileData).
       var _pendingAddr = null;
 
+      // Last-known-good snapshot (per address, session-scoped). sessionStorage
+      // lives for one tab/deploy, so a stored innerHTML always matches the
+      // current page structure — no cross-deploy staleness. Lets a fresh
+      // navigation or a transient API failure repaint REAL data instantly
+      // instead of a confident zero state. The profile must never desync from
+      // the wallet/marketplace; showing stale-but-true beats showing zeros.
+      function _lkgKey(a){ return 'mw_profile_lkg:'+String(a||'').toLowerCase(); }
+      function _lkgSave(a, html){ try { sessionStorage.setItem(_lkgKey(a), html); } catch(_){} }
+      function _lkgLoad(a){ try { return sessionStorage.getItem(_lkgKey(a)); } catch(_){ return null; } }
+
       // Compute isOwnProfile inside loadProfileData to stay fresh on wallet changes
       function isOwnProfileFor(targetAddr){
         const curConnected = (function(){
@@ -127,22 +137,43 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
         if (_loading) return;
         _loading = true;
         const encAddr = encodeURIComponent(targetAddr);
-        // First paint already shows the server-rendered skeleton — keep it.
-        // Only swap in the lightweight loader on later reloads (wallet switch).
-        if (root.dataset.mwLoaded !== '1' && !root.querySelector('.shimmer')) root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+        // Instant paint, scoped to THIS address. "Good" DOM means it was
+        // rendered for targetAddr (root.dataset.mwAddr) — not merely that
+        // some profile is on screen. On a wallet switch (A→B) we must not
+        // keep A's view: restore B's snapshot if we have one, else show the
+        // loader. On first paint, keep the server-rendered skeleton.
+        var haveCurrent = root.dataset.mwLoaded === '1' && root.dataset.mwAddr === targetAddr;
+        if (!haveCurrent) {
+          var _snap = _lkgLoad(targetAddr);
+          if (_snap) {
+            root.innerHTML = _snap;
+            root.dataset.mwLoaded = '1';
+            root.dataset.mwAddr = targetAddr;
+            root.dataset.mwStale = '1';
+          } else {
+            // No snapshot for this address. Show the loader unless the
+            // server skeleton is still up (first paint). Clear mwLoaded so
+            // the failure guard below knows there is no good data yet.
+            if (!root.querySelector('.shimmer')) {
+              root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.4;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Loading profile…</p></div>';
+            }
+            root.dataset.mwLoaded = '';
+            delete root.dataset.mwStale;
+          }
+        }
         try {
-          const [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes, metRes, actRes] = await Promise.all([
+          // Three parallel requests, down from nine. The profile-page
+          // composite returns every list the page needs in one round trip
+          // (listings, auctions, offers sent/received, metrics, activity,
+          // created collections). Profile and wallet stay separate: profile
+          // carries cross-chain carry-over, and the wallet endpoint carries
+          // the explorer-merge + X-MW-Degraded signal the last-known-good
+          // guard below depends on.
+          const [pRes, nftRes, ppRes] = await Promise.all([
         fetch('/api/v1/profile/'+encAddr).catch(function(){return null;}),
         fetch('/api/v1/wallet/'+encAddr+'/nfts').catch(function(){return null;}),
-        fetch('/api/v1/listings?seller='+encAddr+'&limit=24').catch(function(){return null;}),
-        fetch('/api/v1/auctions?seller='+encAddr+'&limit=20').catch(function(){return null;}),
-        fetch('/api/v1/offers?bidder='+encAddr+'&limit=50').catch(function(){return null;}),
-        fetch('/api/v1/offers?owner='+encAddr+'&limit=50').catch(function(){return null;}),
-        fetch('/api/v1/metrics').catch(function(){return null;}),
-        fetch('/api/v1/activity?address='+encAddr+'&limit=20').catch(function(){return null;})
+        fetch('/api/v1/profile-page/'+encAddr).catch(function(){return null;})
       ]);
-          // Creator badge: does this address own (ERC-173) any indexed collection?
-          const collRes = await fetch('/api/v1/collections?limit=200').catch(function(){return null;});
 
           function ok(r){return r&&r.ok;}
           async function safeJson(r){try{return await r.json();}catch(_){return null;}}
@@ -152,31 +183,85 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
           // and re-rendered a confident zero-state (0 NFTs, deterministic
           // badge, raw address) over good data. On failure: keep the current
           // DOM, retry after Retry-After (or 5s), and stop.
-          var failed = [pRes, nftRes, listRes, aucRes, offSentRes, offRecvRes].some(function(r){
+          // Degraded wallet inventory: when the explorer is unreachable the
+          // backend still returns 200 with a possibly-shrunken/empty NFT list
+          // (marked X-MW-Degraded). Treat that as a failed refresh so we never
+          // overwrite good data with a degraded view — keep last-known-good
+          // and retry.
+          var nftDegraded = !!(nftRes && nftRes.headers && nftRes.headers.get('X-MW-Degraded'));
+          // Do we already have a good render FOR THIS ADDRESS to protect?
+          var haveGood = root.dataset.mwLoaded === '1' && root.dataset.mwAddr === targetAddr;
+          // Hard failure: profile / wallet / composite unreachable.
+          var hardFailed = [pRes, nftRes, ppRes].some(function(r){
             return !r || (!r.ok && r.status !== 404);
           });
-          if (failed && root.dataset.mwLoaded === '1') {
-            var ra = 5;
-            [pRes, nftRes, listRes].some(function(r){
+          // A degraded wallet must never OVERWRITE good data — but on first
+          // paint (no good data yet) it must NOT block: the DB-side wallet
+          // list plus all the composite data are available and should render.
+          var degradedBlock = nftDegraded && haveGood;
+
+          // Backoff + address-scoped retry. Retry-After (429) wins; otherwise
+          // grow 5→10→20→30s (capped) so a long outage doesn't hammer the
+          // backend every 5s. The scheduled retry aborts if the user switched
+          // wallets in the meantime (targetAddr is no longer the active one).
+          function scheduleRetry(hdrRes){
+            var ra = 0;
+            (hdrRes || []).some(function(r){
               if (r && r.headers && r.headers.get('Retry-After')) { ra = Math.min(30, parseInt(r.headers.get('Retry-After'), 10) || 5); return true; }
               return false;
             });
-            setTimeout(function(){ loadProfileData(targetAddr); }, ra * 1000);
+            if (!ra) {
+              var n = parseInt(root.dataset.mwRetries || '0', 10) || 0;
+              ra = Math.min(30, 5 * Math.pow(2, Math.min(n, 3)));
+              root.dataset.mwRetries = String(n + 1);
+            }
+            setTimeout(function(){
+              if (targetAddr === _lastRenderedAddr) loadProfileData(targetAddr);
+            }, ra * 1000);
+          }
+
+          if (hardFailed || degradedBlock) {
+            // Have good data for this address? Keep it and retry — never
+            // repaint with defaults on a blip.
+            if (haveGood) { scheduleRetry([pRes, nftRes, ppRes]); return; }
+            // No good data for this address: restore a snapshot if we have
+            // one, else show a retry notice. Never render a confident zero
+            // state, never set mwLoaded.
+            var snap = _lkgLoad(targetAddr);
+            if (snap) {
+              root.innerHTML = snap;
+              root.dataset.mwLoaded = '1';
+              root.dataset.mwAddr = targetAddr;
+              root.dataset.mwStale = '1';
+            } else {
+              root.innerHTML = '<div style="text-align:center;padding:2rem;opacity:0.5;"><div style="font-size:1.5rem;margin-bottom:0.5rem;">⌬</div><p style="font-size:0.8125rem;">Couldn’t reach the marketplace — retrying…</p></div>';
+            }
+            scheduleRetry([pRes, nftRes, ppRes]);
             return;
           }
           root.dataset.mwLoaded = '1';
+          root.dataset.mwAddr = targetAddr;
+          delete root.dataset.mwStale;
+          // First paint reached here with a degraded wallet (explorer down):
+          // we render the DB-only inventory now rather than block, and retry
+          // in the background to enrich it once the explorer recovers. A clean
+          // load resets the backoff counter.
+          if (nftDegraded) { scheduleRetry([]); } else { root.dataset.mwRetries = '0'; }
 
           const profile     = ok(pRes)    ? (await safeJson(pRes))    : null;
           let nfts        = ok(nftRes)  ? (await safeJson(nftRes))  : [];
-          let listings    = ok(listRes) ? (await safeJson(listRes)) : [];
-          let auctions    = ok(aucRes)  ? (await safeJson(aucRes))  : [];
-          let offersSent  = ok(offSentRes) ? (await safeJson(offSentRes)) : [];
-          let offersRecv  = ok(offRecvRes) ? (await safeJson(offRecvRes)) : [];
-          const metrics     = ok(metRes)  ? ((await safeJson(metRes)) || {})  : {};
-          let allColls    = ok(collRes) ? (await safeJson(collRes)) : [];
-          if (!Array.isArray(allColls)) allColls = [];
-          const createdColls = allColls.filter(function(c){ return c && c.creator_addr && String(c.creator_addr).toLowerCase() === targetAddr.toLowerCase(); });
-          let activity    = ok(actRes)  ? (await safeJson(actRes))  : [];
+          // The profile-page composite; every list comes off this one object.
+          const pp = (ok(ppRes) ? (await safeJson(ppRes)) : null) || {};
+          let listings    = pp.listings || [];
+          let auctions    = pp.auctions || [];
+          let offersSent  = pp.offersSent || [];
+          let offersRecv  = pp.offersReceived || [];
+          const metrics     = pp.metrics || {};
+          // Created collections come pre-filtered by creator from the server
+          // (no more pulling 200 collections to filter client-side).
+          let createdColls = pp.createdCollections || [];
+          if (!Array.isArray(createdColls)) createdColls = [];
+          let activity    = pp.activity || [];
 
           if (!Array.isArray(nfts)) nfts = [];
           if (!Array.isArray(listings)) listings = [];
@@ -802,6 +887,13 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               });
             });
           }
+
+          // Save a last-known-good snapshot of the fully rendered profile
+          // (session-scoped) so the next navigation or a transient failure
+          // repaints real data instantly instead of a zero state. Skip when
+          // the wallet inventory was degraded — don't persist an incomplete
+          // NFT grid as "good"; the background retry will save the full one.
+          if (!nftDegraded) _lkgSave(targetAddr, root.innerHTML);
 
         } catch(e) {
           // Reset last-rendered guard so the user isn't stuck — future wallet

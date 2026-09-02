@@ -18,6 +18,7 @@ require (
 	github.com/ethereum/go-ethereum v1.17.0
 	github.com/fasthttp/websocket v1.5.12
 	github.com/getsentry/sentry-go v0.28.1
+	github.com/goccy/go-json v0.10.6
 	github.com/gofiber/fiber/v2 v2.52.13
 	github.com/golang-jwt/jwt/v5 v5.2.2
 	github.com/google/uuid v1.6.0

@@ -71,6 +71,9 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 				}
 			}
 			c.Set("X-MW-Wallet-Source", src)
+			// A cached view is always non-degraded (degraded views are never
+			// cached), so it gets the healthy short private cache.
+			c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
 			c.Set("Content-Type", "application/json")
 			return c.Send(body)
 		}
@@ -91,6 +94,20 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 
 	merged, source := s.mergeExplorerNFTs(c.Context(), addr, nfts)
 	c.Set("X-MW-Wallet-Source", source)
+	// Signal a degraded inventory: an explorer is configured but its fan-out
+	// failed, so this list may be missing the wallet's explorer-held NFTs.
+	// The client treats this like a failed refresh and keeps last-known-good
+	// rather than repainting a shrunken/empty grid. (Cache hits never reach
+	// here — degraded views are never cached; see below.)
+	if s.explorerURL != "" && source == "db" {
+		c.Set("X-MW-Degraded", "explorer-unavailable")
+		// Degraded: force a live retry, never let the browser cache a
+		// possibly-incomplete inventory (mirrors the server-cache rule below).
+		c.Set("Cache-Control", "no-store")
+	} else {
+		// Healthy: short private cache + SWR, matching the 2s live-read TTL.
+		c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
+	}
 
 	body, err := json.Marshal(merged)
 	if err != nil {

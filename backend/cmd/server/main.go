@@ -21,6 +21,7 @@ import (
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/getsentry/sentry-go"
 	sentryfiber "github.com/getsentry/sentry-go/fiber"
+	gojson "github.com/goccy/go-json"
 	"github.com/gofiber/fiber/v2"
 	fiberrecover "github.com/gofiber/fiber/v2/middleware/recover"
 	"github.com/jackc/pgx/v5"
@@ -349,6 +350,12 @@ func run() error {
 		DisableStartupMessage:   false,
 		EnableTrustedProxyCheck: false,
 		ProxyHeader:             "Fly-Client-IP",
+		// goccy/go-json replaces stdlib encoding/json for every c.JSON /
+		// c.BodyParser on the REST hot path (listings, auctions, offers,
+		// collections, metrics, activity). ~3-5x faster marshal, drop-in on
+		// the shapes we use (struct tags, maps, json.RawMessage passthrough).
+		JSONEncoder: gojson.Marshal,
+		JSONDecoder: gojson.Unmarshal,
 		// BodyLimit: 1 MB. Prevents oversized payload DoS attacks on JSON
 		// endpoints (profile update, reports, auth verify). Fiber's default
 		// limit is 4 MB — tightening to 1 MB means a degenerate JSON upload

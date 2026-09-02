@@ -15,7 +15,9 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/gofiber/fiber/v2/middleware/compress"
 	"github.com/gofiber/fiber/v2/middleware/cors"
+	"github.com/gofiber/fiber/v2/middleware/etag"
 	flog "github.com/gofiber/fiber/v2/middleware/logger"
+	"github.com/rs/zerolog/log"
 	"github.com/valyala/fasthttp/fasthttpadaptor"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/auth"
@@ -245,6 +247,14 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	)
 	wsHandler := ws.NewHandler(cfg, bcast, q, wsClient, func() int64 { return atomic.LoadInt64(serverTimeMs) })
 	GlobalWSStats = wsHandler // WS metrics exposed via Prometheus /metrics endpoint
+	// One shared broadcaster subscription + dispatcher goroutine for all WS
+	// connections (marshal-once fan-out). Started here rather than in
+	// NewHandler so struct-literal test handlers don't spawn a goroutine.
+	// A false return means the broadcaster is at capacity and NO events will
+	// reach any WS client — surface it loudly rather than failing silently.
+	if !wsHandler.StartDispatcher() {
+		log.Error().Msg("ws: StartDispatcher failed (broadcaster at capacity) — real-time push is DISABLED for this process")
+	}
 	app.Get("/ws", wsHandler.HandleWebSocket)
 
 	// GraphQL endpoint for rich data queries.
@@ -328,7 +338,32 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		})
 	}
 
-	api := app.Group("/api/v1", rateLimitMiddleware(rl))
+	api := app.Group("/api/v1", rateLimitMiddleware(rl), browserCacheReads(), etag.New(etag.Config{
+		// Weak validators: JSON bodies are byte-stable per render but we don't
+		// need octet-exact semantics. Skip non-GET and the media/image proxies
+		// (already long-lived immutable, large/binary — hashing buys nothing).
+		Weak: true,
+		Next: func(c *fiber.Ctx) bool {
+			if c.Method() != fiber.MethodGet {
+				return true
+			}
+			p := c.Path()
+			// Skip: media/img proxies (already immutable/binary); the
+			// user-scoped JWT endpoints (an ETag with no Cache-Control would
+			// let a browser heuristically cache a user's own notifications /
+			// saved searches); and profile-page, whose body embeds live WS
+			// counters so its hash never matches — pure hashing cost, no 304.
+			return strings.HasPrefix(p, "/api/v1/media") ||
+				strings.HasPrefix(p, "/api/v1/img") ||
+				strings.HasPrefix(p, "/api/v1/notifications") ||
+				strings.HasPrefix(p, "/api/v1/saved-searches") ||
+				strings.HasPrefix(p, "/api/v1/profile-page")
+		},
+	}))
+	// etag runs AFTER the rate limiter, so a 304 still consumes a token and
+	// carries X-RateLimit-* — no free-polling loophole. compress is app-level
+	// (outer), so etag hashes the UNcompressed body and compress runs on
+	// unwind; 304s have empty bodies and compress skips them.
 
 	// RL-1: Tiered rate-limit groups for expensive/privileged endpoints.
 	// Separate groups at /api/v1 prefix (not nested) because each service
@@ -382,7 +417,11 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)
-	NewMetricsService(q, activityCache, wsHandler).RegisterRoutes(api)
+	metricsSvc := NewMetricsService(q, activityCache, wsHandler)
+	metricsSvc.RegisterRoutes(api)
+	// Composite: one request for all of the profile page's lists (see
+	// ProfilePageService). Reuses the metrics service's BuildResponse.
+	NewProfilePageService(q, metricsSvc).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
 
 	// Image-by-hash route. It serves locally-stored blobs from the database —
@@ -566,6 +605,49 @@ func buildOrigins(frontendURL, env string) string {
 		origins += ",http://localhost:3000,http://localhost:8080,http://127.0.0.1:3000,http://127.0.0.1:8080"
 	}
 	return origins
+}
+
+// browserCacheReadPrefixes are the public, non-user-scoped read collections
+// safe to cache briefly in the browser. Deliberately excludes /wallet (sets
+// its own degraded-aware header) and anything user-scoped (notifications,
+// saved searches) — those must never be cached.
+var browserCacheReadPrefixes = []string{
+	"/api/v1/listings",
+	"/api/v1/auctions",
+	"/api/v1/offers",
+	"/api/v1/collections",
+	"/api/v1/metrics",
+	"/api/v1/activity",
+	"/api/v1/profile",
+	"/api/v1/profile-page",
+}
+
+// browserCacheReads sets a short private cache + stale-while-revalidate on
+// GET responses for the allowlisted public read endpoints. Registered BEFORE
+// the etag middleware so the header is present on a 304 as well as a 200.
+// max-age=2 matches the wallet service's 2s live-read TTL (owner directive:
+// nothing user-visible may lag more than ~1s beyond transport); SWR lets a
+// repeat view paint instantly while it revalidates in the background.
+func browserCacheReads() fiber.Handler {
+	return func(c *fiber.Ctx) error {
+		err := c.Next()
+		// Set the header on the way out, and only for a successful read: a 5xx
+		// or other error body must not be cached even briefly. 200 and 304
+		// (the etag middleware runs inside this one) both get it; anything
+		// else does not. GET-only, allowlisted prefixes only.
+		if c.Method() == fiber.MethodGet {
+			if st := c.Response().StatusCode(); st == fiber.StatusOK || st == fiber.StatusNotModified {
+				p := c.Path()
+				for _, pre := range browserCacheReadPrefixes {
+					if strings.HasPrefix(p, pre) {
+						c.Set("Cache-Control", "private, max-age=2, stale-while-revalidate=10")
+						break
+					}
+				}
+			}
+		}
+		return err
+	}
 }
 
 // ── JSON helpers ─────────────────────────────────────────────────────────────

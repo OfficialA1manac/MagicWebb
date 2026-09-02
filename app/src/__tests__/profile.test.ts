@@ -32,6 +32,24 @@ function okJson(body: any) {
   } as Response);
 }
 
+// The /api/v1/profile-page composite shape. The profile page fetches this
+// once for all its lists; override individual sections as a test needs.
+function composite(overrides: Record<string, any> = {}) {
+  return {
+    listings: [],
+    auctions: [],
+    offersSent: [],
+    offersReceived: [],
+    metrics: {},
+    activity: [],
+    createdCollections: [],
+    ...overrides,
+  };
+}
+function okComposite(overrides: Record<string, any> = {}) {
+  return okJson(composite(overrides));
+}
+
 function emptyProfileData() {
   return {
     profile: okJson({ display_name: 'Test User', bio: '', avatar_uri: '', verified: false }),
@@ -119,6 +137,14 @@ async function flushDebounce(ms = 600) {
   await vi.runAllTimersAsync();
 }
 
+// The profile page now persists a last-known-good snapshot in sessionStorage.
+// Isolate every test from snapshots left by earlier tests (a successful load
+// in one suite would otherwise instant-paint in the next, masking the loader).
+// Runs BETWEEN tests only, so tests that setup twice keep their own snapshot.
+beforeEach(() => {
+  try { sessionStorage.clear(); } catch { /* jsdom */ }
+});
+
 // ═══════════════════════════════════════════════════════════════════════════════
 // Suite 1: Address Resolution (URL path vs localStorage)
 // ═══════════════════════════════════════════════════════════════════════════════
@@ -130,11 +156,7 @@ describe('Profile address resolution', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: '', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL: ' + url));
     });
   });
@@ -209,11 +231,7 @@ describe('_lastRenderedAddr guard', () => {
         return okJson({ display_name: 'User' + profileCallCount, bio: '', avatar_uri: '', verified: false });
       }
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
   });
@@ -363,16 +381,16 @@ describe('_loading flag — prevents overlapping calls', () => {
     // The loading indicator should still be the original one — NOT re-entered
     expect(root.innerHTML).toContain('Loading profile');
 
-    // Resolve the first fetch: the ADDR_A load completes, and the deferred
-    // wallet change immediately starts a follow-up load for ADDR_B (which
-    // hangs on its own profile fetch) — the change is never silently dropped.
-    // Since the last-known-good guard (2026-09-01), a reload no longer wipes
-    // the rendered page with the loader: ADDR_A's data stays visible while
-    // ADDR_B's fetch is in flight.
+    // Resolve the first fetch: the ADDR_A load completes and saves its
+    // snapshot, and the deferred wallet change immediately starts a follow-up
+    // load for ADDR_B (which hangs on its own profile fetch). ADDR_B has no
+    // snapshot, so the loader shows for B rather than leaving A's (a different
+    // wallet's) data on screen — the render must stay in sync with the wallet.
     resolveFirstFetch();
     await vi.runAllTimersAsync();
     await vi.runAllTimersAsync();
-    expect(root.innerHTML).not.toContain('Loading profile');
+    expect(root.innerHTML).toContain('Loading profile');
+    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toBeTruthy();
 
     // Resolve the follow-up fetch: the page now shows the new wallet.
     resolveFirstFetch();
@@ -474,11 +492,7 @@ describe('Debounce behavior', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'User', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
   });
@@ -635,11 +649,7 @@ describe('emptyWalletNotice', () => {
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'Seller', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
       // Has listings but no NFTs
-      if (url.includes('/api/v1/listings')) return okJson([{ collection: ADDR_A, token_id: '1', price_wei: '1000000000000000000' }]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite({ listings: [{ collection: ADDR_A, token_id: '1', price_wei: '1000000000000000000' }] });
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -657,11 +667,7 @@ describe('emptyWalletNotice', () => {
       if (url.includes('/api/v1/wallet/')) return okJson([
         { collection: ADDR_A, token_id: '1', name: 'Test NFT', image_uri: '/api/v1/img/abc123', units: '1', standard: 'erc721' }
       ]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -678,11 +684,7 @@ describe('emptyWalletNotice', () => {
       const url = String(_url);
       if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'NewUser', bio: '', avatar_uri: '', verified: false });
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL'));
     });
 
@@ -763,11 +765,7 @@ describe('Edit Profile Modal', () => {
 
       // All other endpoints: return empty
       if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/listings')) return okJson([]);
-      if (url.includes('/api/v1/auctions')) return okJson([]);
-      if (url.includes('/api/v1/offers')) return okJson([]);
-      if (url.includes('/api/v1/metrics')) return okJson({});
-      if (url.includes('/api/v1/activity')) return okJson([]);
+      if (url.includes('/api/v1/profile-page')) return okComposite();
       return Promise.reject(new Error('unexpected URL: ' + url));
     });
 
@@ -1070,5 +1068,143 @@ describe('Edit Profile Modal', () => {
     const saveBtn = document.getElementById('edit-profile-save') as HTMLButtonElement;
     expect(saveBtn.disabled).toBe(false);
     expect(saveBtn.textContent).toBe('Save Changes');
+  });
+});
+
+// ═══════════════════════════════════════════════════════════════════════════════
+// Suite 9: Item 0 — profile stays in sync (no zero-state, snapshot, degraded)
+// ═══════════════════════════════════════════════════════════════════════════════
+
+describe('Item 0 — sync hardening', () => {
+  // Response with readable headers + status (the base okJson has neither).
+  function resp(body: any, init: { ok?: boolean; status?: number; headers?: Record<string, string> } = {}) {
+    const { ok = true, status = 200, headers = {} } = init;
+    return Promise.resolve({
+      ok,
+      status,
+      headers: { get: (k: string) => headers[k] ?? headers[k.toLowerCase()] ?? null },
+      json: () => Promise.resolve(body),
+    } as unknown as Response);
+  }
+
+  // Flush the current load's microtasks + any 0ms timers, WITHOUT draining
+  // the retry timer (scheduled ~seconds out). Draining it while the mock is
+  // in a permanent-fail state would loop forever.
+  async function settle() {
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+  }
+
+  beforeEach(() => {
+    vi.useFakeTimers();
+    localStorage.setItem('mw_addr', ADDR_A);
+    try { sessionStorage.clear(); } catch { /* jsdom */ }
+  });
+  afterEach(() => {
+    vi.restoreAllMocks();
+    vi.useRealTimers();
+    document.body.innerHTML = '';
+    localStorage.clear();
+    try { sessionStorage.clear(); } catch { /* jsdom */ }
+  });
+
+  it('first paint with all 429s shows a retry notice, never a confident zero-state', async () => {
+    let phase: 'fail' | 'ok' = 'fail';
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      if (phase === 'fail') return resp(null, { ok: false, status: 429, headers: { 'Retry-After': '1' } });
+      const url = String(_url);
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Real Name', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/metrics')) return resp({});
+      return resp([]);
+    });
+
+    setupProfilePage({ pathname: '/profile' });
+    await settle();
+
+    const root = document.getElementById('profile-root')!;
+    // Retry notice, not a zero-state header (no metric cards, not "loaded").
+    expect(root.innerHTML).toContain('retrying');
+    expect(root.dataset.mwLoaded).not.toBe('1');
+    expect(root.innerHTML).not.toContain('Offers Sent');
+
+    // The scheduled retry (Retry-After: 1s) recovers to real data.
+    phase = 'ok';
+    await vi.advanceTimersByTimeAsync(1200);
+    await settle();
+    expect(root.innerHTML).toContain('Real Name');
+    expect(root.dataset.mwLoaded).toBe('1');
+  });
+
+  it('paints the last-known-good snapshot instantly on the next load, before fetch resolves', async () => {
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      const url = String(_url);
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Snap User', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/metrics')) return resp({});
+      return resp([]);
+    });
+
+    setupProfilePage({ pathname: '/profile' });
+    await flushDebounce();
+    let root = document.getElementById('profile-root')!;
+    expect(root.innerHTML).toContain('Snap User');
+    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toBeTruthy();
+
+    // Re-eval with a fetch that never resolves — the snapshot must paint anyway.
+    vi.restoreAllMocks();
+    vi.spyOn(window, 'fetch').mockImplementation(() => new Promise<Response>(() => {}));
+    setupProfilePage({ pathname: '/profile' });
+    root = document.getElementById('profile-root')!;
+    expect(root.innerHTML).toContain('Snap User');
+    expect(root.dataset.mwStale).toBe('1');
+  });
+
+  it('keeps the snapshot when revalidation returns a degraded wallet inventory', async () => {
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      const url = String(_url);
+      if (url.includes('/api/v1/wallet/')) return resp([{ collection: '0xCollection', token_id: '1', name: 'Kept NFT' }]);
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg User', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/metrics')) return resp({});
+      return resp([]);
+    });
+
+    setupProfilePage({ pathname: '/profile' });
+    await flushDebounce();
+    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toContain('Kept NFT');
+
+    // Next load: snapshot paints, then revalidation returns a degraded/empty
+    // wallet — which must NOT wipe the held NFT.
+    vi.restoreAllMocks();
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      const url = String(_url);
+      if (url.includes('/api/v1/wallet/')) return resp([], { headers: { 'X-MW-Degraded': 'explorer-unavailable' } });
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg User', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/metrics')) return resp({});
+      return resp([]);
+    });
+    setupProfilePage({ pathname: '/profile' });
+    const root = document.getElementById('profile-root')!;
+    expect(root.innerHTML).toContain('Kept NFT'); // instant snapshot
+    await settle();                                 // degraded revalidation runs
+    expect(root.innerHTML).toContain('Kept NFT');   // degraded did not wipe it
+  });
+
+  it('renders available data on first paint even when the wallet is degraded', async () => {
+    // Explorer down (X-MW-Degraded) but profile + composite are fine, and no
+    // snapshot exists. Degraded must NOT block a first paint — the DB-side
+    // data is available and should render, not a "retrying" spinner.
+    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
+      const url = String(_url);
+      if (url.includes('/api/v1/wallet/')) return resp([], { headers: { 'X-MW-Degraded': 'explorer-unavailable' } });
+      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg First', bio: '', avatar_uri: '' });
+      if (url.includes('/api/v1/profile-page')) return resp(composite({ listings: [{ collection: '0xC', token_id: '9', price_wei: '1000000000000000000' }] }));
+      return resp([]);
+    });
+
+    setupProfilePage({ pathname: '/profile' });
+    await settle();
+    const root = document.getElementById('profile-root')!;
+    expect(root.innerHTML).toContain('Deg First'); // rendered, not blocked
+    expect(root.innerHTML).not.toContain('retrying');
+    expect(root.dataset.mwLoaded).toBe('1');
   });
 });

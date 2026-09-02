@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math/big"
+	"strings"
 	"time"
 
 	"github.com/jackc/pgx/v5"
@@ -125,6 +126,30 @@ func (q *Q) ListCollections(ctx context.Context, limit int) ([]CollectionRow, er
 	rows, err := q.reader().Query(ctx,
 		`SELECT address, name, symbol, standard::text, deploy_block, verified, COALESCE(creator_addr,'')
 		 FROM collections WHERE tracked=true ORDER BY created_at DESC LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollectionRow
+	for rows.Next() {
+		var c CollectionRow
+		if err := rows.Scan(&c.Address, &c.Name, &c.Symbol, &c.Standard, &c.DeployBlock, &c.Verified, &c.CreatorAddr); err != nil {
+			return nil, err
+		}
+		out = append(out, c)
+	}
+	return out, rows.Err()
+}
+
+// ListCollectionsByCreator returns tracked collections whose ERC-173 owner is
+// `creator` (lowercased). Used by the profile-page composite for the Creator
+// badge — avoids pulling the full collection list to the client just to filter
+// it for one address.
+func (q *Q) ListCollectionsByCreator(ctx context.Context, creator string) ([]CollectionRow, error) {
+	creator = strings.ToLower(creator)
+	rows, err := q.reader().Query(ctx,
+		`SELECT address, name, symbol, standard::text, deploy_block, verified, COALESCE(creator_addr,'')
+		 FROM collections WHERE tracked=true AND lower(creator_addr)=$1 ORDER BY name`, creator)
 	if err != nil {
 		return nil, err
 	}
