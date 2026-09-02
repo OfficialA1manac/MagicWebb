@@ -125,11 +125,14 @@ func (c *Connection) writePump() {
 			// WS-3: coalesce writes — if there's already a pending batch,
 			// append to it. Otherwise start a new batch with a timer.
 			if buf == nil {
-				// Copy the payload: BroadcastTo marshals one slice and sends
-				// it to every connection, so appending in place would write
-				// into a backing array shared across connections (data race
-				// + corrupted frames).
-				buf = append(make([]byte, 0, len(msg)+64), msg...)
+				// Copy the payload: the dispatcher marshals one slice and
+				// sends it to every connection, so appending in place would
+				// write into a backing array shared across connections (data
+				// race + corrupted frames). Copy exactly len(msg) — avoid a
+				// len(msg)+const size expression (flagged as a potential
+				// allocation-size overflow); the coalesce path below grows the
+				// slice as needed.
+				buf = append([]byte(nil), msg...)
 				// Try a non-blocking drain of any additional messages
 				// already queued — if multiple events arrived between
 				// the last writePump iteration and now, grab them all
