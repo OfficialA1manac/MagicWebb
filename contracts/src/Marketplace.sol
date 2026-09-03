@@ -276,6 +276,9 @@ contract Marketplace is MarketplaceCore {
         // is not the caller, so it keeps safeTransferFrom. ERC-1155 has no
         // unsafe variant — that branch keeps its callback.
         if (l.standard == TokenStandard.ERC721) {
+            // `from` is the recorded listing seller who approved this contract at list
+            // time; `to` is the paying caller. Not attacker-controlled.
+            // slither-disable-next-line arbitrary-send-erc20
             IERC721(coll).transferFrom(l.seller, msg.sender, id);
         } else {
             IERC1155(coll).safeTransferFrom(l.seller, msg.sender, id, l.amount, "");
