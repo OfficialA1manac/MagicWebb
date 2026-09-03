@@ -25,8 +25,8 @@ import {Script, console2} from "forge-std/Script.sol";
 ///   SAFE_SALT      -- create2 salt nonce (default: 0, i.e. fresh deploy)
 ///
 /// The script prints the Safe address and the setup call data. Paste the
-/// address into CREATOR_ADDR when running DeployCoston2 / DeployFlareMainnet
-/// / DeploySongbird. The script does NOT deploy marketplace contracts — it
+/// address into CREATOR_ADDR when running DeployV34 (the unified deploy for
+/// every network). The script does NOT deploy marketplace contracts — it
 /// only creates the Safe.
 contract DeploySafe is Script {
     /// @notice Canonical SafeL2 v1.3.0 singleton (used on chains 14, 114).

@@ -193,34 +193,39 @@ jobs:
         working-directory: contracts
         env:
           EXPLORER_API_KEY: ${{ secrets.EXPLORER_API_KEY }}
-          NETWORK: ${{ vars.NETWORK }}
         run: |
           set -euo pipefail
-          NETWORK="${NETWORK:-coston2}"
-          DEP="../deployments/${NETWORK}.json"
-          [ -f "$DEP" ] || { echo "::error::no deployments/${NETWORK}.json"; exit 1; }
-          if [ "$(jq -r .status "$DEP")" != "deployed" ]; then
-            echo "${NETWORK} has no deployed contracts (deployments/${NETWORK}.json status=not-deployed); nothing to verify."
-            exit 0
-          fi
-          CHAIN_ID=$(jq -r .chainId "$DEP")
-          EXPLORER_URL=$(jq -r .explorer "$DEP")
-          echo "Verifying contracts on $EXPLORER_URL (chain $CHAIN_ID)..."
+          # v3.4: verify EVERY network whose manifest says "deployed" — the
+          # old single-vars.NETWORK form silently skipped Songbird/Flare.
+          for NETWORK in coston2 songbird flare; do
+            DEP="../deployments/${NETWORK}.json"
+            [ -f "$DEP" ] || { echo "::error::no deployments/${NETWORK}.json"; exit 1; }
+            if [ "$(jq -r .status "$DEP")" != "deployed" ]; then
+              echo "${NETWORK}: status != deployed; nothing to verify."
+              continue
+            fi
+            CHAIN_ID=$(jq -r .chainId "$DEP")
+            EXPLORER_URL=$(jq -r .explorer "$DEP")
+            echo "=== ${NETWORK}: verifying on $EXPLORER_URL (chain $CHAIN_ID) ==="
 
-          verify() {
-            local name="$1" key="$2" file="$3"
-            local addr; addr=$(jq -r ".contracts.${key}" "$DEP")
-            echo "--- Verifying $name at $addr ---"
-            forge flatten "src/$file" -o "/tmp/${name}_flat.sol"
-            forge verify-contract               "$addr"               "src/$file"               --chain "$CHAIN_ID"               --verifier blockscout               --verifier-url "${EXPLORER_URL}/api/"               --etherscan-api-key "$EXPLORER_API_KEY"               --watch || echo "⚠  $name verification skipped or failed (check explorer)"
-          }
+            verify() {
+              local name="$1" key="$2" file="$3"
+              local addr; addr=$(jq -r ".contracts.${key}" "$DEP")
+              echo "--- Verifying $name at $addr ---"
+              forge flatten "src/$file" -o "/tmp/${name}_flat.sol"
+              forge verify-contract               "$addr"               "src/$file"               --chain "$CHAIN_ID"               --verifier blockscout               --verifier-url "${EXPLORER_URL}/api/"               --etherscan-api-key "$EXPLORER_API_KEY"               --watch || echo "⚠  $name verification skipped or failed (check explorer)"
+            }
 
-          # The NFT at contracts.nft is a third-party/test collection, not a
-          # contract in this repo (src/MagicWebbNFT.sol was removed in 3867c0c).
-          verify "MarketplaceManager" "marketplaceManager" "MarketplaceManager.sol"
-          verify "Marketplace"       "marketplace"        "Marketplace.sol"
-          verify "AuctionHouse"      "auctionHouse"       "AuctionHouse.sol"
-          verify "OfferBook"         "offerBook"          "OfferBook.sol"
+            # The NFT at contracts.nft is a third-party/test collection, not a
+            # contract in this repo (src/MagicWebbNFT.sol was removed in 3867c0c).
+            # v3.4: the manager is UNPROXIED — this verifies its real bytecode
+            # directly; the three cores are ERC1967 proxies (impls are logged
+            # in the deploy broadcast and can be verified manually if wanted).
+            verify "MarketplaceManager" "marketplaceManager" "MarketplaceManager.sol"
+            verify "Marketplace"       "marketplace"        "Marketplace.sol"
+            verify "AuctionHouse"      "auctionHouse"       "AuctionHouse.sol"
+            verify "OfferBook"         "offerBook"          "OfferBook.sol"
+          done
 
   plan:
     name: Which networks deploy

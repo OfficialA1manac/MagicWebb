@@ -24,7 +24,9 @@ contract MarketplaceHandler is Test {
 
     /// @notice Gross ETH paid by buyers across every settled sale.
     uint256 public ghostGross;
-    /// @notice Sum of the 1.5% platform fees those sales should have produced.
+    /// @notice Sum of the 2% platform fees those sales should have produced. The harness
+    ///         deploys with manager == address(0), so no keeper share is carved out and
+    ///         the full fee accrues at feeRecipient (split covered in FeeSplit.t.sol).
     uint256 public ghostFees;
     /// @notice block.timestamp at which each token's current listing was written.
     mapping(uint256 => uint64) public ghostListedAt;
@@ -198,7 +200,7 @@ contract MarketplaceInvariantTest is Test, TestHelpers {
     }
 
     /// @notice Value conservation across every settled sale: the fee wallet
-    ///         holds exactly the accrued 1.5%, and the seller holds exactly the
+    ///         holds exactly the accrued 2% (no manager → no keeper share), and the seller holds exactly the
     ///         remainder. Both actors start at zero balance and are never
     ///         dealt ETH, so these are absolute, not relative, checks.
     function invariant_salesConserveValue() public view {

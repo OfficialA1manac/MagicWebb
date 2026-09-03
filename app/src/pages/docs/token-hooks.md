@@ -9,7 +9,9 @@ description: "Future token integration points anchored in the manager contract."
 Status: **foreclosed as of v3.2 — the slots below were removed from the
 contracts.** The v3.2 redesign deleted the module slots, their setters, and
 the role registry that gated them: the marketplace has a single fixed keeper,
-no role granting, and mainnet deployments are sealed (no admin) at deploy.
+no role granting, and every network deploys unsealed under a single admin whose
+only powers are instant upgrades, keeper replacement and its own rotation or
+renunciation — sealing (`renounceAdmin()`) is a later, explicit per-network step.
 Any future token architecture would ship as a new contract generation, not by
 wiring these slots. This page is retained as that future generation's design
 record.
@@ -19,7 +21,7 @@ record.
 | Hook | Location | Set by | Purpose when a native token ships |
 |------|----------|--------|-----------------------------------|
 | `setTokenAddress(address)` | `MarketplaceManager.sol` | `DEFAULT_ADMIN_ROLE` | Registers the marketplace token. Single discovery point for every other module and for the backend indexer. |
-| `setFeeDistributor(address)` | `MarketplaceManager.sol` | `DEFAULT_ADMIN_ROLE` | Token-based fee rebates. The core 1.5 % fee is immutable and always flows to `feeRecipient`; a FeeDistributor would sit **behind** that address (deploy the distributor, point `feeRecipient` of the *next* core version at it, or have the fee wallet forward). `FEE_MANAGER_ROLE` is pre-defined for its operators. |
+| `setFeeDistributor(address)` | `MarketplaceManager.sol` | `DEFAULT_ADMIN_ROLE` | Token-based fee rebates. The core 2 % fee is immutable (1.5 % to `feeRecipient`, 0.5 % to the keeper); a FeeDistributor would sit **behind** that address (deploy the distributor, point `feeRecipient` of the *next* core version at it, or have the fee wallet forward). `FEE_MANAGER_ROLE` is pre-defined for its operators. |
 | `setStakingModule(address)` | `MarketplaceManager.sol` | `DEFAULT_ADMIN_ROLE` | Token utility (e.g. staked-tier perks). Reads `manager.token()`; cores stay untouched. |
 | `setGovernanceModule(address)` | `MarketplaceManager.sol` | `DEFAULT_ADMIN_ROLE` | On-chain governance. Recommended end-state: transfer `DEFAULT_ADMIN_ROLE` to this module (or a timelock in front of it). |
 
@@ -27,7 +29,7 @@ record.
 
 1. **Cores are immutable.** Token features integrate by *reading* the manager registry, never by modifying Marketplace/AuctionHouse/OfferBook. New behavior requiring core changes = new core version + `setCoreContracts` re-point.
 2. **Exits stay unstoppable.** No module may sit between a user and `settle` / `refundLosers` / `withdrawRefund` / `rejectOffer` / `refundExpiredOffer` / `cancel*`.
-3. **The 1.5 % fee is fixed.** Rebates are paid from collected fees by the FeeDistributor, never by changing `PLATFORM_FEE_BPS`.
+3. **The 2 % fee is fixed.** Rebates are paid from collected fees by the FeeDistributor, never by changing `PLATFORM_FEE_BPS`.
 4. **The manager holds no funds** (no payable surface — enforced by test `test_managerHoldsNoFundsPath`).
 
 ## Off-chain integration points

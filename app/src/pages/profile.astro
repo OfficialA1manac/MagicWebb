@@ -74,6 +74,20 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
       // Mirrors src/lib/image-uri.ts -- inline scripts cannot import; keep in sync.
       function resolveImageUri(uri,tid,size){if(!uri)return'';if(uri.startsWith('data:'))return uri;if(uri.startsWith('/api/v1/img/'))uri='/img/'+uri.slice(12);if(uri.startsWith('/img/'))return size?uri+'?size='+size:uri;return'/api/v1/media?url='+encodeURIComponent(uri)+'&id='+encodeURIComponent(tid||'');}
       function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
+      // Mirrors components/VerifiedBadge.svelte with link={false}. Duplicated
+      // per page (index/auctions/search/profile) because is:inline scripts
+      // cannot import; keep in sync. Emits a <span> (never an <a>): these
+      // badges sit inside anchor cards. Upgrades to "Authentic" whenever the
+      // collection is verified AND its ERC-173 creator is known.
+      function mwVerifiedBadge(verified, creator, collName, style) {
+        if (!verified) return '';
+        var sc = creator ? String(creator).slice(0,6)+'…'+String(creator).slice(-4) : '';
+        var label = creator ? 'Authentic' : 'Verified NFT';
+        var tip = creator
+          ? 'Authentic — '+(collName||'this collection')+' by '+sc+'. Standard NFT contract, metadata confirmed, creator known.'
+          : 'Verified NFT: standard NFT contract, metadata confirmed. Not a judgement of the art or the seller.';
+        return '<span'+(style?' style="'+style+'"':'')+' class="vb is-ok" title="'+esc(tip)+'" aria-label="'+esc(tip)+'"><span class="vb-dot" aria-hidden="true">✓</span>'+label+'</span>';
+      }
 
       function isEthAddr(s){
         if(!s||s.length!==42||s.slice(0,2)!=='0x')return false;
@@ -331,6 +345,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
                 (selectable?'<input type="checkbox" class="mw-batch-cb" data-coll="'+esc(coll)+'" data-tid="'+esc(String(tid))+'" style="position:absolute;top:0.5rem;left:0.5rem;z-index:3;width:1.125rem;height:1.125rem;accent-color:#7dd3fc;cursor:pointer;" title="Select for batch listing">':'')+
                 '<div style="aspect-ratio:1;overflow:hidden;background:rgba(9,9,11,0.5);position:relative;display:flex;align-items:center;justify-content:center;">'+
                   imgTag(src,'🖼')+
+                  mwVerifiedBadge(it.collection_verified, it.collection_creator, it.collection_name||'', 'position:absolute;'+(selectable?'top:2.25rem;':'top:0.5rem;')+'left:0.5rem;')+
                   (price?'<div style="position:absolute;top:0.5rem;right:0.5rem;padding:0.25rem 0.625rem;border-radius:0.625rem;background:rgba(9,9,11,0.75);backdrop-filter:blur(8px);border:1px solid rgba(252,211,77,0.3);"><span style="font-size:0.75rem;font-weight:900;color:#fde68a;">'+esc(price)+'</span> <span style="font-size:0.5625rem;color:rgba(253,224,138,0.7);font-weight:700;">'+cur()+'</span></div>':'')+
                 '</div>'+
                 '<div style="padding:0.75rem;position:relative;z-index:2;pointer-events:none;"><p style="font-size:0.5625rem;color:rgba(255,255,255,0.25);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(coll))+'</p><p style="font-size:0.875rem;font-weight:700;color:#fafafa;">'+esc(nm)+'</p>'+
@@ -396,7 +411,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             if(!items||!items.length) return '<div style="padding:4rem;text-align:center;color:rgba(255,255,255,0.2);">No auctions</div>';
             return '<div style="display:grid;grid-template-columns:repeat(auto-fill,minmax(240px,1fr));gap:1rem;">'+items.map(function(a){
               return '<a href="/auction/'+encodeURIComponent(String(a.auction_id))+'" style="display:block;background:rgba(15,15,19,0.6);border:1px solid rgba(167,139,250,0.2);border-radius:1rem;padding:1rem;transition:all 0.2s;">'+
-                '<p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">Auction #'+esc(String(a.auction_id))+'</p>'+
+                '<div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;"><p style="font-size:0.8125rem;font-weight:700;color:#fafafa;">Auction #'+esc(String(a.auction_id))+'</p>'+mwVerifiedBadge(a.collection_verified, a.collection_creator, a.collection_name||'')+'</div>'+
                 '<p style="font-size:0.625rem;color:rgba(255,255,255,0.35);font-family:JetBrains Mono,monospace;margin-top:0.25rem;">'+esc(shortAddr(a.collection))+' #'+esc(a.token_id)+'</p>'+
                 '<div style="display:flex;justify-content:space-between;align-items:center;margin-top:0.75rem;">'+
                   '<span style="font-size:0.625rem;padding:0.125rem 0.5rem;border-radius:1rem;background:rgba(167,139,250,0.12);color:#c4b5fd;font-weight:700;text-transform:uppercase;">'+esc(a.status||'active')+'</span>'+
@@ -411,7 +426,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
               const label = type==='sent' ? esc(shortAddr(o.collection))+' #'+esc(o.token_id) : 'From '+esc(shortAddr(o.bidder));
               const borderColor = type==='sent' ? 'rgba(252,211,77,0.12)' : 'rgba(125,211,252,0.12)';
               return '<a href="/token/'+encodeURIComponent(o.collection)+'/'+encodeURIComponent(o.token_id)+'" style="display:flex;align-items:center;justify-content:space-between;padding:1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid '+borderColor+';transition:all 0.2s;">'+
-                '<div><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+label+'</p><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div>'+
+                '<div><div style="display:flex;align-items:center;gap:0.5rem;flex-wrap:wrap;"><p style="font-size:0.8125rem;font-weight:600;color:#fafafa;">'+label+'</p>'+mwVerifiedBadge(o.collection_verified, o.collection_creator, o.collection_name||'')+'</div><p style="font-size:0.625rem;color:rgba(255,255,255,0.3);">'+esc(o.status||'pending')+'</p></div>'+
                 '<span style="font-size:0.9375rem;font-weight:800;color:#fcd34d;">'+weiToFLR(o.amount_wei||o.principal_wei||'0')+' <span style="font-size:0.5625rem;opacity:0.6;">'+cur()+'</span></span></a>';
             }).join('')+'</div>';
           }
@@ -599,7 +614,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
             switch(id){
               case 'nfts': {
                 // Read-only deployments have no marketplace contract: no List/batch UI.
-                var own = isOwnProfileFor(targetAddr) && !!window.MW_MARKETPLACE;
+                var own = isOwnProfileFor(targetAddr) && /^0x[0-9a-fA-F]{40}$/.test(String(window.MW_MARKETPLACE||''));
                 tc.innerHTML = (own ? '<p style="font-size:0.6875rem;color:rgba(255,255,255,0.35);margin-bottom:0.5rem;">Tick unlisted NFTs to list several at once (max 50), or use each card\u2019s List \u2192 link.</p>'+renderBatchBar() : '') + renderNFTGrid(pageSlice(combinedNFTs,'nfts'), own) + renderPager('nfts', combinedNFTs.length);
                 if(own) wireBatchBar(tc);
                 wirePager(tc,'nfts');

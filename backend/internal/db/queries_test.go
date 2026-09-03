@@ -996,3 +996,141 @@ func TestUpsertProfileWritesTag(t *testing.T) {
 		t.Fatal(err)
 	}
 }
+
+// ── v3.4: force-cancel window, offer eligibility, badge columns ──────────────
+
+func auctionMockRow(mock pgxmock.PgxPoolIface, id int64, now time.Time) *pgxmock.Rows {
+	return mock.NewRows([]string{"auction_id", "collection", "token_id", "seller", "standard",
+		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri",
+		"verified", "creator_addr"}).
+		AddRow(id, "0xc", "1", "0xs", "erc721", "0", "0", "", 500,
+			now.Add(-96*time.Hour), now.Add(-80*time.Hour), "active", "0xtx", "", "",
+			false, "")
+}
+
+// The keeper's force-cancel sweep must key on ends_at + the 72h contract
+// window (SELLER_DEFAULT_WINDOW), not bare ends_at — otherwise it would race
+// settle() on every freshly-ended auction and burn gas on NotYet reverts.
+func TestGetForceCancelableAuctionsUsesWindow(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	if ForceCancelWindow != 72*time.Hour {
+		t.Fatalf("ForceCancelWindow = %v, want 72h (AuctionHouse.SELLER_DEFAULT_WINDOW)", ForceCancelWindow)
+	}
+	now := time.Unix(1_700_000_000, 0)
+	mock.ExpectQuery(`WHERE a\.status='active' AND a\.ends_at \+ \$1::interval <= now\(\)\s+ORDER BY a\.ends_at ASC LIMIT 100`).
+		WithArgs(ForceCancelWindow).
+		WillReturnRows(auctionMockRow(mock, 7, now))
+
+	got, err := q.GetForceCancelableAuctions(context.Background())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || got[0].AuctionID != 7 || got[0].Status != "active" {
+		t.Fatalf("rows = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSetCollectionOfferEligibleUpserts(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	mock.ExpectExec(`INSERT INTO collections\(address, name, symbol, standard, deploy_block, offer_eligible\)\s+VALUES\(\$1, '', '', 'erc721', 0, \$2\)\s+ON CONFLICT\(address\) DO UPDATE SET offer_eligible=EXCLUDED\.offer_eligible`).
+		WithArgs("0xabc", true).
+		WillReturnResult(pgxmock.NewResult("INSERT", 1))
+
+	if err := q.SetCollectionOfferEligible(context.Background(), "0xabc", true); err != nil {
+		t.Fatal(err)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func offerMockRows(mock pgxmock.PgxPoolIface, now time.Time) *pgxmock.Rows {
+	return mock.NewRows([]string{"offer_id", "bidder", "collection", "token_id", "principal_wei",
+		"fee_wei", "units", "standard", "expires_at", "status", "make_tx", "created_at",
+		"verified", "creator_addr"}).
+		AddRow("1", "0xb", "0xc", "5", "1000", "15", int64(1), "erc721",
+			now.Add(time.Hour), "pending", "0xtx", now, true, "0xcreator")
+}
+
+// OfferRow now carries the collection badge columns (Verified / Authentic)
+// via LEFT JOIN collections — both GetOffer and ListOffers must select and
+// scan them, or offer cards silently lose the badges.
+func TestGetOfferCarriesBadgeColumns(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	now := time.Unix(1_700_000_000, 0)
+	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+WHERE o\.offer_id=\$1`).
+		WithArgs("1").
+		WillReturnRows(offerMockRows(mock, now))
+
+	got, err := q.GetOffer(context.Background(), "1")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !got.CollectionVerified || got.CollectionCreator != "0xcreator" {
+		t.Fatalf("badge cols = %v/%q", got.CollectionVerified, got.CollectionCreator)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestListOffersCarriesBadgeColumns(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	now := time.Unix(1_700_000_000, 0)
+	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+WHERE o\.expires_at > now\(\) AND o\.collection=\$2 ORDER BY o\.created_at DESC LIMIT \$1`).
+		WithArgs(50, "0xc").
+		WillReturnRows(offerMockRows(mock, now))
+
+	got, err := q.ListOffers(context.Background(), OffersFilter{Collection: "0xc"})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 1 || !got[0].CollectionVerified || got[0].CollectionCreator != "0xcreator" {
+		t.Fatalf("rows = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}
+
+// Search must project creator_addr in BOTH UNION branches (a column-count
+// mismatch between branches is a Postgres error, not a silent miss).
+func TestSearchCarriesCreatorInBothBranches(t *testing.T) {
+	mock, _ := pgxmock.NewPool()
+	defer mock.Close()
+	q := New(mock)
+
+	rows := mock.NewRows([]string{"kind", "collection", "token_id", "name", "image_uri", "verified", "creator"}).
+		AddRow("nft", "0xc", "1", "Alpha", "ipfs://x", true, "0xcreator").
+		AddRow("collection", "0xc", "", "Alpha Coll", "", true, "0xcreator")
+	mock.ExpectQuery(`coalesce\(c\.verified, false\) AS verified,\s+coalesce\(c\.creator_addr, ''\) AS creator\s+FROM nft_tokens t[\s\S]*coalesce\(c\.verified, false\),\s+coalesce\(c\.creator_addr, ''\)\s+FROM collections c`).
+		WithArgs("alpha", 20).
+		WillReturnRows(rows)
+
+	got, err := q.Search(context.Background(), "alpha", 0)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(got) != 2 || got[0].Creator != "0xcreator" || got[1].Creator != "0xcreator" {
+		t.Fatalf("rows = %+v", got)
+	}
+	if err := mock.ExpectationsWereMet(); err != nil {
+		t.Fatal(err)
+	}
+}

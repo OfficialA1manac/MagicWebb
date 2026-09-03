@@ -3,7 +3,8 @@
 > **FORECLOSED in v3.2 (2026-08-31).** The four module slots and their
 > admin-gated setters were DELETED from `MarketplaceManager` along with the
 > entire AccessControl role registry (owner decision: single fixed keeper, no
-> role granting, sealed mainnet deployments). On a sealed network there is no
+> role granting; every network deploys unsealed and is sealed later by an
+> explicit per-network `renounceAdmin()`). On a sealed network there is no
 > admin to call any setter, so the slot architecture below cannot exist there
 > even in principle. A future token / fee-distributor / staking / governance
 > rollout requires a NEW contract generation and user migration. This document
@@ -42,7 +43,8 @@ In particular:
 
 - The 1.5% platform fee is **immutable and hard-coded in the cores**. A
   `feeDistributor` address does not, and cannot, redirect or rebate it. Fee
-  changes would require a core upgrade through the timelock, not a slot write.
+  changes would require a core upgrade through the admin-gated upgrade path
+  (instant — no timelock), not a slot write.
 - No sale, bid, offer, or settlement path consults any of these slots, so a
   misconfigured or hostile address in one of them cannot halt a user action or
   touch escrowed funds. This is the same guarantee the manager itself carries:
@@ -60,7 +62,7 @@ depends on them must therefore either:
 
 1. set the slots before renunciation, accepting that the modules behind them are
    still inert until a core upgrade teaches the cores to read them (and core
-   upgrades are themselves timelocked, and gone after renunciation); or
+   upgrades are instant while an admin exists, and gone after renunciation); or
 2. treat the slots as abandoned and build the token programme in a separate
    contract system that does not need the manager's permission.
 

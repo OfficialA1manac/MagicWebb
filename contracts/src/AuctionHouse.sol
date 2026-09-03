@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {MarketplaceCore, TokenStandard, TransferFailed, WithdrawFailed, BelowMinPrice, InvalidDuration, DURATION_24HR} from "./MarketplaceCore.sol";
+import {MarketplaceCore, TokenStandard, TransferFailed, WithdrawFailed, BelowMinPrice, InvalidDuration} from "./MarketplaceCore.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 
@@ -51,7 +51,7 @@ error CannotCancel();
 ///   the leader too. Worst case — seller vanished AND keeper dead — the LEADER
 ///   force-cancels their own auction after 3 days; no path leaves funds locked
 ///   forever, but no outsider can trigger it either.
-///   NFT → winner; 1.5% fee → feeRecipient; winningBid−fee → seller.
+///   NFT → winner; 2% fee (1.5% platform + 0.5% keeper); winningBid−fee → seller.
 ///   The winner's escrow is consumed.
 ///   - `refundLosers(id, batch)` is callable by ANYONE after settlement and returns
 ///     each non-winner's full escrow. Batched + pull-fallback so one non-receiving
@@ -99,21 +99,41 @@ contract AuctionHouse is MarketplaceCore {
     ///         never read.
     uint128 public constant MIN_BID_INCREMENT  = 1 ether;
 
+    /// @dev v3.4 repack: 6 slots → 4 (create writes 4 cold SSTOREs, −66k).
+    ///      Dropped fields and where their duties went:
+    ///        - minIncrementBps/minIncrementFlat: vestigial since v3.3
+    ///          (marketplace-wide MIN_BID_INCREMENT), deleted outright.
+    ///        - active: vestigial (creation = activation since v3.3);
+    ///          activateAuction() removed with it.
+    ///        - startsAt: only fed the legacy anti-snipe fallback and the
+    ///          AuctionCreated event; the fallback died when originalEndsAt
+    ///          moved into the struct (always set on a fresh deployment) and
+    ///          the event emits block.timestamp directly.
+    ///        - leaderTotal: DERIVED, not stored — the invariant
+    ///          `leaderTotal == cumulative[id][leader]` held by construction,
+    ///          so bid()/settle() read cumulative and the leaderTotal(id)
+    ///          compat view serves off-chain readers (note: it reads 0 after
+    ///          settlement, when the winner's escrow has been consumed).
+    ///      Width bounds (external ABI keeps uint128; _create guards):
+    ///        - reserve/amount: uint96 caps at ~7.9e10 ether — above any
+    ///          single wallet's holdings on Flare-family chains; BidOverflow
+    ///          on anything larger.
+    ///        - endsAt/originalEndsAt: uint40 seconds is fine until y36812.
     struct Auction {
+        // slot 0: 20 + 5 + 5 + 1 + 1 = 32
         address       seller;
-        uint64        startsAt;
-        uint16        minIncrementBps;   // VESTIGIAL (v3.3): always 0; kept for storage layout
+        uint40        endsAt;
+        uint40        originalEndsAt;   // pre-extension end; anti-snipe hard cap anchor
         bool          settled;
-        bool          active;            // VESTIGIAL: set true by _create; bid() never reads it. Kept for ABI/storage compat
         TokenStandard standard;
+        // slot 1: 20 + 12 = 32
         address       collection;
-        uint64        endsAt;
+        uint96        reserve;
+        // slot 2
         uint256       tokenId;
-        uint128       reserve;
-        uint128       amount;            // token amount (1 for ERC-721)
+        // slot 3: 20 + 12 = 32
         address       leader;            // current highest-cumulative bidder
-        uint128       leaderTotal;       // leader's cumulative escrow
-        uint128       minIncrementFlat;  // DEPRECATED + IGNORED by bid(): uncapped flat was a griefing vector
+        uint96        amount;            // token amount (1 for ERC-721)
     }
 
     uint256 public nextAuctionId;
@@ -124,53 +144,38 @@ contract AuctionHouse is MarketplaceCore {
     /// getter, which returns a positional tuple — silent misreads on struct
     /// reflow if a new field is ever added before `leader`. Test harnesses
     /// also gain audit-fix stability: invariants can assert on a named field
-    /// (`.endsAt`, `.settled`, `.active`, `.leader`, `.leaderTotal`)
-    /// rather than counting commas in a destructuring tuple.
+    /// (`.endsAt`, `.settled`, `.leader`) rather than counting commas in a
+    /// destructuring tuple.
     function getAuction(uint256 id) external view returns (Auction memory) {
         return auctions[id];
     }
 
-    /// @notice cumulative[auctionId][bidder] → total wei this bidder has escrowed.
-    mapping(uint256 => mapping(address => uint128)) public cumulative;
-    /// @notice Distinct bidders per auction, for off-chain enumeration + refund batching.
-    /// @dev L-10 fix (v28 — Round 3): the prior design relied on `cumulative == 0`
-    ///      as the first-bid signal, but `refundLosers` zeros `cumulative[id][b]`
-    ///      for every bidder it processes, and a previously-refunded bidder can
-    ///      re-bid exactly as a fresh entry would. Without the seen-mapping below,
-    ///      `_bidders[id]` accumulates a duplicate entry on every rebind cycle —
-    ///      not exploitable (each duplicate address still maps to its own
-    ///      cumulative slot and refundLosers is idempotent) but unbounded
-    ///      off-chain enumeration gas and a permanent on-chain storage tax.
-    ///      Iteration is bounded by uint256 so a worst-case attacker could in
-    ///      principle grow `_bidders[id]` without limit and force every
-    ///      `bidderCount(id)` / `getBidder(id, i)` off-chain loop to scan an
-    ///      ever-larger array — capping the bids-per-auction count by gas
-    ///      alone. Cheaper fix: a presence flag keyed `(id, bidder)` that the
-    ///      push path consults before appending and the consume path never
-    ///      clears (since refunding + rebidding counts as the SAME logical
-    ///      enrollee from the off-chain indexer's point of view).
-    mapping(uint256 => address[]) private _bidders;
-    /// @notice Presence flag for `_bidders[id]` uniqueness. Set true on first
-    ///         push; never cleared (a refunded-then-rebidded bidder is the same
-    ///         logical enrollee — the off-chain indexer dedupes on `address`,
-    ///         not on cumulative epoch). Adds ~20k gas per unique-bidder
-    ///         enrollment (one SSTORE) but caps `_bidders[id].length` to the
-    ///         number of distinct participating addresses — bounded by total
-    ///         accounts on the chain, and naturally bounded by per-auction
-    ///         gas-budget economics (a single bidder pays gas for each rebind).
-    mapping(uint256 => mapping(address => bool)) private _seenBidder;
+    /// @notice The leader's cumulative escrow — v3.4 compat view for the
+    ///         dropped stored field. DERIVED: equals cumulative[id][leader]
+    ///         by construction. Reads 0 when there is no leader, and 0 after
+    ///         settlement (the winner's escrow is consumed by settle()); code
+    ///         that needs the winning amount post-settle should read the
+    ///         AuctionSettled event.
+    function leaderTotal(uint256 id) external view returns (uint128) {
+        address l = auctions[id].leader;
+        return l == address(0) ? 0 : cumulative[id][l];
+    }
 
-    /// @notice The auction's end time as set at creation, before any anti-snipe
-    ///         extension. Anti-snipe extensions are capped at
-    ///         `originalEndsAt[id] + MAX_TOTAL_EXTENSION` (30 minutes past the
-    ///         ORIGINAL end), regardless of the auction's chosen duration —
-    ///         the prior cap keyed off `startsAt + DURATION_24HR` let a 3-min
-    ///         auction extend for hours. Kept in a separate mapping (not a new
-    ///         Auction-struct field) so the `getAuction` ABI and stored struct
-    ///         layout are unchanged across the UUPS upgrade. Zero for auctions
-    ///         created before this upgrade — bid() falls back to the legacy
-    ///         cap for those.
-    mapping(uint256 => uint64) public originalEndsAt;
+    /// @notice v3.4 compat view: originalEndsAt moved from a standalone
+    ///         mapping into the Auction struct.
+    function originalEndsAt(uint256 id) external view returns (uint64) {
+        return auctions[id].originalEndsAt;
+    }
+
+    /// @notice cumulative[auctionId][bidder] → total wei this bidder has escrowed.
+    /// @dev v3.4: the write-only bidder registry (_bidders array + _seenBidder
+    ///      presence flag) is GONE — the contract never read it, refundLosers
+    ///      takes its batch as calldata, and the off-chain keeper/indexer
+    ///      reconstructs the bidder set from BidPlaced events. First-bid cost
+    ///      drops ~44k (array length + element + seen-flag cold SSTOREs).
+    ///      originalEndsAt likewise moved from a standalone mapping into the
+    ///      Auction struct (fresh deployment — no layout compatibility owed).
+    mapping(uint256 => mapping(address => uint128)) public cumulative;
 
     // pendingReturns inherited from MarketplaceCore — no shadowing needed.
     // AuctionHouse.writeRefund() overrides MarketplaceCore.withdrawRefund()
@@ -206,36 +211,23 @@ contract AuctionHouse is MarketplaceCore {
     ///         winner. Losers withdraw as usual via refundLosers().
     event AuctionSettlementFailed(uint256 indexed id, address indexed winner, uint128 amount);
     event RefundPushed(address indexed bidder, uint256 amount);
-    event AuctionActivated(uint256 indexed id);
 
+    /// @notice v3.4: feeRecipient + manager are baked into the implementation
+    ///         as immutables (validated in MarketplaceCore's constructor).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor(address recipient, address manager_)
+        MarketplaceCore(recipient, manager_)
+    { _disableInitializers(); }
 
-    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
-    ///         feeRecipient + manager in upgradeable storage.
-    function initialize(address recipient, address manager_) public initializer {
-        __MarketplaceCore_init(recipient, manager_);
-    }
-
-    // ── Activate Auction ──────────────────────────────────────────────────────
-
-    /// @notice Activate an auction, allowing bids. Only the seller can call this.
-    ///         Once activated, the auction cannot be deactivated.
-    /// @dev Auctions are now auto-activated on creation; calling this on an
-    ///      already-active auction reverts.
-    /// @param id The auction to activate.
-    function activateAuction(uint256 id) external nonReentrant {
-        Auction storage a = auctions[id];
-        if (a.seller != msg.sender) revert NotSeller();
-        if (a.settled) revert NotActive();
-        if (a.active) revert AuctionLive();
-        // Unreachable under current create()-auto-activate behaviour;
-        // retained for ABI backwards-compatibility.
-        a.active = true;
-        emit AuctionActivated(id);
+    /// @notice One-time proxy initializer — no arguments in v3.4 (immutables
+    ///         live in the implementation). Still initializer-gated.
+    function initialize() public initializer {
+        __MarketplaceCore_init();
     }
 
     // ── Create (free) ───────────────────────────────────────────────────────────
+    // v3.4: activateAuction() removed — creation IS activation since v3.3 and
+    // the vestigial `active` field is gone from the struct.
 
     /// @notice Create an ERC-721 auction. Starts immediately.
     /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
@@ -277,32 +269,26 @@ contract AuctionHouse is MarketplaceCore {
             if (!IERC1155(coll).isApprovedForAll(msg.sender, address(this))) revert NotApproved();
         }
 
-        uint64 startsAt = uint64(block.timestamp);
+        // v3.4 width bounds: external ABI keeps uint128, storage is uint96.
+        // ~7.9e10 ether is beyond any single wallet on Flare-family chains.
+        if (reserve > type(uint96).max || amount > type(uint96).max) revert BidOverflow();
+
         id = ++nextAuctionId;
+        // v3.4: exactly 4 cold slot writes (seller/endsAt/originalEndsAt/
+        // standard | collection/reserve | tokenId | amount). The auction is
+        // live from creation (no `active` flag, no separate activate step);
+        // originalEndsAt lives in the struct and anchors the anti-snipe cap.
         Auction storage a = auctions[id];
-        a.seller          = msg.sender;
-        a.startsAt        = startsAt;
-        // v3.3: the overtake step is the marketplace-wide MIN_BID_INCREMENT
-        // (1 native token). The per-auction increment fields are vestigial
-        // storage kept for layout compatibility — written 0, never read.
-        a.minIncrementBps = 0;
-        a.standard        = standard;
-        a.collection      = coll;
-        a.endsAt          = endsAt;
-        a.tokenId         = tokenId;
-        a.reserve         = reserve;
-        a.amount          = amount;
-        a.minIncrementFlat = 0;
+        a.seller         = msg.sender;
+        a.endsAt         = uint40(endsAt);
+        a.originalEndsAt = uint40(endsAt);
+        a.standard       = standard;
+        a.collection     = coll;
+        a.reserve        = uint96(reserve);
+        a.tokenId        = tokenId;
+        a.amount         = uint96(amount);
 
-        // Auction starts ACTIVE — seller creating the auction is activating it.
-        // Bids are accepted immediately after creation. There is no separate
-        // activate step; creation = activation.
-        a.active = true;
-
-        // Record the pre-extension end for the 30-min anti-snipe hard cap.
-        originalEndsAt[id] = endsAt;
-
-        emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, startsAt, endsAt);
+        emit AuctionCreated(id, coll, tokenId, msg.sender, standard, amount, reserve, uint64(block.timestamp), endsAt);
     }
 
     // ── Bid (free, cumulative, escrow-until-settle) ───────────────────────────────
@@ -325,18 +311,9 @@ contract AuctionHouse is MarketplaceCore {
         if (nt > type(uint128).max) revert BidOverflow();
         uint128 newTotal = uint128(nt);
 
-        if (prevCum == 0) {
-            // L-10 fix (Round 3): the prior `prevCum == 0` check is racy
-            // against refundLosers zeroing-then-rebid sequences; gate the
-            // push on a dedicated presence flag instead so _bidders[id]
-            // is one entry per distinct participating address across
-            // the auction's full lifetime, regardless of how many times
-            // they were outbid and re-bid.
-            if (!_seenBidder[id][msg.sender]) {
-                _bidders[id].push(msg.sender);
-                _seenBidder[id][msg.sender] = true;
-            }
-        }
+        // v3.4: no bidder registry — the contract never read it; the keeper/
+        // indexer reconstructs the bidder set from BidPlaced events and passes
+        // refundLosers its batch as calldata. First bid saves ~44k.
         cumulative[id][msg.sender] = newTotal;
 
         // Leadership update. Invariant: the leader always holds the max cumulative.
@@ -347,44 +324,35 @@ contract AuctionHouse is MarketplaceCore {
         // auction, stranding winner + losers' funds).
         bool newLead = false;
         if (a.leader == msg.sender) {
-            a.leaderTotal = newTotal; // leader tops up; no leadership change.
-        } else if (a.leaderTotal == 0) {
+            // Leader tops up: cumulative (written above) IS the leader total
+            // in v3.4 — no stored duplicate to maintain, no SSTORE at all.
+        } else if (a.leader == address(0)) {
             // No leader yet: bidder MUST clear the reserve to take the lead.
             // Sub-reserve bids revert — accumulators that can never lead
             // just burn gas for no purpose and complicate refund logic.
             if (newTotal < a.reserve) revert BidTooLow();
-            newLead         = true;
-            a.leader        = msg.sender;
-            a.leaderTotal   = newTotal;
-        } else if (newTotal > a.leaderTotal) {
-            // Overtaking the leader requires clearing the min increment — a bidder
-            // may not sit above the leader without taking the lead.
-            // v3.3 (owner decision 2026-08-31): ONE increment rule for the
-            // whole marketplace on every network — overtaking costs exactly
-            // leaderTotal + 1 native token (MIN_BID_INCREMENT). No seller
-            // percentage, no per-auction knobs. Example: leader at 500, a
-            // bidder with 200 escrowed must send 301+ so their cumulative
-            // reaches 501+. a.minIncrementBps is VESTIGIAL storage: written 0
-            // by _create, never read.
-            uint256 inc = MIN_BID_INCREMENT;
-            // L-11 fix: keep the min-next comparison in uint256 to avoid
-            // silent truncation when leaderTotal + inc exceeds uint128 max.
-            uint256 minNext256 = uint256(a.leaderTotal) + inc;
+            newLead  = true;
+            a.leader = msg.sender;
+        } else {
+            // Overtake path. v3.4: the leader's total is DERIVED —
+            // cumulative[id][leader] (one cold SLOAD) replaces the stored
+            // leaderTotal (which cost an SSTORE on every lead change).
+            // v3.3 rule unchanged: ONE increment for the whole marketplace —
+            // overtaking costs exactly leaderTotal + 1 native token
+            // (MIN_BID_INCREMENT). No seller percentage, no per-auction knobs.
+            uint128 lead = cumulative[id][a.leader];
+            // L-11 fix retained: compare in uint256 to avoid silent
+            // truncation when lead + increment exceeds uint128 max.
+            uint256 minNext256 = uint256(lead) + MIN_BID_INCREMENT;
             if (minNext256 > type(uint128).max) revert BidOverflow();
-            uint128 minNext = uint128(minNext256);
-            if (newTotal < minNext) revert BidTooLow();
+            if (uint256(newTotal) < minNext256) revert BidTooLow();
+            // Users must bid enough to claim first place; sub-leader
+            // accumulation is not allowed. If a bidder cannot afford the
+            // lead, they withdraw via withdrawLoserFunds().
             newLead = true;
-            address prev  = a.leader;
-            a.leader      = msg.sender;
-            a.leaderTotal = newTotal;
+            address prev = a.leader;
+            a.leader     = msg.sender;
             emit OutbidNotification(id, prev, newTotal);
-        }
-        // else (newTotal <= leaderTotal): bid does not take the lead — revert.
-        // Users must bid enough to claim first place; sub-leader accumulation
-        // is not allowed. If a bidder cannot afford to take the lead, they
-        // should withdraw their funds via withdrawLoserFunds().
-        else {
-            revert BidTooLow();
         }
 
         // Anti-snipe — gated on `newLead` so sub-threshold accumulation cannot
@@ -394,19 +362,16 @@ contract AuctionHouse is MarketplaceCore {
         // end (originalEndsAt + MAX_TOTAL_EXTENSION) for every duration, so a
         // 3-minute auction can run at most 33 minutes total and griefers on
         // low-gas networks (Flare at sub-cent FLR) cannot keep any auction
-        // alive indefinitely by alternating the lead. Auctions created before
-        // this upgrade have originalEndsAt == 0 and fall back to the legacy
-        // startsAt + 24h + 30min cap.
+        // alive indefinitely by alternating the lead. v3.4: originalEndsAt is
+        // a struct field, ALWAYS set by _create on this fresh deployment —
+        // the legacy startsAt-based fallback is gone with the startsAt field.
         unchecked {
-            if (newLead && a.endsAt - block.timestamp < EXTENSION_WINDOW) {
-                uint64 baseEnd = originalEndsAt[id];
-                uint64 hardCap = baseEnd != 0
-                    ? baseEnd + MAX_TOTAL_EXTENSION
-                    : a.startsAt + DURATION_24HR + MAX_TOTAL_EXTENSION;
+            if (newLead && uint64(a.endsAt) - block.timestamp < EXTENSION_WINDOW) {
+                uint64 hardCap = uint64(a.originalEndsAt) + MAX_TOTAL_EXTENSION;
                 uint64 newEnd  = uint64(block.timestamp) + EXTENSION_WINDOW;
                 if (newEnd > hardCap) newEnd = hardCap;
                 if (newEnd > a.endsAt) {
-                    a.endsAt = newEnd;
+                    a.endsAt = uint40(newEnd);
                     emit AuctionExtended(id, newEnd);
                 }
             }
@@ -422,7 +387,7 @@ contract AuctionHouse is MarketplaceCore {
     ///         2. Seller OR auction winner — settle any time after `endsAt` when
     ///            the keeper has not already done so.
     ///         No one else can ever settle: there is no permissionless tier.
-    ///         NFT → winner, 1.5% fee → feeRecipient, winningBid−fee → seller.
+    ///         NFT → winner, 2% fee (1.5% platform + 0.5% keeper), winningBid−fee → seller.
     ///         If there is no qualifying leader, cancels (all escrow refundable
     ///         via refundLosers; with no leader the escrow is provably zero for
     ///         losing bids that never led — non-leading bids revert on entry).
@@ -465,7 +430,9 @@ contract AuctionHouse is MarketplaceCore {
         address       coll    = a.collection;
         uint256       tid     = a.tokenId;
         uint128       amt     = a.amount;
-        uint128       winBid  = a.leaderTotal;
+        // v3.4: the winning total is DERIVED — read the winner's escrow
+        // BEFORE consuming it below (the stored leaderTotal field is gone).
+        uint128       winBid  = cumulative[id][winner];
         uint128       fee     = uint128(_feeOf(winBid));
 
         // Consume the winner's escrow up front so refundLosers never repays them.
@@ -529,13 +496,7 @@ contract AuctionHouse is MarketplaceCore {
         }
 
         // Payouts never revert: non-receiving recipient falls back to pull-withdrawal.
-        if (fee > 0) {
-            (bool okFee,) = feeRecipient.call{gas: 50_000, value: fee}("");
-            if (!okFee) {
-                pendingReturns[feeRecipient] += fee;
-                emit PushFailed(feeRecipient, fee);
-            }
-        }
+        _payFee(fee); // 2% split 1.5% feeRecipient / 0.5% keeper; event `fee` stays the total
         uint128 proceeds;
         unchecked { proceeds = winBid - fee; }
         (bool okSel,) = sel.call{gas: 50_000, value: proceeds}("");
@@ -569,10 +530,14 @@ contract AuctionHouse is MarketplaceCore {
         if (!a.settled) revert NotSettled();
         if (batch.length == 0 || batch.length > 200) revert BatchTooLarge();
 
-        for (uint256 i; i < batch.length; ++i) {
+        // v3.4: length hoisted + unchecked increment (−7k on a full batch).
+        // Safe: the bounds check above ran, calldata length is constant, and
+        // i < len < 2^256 cannot overflow.
+        uint256 len = batch.length;
+        for (uint256 i; i < len; ) {
             address b = batch[i];
             uint128 amt = cumulative[id][b];
-            if (amt == 0) continue; // winner (consumed) or already refunded
+            if (amt == 0) { unchecked { ++i; } continue; } // winner (consumed) or already refunded
             cumulative[id][b] = 0;
             // Safe: amt is b's OWN escrowed balance (zeroed above, CEI); a non-bidder
             // address has 0 and was skipped, so funds can only return to their owner.
@@ -586,6 +551,7 @@ contract AuctionHouse is MarketplaceCore {
                 emit PushFailed(b, amt);
             }
             emit LoserRefunded(id, b, amt);
+            unchecked { ++i; }
         }
     }
 
@@ -605,10 +571,11 @@ contract AuctionHouse is MarketplaceCore {
         if (a.seller != msg.sender) revert NotSeller();
         if (a.settled) revert NotActive();
         if (block.timestamp >= a.endsAt) revert AuctionEnded();
-        // Reserve-met lock: the auction has met its reserve and a leader
-        // exists. Walking back at this point would let the seller snipe
-        // their own auction (audit-#6).
-        if (a.leader != address(0) && a.leaderTotal >= a.reserve) revert CannotCancel();
+        // Reserve-met lock: a leader exists, so the reserve has been met by
+        // construction — bid() only ever installs a leader whose cumulative
+        // clears the reserve. Walking back at this point would let the seller
+        // snipe their own auction (audit-#6).
+        if (a.leader != address(0)) revert CannotCancel();
         a.settled = true;
         emit AuctionCancelled(id);
     }
@@ -684,10 +651,8 @@ contract AuctionHouse is MarketplaceCore {
         emit LoserRefunded(id, msg.sender, amt);
     }
 
-    // ── Views (keeper enumeration) ────────────────────────────────────────────────
-
-    function bidderCount(uint256 id) external view returns (uint256) { return _bidders[id].length; }
-    function getBidder(uint256 id, uint256 i) external view returns (address) { return _bidders[id][i]; }
+    // v3.4: bidderCount/getBidder views removed with the bidder registry —
+    // the keeper/indexer enumerates bidders from BidPlaced events.
 
     // ── Emergency pull refund ─────────────────────────────────────────────────────
 

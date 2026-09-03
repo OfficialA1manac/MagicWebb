@@ -47,20 +47,24 @@ contracts-build: ## forge build
 contracts-test: ## forge test -vvv
 	cd contracts && forge test -vvv
 
-deploy: ## deploy contracts to Coston2
+deploy: ## deploy v3.4 contracts (any network; set RPC_URL + DEPLOY_CHAIN_ID)
 	@test -n "$(PRIVATE_KEY)" || { echo "FATAL: PRIVATE_KEY missing in .env"; exit 1; }
-	cd contracts && forge script script/DeployCoston2.s.sol \
+	@test -n "$(ADMIN_ADDR)" || { echo "FATAL: ADMIN_ADDR required (unsealed deploy)"; exit 1; }
+	@test -n "$(FEE_RECIPIENT_ADDR)" || { echo "FATAL: FEE_RECIPIENT_ADDR required"; exit 1; }
+	@test -n "$(KEEPER_ADDR)" || { echo "FATAL: KEEPER_ADDR required"; exit 1; }
+	cd contracts && forge script script/DeployV34.s.sol \
 	  --rpc-url $(RPC_URL) --broadcast --private-key $(PRIVATE_KEY) --slow
 	@$(MAKE) load-addrs
 
+DEPLOY_CHAIN_ID ?= 114
 load-addrs: ## sync deployed contract addresses into .env
-	@bc=contracts/broadcast/DeployCoston2.s.sol/114/run-latest.json; \
+	@bc=contracts/broadcast/DeployV34.s.sol/$(DEPLOY_CHAIN_ID)/run-latest.json; \
 	  test -f "$$bc" || { echo "FATAL: $$bc not found - run 'make deploy' first"; exit 1; }; \
 	  command -v jq >/dev/null || { echo "FATAL: jq required"; exit 1; }; \
 	  m=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="Marketplace") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
 	  a=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="AuctionHouse") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
 	  o=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="OfferBook") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
-	  g=$$(jq -r '.transactions as $$t | range(0; $$t|length) as $$i | select($$t[$$i].transactionType=="CREATE" and $$t[$$i].contractName=="MarketplaceManager") | $$t[$$i+1].contractAddress' "$$bc" | head -n1); \
+	  g=$$(jq -r '.transactions[] | select(.transactionType=="CREATE" and .contractName=="MarketplaceManager") | .contractAddress' "$$bc" | head -n1); \
 	  test -n "$$m" -a -n "$$a" -a -n "$$o" -a -n "$$g" || { echo "FATAL: missing address(es) in broadcast"; exit 1; }; \
 	  for kv in MARKETPLACE_ADDR=$$m AUCTION_ADDR=$$a OFFERBOOK_ADDR=$$o MARKETPLACE_MANAGER_ADDR=$$g; do \
 	    k=$${kv%%=*}; v=$${kv#*=}; \

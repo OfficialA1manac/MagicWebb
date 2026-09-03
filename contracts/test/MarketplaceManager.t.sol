@@ -2,13 +2,12 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
-import {MarketplaceManager, ZeroAddr, NotAdmin} from "../src/MarketplaceManager.sol";
+import {MarketplaceManager, ZeroAddr, NotAdmin, SameAdmin, NotPendingAdmin} from "../src/MarketplaceManager.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
 import {MockERC721} from "./MockERC721.sol";
-import {BadManager, BadImplementation, UpgradeNotQueued, UpgradeNotReady, UpgradeExpired} from "../src/MarketplaceCore.sol";
+import {BadManager, NotAdmin as CoreNotAdmin} from "../src/MarketplaceCore.sol";
 import {TestHelpers} from "./TestHelpers.sol";
 
 contract MarketplaceManagerTest is Test, TestHelpers {
@@ -39,12 +38,13 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0)), "zero address never holds a role");
     }
 
-    function test_initialize_rejectsZeroAddresses() public {
-        MarketplaceManager impl = new MarketplaceManager();
+    function test_constructor_rejectsZeroAddresses() public {
+        // v3.4: the manager is a plain contract — validation lives in the
+        // constructor, there is no initializer.
         vm.expectRevert(ZeroAddr.selector);
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, address(0), keeper));
+        new MarketplaceManager(address(0), keeper);
         vm.expectRevert(ZeroAddr.selector);
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, address(0)));
+        new MarketplaceManager(admin, address(0));
     }
 
     // ── Single keeper: only the admin can replace it, nobody can add ─────────
@@ -90,6 +90,24 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         assertFalse(ok, "removeKeeper must not exist");
     }
 
+    function test_noUpgradeSurfaceExists() public {
+        // v3.4: the manager is UNPROXIED plain bytecode. Every upgrade-related
+        // selector must be absent at the ABI level — there is nothing to
+        // upgrade and no proxy to point elsewhere.
+        (bool ok,) = address(mgr).call(abi.encodeWithSignature("upgradeTo(address)", address(0xB0B)));
+        assertFalse(ok, "upgradeTo must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", address(0xB0B), ""));
+        assertFalse(ok, "upgradeToAndCall must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("queueUpgrade(address)", address(0xB0B)));
+        assertFalse(ok, "queueUpgrade must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("cancelUpgrade()"));
+        assertFalse(ok, "cancelUpgrade must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("proxiableUUID()"));
+        assertFalse(ok, "proxiableUUID must not exist (not UUPS)");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("initialize(address,address)", admin, keeper));
+        assertFalse(ok, "initialize must not exist (plain constructor)");
+    }
+
     // ── renounceAdmin: the one-way seal ──────────────────────────────────────
 
     function test_renounceAdmin_seals() public {
@@ -101,22 +119,202 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         // Keeper survives the seal and keeps settling.
         assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), keeper));
 
-        // Every admin path is dead — including for the ex-admin.
-        // (The fresh impl is created BEFORE expectRevert: CREATE would
-        // otherwise consume the expected revert.)
-        address nextImpl = address(new MarketplaceManager());
+        // Every admin path on the manager is dead — including for the ex-admin.
         vm.startPrank(admin);
         vm.expectRevert(NotAdmin.selector);
         mgr.setKeeper(address(0xAA2));
         vm.expectRevert(NotAdmin.selector);
-        mgr.queueUpgrade(address(this));
+        mgr.renounceAdmin();
+        vm.stopPrank();
+
+        // And the seal reaches the cores: their upgrade gate consults exactly
+        // this manager's hasRole probe. (Impl constructed BEFORE expectRevert
+        // so CREATE doesn't consume the expected revert.)
+        Marketplace nextImpl = new Marketplace(feeRecipient, address(mgr));
+        vm.prank(admin);
+        vm.expectRevert(CoreNotAdmin.selector);
+        mp.queueUpgrade(address(nextImpl));
+    }
+
+    // ── transferAdmin / acceptAdmin: two-step rotation ───────────────────────
+
+    event AdminTransferStarted(address indexed current, address indexed pending);
+    event AdminTransferCancelled(address indexed pending);
+    event AdminTransferred(address indexed previous, address indexed current);
+    event AuditLog(bytes32 indexed action, address indexed actor, address indexed subject, bytes32 extra);
+
+    address admin2 = address(0xAD2);
+
+    function test_transferAdmin_happyPath_events() public {
+        assertEq(mgr.pendingAdmin(), address(0));
+
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AdminTransferStarted(admin, admin2);
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AuditLog("TRANSFER_ADMIN", admin, admin2, 0);
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+
+        // Offer alone changes nothing: old admin keeps power, offeree has none.
+        assertEq(mgr.pendingAdmin(), admin2);
+        assertEq(mgr.admin(), admin);
+        assertTrue(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin));
+        assertFalse(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin2), "pending admin holds no power yet");
+
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AdminTransferred(admin, admin2);
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AuditLog("ACCEPT_ADMIN", admin2, admin, 0);
+        vm.prank(admin2);
+        mgr.acceptAdmin();
+
+        assertEq(mgr.admin(), admin2);
+        assertEq(mgr.pendingAdmin(), address(0), "pending cleared on accept");
+        assertTrue(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin2));
+        assertFalse(mgr.hasRole(mgr.DEFAULT_ADMIN_ROLE(), admin), "old admin lost authority");
+        // Keeper untouched by an admin hand-off.
+        assertEq(mgr.keeper(), keeper);
+    }
+
+    function test_acceptAdmin_nonPendingReverts() public {
+        // Nothing pending: everyone reverts, including the current admin.
+        vm.prank(admin2);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+        vm.prank(admin);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        // Pending set: only admin2 may accept.
+        vm.prank(keeper);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+        vm.prank(address(0x999));
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+        vm.prank(admin);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+        assertEq(mgr.admin(), admin);
+    }
+
+    function test_transferAdmin_onlyAdmin() public {
+        vm.prank(keeper);
         vm.expectRevert(NotAdmin.selector);
-        mgr.cancelUpgrade();
+        mgr.transferAdmin(admin2);
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.transferAdmin(admin2);
+        vm.prank(keeper);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.cancelAdminTransfer();
+        assertEq(mgr.pendingAdmin(), address(0));
+    }
+
+    function test_transferAdmin_zeroAndSameRevert() public {
+        vm.startPrank(admin);
+        vm.expectRevert(ZeroAddr.selector);
+        mgr.transferAdmin(address(0));
+        vm.expectRevert(SameAdmin.selector);
+        mgr.transferAdmin(admin);
+        vm.stopPrank();
+        assertEq(mgr.pendingAdmin(), address(0));
+    }
+
+    function test_cancelAdminTransfer_clearsPending() public {
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        assertEq(mgr.pendingAdmin(), admin2);
+
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AdminTransferCancelled(admin2);
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AuditLog("CANCEL_ADMIN_TRANSFER", admin, admin2, 0);
+        vm.prank(admin);
+        mgr.cancelAdminTransfer();
+
+        assertEq(mgr.pendingAdmin(), address(0));
+        assertEq(mgr.admin(), admin);
+        // The withdrawn offeree can no longer accept.
+        vm.prank(admin2);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+    }
+
+    function test_transferAdmin_replacesOutstandingOffer() public {
+        address admin3 = address(0xAD3);
+        vm.startPrank(admin);
+        mgr.transferAdmin(admin2);
+        mgr.transferAdmin(admin3);
+        vm.stopPrank();
+        assertEq(mgr.pendingAdmin(), admin3);
+        vm.prank(admin2);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+    }
+
+    function test_renounceAdmin_wipesPending() public {
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        vm.prank(admin);
+        mgr.renounceAdmin();
+        assertEq(mgr.admin(), address(0));
+        assertEq(mgr.pendingAdmin(), address(0), "seal must wipe the pending offer");
+        // No pending key can resurrect the role after the seal.
+        vm.prank(admin2);
+        vm.expectRevert(NotPendingAdmin.selector);
+        mgr.acceptAdmin();
+    }
+
+    function test_acceptAdmin_reachesCoreUpgradeGate() public {
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        vm.prank(admin2);
+        mgr.acceptAdmin();
+
+        // Impls constructed BEFORE expectRevert so CREATE doesn't consume it.
+        Marketplace nextA = new Marketplace(feeRecipient, address(mgr));
+        Marketplace nextB = new Marketplace(feeRecipient, address(mgr));
+
+        // OLD admin: every core's _requireAdmin probes this manager -> dead.
+        vm.prank(admin);
+        vm.expectRevert(CoreNotAdmin.selector);
+        mp.queueUpgrade(address(nextA));
+
+        // NEW admin: queue + instant install succeed.
+        vm.startPrank(admin2);
+        mp.queueUpgrade(address(nextB));
+        assertEq(mp.pendingImplementation(), address(nextB));
+        mp.upgradeTo(address(nextB));
+        vm.stopPrank();
+        assertEq(mp.pendingImplementation(), address(0));
+    }
+
+    function test_oldAdminCannotActAfterAccept() public {
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        vm.prank(admin2);
+        mgr.acceptAdmin();
+
+        vm.startPrank(admin);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.setKeeper(address(0xAA2));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.transferAdmin(admin);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.cancelAdminTransfer();
         vm.expectRevert(NotAdmin.selector);
         mgr.renounceAdmin();
-        vm.expectRevert();
-        mgr.upgradeTo(nextImpl);
         vm.stopPrank();
+
+        // And the new admin can hand it straight back if it wants to.
+        vm.prank(admin2);
+        mgr.transferAdmin(admin);
+        vm.prank(admin);
+        mgr.acceptAdmin();
+        assertEq(mgr.admin(), admin);
     }
 
     function test_renounceAdmin_onlyAdmin() public {
@@ -131,17 +329,15 @@ contract MarketplaceManagerTest is Test, TestHelpers {
     // ── Core wiring (unchanged consult protocol) ─────────────────────────────
 
     function test_coreRejectsEOAManager() public {
-        address rando = address(0x999);
-        Marketplace impl = new Marketplace();
+        // v3.4: the probe runs in the implementation constructor.
         vm.expectRevert(BadManager.selector);
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, feeRecipient, rando));
+        new Marketplace(feeRecipient, address(0x999));
     }
 
     function test_coreRejectsNonManagerContract() public {
         MockERC721 nonManager = new MockERC721();
-        Marketplace impl = new Marketplace();
         vm.expectRevert();
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, feeRecipient, address(nonManager)));
+        new Marketplace(feeRecipient, address(nonManager));
     }
 
     function test_zeroManagerCoreListsFreely() public {
@@ -159,91 +355,5 @@ contract MarketplaceManagerTest is Test, TestHelpers {
 
         (address s, , ,,) = freeMp.listings(address(nft), tid, address(0xBEEF));
         assertEq(s, address(0xBEEF));
-    }
-
-    // ── Manager upgrade timelock (v3: weak-link fix) ─────────────────────
-
-    function _newImpl() internal returns (address) {
-        return address(new MarketplaceManager());
-    }
-
-    function test_manager_queueUpgrade_nonAdminReverts() public {
-        address next = _newImpl();
-        vm.prank(address(0x999));
-        vm.expectRevert(NotAdmin.selector);
-        mgr.queueUpgrade(next);
-    }
-
-    function test_manager_queueUpgrade_rejectsZeroAndEOA() public {
-        vm.startPrank(admin);
-        vm.expectRevert(BadImplementation.selector);
-        mgr.queueUpgrade(address(0));
-        vm.expectRevert(BadImplementation.selector);
-        mgr.queueUpgrade(address(0xDEAD)); // EOA: no code
-        vm.stopPrank();
-    }
-
-    function test_manager_upgrade_requiresQueue() public {
-        address next = _newImpl();
-        vm.prank(admin);
-        vm.expectRevert(UpgradeNotQueued.selector);
-        mgr.upgradeTo(next);
-    }
-
-    function test_manager_upgrade_wrongImplCannotRideQueue() public {
-        address next = _newImpl();
-        address other = _newImpl();
-        vm.startPrank(admin);
-        mgr.queueUpgrade(next);
-        vm.expectRevert(UpgradeNotQueued.selector);
-        mgr.upgradeTo(other);
-        vm.stopPrank();
-    }
-
-    function test_manager_upgrade_zeroDelayInstantOnTestnet() public {
-        // chainid 31337 -> delay 0: queue then install in the same block.
-        address next = _newImpl();
-        vm.startPrank(admin);
-        mgr.queueUpgrade(next);
-        assertEq(mgr.upgradeEta(), uint64(block.timestamp));
-        mgr.upgradeTo(next);
-        vm.stopPrank();
-        assertEq(mgr.pendingImplementation(), address(0), "queue consumed");
-        assertEq(mgr.upgradeEta(), 0, "eta cleared");
-    }
-
-    function test_manager_upgrade_delayEnforcedOnMainnet() public {
-        vm.chainId(14); // Flare — 48h delay
-        address next = _newImpl();
-        vm.startPrank(admin);
-        mgr.queueUpgrade(next);
-        vm.expectRevert(UpgradeNotReady.selector);
-        mgr.upgradeTo(next);
-        vm.warp(block.timestamp + 48 hours);
-        mgr.upgradeTo(next);
-        vm.stopPrank();
-    }
-
-    function test_manager_upgrade_staleQueueExpires() public {
-        vm.chainId(14);
-        address next = _newImpl();
-        vm.startPrank(admin);
-        mgr.queueUpgrade(next);
-        vm.warp(block.timestamp + 48 hours + 7 days + 1);
-        vm.expectRevert(UpgradeExpired.selector);
-        mgr.upgradeTo(next);
-        vm.stopPrank();
-    }
-
-    function test_manager_cancelUpgrade_clearsQueue() public {
-        address next = _newImpl();
-        vm.startPrank(admin);
-        mgr.queueUpgrade(next);
-        mgr.cancelUpgrade();
-        assertEq(mgr.pendingImplementation(), address(0));
-        assertEq(mgr.upgradeEta(), 0);
-        vm.expectRevert(UpgradeNotQueued.selector);
-        mgr.upgradeTo(next);
-        vm.stopPrank();
     }
 }

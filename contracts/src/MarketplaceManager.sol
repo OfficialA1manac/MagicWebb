@@ -1,34 +1,52 @@
 // SPDX-License-Identifier: MIT
 pragma solidity 0.8.26;
 
-import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
-import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {BadImplementation, UpgradeNotQueued, UpgradeNotReady, UpgradeExpired} from "./MarketplaceCore.sol";
-
 error ZeroAddr();
 error NotContract();
 error NotAdmin();
+/// @dev transferAdmin() was handed the current admin.
+error SameAdmin();
+/// @dev acceptAdmin() called by anyone other than the pending admin.
+error NotPendingAdmin();
 
-/// @title MarketplaceManager (v3.2)
+/// @title MarketplaceManager (v3.4)
 /// @notice Authority anchor for the marketplace contract set: exactly ONE
 ///         keeper and (until renounced) exactly ONE admin per network.
 ///
-/// v3.2 redesign — role machinery deleted by owner decision (2026-08-31):
-///   - v3.1's AccessControl fleet is gone. `addKeeper` let any keeper enroll
-///     unlimited further keepers ("self-replenishing fleet"); the inherited
-///     `grantRole` let the admin mint arbitrary role holders. Both grant paths
-///     are removed at the type level: there is no function anywhere in this
-///     contract that adds a settlement-authorized address. The keeper cannot
-///     extend itself, ever.
-///   - The keeper is a single address. The admin may REPLACE it via
-///     `setKeeper` (testnet iteration); once `renounceAdmin()` is called that
-///     path is dead and the keeper is fixed for the life of the deployment.
-///   - Deployment modes, same bytecode on every network:
-///       * Coston2 (dev): admin retained — contracts stay upgradeable and the
-///         keeper is rotatable, both by the admin only.
-///       * Mainnets (Songbird/Flare): the deploy script calls
-///         `renounceAdmin()` as its final action — from block one there is no
-///         admin, no upgrade path, no keeper rotation, no grants. Sealed.
+/// v3.4 redesign — the manager is a PLAIN, UNPROXIED contract:
+///   - v3.2 deployed the manager behind its own UUPS proxy, which taxed every
+///     keeper-path authority consult with a second proxy hop (delegatecall +
+///     impl-slot SLOAD) — measured ~11.9k per consult, worst on settle.
+///     The manager holds two addresses and a shim; there is nothing in it
+///     worth an upgrade surface. v3.4 deploys it as immutable bytecode and
+///     the cores bake its address as an `immutable`, cutting keeper-path
+///     consults by 6.8k–9.8k gas.
+///   - Replacing the manager remains possible while the cores are unsealed:
+///     deploy a new manager, build new core implementations whose constructor
+///     bakes the new address, then queueUpgrade + upgradeTo on each core
+///     (authorized by the OLD manager's admin). The upgrade surface lives on
+///     the cores, where it always was.
+///
+/// Admin-key lifecycle (the weak link, and how it is bounded):
+///   - While a network is unsealed, custody of ONE admin key is the entire
+///     upgrade security model (upgradeDelay()==0 — see docs/UPGRADE_RUNBOOK.md).
+///     That risk is TEMPORARY and ROTATABLE: `transferAdmin(new)` +
+///     `acceptAdmin()` is a two-step hand-off (the new key must prove it can
+///     sign before the old one loses power, so a typo cannot brick the
+///     network into an unintended seal), `cancelAdminTransfer()` withdraws
+///     an unaccepted offer, and `renounceAdmin()` ENDS the admin role
+///     permanently — clearing any pending transfer with it. There is no
+///     path back from renunciation and no path that grants a second admin.
+///
+/// v3.2 role redesign retained (owner decision 2026-08-31):
+///   - No role machinery, no grant paths. The keeper is a single address the
+///     admin may REPLACE via `setKeeper`; after `renounceAdmin()` that path
+///     is dead and the keeper is fixed for the life of the deployment.
+///   - Deployment modes, same bytecode on every network (owner decision
+///     2026-09-02): every network — Coston2, Songbird, Flare — deploys
+///     admin-held and instantly upgradeable. Immutability is a LATER,
+///     explicit, per-network `renounceAdmin()` on the owner's order, not a
+///     deploy-time default.
 ///
 /// Design contract (unchanged from v3.1):
 ///   - The core escrow contracts (Marketplace, AuctionHouse, OfferBook)
@@ -39,7 +57,7 @@ error NotAdmin();
 ///     authority here cannot redirect a single wei or block any user action.
 ///     Keeper power is strictly benign: settle auctions to the RECORDED
 ///     parties, sweep refunds to their OWNERS, clean expired listings.
-contract MarketplaceManager is Initializable, UUPSUpgradeable {
+contract MarketplaceManager {
     /// @notice Role ids retained ONLY as the wire protocol for the cores'
     ///         `hasRole` staticcall (MarketplaceCore._requireAdmin,
     ///         AuctionHouse.settle, Marketplace.cleanExpired,
@@ -50,22 +68,28 @@ contract MarketplaceManager is Initializable, UUPSUpgradeable {
 
     /// @notice The single settlement keeper for this network.
     address public keeper;
-    /// @notice The single admin (upgrades + keeper rotation), or address(0)
-    ///         forever after `renounceAdmin()`.
+    /// @notice The single admin (core upgrades + keeper rotation), or
+    ///         address(0) forever after `renounceAdmin()`.
     address public admin;
+    /// @notice Address offered the admin role by `transferAdmin`; holds no
+    ///         power until it calls `acceptAdmin()`. address(0) when no
+    ///         transfer is in flight.
+    address public pendingAdmin;
 
     // ── Audit log ─────────────────────────────────────────────────────────────
     /// @notice Emitted on every state-changing operation, uniformly indexable.
     event AuditLog(bytes32 indexed action, address indexed actor, address indexed subject, bytes32 extra);
     event KeeperSet(address indexed previousKeeper, address indexed newKeeper);
     event AdminRenounced(address indexed lastAdmin);
+    event AdminTransferStarted(address indexed current, address indexed pending);
+    event AdminTransferCancelled(address indexed pending);
+    event AdminTransferred(address indexed previous, address indexed current);
 
-    /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
-
-    /// @notice One-time initializer: the single admin and the single keeper.
-    function initialize(address admin_, address keeper_) public initializer {
-        __UUPSUpgradeable_init();
+    /// @notice Plain constructor — no proxy, no initializer. The manager's
+    ///         bytecode and these two addresses are fixed at deploy; only
+    ///         `setKeeper`, the `transferAdmin`/`acceptAdmin` hand-off and
+    ///         `renounceAdmin` can change state afterwards.
+    constructor(address admin_, address keeper_) {
         if (admin_ == address(0) || keeper_ == address(0)) revert ZeroAddr();
         admin  = admin_;
         keeper = keeper_;
@@ -103,74 +127,54 @@ contract MarketplaceManager is Initializable, UUPSUpgradeable {
         keeper = k;
     }
 
-    /// @notice One-way seal. After this: no upgrades (here and in every core,
-    ///         whose _requireAdmin probes this contract), no keeper rotation,
-    ///         no admin ever again. The mainnet deploy script calls this as
-    ///         its final action; a lost keeper key thereafter costs automation
-    ///         only — every user exit remains self-service by design.
+    // ── Admin rotation (two-step; dies with renunciation) ────────────────────
+
+    /// @notice Offer the admin role to `newAdmin`. Nothing changes until the
+    ///         offeree calls `acceptAdmin()` — the current admin keeps every
+    ///         power (and can `cancelAdminTransfer`) in the meantime. Calling
+    ///         again simply replaces the outstanding offer.
+    function transferAdmin(address newAdmin) external onlyAdmin {
+        if (newAdmin == address(0)) revert ZeroAddr();
+        if (newAdmin == admin) revert SameAdmin();
+        pendingAdmin = newAdmin;
+        emit AdminTransferStarted(msg.sender, newAdmin);
+        emit AuditLog("TRANSFER_ADMIN", msg.sender, newAdmin, 0);
+    }
+
+    /// @notice Withdraw an outstanding admin offer. Idempotent on an empty
+    ///         pending slot (emits with address(0)).
+    function cancelAdminTransfer() external onlyAdmin {
+        address p = pendingAdmin;
+        pendingAdmin = address(0);
+        emit AdminTransferCancelled(p);
+        emit AuditLog("CANCEL_ADMIN_TRANSFER", msg.sender, p, 0);
+    }
+
+    /// @notice Second step: the offeree proves control of its key by
+    ///         accepting. From this block the previous admin has NO power on
+    ///         this manager or on any core (their `_requireAdmin` probes
+    ///         `hasRole(DEFAULT_ADMIN_ROLE, caller)` here).
+    function acceptAdmin() external {
+        address p = pendingAdmin;
+        if (p == address(0) || msg.sender != p) revert NotPendingAdmin();
+        address previous = admin;
+        admin = p;
+        pendingAdmin = address(0);
+        emit AdminTransferred(previous, p);
+        emit AuditLog("ACCEPT_ADMIN", msg.sender, previous, 0);
+    }
+
+    /// @notice One-way seal. After this: no core upgrades (every core's
+    ///         _requireAdmin probes this contract), no keeper rotation, no
+    ///         admin ever again — any in-flight `transferAdmin` offer is
+    ///         wiped too, so no pending key can resurrect the role. Called
+    ///         per network ONLY on the owner's explicit go-immutable order;
+    ///         a lost keeper key thereafter costs automation only — every
+    ///         user exit remains self-service by design.
     function renounceAdmin() external onlyAdmin {
         emit AdminRenounced(msg.sender);
         emit AuditLog("RENOUNCE_ADMIN", msg.sender, address(0), 0);
         admin = address(0);
+        pendingAdmin = address(0);
     }
-
-    // ── UUPS upgrade authorization (timelocked — mirrors MarketplaceCore) ────
-
-    /// @notice Implementation queued for upgrade, or address(0) when none is
-    ///         pending. Packs into a single slot with upgradeEta.
-    address public pendingImplementation;
-    /// @notice Earliest timestamp at which `pendingImplementation` may be
-    ///         installed. Zero when nothing is queued.
-    uint64  public upgradeEta;
-
-    /// @notice Grace period after `upgradeEta` during which the queued
-    ///         implementation may still be installed.
-    uint64 public constant MAX_UPGRADE_WINDOW = 7 days;
-
-    /// @notice Emitted when an upgrade is queued and its timer starts.
-    event UpgradeQueued(address indexed implementation, uint64 eta);
-    /// @notice Emitted when a queued upgrade is abandoned before installation.
-    event UpgradeCancelled(address indexed implementation);
-
-    /// @notice 0 on test chains (instant while the marketplace is in testing),
-    ///         48h elsewhere. Mirrors MarketplaceCore.upgradeDelay().
-    function upgradeDelay() public view returns (uint64) {
-        uint256 id = block.chainid;
-        if (id == 114 || id == 16 || id == 31337) return 0;
-        return 48 hours;
-    }
-
-    /// @notice Start the timer on a manager upgrade. Queuing is public and
-    ///         emits, so holders can see a pending implementation.
-    function queueUpgrade(address impl) external onlyAdmin {
-        if (impl == address(0) || impl.code.length == 0) revert BadImplementation();
-        pendingImplementation = impl;
-        upgradeEta = uint64(block.timestamp) + upgradeDelay();
-        emit UpgradeQueued(impl, upgradeEta);
-        emit AuditLog("QUEUE_UPGRADE", msg.sender, impl, 0);
-    }
-
-    /// @notice Abandon the queued upgrade.
-    function cancelUpgrade() external onlyAdmin {
-        emit UpgradeCancelled(pendingImplementation);
-        emit AuditLog("CANCEL_UPGRADE", msg.sender, pendingImplementation, 0);
-        pendingImplementation = address(0);
-        upgradeEta = 0;
-    }
-
-    /// @notice Admin plus the queue/delay/window discipline the cores use.
-    ///         After `renounceAdmin()` this reverts unconditionally — the
-    ///         implementation is frozen for the life of the deployment.
-    function _authorizeUpgrade(address newImplementation) internal override onlyAdmin {
-        if (newImplementation != pendingImplementation) revert UpgradeNotQueued();
-        if (block.timestamp < upgradeEta) revert UpgradeNotReady();
-        if (block.timestamp > uint256(upgradeEta) + MAX_UPGRADE_WINDOW) revert UpgradeExpired();
-        pendingImplementation = address(0);
-        upgradeEta = 0;
-    }
-
-    /// @dev Storage gap. v3.2 note: `keeper`/`admin` occupy the slots the
-    ///      v3.1 module registry used; this is a FRESH deployment target, not
-    ///      a storage-compatible upgrade of a live v3.1 proxy.
-    uint256[49] private __gap;
 }

@@ -65,9 +65,11 @@ templates.
 
 Nothing in the app has to change. The whole procedure is:
 
-1. Deploy contracts: `contracts/script/DeployV32.s.sol` with `SEAL=true` (mainnets seal at deploy — admin renounced in-script; fee recipient must be a Safe)
-   with `PRIVATE_KEY`, `CREATOR_ADDR` (fee recipient — a multisig on mainnet), optional
-   `KEEPER_ADDR`. See `docs/DEPLOY_CHECKLIST.md`.
+1. Deploy contracts: `contracts/script/DeployV34.s.sol` UNSEALED with
+   `PRIVATE_KEY`, `ADMIN_ADDR` (that network's saved admin wallet -- every
+   network stays instantly upgradeable until the owner's explicit
+   go-immutable `renounceAdmin()`), `FEE_RECIPIENT_ADDR`, `KEEPER_ADDR`.
+   See `docs/DEPLOY_CHECKLIST.md`.
 2. Record the result in `deployments/<network>.json` (`status: "deployed"`, addresses,
    `indexFromBlock` = deploy block).
 3. Create the Neon project for that network (never share a database between networks).

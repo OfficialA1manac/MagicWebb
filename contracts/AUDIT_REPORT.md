@@ -1,5 +1,37 @@
 # Magic Webb — Production Security Audit Report
 
+> **v3.4 state (2026-09-02) — read this first.** The body below is a June 2026 audit with
+> August 2026 corrections layered on top; several of THOSE corrections are now stale too.
+> What is live in the working tree (Solidity 0.8.26, via-IR) versus what the body describes:
+>
+> - **Authority:** `MarketplaceManager` is a plain, **unproxied** contract holding exactly two
+>   addresses — `admin` and `keeper`. There is **no `AccessControl`**, no `entryGate`, no
+>   `OPERATOR_ROLE`, no `FEE_MANAGER_ROLE`, no grant/add/remove paths. `KEEPER_ROLE` /
+>   `DEFAULT_ADMIN_ROLE` survive only as constants behind a `hasRole(bytes32,address)` shim the
+>   cores staticcall. The admin can `setKeeper`, rotate itself via the 2-step
+>   `transferAdmin`→`acceptAdmin` (cancellable with `cancelAdminTransfer`), and end the role
+>   permanently with `renounceAdmin()`, which also wipes any pending offer.
+> - **Upgrades:** cores stay UUPS but `upgradeDelay()` is **0 on every chain** (instant
+>   `queueUpgrade`→`upgradeTo`); custody of the admin key is the whole upgrade security model
+>   until renunciation. `feeRecipient` and `manager` are **immutables** again, baked into each
+>   implementation's constructor; proxies initialize with no arguments.
+> - **AuctionHouse:** the `Auction` struct is **10 fields / 4 slots** (`seller, endsAt(uint40),
+>   originalEndsAt(uint40), settled, standard, collection, reserve(uint96), tokenId, leader,
+>   amount(uint96)`); the `active` flag, `startsAt`, per-auction increment fields and the stored
+>   `leaderTotal` are gone (`leaderTotal()`/`originalEndsAt()` are derived views). The
+>   **bidder registry (`_bidders`, `_seenBidder`, `bidderCount`, `getBidder`) no longer exists**
+>   — `refundLosers` takes its batch as calldata and the keeper rebuilds the set from
+>   `BidPlaced` events.
+> - **Reentrancy:** `MarketplaceCore` uses an EIP-1153 **transient-storage guard**
+>   (`TransientReentrancyGuard`, one slot shared by every `nonReentrant` function) instead of
+>   OZ `ReentrancyGuardUpgradeable`. Same cross-function semantics; a guarded re-entry reverts
+>   cheaply enough that the 50k-capped payout push still succeeds.
+> - **Unchanged:** nothing is pausable; 1.5 % seller-pays fee constant; settle authorized to
+>   keeper/seller/winner; every user exit is manager-independent; 15 fixed durations.
+>
+> Sections below tagged **[superseded in v3.4 — see preface]** describe code that no longer
+> exists. Findings there remain historically accurate.
+
 > **⚠️ Post-Audit Architectural Change (July 2026):** The **stall window mechanism** (`STALL_WINDOW`, `stalledAt`, `settleUnstuck()`, `reclaim()`, `AuctionStalled`, `AuctionReclaimed`) has been **removed** from `AuctionHouse.sol`. Auction settlement now uses a simpler model: `settle()` reverts entirely on transfer failure, and the keeper retries on the next tick. This eliminates the 7-day stall/reclaim safety valve in favor of deterministic keeper retry. References to the stall mechanism in this report are **historical** — the findings were valid at the time of audit but the mechanism they describe no longer exists.
 >
 > **Also removed:** `MagicWebbNFT.sol` (first-party NFT contract) — the system is now purely a marketplace for external collections.
@@ -8,8 +40,8 @@
 >
 > **⚠️ Post-audit architectural change (v3, August 2026) — read before the body of this report.** Three claims made repeatedly below were true at audit time and are **false today**. They have been corrected in place in the sections that follow; this note exists so a reader who samples the document does not carry away the old model:
 >
-> 1. **Nothing is pausable.** The `entryGate` modifier and the manager's entry-halting power were **removed**. There is no circuit breaker, no pause, and no `OPERATOR_ROLE`. The design is now *"unpausable entries, unstoppable exits"* — the manager holds only `DEFAULT_ADMIN_ROLE`, `KEEPER_ROLE` and `FEE_MANAGER_ROLE`, none of which can halt or reprice a trade or touch escrow.
-> 2. **The cores are UUPS-upgradeable behind a timelock**, not immutable. `feeRecipient` and `manager` moved from `immutable` to upgradeable storage. Full immutability is the documented END STATE, reached by renouncing `DEFAULT_ADMIN_ROLE` — see `docs/IMMUTABILITY_TRANSITION.md`. Until then, "immutable" in this report means "no privileged runtime control", not "no upgrade path".
+> 1. **Nothing is pausable.** The `entryGate` modifier and the manager's entry-halting power were **removed**. There is no circuit breaker, no pause, and no `OPERATOR_ROLE`. The design is now *"unpausable entries, unstoppable exits"* — the manager holds only `DEFAULT_ADMIN_ROLE`, `KEEPER_ROLE` and `FEE_MANAGER_ROLE`, none of which can halt or reprice a trade or touch escrow. **[superseded in v3.4 — see preface]**
+> 2. **The cores are UUPS-upgradeable behind a timelock**, not immutable. `feeRecipient` and `manager` moved from `immutable` to upgradeable storage. Full immutability is the documented END STATE, reached by renouncing `DEFAULT_ADMIN_ROLE` — see `docs/IMMUTABILITY_TRANSITION.md`. Until then, "immutable" in this report means "no privileged runtime control", not "no upgrade path". **[superseded in v3.4 — see preface]**
 > 3. **`settle()` is authorized**, to the keeper, the seller, or the winner — not permissionless. This is a deliberate product rule. Escrow recovery stays manager-independent (see Phase 1, "Critical design invariant").
 >
 > `MIN_PRICE` is **1 ether**, not the 0.01 ETH quoted in the original Round-1 text.
@@ -69,7 +101,7 @@ MarketplaceManager   — Role registry + timelocked upgrade anchor (NO circuit b
 **Inheritance chain:**
 - `MarketplaceCore` extends `ReentrancyGuard` (OpenZeppelin) + `ERC1155Holder`
 - All three cores are `nonReentrant` on every state-changing external function
-- `MarketplaceManager` extends `AccessControl` (OpenZeppelin)
+- `MarketplaceManager` extends `AccessControl` (OpenZeppelin) **[superseded in v3.4 — see preface]**
 
 **Fee and price parameters:**
 
@@ -260,7 +292,7 @@ system's principal trust assumption. It is constrained rather than open:
 | Cancellation | `pendingImplementation` can be cleared before the ETA |
 | Retirement | Renouncing `DEFAULT_ADMIN_ROLE` freezes the implementation permanently |
 
-`MarketplaceManager` uses OpenZeppelin `AccessControl` with exactly three roles:
+**[superseded in v3.4 — see preface]** `MarketplaceManager` uses OpenZeppelin `AccessControl` with exactly three roles:
 `DEFAULT_ADMIN_ROLE`, `KEEPER_ROLE`, and `FEE_MANAGER_ROLE` (reserved; the 1.5%
 fee itself is a constant and unreachable from any role). **There is no
 `OPERATOR_ROLE`** — Round 1 referred to one that no longer exists.
@@ -334,7 +366,7 @@ would exist. ✅
 
 **Status:** ⚠️ **OBSOLETE.** The `stalledAt` field was removed post-audit when the stall window mechanism was eliminated. The struct packing analysis below is historical only.
 
-**Description:** ~~The `Auction` struct uses 13 fields. The `stalledAt` field (uint64) is placed at the end, after `minIncrementFlat` (uint128). This means `stalledAt` occupies a separate 32-byte storage slot. Reordering fields could save one storage slot.~~
+**[superseded in v3.4 — see preface: 10-field struct]** **Description:** ~~The `Auction` struct uses 13 fields. The `stalledAt` field (uint64) is placed at the end, after `minIncrementFlat` (uint128). This means `stalledAt` occupies a separate 32-byte storage slot. Reordering fields could save one storage slot.~~
 
 **Current layout:**
 ~~```
@@ -527,7 +559,7 @@ Exploit shape: caller invokes `batchList([(coll, t1, P₁)])` where the underlyi
 
 ### L-10 (Low / Indexer Enumeration Bound) — `_bidders[id]` Unbounded Growth on Refund+Rebid → **FIXED**
 
-**Location:** `contracts/src/AuctionHouse.sol` — `_bidders` + new `_seenBidder` mapping + `bid()` push logic.
+**[superseded in v3.4 — see preface: bidder registry removed]** **Location:** `contracts/src/AuctionHouse.sol` — `_bidders` + new `_seenBidder` mapping + `bid()` push logic.
 
 **Description:** The `bid()` push guard `if (prevCum == 0)` was intended to fire only on first-time enrollment. But `refundLosers` zeroes `cumulative[id][b]` AND a re-bidder after refund has `prevCum == 0` again — so the same address got pushed to `_bidders[id]` a SECOND time. Per-bidder this is harmless (the array store is idempotent address-wise; an external indexer can dedupe) but the array length grew unboundedly across refund→rebid cycles.
 

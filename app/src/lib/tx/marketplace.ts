@@ -17,7 +17,7 @@ const U128 = (1n << 128n) - 1n;
 
 export function marketplaceAddress(): Address {
   const a = currentChain().contracts.marketplace;
-  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to Coston2 to trade.`);
+  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to a live trading network to trade.`);
   return a;
 }
 
@@ -66,15 +66,15 @@ export interface ListArgs { nft: Address; tokenId: bigint; priceWei: bigint; dur
 export function list(a: ListArgs, hooks?: TxHooks): Promise<TxResult> {
   const req = buildList(a.nft, a.tokenId, a.priceWei, a.duration, a.std, a.amount); // validate early
   const sym = currentChain().currency;
-  const fee = (a.priceWei * 150n) / 10_000n;
+  const fee = (a.priceWei * 200n) / 10_000n;
   const plan: TxPlan = {
     title: `List ${a.name ?? `#${a.tokenId}`}`,
     approval: (ctx) => ensureOperatorApproval(ctx, a.nft, marketplaceAddress(), a.std),
     request: async () => req,
     summary: [
       ['Price', `${fmtPrice(a.priceWei)} ${sym}`],
-      ['You receive on sale', `${fmtPrice(a.priceWei - fee)} ${sym} (98.5%)`],
-      ['Marketplace fee', `${fmtPrice(fee)} ${sym} (1.5%) · only when it sells`],
+      ['You receive on sale', `${fmtPrice(a.priceWei - fee)} ${sym} (98%)`],
+      ['Marketplace fee', `${fmtPrice(fee)} ${sym} (2%: 1.5% platform + 0.5% keeper) · only when it sells`],
       ['Listing cost', 'Free · gas only'],
     ],
   };
@@ -108,7 +108,7 @@ export function buy(a: BuyArgs, hooks?: TxHooks): Promise<TxResult> {
     },
     summary: [
       ['Price', `${fmtPrice(a.priceWei)} ${sym}`],
-      ['Marketplace fee', '1.5% · paid by the seller'],
+      ['Marketplace fee', '2% (1.5% platform + 0.5% keeper gas fund) · paid by the seller'],
       ['You pay', `${fmtPrice(a.priceWei)} ${sym} + gas`],
     ],
   };
@@ -145,7 +145,7 @@ export function batchList(a: BatchListArgs, hooks?: TxHooks): Promise<TxResult> 
     summary: [
       ['Items', `${a.items.length}`],
       ['Total asking price', `${fmtPrice(total)} ${sym}`],
-      ['Marketplace fee', '1.5% per sale · paid by the seller'],
+      ['Marketplace fee', '2% per sale (1.5% platform + 0.5% keeper) · paid by the seller'],
       ['Listing cost', 'Free · gas only'],
     ],
   };

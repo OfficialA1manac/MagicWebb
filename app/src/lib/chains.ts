@@ -92,16 +92,43 @@ export function chainName(id: number): string { return STATIC[id]?.name ?? `chai
 
 /**
  * Whether trading is live on this deployment. False = read-only network mode
- * (Songbird/Flare before contracts deploy): browsing, wallet and profile work,
- * every trade surface points at the Coston2 origin instead.
+ * (a network before its contracts deploy): browsing, wallet and profile work,
+ * every trade surface points at a live sibling origin instead.
+ *
+ * v3.4 hardening: requires ALL THREE core addresses, not just the
+ * marketplace — a partial config must not light up auction/offer buttons
+ * that would then throw in the tx layer.
  */
 export function tradingLive(): boolean {
-  return currentChain().contracts.marketplace !== null;
+  const c = currentChain().contracts;
+  return c.marketplace !== null && c.auctionHouse !== null && c.offerBook !== null;
 }
 
-/** Origin of the primary trading network, for read-only-mode CTAs. */
+/**
+ * Preference order for read-only-mode CTAs. Only consulted on a deployment
+ * that is itself read-only; once every network trades, no surface reads it.
+ */
+const TRADING_CTA_PREF = [114, 14, 19];
+
+/** Origin of the preferred sibling trading network, for read-only-mode CTAs. */
 export function tradingOrigin(): string | null {
-  return networkOrigins().get(114) ?? null;
+  const m = networkOrigins();
+  for (const id of TRADING_CTA_PREF) {
+    if (id === currentChain().id) continue; // never CTA to ourselves
+    const o = m.get(id);
+    if (o) return o;
+  }
+  return null;
+}
+
+/** Display name for the network tradingOrigin() points at. */
+export function tradingOriginName(): string {
+  const m = networkOrigins();
+  for (const id of TRADING_CTA_PREF) {
+    if (id === currentChain().id) continue;
+    if (m.get(id)) return chainName(id);
+  }
+  return chainName(114);
 }
 
 /**
@@ -113,7 +140,7 @@ export function readOnlyCopy(): { heading: string; body: string; cta: string; ct
   return {
     heading: `Trading isn't live on ${name} yet`,
     body: 'You can browse, connect your wallet, and view your profile. Trading opens after the security audit.',
-    cta: 'Trade on Flare Coston2',
+    cta: `Trade on ${tradingOriginName()}`,
     ctaHref: tradingOrigin(),
   };
 }

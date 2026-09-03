@@ -125,7 +125,7 @@ func sseEventToWebhookType(ev sse.Event) MarketplaceEventType {
 			return EventAuctionBid
 		case "AuctionSettled":
 			return EventAuctionSettled
-		case "AuctionCancelled", "AuctionSettlementFailed", "LoserRefunded", "RefundPushed":
+		case "AuctionCancelled", "AuctionSettlementFailed", "AuctionForceCancelled", "LoserRefunded", "RefundPushed":
 			return EventAuctionEnded
 		default:
 			return EventAuctionBid // generic update fallback

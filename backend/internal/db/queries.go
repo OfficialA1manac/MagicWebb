@@ -92,6 +92,20 @@ func (q *Q) UpsertCollection(ctx context.Context, addr, name, symbol, standard s
 	return err
 }
 
+// SetCollectionOfferEligible mirrors OfferBook.offerEligible[coll] from the
+// OfferEligibilitySet event (migration 041). The collection row may not exist
+// yet if the owner enables offers before the first Listed/Transfer for it —
+// insert a placeholder so the flag is not lost; the next UpsertCollection
+// fills in name/symbol.
+func (q *Q) SetCollectionOfferEligible(ctx context.Context, address string, eligible bool) error {
+	_, err := q.writer().Exec(ctx,
+		`INSERT INTO collections(address, name, symbol, standard, deploy_block, offer_eligible)
+		 VALUES($1, '', '', 'erc721', 0, $2)
+		 ON CONFLICT(address) DO UPDATE SET offer_eligible=EXCLUDED.offer_eligible`,
+		address, eligible)
+	return err
+}
+
 func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, error) {
 	var c CollectionRow
 	err := q.reader().QueryRow(ctx,
@@ -828,6 +842,36 @@ func (q *Q) GetExpiredActiveAuctions(ctx context.Context) ([]AuctionRow, error) 
 	return out, rows.Err()
 }
 
+// ForceCancelWindow mirrors AuctionHouse.SELLER_DEFAULT_WINDOW (3 days): once
+// endsAt + window has passed, forceCancel(id) is callable by keeper/seller/
+// winner and finalises a stuck auction (settled=true, no sale).
+const ForceCancelWindow = 72 * time.Hour
+
+// GetForceCancelableAuctions returns auctions still 'active' in the DB whose
+// ends_at + ForceCancelWindow has passed — i.e. settle() has failed to land
+// for three days (seller default, repeated revert, RPC outage). The keeper
+// sends forceCancel for these so losers can be refunded; the resulting
+// AuctionForceCancelled event marks the row 'cancelled'.
+func (q *Q) GetForceCancelableAuctions(ctx context.Context) ([]AuctionRow, error) {
+	rows, err := q.reader().Query(ctx,
+		`SELECT `+auctionSelectCols+auctionFromJoin+
+			` WHERE a.status='active' AND a.ends_at + $1::interval <= now()
+		 ORDER BY a.ends_at ASC LIMIT 100`, ForceCancelWindow)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []AuctionRow
+	for rows.Next() {
+		r, err := scanAuctionRow(rows)
+		if err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
 func (q *Q) GetInactiveAuctions(ctx context.Context) ([]AuctionRow, error) {
 	rows, err := q.reader().Query(ctx,
 		`SELECT `+auctionSelectCols+auctionFromJoin+
@@ -1302,6 +1346,10 @@ type OfferRow struct {
 	Status     string    `json:"status"`
 	MakeTx     string    `json:"make_tx"`
 	CreatedAt  time.Time `json:"created_at"`
+	// CollectionVerified / CollectionCreator mirror ListingRow (migrations
+	// 034/036) so offer cards can render the Verified / Authentic badges.
+	CollectionVerified bool   `json:"collection_verified"`
+	CollectionCreator  string `json:"collection_creator"`
 }
 
 type OffersFilter struct {
@@ -1316,12 +1364,16 @@ type OffersFilter struct {
 func (q *Q) GetOffer(ctx context.Context, offerID string) (*OfferRow, error) {
 	var r OfferRow
 	err := q.reader().QueryRow(ctx,
-		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
-		        fee_wei::text, units, standard::text, expires_at, status::text,
-		        COALESCE(make_tx,''), created_at
-		 FROM offers WHERE offer_id=$1`, offerID).
+		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text, o.principal_wei::text,
+		        o.fee_wei::text, o.units, o.standard::text, o.expires_at, o.status::text,
+		        COALESCE(o.make_tx,''), o.created_at,
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
+		 FROM offers o
+		 LEFT JOIN collections c ON c.address=o.collection
+		 WHERE o.offer_id=$1`, offerID).
 		Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
-			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt)
+			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt,
+			&r.CollectionVerified, &r.CollectionCreator)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("offer not found: %s", offerID)
 	}
@@ -1360,8 +1412,11 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 	rows, err := q.reader().Query(ctx,
 		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text,
 		        o.principal_wei::text, o.fee_wei::text, o.units, o.standard::text,
-		        o.expires_at, o.status::text, COALESCE(o.make_tx,''), o.created_at
-		 FROM offers o `+where+` ORDER BY o.created_at DESC LIMIT $1`, args...)
+		        o.expires_at, o.status::text, COALESCE(o.make_tx,''), o.created_at,
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
+		 FROM offers o
+		 LEFT JOIN collections c ON c.address=o.collection
+		 `+where+` ORDER BY o.created_at DESC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -1371,7 +1426,8 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 		var r OfferRow
 		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID,
 			&r.AmountWei, &r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt,
-			&r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
+			&r.Status, &r.MakeTx, &r.CreatedAt,
+			&r.CollectionVerified, &r.CollectionCreator); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1465,6 +1521,9 @@ type SearchResult struct {
 	// Verified is the collection badge (standard NFT contract + resolved
 	// metadata), carried on both kinds so search results show it too.
 	Verified bool `json:"collection_verified"`
+	// Creator is the collection's ERC-173 owner() (migration 036), "" when
+	// unresolved — feeds the "Authentic" badge on search results.
+	Creator string `json:"collection_creator"`
 }
 
 // Search finds NFTs and collections matching query using Postgres full-text search.
@@ -1484,7 +1543,8 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       t.token_id::text,
 			       coalesce(m.name, t.name, '') AS name,
 			       coalesce(m.image_uri, t.image_uri, '') AS image_uri,
-			       coalesce(c.verified, false) AS verified
+			       coalesce(c.verified, false) AS verified,
+			       coalesce(c.creator_addr, '') AS creator
 			FROM nft_tokens t
 			LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 			LEFT JOIN collections c ON c.address=t.collection
@@ -1499,7 +1559,8 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       ''::text,
 			       c.name,
 			       ''::text,
-			       coalesce(c.verified, false)
+			       coalesce(c.verified, false),
+			       coalesce(c.creator_addr, '')
 			FROM collections c
 			WHERE c.search_vec @@ plainto_tsquery('english', $1)
 			ORDER BY c.name ASC
@@ -1515,7 +1576,7 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	var out []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI, &r.Verified); err != nil {
+		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI, &r.Verified, &r.Creator); err != nil {
 			return nil, err
 		}
 		out = append(out, r)

@@ -49,7 +49,7 @@ error PrincipalChanged();
 ///     full principal refund.
 ///   - There is NO individual withdrawal while the position is active. A position is
 ///     locked until accept / reject / expiry / edit.
-///   - acceptOffer DEDUCTS a 1.5% platform fee from the principal; the seller receives 98.5%.
+///   - acceptOffer DEDUCTS a 2% platform fee (1.5% platform + 0.5% keeper) from the principal; the seller receives 98%.
 ///   - rejectOffer (owner), cancelOffer (bidder, before expiry), or refundExpiredOffer
 ///     (after expiry) returns the FULL principal to the bidder — an offer that never
 ///     sells costs nothing. refundExpiredOffer is NOT keeper-only: the bidder can
@@ -62,10 +62,15 @@ contract OfferBook is MarketplaceCore {
     /// @notice A bidder's offer on one NFT — one position per (coll, tokenId, bidder).
     ///         Calling makeOffer again edits the position (refunds old principal,
     ///         sets new principal/units/expiry) rather than compounding.
+    /// @dev v3.4 repack: 2 slots → 1 (16 + 10 + 5 + 1 = 32 bytes). A new
+    ///      position writes ONE cold slot instead of two (makeOffer −22k).
+    ///      External signatures keep uint128/uint64; _makeOffer guards the
+    ///      narrowed widths: units uint80 caps at ~1.2e24 (beyond any real
+    ///      ERC-1155 position), expiresAt uint40 is fine until y36812.
     struct Position {
         uint128       principal; // escrowed ETH (fees already removed)
-        uint128       units;     // ERC-1155 units desired (1 for ERC-721)
-        uint64        expiresAt; // set on creation or edit; validated against 15 fixed durations
+        uint80        units;     // ERC-1155 units desired (1 for ERC-721)
+        uint40        expiresAt; // set on creation or edit; validated against 15 fixed durations
         TokenStandard standard;  // token kind this offer targets
     }
 
@@ -101,19 +106,23 @@ contract OfferBook is MarketplaceCore {
         address indexed seller,
         address bidder,
         uint256 principal, // gross accepted principal
-        uint256 fee,       // 1.5% platform fee deducted from the seller
+        uint256 fee,       // 2% platform fee (1.5% platform + 0.5% keeper) deducted from the seller
         uint128 units,
         TokenStandard standard
     );
     event OfferRefunded(address indexed coll, uint256 indexed tokenId, address indexed bidder, uint256 principal);
 
+    /// @notice v3.4: feeRecipient + manager are baked into the implementation
+    ///         as immutables (validated in MarketplaceCore's constructor).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor(address recipient, address manager_)
+        MarketplaceCore(recipient, manager_)
+    { _disableInitializers(); }
 
-    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
-    ///         feeRecipient + manager in upgradeable storage.
-    function initialize(address recipient, address manager_) public initializer {
-        __MarketplaceCore_init(recipient, manager_);
+    /// @notice One-time proxy initializer — no arguments in v3.4 (immutables
+    ///         live in the implementation). Still initializer-gated.
+    function initialize() public initializer {
+        __MarketplaceCore_init();
     }
 
     /// @notice Toggle whether a collection accepts offers. Callable by the
@@ -200,6 +209,8 @@ contract OfferBook is MarketplaceCore {
         if (principal == 0) revert InvalidAmount();
         if (principal < MIN_PRICE) revert BelowMinPrice();
         if (msg.value != uint256(principal)) revert WrongValue();
+        // v3.4 width bound: external ABI keeps uint128, storage is uint80.
+        if (units > type(uint80).max) revert InvalidAmount();
 
         Position storage p = positions[coll][tokenId][msg.sender];
         bool isEdit = p.principal > 0;
@@ -221,11 +232,11 @@ contract OfferBook is MarketplaceCore {
         } else {
             // New position: the caller supplied a DURATION; validate it and
             // compute the absolute expiry on-chain (see MarketplaceCore._expiryFor).
-            p.expiresAt = _expiryFor(duration);
+            p.expiresAt = uint40(_expiryFor(duration));
         }
 
         p.principal = principal;
-        p.units     = units;
+        p.units     = uint80(units);
         p.standard  = standard;
 
         // Refund the old principal to the buyer atomically in the same tx.
@@ -239,10 +250,10 @@ contract OfferBook is MarketplaceCore {
         emit OfferMade(coll, tokenId, msg.sender, p.principal, units, p.expiresAt);
     }
 
-    // ── Accept (seller pays 1.5%; seller nets 98.5% of principal) ──────────────
+    // ── Accept (seller pays 2%; seller nets 98% of principal) ──────────────
 
     /// @notice Accept a bidder's full position. Caller must currently own/hold the NFT.
-    ///         NFT → bidder, 1.5% fee → feeRecipient, principal − fee → seller.
+    ///         NFT → bidder, 2% fee (1.5% platform + 0.5% keeper), principal − fee → seller.
     /// @param expectedPrincipal The principal the seller is agreeing to, in wei.
     ///        Reverts PrincipalChanged() if the stored position differs — read it
     ///        from `positions(coll, tokenId, bidder).principal` when building the tx.
@@ -285,8 +296,8 @@ contract OfferBook is MarketplaceCore {
         _transferToken(p.standard, coll, msg.sender, bidder, tokenId, moveAmount);
         _payFee(fee);
         uint256 proceeds;
-        unchecked { proceeds = uint256(p.principal) - fee; } // fee = 1.5% of principal, always < principal
-        _pay(msg.sender, proceeds); // seller nets 98.5%
+        unchecked { proceeds = uint256(p.principal) - fee; } // fee = 2% of principal, always < principal
+        _pay(msg.sender, proceeds); // seller nets 98%
 
         emit OfferAccepted(coll, tokenId, msg.sender, bidder, p.principal, fee, p.units, p.standard);
     }

@@ -28,16 +28,10 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "MAX_UPGRADE_WINDOW",
+    "name": "acceptAdmin",
     "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
+    "outputs": [],
+    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -54,7 +48,7 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "cancelUpgrade",
+    "name": "cancelAdminTransfer",
     "inputs": [],
     "outputs": [],
     "stateMutability": "nonpayable"
@@ -85,24 +79,6 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "initialize",
-    "inputs": [
-      {
-        "name": "admin_",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "keeper_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
-  },
-  {
-    "type": "function",
     "name": "keeper",
     "inputs": [],
     "outputs": [
@@ -116,7 +92,7 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "pendingImplementation",
+    "name": "pendingAdmin",
     "inputs": [],
     "outputs": [
       {
@@ -126,32 +102,6 @@ export const managerAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "proxiableUUID",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "bytes32",
-        "internalType": "bytes32"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "queueUpgrade",
-    "inputs": [
-      {
-        "name": "impl",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -175,36 +125,10 @@ export const managerAbi = [
   },
   {
     "type": "function",
-    "name": "upgradeDelay",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "upgradeEta",
-    "inputs": [],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint64",
-        "internalType": "uint64"
-      }
-    ],
-    "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "upgradeTo",
+    "name": "transferAdmin",
     "inputs": [
       {
-        "name": "newImplementation",
+        "name": "newAdmin",
         "type": "address",
         "internalType": "address"
       }
@@ -213,37 +137,13 @@ export const managerAbi = [
     "stateMutability": "nonpayable"
   },
   {
-    "type": "function",
-    "name": "upgradeToAndCall",
-    "inputs": [
-      {
-        "name": "newImplementation",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "data",
-        "type": "bytes",
-        "internalType": "bytes"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "payable"
-  },
-  {
     "type": "event",
-    "name": "AdminChanged",
+    "name": "AdminRenounced",
     "inputs": [
       {
-        "name": "previousAdmin",
+        "name": "lastAdmin",
         "type": "address",
-        "indexed": false,
-        "internalType": "address"
-      },
-      {
-        "name": "newAdmin",
-        "type": "address",
-        "indexed": false,
+        "indexed": true,
         "internalType": "address"
       }
     ],
@@ -251,10 +151,48 @@ export const managerAbi = [
   },
   {
     "type": "event",
-    "name": "AdminRenounced",
+    "name": "AdminTransferCancelled",
     "inputs": [
       {
-        "name": "lastAdmin",
+        "name": "pending",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AdminTransferStarted",
+    "inputs": [
+      {
+        "name": "current",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "pending",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "AdminTransferred",
+    "inputs": [
+      {
+        "name": "previous",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "current",
         "type": "address",
         "indexed": true,
         "internalType": "address"
@@ -295,32 +233,6 @@ export const managerAbi = [
   },
   {
     "type": "event",
-    "name": "BeaconUpgraded",
-    "inputs": [
-      {
-        "name": "beacon",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Initialized",
-    "inputs": [
-      {
-        "name": "version",
-        "type": "uint8",
-        "indexed": false,
-        "internalType": "uint8"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
     "name": "KeeperSet",
     "inputs": [
       {
@@ -339,73 +251,18 @@ export const managerAbi = [
     "anonymous": false
   },
   {
-    "type": "event",
-    "name": "UpgradeCancelled",
-    "inputs": [
-      {
-        "name": "implementation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "UpgradeQueued",
-    "inputs": [
-      {
-        "name": "implementation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      },
-      {
-        "name": "eta",
-        "type": "uint64",
-        "indexed": false,
-        "internalType": "uint64"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "Upgraded",
-    "inputs": [
-      {
-        "name": "implementation",
-        "type": "address",
-        "indexed": true,
-        "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "error",
-    "name": "BadImplementation",
-    "inputs": []
-  },
-  {
     "type": "error",
     "name": "NotAdmin",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "UpgradeExpired",
+    "name": "NotPendingAdmin",
     "inputs": []
   },
   {
     "type": "error",
-    "name": "UpgradeNotQueued",
-    "inputs": []
-  },
-  {
-    "type": "error",
-    "name": "UpgradeNotReady",
+    "name": "SameAdmin",
     "inputs": []
   },
   {

@@ -6,11 +6,23 @@
 //
 //	-derive <hexkey-file-or-env>   print the address a private key controls
 //	-gen -out <file>               generate a fresh secp256k1 keeper key
-//	-grant -granter <key> -to <addr> -manager <addr> -rpc <url>
-//	                               grantRole(KEEPER_ROLE, to) from an existing
-//	                               keeper or admin wallet
+//	-set -granter <key> -to <addr> -manager <addr> -rpc <url>
+//	                               MarketplaceManager.setKeeper(to), signed by
+//	                               the ADMIN wallet (v3.2+ removed all grant
+//	                               paths; the single keeper is REPLACED, never
+//	                               added)
 //	-fund -granter <key> -to <addr> -wei <amount> -rpc <url>
 //	                               native transfer to the new keeper
+//	-transfer-admin -granter <key> -to <addr> -manager <addr> -rpc <url>
+//	                               MarketplaceManager.transferAdmin(to), signed
+//	                               by the CURRENT admin: step 1 of the 2-step
+//	                               admin rotation (nothing changes until the
+//	                               new key accepts)
+//	-accept-admin -granter <key> -manager <addr> -rpc <url>
+//	                               MarketplaceManager.acceptAdmin(), signed by
+//	                               the NEW admin key (the pending admin): step
+//	                               2 -- from this block the old key has no
+//	                               power on the manager or any core
 package main
 
 import (
@@ -44,9 +56,11 @@ func main() {
 	derive := flag.String("derive", "", "hex private key: print its address")
 	gen := flag.Bool("gen", false, "generate a new keeper key")
 	out := flag.String("out", "", "file to write the generated key (0600)")
-	grant := flag.Bool("grant", false, "grant KEEPER_ROLE")
+	setK := flag.Bool("set", false, "setKeeper(to) as the admin (replaces the single keeper)")
 	fund := flag.Bool("fund", false, "send native value")
-	granter := flag.String("granter", "", "hex private key of keeper/admin sender")
+	transferAdmin := flag.Bool("transfer-admin", false, "transferAdmin(to) as the CURRENT admin (step 1 of 2)")
+	acceptAdmin := flag.Bool("accept-admin", false, "acceptAdmin() as the PENDING admin (step 2 of 2)")
+	granter := flag.String("granter", "", "hex private key of the sender (ADMIN for -set/-transfer-admin; NEW admin for -accept-admin)")
 	to := flag.String("to", "", "target address")
 	manager := flag.String("manager", "", "MarketplaceManager address")
 	rpc := flag.String("rpc", "https://coston2-api.flare.network/ext/C/rpc", "RPC URL")
@@ -71,9 +85,12 @@ func main() {
 		}
 		fmt.Println(crypto.PubkeyToAddress(k.PublicKey).Hex())
 
-	case *grant, *fund:
-		if *granter == "" || *to == "" {
-			die("need -granter and -to")
+	case *setK, *fund, *transferAdmin, *acceptAdmin:
+		if *granter == "" {
+			die("need -granter")
+		}
+		if *to == "" && !*acceptAdmin {
+			die("need -to")
 		}
 		key := loadKey(*granter)
 		from := crypto.PubkeyToAddress(key.PublicKey)
@@ -100,16 +117,37 @@ func main() {
 		gasPrice = new(big.Int).Mul(gasPrice, big.NewInt(2))
 
 		var tx *types.Transaction
-		if *grant {
+		if *setK {
 			if *manager == "" {
-				die("-grant requires -manager")
+				die("-set requires -manager")
 			}
 			mgr := common.HexToAddress(*manager)
-			// MarketplaceManager.addKeeper(address) — callable by an existing
-			// keeper or the admin; AccessControl.grantRole would require the
-			// role admin and reverts for a keeper caller.
-			data := append([]byte{0x40, 0x32, 0xb7, 0x2b}, // addKeeper(address)
+			// MarketplaceManager.setKeeper(address) — ADMIN-only since v3.2.
+			// The old -grant mode called addKeeper (0x4032b72b), which no
+			// longer exists anywhere in the contract set; the single keeper
+			// is REPLACED via setKeeper, and after renounceAdmin() nobody can.
+			data := append([]byte{0x74, 0x87, 0x47, 0xe6}, // setKeeper(address)
 				common.LeftPadBytes(common.HexToAddress(*to).Bytes(), 32)...)
+			tx = types.NewTransaction(nonce, mgr, big.NewInt(0), 200_000, gasPrice, data)
+		} else if *transferAdmin {
+			if *manager == "" {
+				die("-transfer-admin requires -manager")
+			}
+			mgr := common.HexToAddress(*manager)
+			// MarketplaceManager.transferAdmin(address) — step 1 of the 2-step
+			// admin rotation. Signed by the CURRENT admin; sets pendingAdmin
+			// only. Selector: `cast sig "transferAdmin(address)"`.
+			data := append([]byte{0x75, 0x82, 0x9d, 0xef}, // transferAdmin(address)
+				common.LeftPadBytes(common.HexToAddress(*to).Bytes(), 32)...)
+			tx = types.NewTransaction(nonce, mgr, big.NewInt(0), 200_000, gasPrice, data)
+		} else if *acceptAdmin {
+			if *manager == "" {
+				die("-accept-admin requires -manager")
+			}
+			mgr := common.HexToAddress(*manager)
+			// MarketplaceManager.acceptAdmin() — step 2. Signed by the NEW key
+			// (must equal pendingAdmin). Selector: `cast sig "acceptAdmin()"`.
+			data := []byte{0x0e, 0x18, 0xb6, 0x81} // acceptAdmin()
 			tx = types.NewTransaction(nonce, mgr, big.NewInt(0), 200_000, gasPrice, data)
 		} else {
 			amt, ok := new(big.Int).SetString(*wei, 10)

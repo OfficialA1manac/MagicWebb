@@ -16,7 +16,7 @@ import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 
 export function offerBookAddress(): Address {
   const a = currentChain().contracts.offerBook;
-  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to Coston2 to trade.`);
+  if (!a) throw new TxError('Invalid', `Trading is not live on ${currentChain().name} yet — browsing, your wallet, and your profile still work. Switch to a live trading network to trade.`);
   return a;
 }
 
@@ -61,21 +61,21 @@ export function makeOffer(a: MakeOfferArgs, hooks?: TxHooks): Promise<TxResult> 
     summary: [
       ['You escrow', `${fmtPrice(a.principalWei)} ${sym}`],
       ['If not accepted', 'Cancel any time before expiry for a full refund'],
-      ['Marketplace fee', '1.5% · paid by the seller if they accept'],
+      ['Marketplace fee', '2% (1.5% platform + 0.5% keeper) · paid by the seller if they accept'],
     ],
   }, hooks);
 }
 
 export const acceptOffer = (a: { nft: Address; tokenId: bigint; bidder: Address; principalWei: bigint; std?: TokenStandard; name?: string }, hooks?: TxHooks) => {
   const sym = currentChain().currency;
-  const fee = (a.principalWei * 150n) / 10_000n;
+  const fee = (a.principalWei * 200n) / 10_000n;
   return runTx({
     title: `Accept offer on ${a.name ?? `#${a.tokenId}`}`,
     approval: (ctx) => ensureOperatorApproval(ctx, a.nft, offerBookAddress(), a.std),
     request: async () => buildAcceptOffer(a.nft, a.tokenId, a.bidder, a.principalWei),
     summary: [
       ['Offer', `${fmtPrice(a.principalWei)} ${sym}`],
-      ['You receive', `${fmtPrice(a.principalWei - fee)} ${sym} (after 1.5% fee)`],
+      ['You receive', `${fmtPrice(a.principalWei - fee)} ${sym} (after 2% fee)`],
     ],
   }, hooks);
 };

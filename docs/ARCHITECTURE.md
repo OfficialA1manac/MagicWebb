@@ -2,8 +2,8 @@
 
 Open, non-custodial NFT marketplace on the Flare family of networks. No user accounts, no
 login, no admin console: anyone with a wallet on a supported network can list, bid, offer
-and buy. (Protocol authority is a separate matter — v3.2: a single `admin`
-address handles queued upgrades and keeper replacement until renounced, and a
+and buy. (Protocol authority is a separate matter — v3.4: a single `admin`
+address handles instant upgrades, keeper replacement and its own 2-step rotation until renounced, and a
 single `keeper` address automates settlement; see
 `IMMUTABILITY_TRANSITION.md`. No role can pause trading entries or exits.) This document is
 the map; `USER_CAPABILITIES.md` is what each kind of user can do; `NETWORKS.md` is how a
@@ -124,11 +124,11 @@ clears it on `tx-indexed` (or on the next REST refresh). Nothing waits 30 second
 
 | Contract | Purpose | Key rules |
 |---|---|---|
-| `MarketplaceCore` | base: fee math, pull-payment refunds, time-locked upgrades | `PLATFORM_FEE_BPS = 150` (1.5%, **seller pays, only on sale**) · `MIN_PRICE = 1 ether` · `_expiryFor(duration)` — fifteen durations 1m/3m/5m/10m/15m/30m/45m/1h/2h/4h/8h/12h/16h/20h/24h, expiry computed on-chain · `withdrawRefund()` |
+| `MarketplaceCore` | base: fee math, pull-payment refunds, admin-gated upgrades (instant — `upgradeDelay` 0 on every network) | `PLATFORM_FEE_BPS = 200` (2%, **seller pays, only on sale**: 150 bps → `feeRecipient`, 50 bps → keeper, `FeeSplit` event) · `MIN_PRICE = 1 ether` · `_expiryFor(duration)` — fifteen durations 1m/3m/5m/10m/15m/30m/45m/1h/2h/4h/8h/12h/16h/20h/24h, expiry computed on-chain · `withdrawRefund()` |
 | `Marketplace` | fixed-price listings | `list / list1155 / batchList(≤50) / cancel / editPrice / buy` · `buy` requires `msg.value == price` · listing is free |
 | `AuctionHouse` | English auctions, cumulative bids | `create / create1155 / bid / settle / cancelEarly / refundLosers / withdrawLoserFunds` · flat marketplace-wide increment: lead + 1 native (v3.3, no seller knobs) · anti-snipe +3 min, 30 min cap · settle: keeper (instant) or seller/winner only; forceCancel (+3d, keeper/seller/winner) is the never-stuck escrow backstop |
 | `OfferBook` | escrowed offers | `makeOffer / makeOffer1155 / acceptOffer / cancelOffer / rejectOffer / refundExpiredOffer` · collection must be opted in via `setOfferEligible` (ERC-173 owner) |
-| `MarketplaceManager` | single-keeper authority anchor + timelocked upgrades | v3.2: `keeper` (one address — instant settlement, refund sweeps, expired-listing cleanup; cannot alter the keeper set) and `admin` (setKeeper, queueUpgrade; `renounceAdmin()` seals the deployment forever — mainnets seal at deploy). No role registry, no grant path. Nothing is pausable — no entry or exit path can ever be halted |
+| `MarketplaceManager` | single-keeper authority anchor + instant admin-gated upgrades (plain unproxied bytecode) | v3.4: `keeper` (one address — instant settlement, refund sweeps, expired-listing cleanup; cannot alter the keeper set) and `admin` (setKeeper; queueUpgrade+upgradeTo back-to-back, `upgradeDelay` 0; 2-step `transferAdmin`/`acceptAdmin` rotates the key; `renounceAdmin()` seals the deployment forever). Every network — Coston2, Songbird, Flare — deploys UNSEALED and admin-held; sealing is a later, explicit per-network `renounceAdmin()` on the owner's order. No role registry, no grant path. Nothing is pausable — no entry or exit path can ever be halted |
 
 Deployed addresses: `deployments/<network>.json` (single source of truth).
 

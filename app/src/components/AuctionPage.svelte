@@ -3,6 +3,7 @@
   // cancel (seller, no bids), withdraw (outbid). WS-driven refresh.
   import { onMount } from 'svelte';
   import VerifiedBadge from './VerifiedBadge.svelte';
+  import CreatorBadge from './CreatorBadge.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
@@ -14,10 +15,10 @@
   import { resolveImageUri } from '../lib/image-uri';
   import { onAccountChange, publicClient } from '../lib/tx/client';
   import { auctionHouseAbi } from '../lib/abi';
-  import { minimumTopUp } from '../lib/tx/auction';
+  import { minimumTopUp, forceCancelUnlocked } from '../lib/tx/auction';
   import type { Address } from 'viem';
 
-  type Auction = { auction_id: number; collection: string; token_id: string; seller: string; standard: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps: number; starts_at: string; ends_at: string; status: string; create_tx: string; name: string; image_uri: string; collection_verified: boolean };
+  type Auction = { auction_id: number; collection: string; token_id: string; seller: string; standard: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps: number; starts_at: string; ends_at: string; status: string; create_tx: string; name: string; image_uri: string; collection_verified: boolean; collection_creator?: string; collection_name?: string };
   type Bid = { bidder: string; amount_wei: string; tx_hash: string; placed_at: string };
 
   let id = $state('');
@@ -40,6 +41,11 @@
   let isLive = $derived(!!a && a.status === 'active' && endsMs > now);
   let ended = $derived(!!a && a.status === 'active' && endsMs <= now);
   let isSeller = $derived(!!me && !!a && a.seller.toLowerCase() === me.toLowerCase());
+  // Seller is the collection's on-chain creator (ERC-173 owner) → ★ Creator pill.
+  let sellerIsCreator = $derived(!!a && !!a.collection_creator && a.seller.toLowerCase() === a.collection_creator.toLowerCase());
+  // forceCancel() (seller/winner/keeper) unlocks 3 days after endsAt when the
+  // auction is still unsettled — pure escrow recovery, the NFT stays put.
+  let canForceCancel = $derived(ended && !!a && forceCancelUnlocked(endsMs / 1000, now));
   let highest = $derived(BigInt(a?.highest_bid_wei || '0'));
   // Cumulative escrow comes from the CHAIN, never from summing the bids API.
   // The bids table is an append-only event log: withdrawLoserFunds() zeroes the
@@ -103,6 +109,7 @@
   };
   const doSettle = () => a && act(() => MW.settle({ auctionId: String(a!.auction_id), name }), 'Settled · syncing');
   const doCancel = () => a && act(() => MW.cancelAuction({ auctionId: String(a!.auction_id), name }), 'Auction cancelled · syncing');
+  const doForceCancel = () => a && act(() => MW.forceCancel({ auctionId: String(a!.auction_id), name }), 'Force-cancelled · refunds unlocked · syncing');
   const doWithdraw = () => a && act(() => MW.withdrawLoserFunds({ auctionId: String(a!.auction_id), amountWei: myCumulative.toString() }), 'Withdrawn · syncing');
 </script>
 
@@ -116,9 +123,9 @@
       {#if img}<img src={img} alt={name} />{:else}<div class="ap-noimg" aria-hidden="true">🖼</div>{/if}
     </a>
     <div class="ap-side">
-      <div class="ap-coll"><a href={`/collection/${a.collection}`}>{shortAddr(a.collection)}</a><VerifiedBadge verified={a.collection_verified} network={chain.name} />{#if live}<span class="ap-live">● live</span>{/if}</div>
+      <div class="ap-coll"><a href={`/collection/${a.collection}`}>{shortAddr(a.collection)}</a><VerifiedBadge verified={a.collection_verified} network={chain.name} creatorAddr={a.collection_creator ?? ''} collectionName={a.collection_name ?? ''} />{#if live}<span class="ap-live">● live</span>{/if}</div>
       <h1 class="ap-title">{name}</h1>
-      <div class="ap-meta mono">Auction #{a.auction_id} · seller {isSeller ? 'you' : shortAddr(a.seller)} · <a href={`/token/${a.collection}/${a.token_id}`}>token #{a.token_id}</a></div>
+      <div class="ap-meta mono">Auction #{a.auction_id} · seller {isSeller ? 'you' : shortAddr(a.seller)}{#if sellerIsCreator} <CreatorBadge name={a.collection_name ?? ''} />{/if} · <a href={`/token/${a.collection}/${a.token_id}`}>token #{a.token_id}</a></div>
       {#if syncing}<div class="ap-sync" role="status"><span class="ap-spin" aria-hidden="true"></span>{syncing}</div>{/if}
 
       {#if !canTrade}
@@ -153,8 +160,14 @@
           {#if amLeader || isSeller}
             <button class="btn gold" onclick={doSettle}>Settle now</button>
             <p class="ap-hint">The marketplace settles this automatically within seconds; as {amLeader ? 'the winner' : 'the seller'} you can also settle it yourself.</p>
+            {#if canForceCancel}
+              <button class="btn g" onclick={doForceCancel}>Force-cancel &amp; refund</button>
+              <p class="ap-hint">Settlement has been stuck for 3+ days. Force-cancel closes the auction without a trade: every bid becomes refundable and the NFT stays where it is.</p>
+            {:else}
+              <p class="ap-hint">The keeper settles automatically; if it can't, force-cancel unlocks after 3 days.</p>
+            {/if}
           {:else}
-            <p class="ap-hint">Auction ended — settling automatically. NFT to the winner, proceeds (minus 1.5%) to the seller, losing bids refundable.</p>
+            <p class="ap-hint">Auction ended — settling automatically. NFT to the winner, proceeds (minus 2%) to the seller, losing bids refundable.</p>
           {/if}
         {:else if canTrade && isLive && isSeller}
           {#if highest === 0n}<button class="btn g" onclick={doCancel}>Cancel auction</button>{:else}<p class="ap-hint">Your auction has bids and will settle when it ends.</p>{/if}

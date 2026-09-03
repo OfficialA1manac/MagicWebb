@@ -1,6 +1,7 @@
 {
   "$schema": "./schema.json",
   "network": "coston2",
+  "script": "contracts/script/DeployV34.s.sol",
   "chainId": 114,
   "status": "deployed",
   "deployedAt": "2026-08-28",

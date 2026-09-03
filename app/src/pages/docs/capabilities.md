@@ -16,7 +16,7 @@ a person is all three at different moments:
 - **Seller / owner** — wallet connected, owns the NFT (or created the listing/auction).
 
 Every write is a wallet transaction on the network you are viewing. The marketplace fee is
-**1.5%, paid by the seller, only when something sells**. Listing, auctioning, bidding and
+**2% (1.5% platform + 0.5% keeper gas fund), paid by the seller, only when something sells**. Listing, auctioning, bidding and
 offering are free (gas only). Escrow you put up stays withdrawable until it becomes a sale:
 winning bids and accepted offers pay the seller, while outbid, cancelled, declined, expired
 and failed-payout amounts are all refundable.
@@ -54,7 +54,7 @@ to a different site, so you connect your wallet again on arrival.
 | Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations)) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
-| Settle after it ends (NFT → winner, proceeds → seller minus 1.5%) | — | ✓ if you won it | ✓ |
+| Settle after it ends (NFT → winner, proceeds → seller minus 2%) | — | ✓ if you won it | ✓ |
 | Cancel early | — | — | ✓ only while there are no bids |
 | Last 3 minutes: every bid extends the end by 3 min (max 30 min total) | rule | rule | rule |
 
@@ -76,7 +76,7 @@ end up with money locked behind a position that cannot win.
 | Make an offer (amount ≥ 1 native escrowed, duration 1m–24h (15 fixed durations)) | — | ✓ if the collection allows offers | not on your own |
 | Raise / lower your offer (keeps original expiry) | — | ✓ | — |
 | Cancel your offer → full refund | — | ✓ before expiry | — |
-| Accept an offer (NFT → bidder, funds → you minus 1.5%) | — | — | ✓ owner |
+| Accept an offer (NFT → bidder, funds → you minus 2%) | — | — | ✓ owner |
 | Decline an offer (bidder refunded in full) | — | — | ✓ owner |
 | Refund an expired offer (your own always; keeper sweeps others) | — | ✓ | ✓ |
 | Enable offers for a collection | — | — | ✓ collection **contract** owner (ERC-173) |

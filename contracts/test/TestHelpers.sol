@@ -7,19 +7,18 @@ import {OfferBook} from "../src/OfferBook.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 
-/// @notice Shared helpers for deploying contracts behind ERC1967Proxy.
-///         Ensures _disableInitializers() in constructors doesn't block
-///         test initialization while maintaining production safety.
-///         All helpers deploy the implementation, then wrap it in a proxy
-///         that calls initialize() in the proxy's context.
+/// @notice Shared helpers for deploying the v3.4 contract set in tests.
+///         v3.4: feeRecipient + manager are implementation-constructor args
+///         (immutables); the proxy initializer takes no arguments. The
+///         manager is a PLAIN contract — no proxy.
 contract TestHelpers {
     function _deployAuctionHouse(address recipient, address manager_)
         internal returns (AuctionHouse)
     {
-        AuctionHouse impl = new AuctionHouse();
+        AuctionHouse impl = new AuctionHouse(recipient, manager_);
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeWithSelector(AuctionHouse.initialize.selector, recipient, manager_)
+            abi.encodeWithSelector(AuctionHouse.initialize.selector)
         );
         return AuctionHouse(address(proxy));
     }
@@ -27,10 +26,10 @@ contract TestHelpers {
     function _deployMarketplace(address recipient, address manager_)
         internal returns (Marketplace)
     {
-        Marketplace impl = new Marketplace();
+        Marketplace impl = new Marketplace(recipient, manager_);
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeWithSelector(Marketplace.initialize.selector, recipient, manager_)
+            abi.encodeWithSelector(Marketplace.initialize.selector)
         );
         return Marketplace(address(proxy));
     }
@@ -38,17 +37,17 @@ contract TestHelpers {
     function _deployOfferBook(address recipient, address manager_)
         internal returns (OfferBook)
     {
-        OfferBook impl = new OfferBook();
+        OfferBook impl = new OfferBook(recipient, manager_);
         ERC1967Proxy proxy = new ERC1967Proxy(
             address(impl),
-            abi.encodeWithSelector(OfferBook.initialize.selector, recipient, manager_)
+            abi.encodeWithSelector(OfferBook.initialize.selector)
         );
         return OfferBook(address(proxy));
     }
 
-    /// @dev v3.2 initialize takes (admin, keeper). The 1-arg helper keeps the
-    ///      old call sites compiling by installing a sentinel keeper that no
-    ///      test impersonates; tests that need a specific keeper call
+    /// @dev The manager constructor takes (admin, keeper). The 1-arg helper
+    ///      keeps old call sites compiling by installing a sentinel keeper
+    ///      that no test impersonates; tests that need a specific keeper call
     ///      `setKeeper` as the admin, or use the 2-arg overload.
     address internal constant TEST_SENTINEL_KEEPER = address(uint160(uint256(keccak256("mw.test.sentinel-keeper"))));
 
@@ -61,11 +60,7 @@ contract TestHelpers {
     function _deployMarketplaceManager(address admin, address keeper)
         internal returns (MarketplaceManager)
     {
-        MarketplaceManager impl = new MarketplaceManager();
-        ERC1967Proxy proxy = new ERC1967Proxy(
-            address(impl),
-            abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, keeper)
-        );
-        return MarketplaceManager(address(proxy));
+        // v3.4: plain contract, no proxy, no initializer.
+        return new MarketplaceManager(admin, keeper);
     }
 }

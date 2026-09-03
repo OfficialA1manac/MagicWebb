@@ -62,8 +62,8 @@ func TestBigStrAndTsUnix(t *testing.T) {
 // (OutbidNotification, LoserRefunded).
 func TestCoreTopicsIncludesAuctionExtended(t *testing.T) {
 	topics := coreTopics()[0]
-	if len(topics) != 15 {
-		t.Fatalf("core topics = %d, want 15", len(topics))
+	if len(topics) != 17 { // 15 + v3.4 AuctionForceCancelled + OfferEligibilitySet
+		t.Fatalf("core topics = %d, want 17", len(topics))
 	}
 	has := func(want common.Hash) bool {
 		for _, h := range topics {

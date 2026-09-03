@@ -132,6 +132,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onAuctionCancelled(ctx, l)
 	case TopicAuctionSettlementFailed:
 		return h.onAuctionSettlementFailed(ctx, l)
+	case TopicAuctionForceCancelled:
+		return h.onAuctionForceCancelled(ctx, l)
 	case TopicRefundPushed:
 		return h.onRefundPushed(ctx, l)
 	case TopicOfferMade:
@@ -140,6 +142,8 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onOfferAccepted(ctx, l, blockTime)
 	case TopicOfferRefunded:
 		return h.onOfferRefunded(ctx, l)
+	case TopicOfferEligibilitySet:
+		return h.onOfferEligibilitySet(ctx, l)
 	case TopicTransfer721:
 		return h.onTransfer721(ctx, l)
 	case TopicTransferSingle:
@@ -463,7 +467,47 @@ func (h *handlers) onAuctionSettlementFailed(ctx context.Context, l types.Log) e
 	return nil
 }
 
+// AuctionForceCancelled(uint256 indexed id)
+//
+// v3.4 stuck-auction rescue: keeper/seller/winner called forceCancel() once
+// block.timestamp >= endsAt + SELLER_DEFAULT_WINDOW (3 days). On-chain it only
+// flips settled=true so refundLosers unlocks — no NFT moves, no sale. Emitted
+// INSTEAD OF AuctionSettled, so like AuctionSettlementFailed it is the only
+// thing that marks the auction terminal. Status is 'cancelled' (not 'settled':
+// that reads as SOLD everywhere it is consumed).
+func (h *handlers) onAuctionForceCancelled(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 2 {
+		return malformedLogf("onAuctionForceCancelled: short log")
+	}
+	auctionID := bigInt(l.Topics[1].Bytes()).Int64()
+	if err := h.q.SetAuctionStatus(ctx, auctionID, "cancelled"); err != nil {
+		return fmt.Errorf("onAuctionForceCancelled: %w", err)
+	}
+	h.pubTyped("auction-updated", &sse.AuctionUpdatedEvent{
+		Event: "AuctionForceCancelled", AuctionID: auctionID,
+	})
+	return nil
+}
+
 // ── OfferBook (Model A: stacked positions, fee taken at make) ──────────────────
+
+// OfferEligibilitySet(address indexed coll, bool indexed eligible)
+//
+// Owner toggled whether OfferBook accepts offers on a collection. Both params
+// are indexed so the flag lives in topics[2] (a full 32-byte word; non-zero =
+// true). Persisted to collections.offer_eligible (migration 041) so the UI can
+// hide the "make offer" CTA on collections the contract would revert on.
+func (h *handlers) onOfferEligibilitySet(ctx context.Context, l types.Log) error {
+	if len(l.Topics) < 3 {
+		return malformedLogf("onOfferEligibilitySet: short log")
+	}
+	coll := addrStr(l.Topics[1].Bytes())
+	eligible := bigInt(l.Topics[2].Bytes()).Sign() != 0
+	if err := h.q.SetCollectionOfferEligible(ctx, coll, eligible); err != nil {
+		return fmt.Errorf("onOfferEligibilitySet: %w", err)
+	}
+	return nil
+}
 
 // OfferMade(address indexed coll, uint256 indexed tokenId, address indexed bidder,
 //

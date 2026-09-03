@@ -15,7 +15,7 @@ One `MarketplaceManager` per network holds exactly two addresses:
 | Slot | Power | Lifetime |
 |---|---|---|
 | `keeper` | Settle ended auctions to their recorded parties, sweep refunds to their owners, clean expired listings. Cannot move, redirect, or block funds. Cannot change the keeper set. | Forever (replaceable only by the admin, while one exists) |
-| `admin` | `setKeeper`, timelocked UUPS upgrades, `renounceAdmin`. | Until `renounceAdmin()` — then nobody, forever |
+| `admin` | `setKeeper`, instant UUPS upgrades (`upgradeDelay` 0), 2-step `transferAdmin`/`acceptAdmin` (`cancelAdminTransfer` aborts a pending handover), `renounceAdmin`. | Until `renounceAdmin()` — then nobody, forever |
 
 The cores (Marketplace, AuctionHouse, OfferBook) consult the manager through
 the same `hasRole(bytes32,address)` staticcall protocol as v3.1; the manager
@@ -24,16 +24,20 @@ function in the deployed system adds a settlement-authorized address.
 
 ## Two deployment modes, one bytecode
 
-- **Unsealed (Coston2 testnet):** `DeployV32.s.sol` with `SEAL=false` and an
-  `ADMIN_ADDR`. The admin can rotate the keeper and perform timelocked
-  upgrades (delay is 0 on chain 114 — testnet iteration is the point).
-  Testnet state carries no real value.
-- **Sealed (Songbird, Flare):** `SEAL=true`. The deploy script requires the
-  fee recipient to be a contract (Safe), uses the deployer as a momentary
-  admin, and calls `renounceAdmin()` as its final action. From block one:
-  no admin, no upgrades, no keeper rotation, no grants, fee recipient fixed.
-  The transition to immutability is completed inside the deploy transaction —
-  there is no post-deploy checklist to forget.
+- **Unsealed -- EVERY network (owner directive 2026-09-02):** `DeployV34.s.sol`
+  with an `ADMIN_ADDR` (a fresh, per-network wallet the owner saves offline).
+  The admin can rotate the keeper and perform INSTANT upgrades -- v3.4 sets
+  `upgradeDelay()` to 0 on every chain; queueUpgrade and upgradeTo run
+  back-to-back. With no notice window, custody of the admin key IS the
+  entire upgrade security model until the network is sealed. The admin key
+  is rotatable before sealing: `transferAdmin(new)` then `acceptAdmin()` from
+  the new wallet (2-step; `cancelAdminTransfer()` aborts).
+- **Sealed -- the go-immutable switch:** when the owner gives the order for a
+  network, its admin calls `MarketplaceManager.renounceAdmin()` -- one way,
+  one transaction. From that block: no admin, no upgrades, no keeper
+  rotation, no grants, fee recipient fixed. (`SEAL=true` at deploy time
+  still exists for a deliberate sealed-from-block-one deployment and
+  requires a Safe/contract fee recipient.)
 
 ## Keeper key policy
 

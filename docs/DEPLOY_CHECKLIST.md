@@ -16,13 +16,14 @@ are hard gates for Flare (chain 14).
 ## Deploy
 ```bash
 cd contracts
-# Testnet (Coston2): admin retained for iteration
+# EVERY network (Coston2, Songbird, Flare) -- owner directive 2026-09-02:
+# deploy admin-held and INSTANTLY upgradeable (upgradeDelay()==0 everywhere).
+# ADMIN_ADDR is that network's saved admin wallet; immutability is a LATER,
+# explicit per-network renounceAdmin() on the owner's go-immutable order.
 PRIVATE_KEY=0x… ADMIN_ADDR=0x… FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
-forge script script/DeployV32.s.sol --rpc-url <rpc> --broadcast -vvvv
-# Mainnet (Songbird/Flare): sealed at deploy — admin renounced in-script,
-# FEE_RECIPIENT_ADDR must be a Safe/contract, ADMIN_ADDR is ignored
-PRIVATE_KEY=0x… SEAL=true FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
-forge script script/DeployV32.s.sol --rpc-url <rpc> --broadcast -vvvv
+forge script script/DeployV34.s.sol --rpc-url <rpc> --broadcast -vvvv
+# (SEAL=true remains available for a deliberate sealed-from-block-one deploy;
+# it requires FEE_RECIPIENT_ADDR to be a Safe/contract and ignores ADMIN_ADDR.)
 ```
 The script itself asserts, on-chain, after deploying: `feeRecipient` matches
 on all three market contracts, `manager` wiring, `keeper()` == KEEPER_ADDR
@@ -53,7 +54,7 @@ export PRIVATE_KEY=0x…            # funded Coston2 deployer
 export ADMIN_ADDR=0x…             # single admin (testnet iteration authority)
 export FEE_RECIPIENT_ADDR=0x…     # fee recipient (can be an EOA on testnet)
 export KEEPER_ADDR=0x…            # address of the backend KEEPER_KEY
-forge script script/DeployV32.s.sol \
+forge script script/DeployV34.s.sol \
   --rpc-url https://coston2-api.flare.network/ext/C/rpc --broadcast -vv
 ```
 

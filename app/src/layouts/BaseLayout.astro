@@ -322,7 +322,7 @@ const networks = KNOWN_NETWORKS.map((n) => {
          (window.MW_MARKETPLACE empty). One line, dismissible per session. -->
     <div id="ro-banner" role="status" hidden style="position:relative;z-index:2;display:flex;align-items:center;justify-content:center;gap:0.5rem;flex-wrap:wrap;padding:0.5rem 3rem 0.5rem 1rem;background:rgba(125,211,252,0.08);border-bottom:1px solid rgba(125,211,252,0.2);font-size:0.8125rem;color:rgba(255,255,255,0.7);">
       <span id="ro-banner-text"></span>
-      <a id="ro-banner-cta" href="#" hidden style="color:#7dd3fc;font-weight:700;">Trade now on Coston2 →</a>
+      <a id="ro-banner-cta" href="#" hidden style="color:#7dd3fc;font-weight:700;"></a>
       <button id="ro-banner-x" aria-label="Dismiss" style="position:absolute;right:0.25rem;top:50%;transform:translateY(-50%);min-width:44px;min-height:44px;background:none;border:none;color:rgba(255,255,255,0.5);font-size:1rem;cursor:pointer;">✕</button>
     </div>
     <script is:inline>
@@ -332,10 +332,15 @@ const networks = KNOWN_NETWORKS.map((n) => {
           var el = document.getElementById('ro-banner'); if (!el) return;
           var name = window.MW_NETWORK_NAME || 'this network';
           document.getElementById('ro-banner-text').textContent = 'Browsing ' + name + ' in read-only mode — trading opens after the security audit.';
-          var origin = '';
-          (window.MW_NETWORK_URLS || '').split(',').forEach(function(p){ var i = p.indexOf('='); if (i > 0 && p.slice(0, i).trim() === '114') origin = p.slice(i + 1).trim(); });
+          // Preferred sibling trading origin: 114 > 14 > 19, never ourselves.
+          var urls = {};
+          (window.MW_NETWORK_URLS || '').split(',').forEach(function(p){ var i = p.indexOf('='); if (i > 0) urls[p.slice(0, i).trim()] = p.slice(i + 1).trim(); });
+          var names = {114:'Coston2', 14:'Flare', 19:'Songbird'};
+          var self = String(window.MW_CHAIN_ID || '');
+          var origin = '', oname = '';
+          ['114','14','19'].some(function(idc){ if (idc !== self && urls[idc]) { origin = urls[idc]; oname = names[idc]; return true; } return false; });
           var cta = document.getElementById('ro-banner-cta');
-          if (origin) { cta.href = origin; cta.hidden = false; }
+          if (origin) { cta.href = origin; cta.textContent = 'Trade now on ' + oname + ' →'; cta.hidden = false; }
           el.hidden = false;
           document.getElementById('ro-banner-x').addEventListener('click', function(){
             el.hidden = true;

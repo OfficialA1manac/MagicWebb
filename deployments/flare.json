@@ -1,6 +1,7 @@
 {
   "$schema": "./schema.json",
   "network": "flare",
+  "script": "contracts/script/DeployV34.s.sol",
   "chainId": 14,
   "status": "read-only",
   "deployedAt": null,
@@ -22,5 +23,5 @@
     "flyApp": "magicwebb-flare",
     "origin": "https://magicwebb-flare.fly.dev"
   },
-  "note": "contracts/script/DeployFlareMainnet.s.sol has never been run. Deployment is gated on external audit + fee-recipient multisig. Filling these addresses + setting FLARE_ENABLED=true in CI is the entire enable procedure."
+  "note": "Deploy with contracts/script/DeployV34.s.sol (unsealed: PRIVATE_KEY, ADMIN_ADDR, FEE_RECIPIENT_ADDR, KEEPER_ADDR; SEAL unset). Owner directive 2026-09-02: every network deploys admin-held and INSTANTLY upgradeable; immutability is a later explicit renounceAdmin() per network. Filling these addresses + setting FLARE_ENABLED=true in CI is the entire enable procedure."
 }

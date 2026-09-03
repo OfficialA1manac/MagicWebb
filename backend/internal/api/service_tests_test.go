@@ -562,6 +562,7 @@ func TestOffersService_HandleList_Success(t *testing.T) {
 		"offer_id", "bidder", "collection", "token_id",
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
+		"collection_verified", "collection_creator",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -569,7 +570,7 @@ func TestOffersService_HandleList_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows(offerCols).
 			AddRow("1", "0xbidder1", "0xcol1", "1",
 				"1000000000000000000", "10000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now))
+				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, ""))
 
 	svc := NewOffersService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -599,6 +600,7 @@ func TestOffersService_HandleList_FilteredByBidder(t *testing.T) {
 		"offer_id", "bidder", "collection", "token_id",
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
+		"collection_verified", "collection_creator",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -606,7 +608,7 @@ func TestOffersService_HandleList_FilteredByBidder(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows(offerCols).
 			AddRow("1", "0xbidder1", "0xcol1", "1",
 				"1000000000000000000", "10000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now))
+				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, ""))
 
 	svc := NewOffersService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -635,6 +637,7 @@ func TestOffersService_HandleList_Empty(t *testing.T) {
 		"offer_id", "bidder", "collection", "token_id",
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
+		"collection_verified", "collection_creator",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -1238,12 +1241,12 @@ func TestLimitClamping(t *testing.T) {
 		input string // limit query param value
 		want  int    // expected limit passed to DB
 	}{
-		{"", 50},    // not present → f.Limit=0 → DB clamps 0→50
+		{"", 50},     // not present → f.Limit=0 → DB clamps 0→50
 		{"0", 1},     // Atoi(0)=0, n<1→n=1 → f.Limit=1 → DB passes 1
 		{"-1", 1},    // Atoi(-1)=-1, n<1→n=1 → f.Limit=1 → DB passes 1
 		{"5", 5},     // valid → f.Limit=5 → DB passes 5
 		{"100", 100}, // valid → f.Limit=100 → DB passes (100 <= 100)
-		{"250", 100},  // handler clamps 250→100 (listings max), DB passes 100 (100 <= 100)
+		{"250", 100}, // handler clamps 250→100 (listings max), DB passes 100 (100 <= 100)
 		{"abc", 50},  // Atoi error → f.Limit=0 → DB clamps 0→50
 	}
 	for _, tc := range tests {

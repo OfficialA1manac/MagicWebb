@@ -13,7 +13,7 @@ description: "Vision, market, and the seller-pays economic model."
 
 ## Executive summary
 
-MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and on-chain payable offers with escrowed principal. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 1.5% platform fee, charged only on settlement (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds. Listing, auction creation, bidding, and making offers are all free — the fee is never charged on operations that do not result in a sale. The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
+MagicWebb is a non-custodial NFT marketplace built natively for the Flare Network. It supports the two dominant token standards — ERC-721 and ERC-1155 — across three trade primitives: instant fixed-price purchase, English auction, and on-chain payable offers with escrowed principal. The platform is engineered for the reality of a sovereign-data network: low fees, transparent settlement, and zero custodial risk. MagicWebb charges a single hardcoded 2% platform fee (1.5% to the platform wallet, 0.5% to the network keeper bot that funds instant settlement), charged only on settlement (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds. Listing, auction creation, bidding, and making offers are all free — the fee is never charged on operations that do not result in a sale. The fee rate is a Solidity `constant` — no admin key, environment variable, or upgrade path can change it.
 
 This document explains what MagicWebb is, who it serves, why it exists, and where it is going. A separate **technical whitepaper** (`WHITEPAPER_TECHNICAL.md`) covers the smart-contract design and threat model in depth.
 
@@ -30,7 +30,7 @@ NFT marketplaces today suffer from three structural failures:
 MagicWebb addresses all three:
 
 - **No custody.** Sellers retain the NFT in their wallet until the moment a buyer settles. The contract holds zero NFT inventory at rest.
-- **Fixed fee.** The on-chain `PLATFORM_FEE_BPS` constant is 150 basis points (1.5%). It is a `constant` — not a variable, not a mutable slot. No admin can change it post-deploy.
+- **Fixed fee.** The on-chain `PLATFORM_FEE_BPS` constant is 200 basis points (2%), split 150 bps to `feeRecipient` and 50 bps to the keeper. It is a `constant` — not a variable, not a mutable slot. No admin can change it post-deploy.
 - **One product, two standards.** A single contract surface handles both ERC-721 and ERC-1155 via a one-byte discriminator. Frontends treat them uniformly.
 
 ---
@@ -65,7 +65,7 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 1. Make an offer on any NFT — the contract escrows your FLR on-chain. Offering is free.
 2. Repeat offers on the same NFT stack into one position; top-ups do NOT refresh the expiry timer — it continues counting down from the original expiry. Bidders can cancel their offer before expiry via `cancelOffer()`.
-3. If the owner accepts, the NFT transfers to you and your escrow pays the seller (minus the 1.5% fee).
+3. If the owner accepts, the NFT transfers to you and your escrow pays the seller (minus the 2% fee).
 4. If the offer is rejected, cancelled, or expires, your full principal is refunded. Bidders can cancel their own offer before expiry; the keeper auto-refunds expired offers instantly.
 
 ### Auctions (the bidder side)
@@ -80,7 +80,7 @@ MagicWebb is positioned as the canonical NFT trade venue on Flare:
 
 ### 4.1 Single hardcoded fee
 
-The `PLATFORM_FEE_BPS` constant in `MarketplaceCore.sol` is 150 (1.5%). It is a `constant` — not a variable, not a mutable storage slot. It is charged only on a successful sale (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds; listing, auction creation, bidding, and making offers are free. Changing the rate requires deploying a new contract with a different address, so users can verify it themselves.
+The `PLATFORM_FEE_BPS` constant in `MarketplaceCore.sol` is 200 (2%: `PLATFORM_SHARE_BPS` 150 to `feeRecipient`, `KEEPER_SHARE_BPS` 50 to the keeper). It is a `constant` — not a variable, not a mutable storage slot. It is charged only on a successful sale (a fixed-price buy, auction settlement, or offer acceptance) and deducted from the seller's proceeds; listing, auction creation, bidding, and making offers are free. Changing the rate requires deploying a new contract with a different address, so users can verify it themselves.
 
 Fees are sent directly to the `feeRecipient` wallet via `.call{value: fee}("")` — no intermediary contract, no vault, no accumulator step.
 
@@ -115,7 +115,7 @@ On-chain (Flare Coston2)
    ├── Marketplace        — fixed-price listings
    ├── AuctionHouse       — English auctions
    ├── OfferBook          — on-chain payable offers (escrowed, stacked)
-   └── MarketplaceCore    — shared fee + transfer logic (immutable, no admin/pause)
+   └── MarketplaceCore    — shared fee + transfer logic (no admin override on trades, no pause)
 
 Off-chain (single Go binary)
    ├── Indexer (Go)        — listens to events, populates Postgres
@@ -146,7 +146,7 @@ This is a deliberate choice:
 
 - A token would create an alignment between the platform and short-term price action that we do not want. We are building infrastructure, not a meme.
 - The Flare Network already has FLR; introducing a second token to a niche venue would fragment liquidity.
-- There is nothing to govern on-chain. The fee rate is a compile-time constant, and nothing on the protocol is pausable. On **mainnet deployments** (Songbird, Flare) the deploy script renounces the sole admin as its final action, so from block one there is no admin, no upgrade path, no keeper rotation, and `feeRecipient` can never change. The **Coston2 testnet** deployment intentionally keeps a single admin so the marketplace can iterate before mainnet — testnet state carries no real value.
+- There is nothing to govern on-chain. The fee rate is a compile-time constant, and nothing on the protocol is pausable. Every network (Coston2, Songbird, Flare) deploys unsealed under a single per-network admin that can perform instant upgrades, replace the keeper, and rotate its own key (2-step `transferAdmin`/`acceptAdmin`); it can never pause trading, change the fee, or touch escrowed funds. Immutability is a later, explicit per-network step: on the owner's order the admin calls `renounceAdmin()`, after which there is no admin, no upgrade path, no keeper rotation, and `feeRecipient` can never change.
 
 If user feedback ever justifies governance, it will be added via a separate mechanism — not retroactively jammed in by minting a token.
 
@@ -167,8 +167,8 @@ If user feedback ever justifies governance, it will be added via a separate mech
 
 | Risk | What happens | What we do |
 |---|---|---|
-| Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty; mainnet deployments are sealed at deploy (admin renounced), so no upgrade can change behavior post-deploy |
-| Deployer key compromised | No effect on a live mainnet market | The deployer holds no power after deploy. Mainnet deployments renounce the admin in the deploy transaction itself — no admin, no pause, no upgrade path survives. `feeRecipient` is fixed at deploy to a multisig |
+| Smart-contract bug | Funds at risk | Hard fee cap, audit, bug bounty; while a network is unsealed its admin can ship an instant fix, and once the owner orders `renounceAdmin()` no upgrade can change behavior on that network ever again |
+| Deployer key compromised | No effect on a live market | The deployer holds no power after deploy; authority sits with the separate per-network admin wallet (rotatable via 2-step `transferAdmin`/`acceptAdmin`, and gone after `renounceAdmin()`). No admin can pause or touch funds. `feeRecipient` is fixed at deploy |
 | Keeper key compromised | Automation only | The keeper can only settle auctions to their recorded winner/seller, push refunds to their owners, and clean expired listings — it cannot move, redirect, or block any user's funds, and it cannot enroll other keepers |
 | Frontend disappears | Inconvenient | Contracts remain callable via Flarescan or any wallet's "contract interaction" panel |
 | Indexer lags | Stale UI | Frontend shows "syncing" badge; on-chain trades still settle in real time |

@@ -131,8 +131,9 @@ contract AuditFuzzTest is Test, TestHelpers {
     function _endsAt(uint256 id)   internal view returns (uint64)  { return _a(id).endsAt; }
     function _settled(uint256 id)  internal view returns (bool)    { return _a(id).settled; }
     function _leader(uint256 id)   internal view returns (address, uint128) {
-        AuctionHouse.Auction memory a = _a(id);
-        return (a.leader, a.leaderTotal);
+        // v3.4: leaderTotal is a derived view (cumulative[id][leader]), no
+        // longer a struct field.
+        return (_a(id).leader, ah.leaderTotal(id));
     }
 
     function _eoa(uint256 i) internal pure returns (address) {
@@ -491,7 +492,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
         vm.warp(block.timestamp + 2 days);
-        uint256 fee = uint256(2 ether) * 150 / 10_000;
+        uint256 fee = uint256(2 ether) * 200 / 10_000; // manager == 0: whole 2% to feeRecipient
         vm.expectEmit(true, false, false, true, address(ah2));
         emit PushFailed(address(badFee), fee);
         vm.prank(seller);
@@ -514,7 +515,7 @@ contract AuditFuzzTest is Test, TestHelpers {
         ah.bid{value: 2 ether}(id2);
         vm.warp(block.timestamp + 2 days);
         uint128 winBid = 2 ether;
-        uint256 fee = uint256(winBid) * 150 / 10_000;
+        uint256 fee = uint256(winBid) * 200 / 10_000;
         uint256 proceeds = uint256(winBid) - fee;
         vm.expectEmit(true, false, false, true, address(ah));
         emit PushFailed(address(badSeller), proceeds);
@@ -663,19 +664,9 @@ contract AuditFuzzTest is Test, TestHelpers {
         assertEq(uint256(p99), 0, "reentry slot price zero (reentry blocked)");
     }
 
-    function test_bidders_uniqueAcrossRefundAndRebid() public {
-        (uint256 id, ) = _auction7d();
-        _bid(id, alice, 1 ether);
-        assertEq(ah.bidderCount(id), 1, "alice enrolled on first bid");
-        _bid(id, alice, 1 ether);
-        assertEq(ah.bidderCount(id), 1, "alice top-up does NOT push duplicate (prevCum > 0 skips enrollment)");
-        assertEq(ah.cumulative(id, alice), 2 ether, "alice cumulative = 2 ether after top-up");
-        _bid(id, bob, 3 ether);
-        assertEq(ah.bidderCount(id), 2, "bob enrolled; no duplicate for alice");
-        _bid(id, bob, 1 ether);
-        assertEq(ah.bidderCount(id), 2, "bob top-up does NOT push duplicate; _bidders[id] has exactly 2 entries");
-        assertEq(ah.cumulative(id, bob), 4 ether, "bob cumulative = 4 ether after top-up");
-    }
+    // v3.4: test_bidders_uniqueAcrossRefundAndRebid deleted — the on-chain
+    // bidder registry (_bidders/_seenBidder/bidderCount/getBidder) is gone;
+    // the keeper/indexer reconstructs the bidder set from BidPlaced events.
 
     function test_create_nonReentrantDefenseInDepth() public {
         (uint256 id721, uint256 tid721) = _auction7d();
@@ -755,7 +746,9 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     function testFuzz_increment_nearMaxBidOverflow(uint128 leaderTotal) public {
         leaderTotal = uint128(bound(leaderTotal, type(uint128).max - 1 ether, type(uint128).max - 1));
-        uint256 id = _setupLeader(leaderTotal / 2, alice, leaderTotal);
+        // v3.4: reserve is stored uint96 (create reverts BidOverflow above it),
+        // so pin it at the cap — bids/cumulative stay full uint128.
+        uint256 id = _setupLeader(type(uint96).max, alice, leaderTotal);
         uint256 floor = ah.MIN_BID_INCREMENT();
         uint256 minNext256 = uint256(leaderTotal) + floor;
         if (minNext256 > type(uint128).max) {

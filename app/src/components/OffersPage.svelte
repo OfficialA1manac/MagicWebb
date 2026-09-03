@@ -2,6 +2,7 @@
   // Offers: "Received" (on NFTs you own: accept / decline) and "Made"
   // (your escrowed offers: cancel before expiry, refund after).
   import { onMount } from 'svelte';
+  import VerifiedBadge from './VerifiedBadge.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
@@ -16,7 +17,7 @@
   import { fmtPrice, shortAddr, fmtCountdown, timeAgo } from '../lib/format';
   import { onAccountChange } from '../lib/tx/client';
 
-  type Offer = { offer_id: string; bidder: string; collection: string; token_id: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string; created_at: string; name?: string; image_uri?: string };
+  type Offer = { offer_id: string; bidder: string; collection: string; token_id: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string; created_at: string; name?: string; image_uri?: string; collection_verified?: boolean; collection_creator?: string; collection_name?: string };
 
   let me = $state<string | null>(null);
   let tab = $state<'received' | 'made'>('received');
@@ -85,7 +86,7 @@
         <li class="op-row" class:is-expired={expired(o)}>
           <a class="op-thumb" href={`/token/${o.collection}/${o.token_id}`} aria-label={label(o)}>{#if o.image_uri}<img src={o.image_uri.startsWith('/api') || o.image_uri.startsWith('data:') ? o.image_uri : `/api/v1/media?url=${encodeURIComponent(o.image_uri)}&id=${o.token_id}`} alt={label(o)} loading="lazy" decoding="async" />{/if}</a>
           <div class="op-main">
-            <a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a>
+            <div class="op-title"><a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a><VerifiedBadge verified={!!o.collection_verified} creatorAddr={o.collection_creator ?? ''} collectionName={o.collection_name ?? ''} network={currentChain().name} /></div>
             <div class="op-dim">{tab === 'received' ? `from ${shortAddr(o.bidder)}` : `on ${shortAddr(o.collection)}`} · {expired(o) ? 'expired ' + timeAgo(o.expires_at) : 'expires in ' + fmtCountdown(new Date(o.expires_at).getTime() / 1000, now)}</div>
           </div>
           <div class="op-amt mono">{fmtPrice(o.amount_wei)} {sym}</div>
@@ -120,7 +121,7 @@
   @media (min-width: 768px) { .op-row { grid-template-columns: 56px 1fr auto auto; grid-template-areas: "thumb main amt acts"; } }
   .op-row.is-expired { opacity: .75; }
   .op-thumb { grid-area: thumb; width: 56px; height: 56px; border-radius: 10px; background: #1a1a24; overflow: hidden; display: block; } .op-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .op-main { grid-area: main; min-width: 0; } .op-name { color: #fafafa; font-weight: 700; text-decoration: none; font-size: 14px; overflow-wrap: anywhere; }
+  .op-main { grid-area: main; min-width: 0; } .op-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .op-name { color: #fafafa; font-weight: 700; text-decoration: none; font-size: 14px; overflow-wrap: anywhere; }
   .op-dim { font-size: 12px; color: rgba(255,255,255,.5); }
   .op-amt { grid-area: amt; font-weight: 600; font-size: 15px; white-space: nowrap; }
   .op-acts { grid-area: acts; display: flex; gap: 8px; flex-wrap: wrap; }

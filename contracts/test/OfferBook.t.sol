@@ -31,7 +31,8 @@ contract OfferBookTest is Test, TestHelpers {
         ob.setOfferEligible(address(multi), true);
     }
 
-    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 150 / 10_000; }
+    // 2% total (1.5% feeRecipient + 0.5% keeper); seller nets principal - _fee.
+    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 200 / 10_000; }
 
     function test_makeOfferEscrowsPrincipal() public {
         vm.prank(alice);
@@ -178,7 +179,7 @@ contract OfferBookTest is Test, TestHelpers {
         uint256 sb = seller.balance;
         vm.prank(seller);
         ob.acceptOffer(address(nft), tid, alice, principal);
-        uint256 fee = uint256(principal) * 150 / 10_000;
+        uint256 fee = uint256(principal) * 200 / 10_000;
         assertEq(seller.balance, sb + uint256(principal) - fee);
     }
 

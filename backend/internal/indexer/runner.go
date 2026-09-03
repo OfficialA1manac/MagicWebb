@@ -1036,6 +1036,16 @@ func (r *Runner) runWithdrawalSweeper(ctx context.Context) {
 
 var settleSelector = crypto.Keccak256([]byte("settle(uint256)"))[:4]
 
+// forceCancel(uint256) — v3.4 stuck-auction rescue. Callable by keeper/seller/
+// winner once block.timestamp >= endsAt + SELLER_DEFAULT_WINDOW (3 days);
+// only sets settled=true so refundLosers unlocks. Emits AuctionForceCancelled.
+var forceCancelSelector = crypto.Keccak256([]byte("forceCancel(uint256)"))[:4]
+
+// forceCancelEvery is how many 1s keeper ticks pass between force-cancel
+// sweeps. Candidates are ≥3 days stale, so a ~30s cadence loses nothing and
+// keeps the hot settle path free of an extra query per tick.
+const forceCancelEvery = 30
+
 // cleanExpired(address coll, uint256 id, address seller) — keeper-gated
 // removal of an expired listing (Marketplace.sol).
 var cleanExpiredSelector = crypto.Keccak256([]byte("cleanExpired(address,uint256,address)"))[:4]
@@ -1058,6 +1068,7 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	// Expired-listing cleanup runs on a slower cadence than settlement (each
 	// clean is a paid tx and listings carry no escrow urgency).
 	cleanTick := 0
+	forceTick := 0
 	for {
 		select {
 		case <-ctx.Done():
@@ -1118,8 +1129,61 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 				cleanTick = 0
 				r.cleanExpiredListings(ctx, key, keeperAddr, signer, chainIDBig)
 			}
+
+			// Stuck-auction rescue, every ~30s: anything still 'active' three
+			// days past endsAt has had settle() fail repeatedly (seller
+			// default, revert loop, RPC outage). forceCancel finalises it so
+			// losers can be refunded; the AuctionForceCancelled event marks
+			// the row 'cancelled'.
+			forceTick++
+			if forceTick >= forceCancelEvery {
+				forceTick = 0
+				r.forceCancelStuckAuctions(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig)
+			}
 		}
 	}
+}
+
+// forceCancelStuckAuctions sends AuctionHouse.forceCancel for every auction
+// GetForceCancelableAuctions returns (DB 'active', ends_at + 72h <= now).
+// Reuses the settle tx path (nonce guard, gas caps, receipt wait). An auction
+// another party already force-cancelled or settled reverts harmlessly with
+// NotActive and drops out of the query once the event indexes.
+func (r *Runner) forceCancelStuckAuctions(ctx context.Context, key *cryptoecdsa.PrivateKey, keeperAddr, auctionAddr common.Address, signer types.Signer, chainIDBig *big.Int) {
+	if auctionAddr == (common.Address{}) {
+		return // read-only network: no contracts
+	}
+	stuck, err := r.q.GetForceCancelableAuctions(ctx)
+	if err != nil {
+		log.Error().Err(err).Msg("keeper: get force-cancelable auctions")
+		return
+	}
+	for _, a := range stuck {
+		txHash, err := r.sendForceCancel(ctx, key, keeperAddr, auctionAddr, signer, chainIDBig, int64(a.AuctionID))
+		if err != nil {
+			log.Error().Err(err).Int64("auctionId", a.AuctionID).Msg("keeper: forceCancel tx failed")
+			continue
+		}
+		if err := r.waitMined(ctx, txHash, 2*time.Minute); err != nil {
+			log.Error().Err(err).Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).
+				Msg("keeper: forceCancel receipt not confirmed; will retry next pass")
+			continue
+		}
+		log.Info().Int64("auctionId", a.AuctionID).Str("tx", txHash.Hex()).Msg("keeper: forceCancel confirmed")
+	}
+}
+
+// encodeForceCancel ABI-encodes forceCancel(uint256): selector ‖ id.
+func encodeForceCancel(auctionID int64) []byte {
+	idBytes := make([]byte, 32)
+	big.NewInt(auctionID).FillBytes(idBytes)
+	data := append([]byte(nil), forceCancelSelector...)
+	return append(data, idBytes...)
+}
+
+func (r *Runner) sendForceCancel(ctx context.Context, key *cryptoecdsa.PrivateKey, from, to common.Address, signer types.Signer, chainID *big.Int, auctionID int64) (common.Hash, error) {
+	// forceCancel only flips settled + emits; well under settle's 150k budget.
+	return r.sendRaw(ctx, key, from, to, signer, chainID, encodeForceCancel(auctionID), 100_000)
 }
 
 // cleanExpiredListings removes expired-but-still-active listings on-chain via

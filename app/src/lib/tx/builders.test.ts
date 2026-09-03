@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { _resetChainCache } from '../chains';
 import { buildList, buildBuy, buildCancel, buildEditPrice, buildBatchList, MIN_PRICE_WEI } from './marketplace';
-import { buildCreate, buildBid, minimumTopUp, MIN_BID_INCREMENT_WEI } from './auction';
+import { buildCreate, buildBid, buildForceCancel, forceCancelUnlocked, minimumTopUp, MIN_BID_INCREMENT_WEI, FORCE_CANCEL_WINDOW_SEC } from './auction';
 import { buildMakeOffer, buildAcceptOffer } from './offers';
 import { TxError } from './errors';
 import { DURATIONS } from './durations';
@@ -72,6 +72,19 @@ describe('auction builders', () => {
   });
   it('create1155 inserts amount', () => {
     expect(buildCreate(NFT, 9n, E, 14400, 'erc1155', 3n).args).toEqual([NFT, 9n, 3n, E, 14400n]);
+  });
+  it('create accepts exactly the fifteen shared durations', () => {
+    for (const d of DURATIONS) expect(() => buildCreate(NFT, 1n, E, d.seconds)).not.toThrow();
+    for (const bad of [0, 1, 120, 420, 7201, 86401, 90000]) expect(() => buildCreate(NFT, 1n, E, bad)).toThrowError(/durations/);
+    expect(() => buildCreate(NFT, 1n, E, 120, 'erc1155', 2n)).toThrowError(/durations/);
+  });
+  it('forceCancel: (id) only; unlocks at endsAt + 3 days', () => {
+    const r = buildForceCancel(42n);
+    expect(r.address).toBe(AH); expect(r.functionName).toBe('forceCancel'); expect(r.args).toEqual([42n]); expect(r.value).toBeUndefined();
+    const ends = 1_700_000_000;
+    expect(FORCE_CANCEL_WINDOW_SEC).toBe(3 * 86400);
+    expect(forceCancelUnlocked(ends, (ends + FORCE_CANCEL_WINDOW_SEC - 1) * 1000)).toBe(false);
+    expect(forceCancelUnlocked(ends, (ends + FORCE_CANCEL_WINDOW_SEC) * 1000)).toBe(true);
   });
   it('bid is payable with the top-up amount', () => {
     const r = buildBid(42n, 2n * E);

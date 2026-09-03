@@ -17,8 +17,8 @@ error BatchTooLarge();
 /// @title Marketplace
 /// @notice Fixed-price, time-bound listings for ERC-721 and ERC-1155 tokens.
 /// @dev Non-custodial: tokens stay with seller until buyer settles. Approval required.
-///      Listing is FREE. The buyer pays exactly the asking price; a 1.5% platform fee is
-///      deducted from the seller's proceeds (the seller receives 98.5%).
+///      Listing is FREE. The buyer pays exactly the asking price; a 2% platform fee (1.5% platform + 0.5% keeper) is
+///      deducted from the seller's proceeds (the seller receives 98%).
 ///      Listings are keyed by (collection, tokenId, seller): ERC-1155 holders each keep
 ///      their own stacked listing; for ERC-721 only the true owner's listing is
 ///      settle-able (a stale listing from a prior owner simply reverts on `buy`).
@@ -64,13 +64,17 @@ contract Marketplace is MarketplaceCore {
         uint256 fee
     );
 
+    /// @notice v3.4: feeRecipient + manager are baked into the implementation
+    ///         as immutables (validated in MarketplaceCore's constructor).
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() { _disableInitializers(); }
+    constructor(address recipient, address manager_)
+        MarketplaceCore(recipient, manager_)
+    { _disableInitializers(); }
 
-    /// @notice One-time initializer. Calls __MarketplaceCore_init to store
-    ///         feeRecipient + manager in upgradeable storage.
-    function initialize(address recipient, address manager_) public initializer {
-        __MarketplaceCore_init(recipient, manager_);
+    /// @notice One-time proxy initializer — no arguments in v3.4 (immutables
+    ///         live in the implementation). Still initializer-gated.
+    function initialize() public initializer {
+        __MarketplaceCore_init();
     }
 
     // ── List (free) ───────────────────────────────────────────────────────────
@@ -129,9 +133,13 @@ contract Marketplace is MarketplaceCore {
     ///      invariant "every state-changing external on the cores is
     ///      nonReentrant". Cheap, mechanical, conservative. Added.
     function batchList(BatchItem[] calldata items) external nonReentrant {
-        if (items.length == 0 || items.length > 50) revert BatchTooLarge();
-        for (uint256 i; i < items.length; ++i) {
+        // v3.4: length hoisted + unchecked increment (−1.5k on a full batch).
+        // Safe: calldata length is constant and bounded to 50 above.
+        uint256 len = items.length;
+        if (len == 0 || len > 50) revert BatchTooLarge();
+        for (uint256 i; i < len; ) {
             _list(TokenStandard.ERC721, items[i].coll, items[i].id, 1, items[i].price, _expiryFor(items[i].duration));
+            unchecked { ++i; }
         }
     }
 
@@ -182,7 +190,9 @@ contract Marketplace is MarketplaceCore {
     ///      the invariant consistently. ~2.3k gas overhead on cold entry,
     ///      zero on re-entry (revert).
     function cancel(address coll, uint256 id) external nonReentrant {
-        Listing memory l = listings[coll][id][msg.sender];
+        // v3.4: storage pointer instead of a memory copy — the guard reads
+        // only slot 0 (seller) instead of loading the whole struct (−2.1k).
+        Listing storage l = listings[coll][id][msg.sender];
         if (l.seller != msg.sender) revert NotOwner(); // seller == address(0) → not listed
         delete listings[coll][id][msg.sender];
         emit Cancelled(coll, id, msg.sender);
@@ -232,10 +242,10 @@ contract Marketplace is MarketplaceCore {
         emit Cancelled(coll, id, seller_);
     }
 
-    // ── Buy (seller pays 1.5% on the sale) ────────────────────────────────────
+    // ── Buy (seller pays 2% on the sale: 1.5% platform + 0.5% keeper) ────────────────────────────────────
 
     /// @notice Buy a listed token. Send exactly `price` as msg.value.
-    /// @dev FINAL on success. NFT → buyer, 1.5% fee → feeRecipient, price − fee → seller.
+    /// @dev FINAL on success. NFT → buyer, 2% fee (1.5% platform + 0.5% keeper), price − fee → seller.
     ///      The `seller` arg selects which listing to buy (listings are seller-keyed).
     ///      Entire tx reverts if the NFT transfer fails (seller no longer owns/approves) —
     ///      no fee is taken, the listing remains. This is how first-settle-wins works.
@@ -255,10 +265,24 @@ contract Marketplace is MarketplaceCore {
 
         delete listings[coll][id][seller];
 
-        _transferToken(l.standard, coll, l.seller, msg.sender, id, l.amount);
+        // v3.4: ERC-721 uses transferFrom, not safeTransferFrom (−2.6k). The
+        // buyer IS msg.sender here, so the onERC721Received probe only ever
+        // protected the buyer from their own purchase — a contract buyer that
+        // cannot handle ERC-721 loses only its own convenience. This mirrors
+        // (inverted) the settle() rationale in AuctionHouse: there the winner
+        // is NOT the caller, so removing the hook removes a veto; here the
+        // caller is consenting by construction. NOTE the deliberate opposite
+        // choice in acceptOffer's _transferToken: its recipient (the offerer)
+        // is not the caller, so it keeps safeTransferFrom. ERC-1155 has no
+        // unsafe variant — that branch keeps its callback.
+        if (l.standard == TokenStandard.ERC721) {
+            IERC721(coll).transferFrom(l.seller, msg.sender, id);
+        } else {
+            IERC1155(coll).safeTransferFrom(l.seller, msg.sender, id, l.amount, "");
+        }
         _payFee(fee);
         uint256 proceeds;
-        unchecked { proceeds = uint256(l.price) - fee; } // fee = 1.5% of price, always < price
+        unchecked { proceeds = uint256(l.price) - fee; } // fee = 2% of price, always < price
         _pay(l.seller, proceeds);
 
         emit Bought(coll, id, msg.sender, l.seller, l.standard, l.amount, l.price, fee);

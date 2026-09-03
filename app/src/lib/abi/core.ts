@@ -2,6 +2,19 @@
 export const coreAbi = [
   {
     "type": "function",
+    "name": "KEEPER_SHARE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_UPGRADE_WINDOW",
     "inputs": [],
     "outputs": [
@@ -29,6 +42,19 @@ export const coreAbi = [
   {
     "type": "function",
     "name": "PLATFORM_FEE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
+    "name": "PLATFORM_SHARE_BPS",
     "inputs": [],
     "outputs": [
       {
@@ -238,7 +264,7 @@ export const coreAbi = [
         "internalType": "uint64"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -319,6 +345,37 @@ export const coreAbi = [
         "type": "address",
         "indexed": true,
         "internalType": "address"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeSplit",
+    "inputs": [
+      {
+        "name": "feeRecipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "platformShare",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "keeper",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "keeperShare",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -407,6 +464,11 @@ export const coreAbi = [
   },
   {
     "type": "error",
+    "name": "BadManager",
+    "inputs": []
+  },
+  {
+    "type": "error",
     "name": "NoManager",
     "inputs": []
   },
@@ -438,6 +500,11 @@ export const coreAbi = [
   {
     "type": "error",
     "name": "WithdrawFailed",
+    "inputs": []
+  },
+  {
+    "type": "error",
+    "name": "ZeroAddress",
     "inputs": []
   }
 ] as const;

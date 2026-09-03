@@ -66,6 +66,7 @@ contracts/lib/*
 !contracts/lib/openzeppelin-contracts
 !contracts/lib/openzeppelin-contracts-upgradeable
 *.gas-snapshot
+!contracts/.gas-snapshot
 gas-report.txt
 
 # ── Frontend / app ──────────────────────────────────────────────────────────

@@ -74,8 +74,12 @@ echo "auction ends in ~3min (plus anti-snipe extensions); polling chain for sett
 DEADLINE=$(( $(date +%s) + 900 ))
 SETTLED=""
 while [ "$(date +%s)" -lt "$DEADLINE" ]; do
-  # Auction struct has 14 fields incl. the `active` bool right after `settled`.
-  SETTLED=$(cast call "$AH" "auctions(uint256)(address,uint64,uint16,bool,bool,uint8,address,uint64,uint256,uint128,uint128,address,uint128,uint128)" "$AID" --rpc-url "$RPC" | sed -n 4p)
+  # v3.4 Auction struct is 10 fields: (seller, endsAt, originalEndsAt, settled,
+  # standard, collection, reserve, tokenId, leader, amount). Decode through the
+  # position-stable getAuction() view (AuctionHouse.sol) -- it returns ONE
+  # tuple on one line; `settled` is the 4th element.
+  SETTLED=$(cast call "$AH" "getAuction(uint256)((address,uint40,uint40,bool,uint8,address,uint96,uint256,address,uint96))" "$AID" --rpc-url "$RPC" \
+    | tr -d '()' | awk -F', *' '{print $4}')
   [ "$SETTLED" = "true" ] && break
   sleep 20
 done

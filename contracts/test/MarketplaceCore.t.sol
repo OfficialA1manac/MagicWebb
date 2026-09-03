@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Marketplace, NotOwner, NotListed} from "../src/Marketplace.sol";
 import {
-    BelowMinPrice, ZeroAddress, NotAdmin, NoManager, BadImplementation,
+    BelowMinPrice, ZeroAddress, NotAdmin, NoManager, BadImplementation, BadManager,
     UpgradeNotQueued, UpgradeNotReady, UpgradeExpired
 } from "../src/MarketplaceCore.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
@@ -29,47 +29,59 @@ contract MarketplaceCoreTest is Test, TestHelpers {
 
     /// Deploys a Marketplace whose upgrade authority is a real manager with
     /// this test contract as DEFAULT_ADMIN_ROLE.
-    function _gatedMarketplace() internal returns (Marketplace) {
+    function _gatedPair() internal returns (Marketplace, MarketplaceManager) {
         MarketplaceManager mgr = _deployMarketplaceManager(address(this));
-        return _deployMarketplace(creator, address(mgr));
+        return (_deployMarketplace(creator, address(mgr)), mgr);
     }
 
     function test_feeRecipientStored() public view {
-        // feeRecipient stored in proxy context
+        // v3.4: feeRecipient is an implementation immutable, read through the
+        // proxy — this also proves immutables resolve across the delegatecall.
         assertEq(mp.feeRecipient(), creator);
     }
 
-    function test_initializeZeroRecipientReverts() public {
-        // Deploy impl, expect revert when proxy tries to call initialize() with zero recipient
-        Marketplace impl = new Marketplace();
+    function test_constructorZeroRecipientReverts() public {
+        // v3.4: validation moved from the initializer to the implementation
+        // constructor (fee recipient + manager are immutables).
         vm.expectRevert(ZeroAddress.selector);
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, address(0), address(0)));
+        new Marketplace(address(0), address(0));
     }
 
-    function test_initializeZeroRecipientReverts2() public {
-        // Redundant with above but kept for coverage
-        Marketplace impl = new Marketplace();
+    function test_constructorRejectsEOAManager() public {
+        // A typo'd/EOA manager would silently disable keeper roles and freeze
+        // upgrades — the constructor probe must reject it.
+        vm.expectRevert(BadManager.selector);
+        new Marketplace(creator, address(0xDEAD));
+    }
+
+    function test_constructorRejectsNonManagerContract() public {
+        // A contract that doesn't answer the hasRole probe is not a manager.
+        vm.expectRevert(BadManager.selector);
+        new Marketplace(creator, address(this));
+    }
+
+    function test_initializeTakesNoArgsAndRunsOnce() public {
+        // The proxy initializer is gated: a second call must revert.
         vm.expectRevert();
-        new ERC1967Proxy(address(impl), abi.encodeWithSelector(Marketplace.initialize.selector, address(0), address(0)));
+        mp.initialize();
     }
 
-    // ── Upgrade timelock ────────────────────────────────────────────────────
+    // ── Upgrades: INSTANT on every chain (v3.4 owner directive) ────────────
 
-    function test_upgradeDelay_isZeroOnLocalChain() public view {
-        // forge's default chainid is 31337 — a dev/test chain, so upgrades are
-        // instant while the marketplace is in its testing phase.
-        assertEq(mp.upgradeDelay(), 0);
-    }
-
-    function test_upgradeDelay_isFortyEightHoursOnUnknownChain() public {
-        vm.chainId(19); // Songbird
-        assertEq(mp.upgradeDelay(), 48 hours);
+    function test_upgradeDelay_isZeroEverywhere() public {
+        assertEq(mp.upgradeDelay(), 0); // 31337 local
+        vm.chainId(114);
+        assertEq(mp.upgradeDelay(), 0); // Coston2
+        vm.chainId(19);
+        assertEq(mp.upgradeDelay(), 0); // Songbird — instant, per owner
+        vm.chainId(14);
+        assertEq(mp.upgradeDelay(), 0); // Flare — instant, per owner
     }
 
     function test_ungatedProxy_cannotBeUpgradedAtAll() public {
         // mp has manager == address(0): the implementation is frozen, rather
         // than upgradable by anyone as it was before the timelock landed.
-        Marketplace next = new Marketplace();
+        Marketplace next = new Marketplace(creator, address(0));
         vm.expectRevert(NoManager.selector);
         mp.queueUpgrade(address(next));
         vm.expectRevert(NoManager.selector);
@@ -77,15 +89,15 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     }
 
     function test_queueUpgrade_nonAdminReverts() public {
-        Marketplace gated = _gatedMarketplace();
-        Marketplace next = new Marketplace();
+        (Marketplace gated, MarketplaceManager mgr) = _gatedPair();
+        Marketplace next = new Marketplace(creator, address(mgr));
         vm.prank(address(0xDEAD));
         vm.expectRevert(NotAdmin.selector);
         gated.queueUpgrade(address(next));
     }
 
     function test_queueUpgrade_rejectsZeroAndEOA() public {
-        Marketplace gated = _gatedMarketplace();
+        (Marketplace gated,) = _gatedPair();
         vm.expectRevert(BadImplementation.selector);
         gated.queueUpgrade(address(0));
         vm.expectRevert(BadImplementation.selector);
@@ -96,12 +108,13 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     // upgradeToAndCall passes forceCall=true, so empty calldata still
     // delegatecalls into the new implementation's (nonexistent) fallback and
     // reverts. Real upgrades either carry migration calldata or use upgradeTo.
-    function test_upgrade_requiresQueueAndDelay() public {
-        // Pin a mainnet chain id: local 31337 has delay 0, which makes the
-        // UpgradeNotReady leg unreachable. Flare (14) keeps the 48h delay.
-        vm.chainId(14);
-        Marketplace gated = _gatedMarketplace();
-        Marketplace next = new Marketplace();
+    function test_upgrade_instantOnMainnetChain() public {
+        // v3.4: delay is 0 everywhere — queue and install run back-to-back on
+        // a MAINNET chain id. The queue still enforces the exact-impl match
+        // and one-shot consumption.
+        vm.chainId(14); // Flare
+        (Marketplace gated, MarketplaceManager mgr) = _gatedPair();
+        Marketplace next = new Marketplace(creator, address(mgr));
         address before = _implOf(address(gated));
 
         // Nothing queued.
@@ -110,23 +123,24 @@ contract MarketplaceCoreTest is Test, TestHelpers {
 
         gated.queueUpgrade(address(next));
         assertEq(gated.pendingImplementation(), address(next));
-        assertEq(gated.upgradeEta(), uint64(block.timestamp) + 48 hours);
-
-        // Queued, but the timer has not run out.
-        vm.expectRevert(UpgradeNotReady.selector);
-        gated.upgradeTo(address(next));
+        assertEq(gated.upgradeEta(), uint64(block.timestamp), "eta == now: instant");
 
         // A different implementation cannot ride the queued slot.
-        vm.warp(block.timestamp + 48 hours);
-        Marketplace other = new Marketplace();
+        Marketplace other = new Marketplace(creator, address(mgr));
         vm.expectRevert(UpgradeNotQueued.selector);
         gated.upgradeTo(address(other));
 
+        // Same-block install — no warp needed.
         gated.upgradeTo(address(next));
         assertEq(_implOf(address(gated)), address(next), "implementation swapped");
         assertTrue(before != address(next), "sanity: new impl differs");
         assertEq(gated.pendingImplementation(), address(0), "queue cleared");
         assertEq(gated.upgradeEta(), 0, "eta cleared");
+
+        // v3.4 invariant: immutables survive upgradeTo (they live in the NEW
+        // implementation's bytecode, constructed with the same args).
+        assertEq(gated.feeRecipient(), creator, "feeRecipient after upgrade");
+        assertEq(gated.manager(), address(mgr), "manager after upgrade");
 
         // The consumed queue entry cannot be replayed.
         vm.expectRevert(UpgradeNotQueued.selector);
@@ -134,29 +148,47 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     }
 
     function test_upgrade_staleQueueExpires() public {
-        vm.chainId(14); // 48h delay chain — see test_upgrade_requiresQueueAndDelay
-        Marketplace gated = _gatedMarketplace();
-        Marketplace next = new Marketplace();
+        // MAX_UPGRADE_WINDOW (7d) still applies with a zero delay: a queued
+        // approval left sitting for a week cannot be exercised.
+        vm.chainId(14);
+        (Marketplace gated, MarketplaceManager mgr) = _gatedPair();
+        Marketplace next = new Marketplace(creator, address(mgr));
         gated.queueUpgrade(address(next));
-        vm.warp(block.timestamp + 48 hours + 7 days + 1);
+        vm.warp(block.timestamp + 7 days + 1);
         vm.expectRevert(UpgradeExpired.selector);
         gated.upgradeTo(address(next));
     }
 
-    function test_upgrade_zeroDelay_sameBlockInstall() public {
-        // Testnet/dev chains (31337 here) have delay 0: queue then install in
-        // the same block. Gate is block.timestamp < upgradeEta, false when
-        // eta == now.
-        Marketplace gated = _gatedMarketplace();
-        Marketplace next = new Marketplace();
-        gated.queueUpgrade(address(next));
-        gated.upgradeTo(address(next));
-        assertEq(_implOf(address(gated)), address(next));
+    function test_upgrade_managerRepoint() public {
+        // v3.4 manager-replacement flow: a new core impl baking a NEW manager
+        // is installed under the OLD manager's authority; afterwards the new
+        // manager's admin controls the next upgrade.
+        (Marketplace gated, MarketplaceManager mgrA) = _gatedPair();
+        MarketplaceManager mgrB = new MarketplaceManager(address(0xB0B), TEST_SENTINEL_KEEPER);
+
+        Marketplace nextImpl = new Marketplace(creator, address(mgrB));
+        gated.queueUpgrade(address(nextImpl));   // authorized by mgrA's admin (this)
+        gated.upgradeTo(address(nextImpl));
+        assertEq(gated.manager(), address(mgrB), "re-pointed to manager B");
+
+        // Old admin (this, via mgrA) no longer authorizes:
+        Marketplace nextB = new Marketplace(creator, address(mgrB));
+        vm.expectRevert(NotAdmin.selector);
+        gated.queueUpgrade(address(nextB));
+
+        // New admin does:
+        vm.startPrank(address(0xB0B));
+        gated.queueUpgrade(address(nextB));
+        gated.upgradeTo(address(nextB));
+        vm.stopPrank();
+        assertEq(_implOf(address(gated)), address(nextB));
+        // Sanity: mgrA's authority genuinely lapsed for gating.
+        assertTrue(address(mgrA) != address(mgrB));
     }
 
     function test_cancelUpgrade_clearsQueue() public {
-        Marketplace gated = _gatedMarketplace();
-        Marketplace next = new Marketplace();
+        (Marketplace gated, MarketplaceManager mgr) = _gatedPair();
+        Marketplace next = new Marketplace(creator, address(mgr));
         gated.queueUpgrade(address(next));
 
         vm.prank(address(0xDEAD));
@@ -169,5 +201,18 @@ contract MarketplaceCoreTest is Test, TestHelpers {
 
         vm.expectRevert(UpgradeNotQueued.selector);
         gated.upgradeTo(address(next));
+    }
+
+    function test_sealedManager_freezesCoreUpgrades() public {
+        // renounceAdmin on the (plain) manager must kill core upgrades: the
+        // cores' _requireAdmin consults exactly the hasRole probe that now
+        // answers false for everyone.
+        (Marketplace gated, MarketplaceManager mgr) = _gatedPair();
+        mgr.renounceAdmin();
+        Marketplace next = new Marketplace(creator, address(mgr));
+        vm.expectRevert(NotAdmin.selector);
+        gated.queueUpgrade(address(next));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.setKeeper(address(0xFEED));
     }
 }

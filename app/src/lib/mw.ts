@@ -65,6 +65,7 @@ export const MW = {
     flow(`Bid on ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.bid({ auctionId: big(p.auctionId), amountWei: big(p.amountWei), name: p.name, myCumulativeWei: p.myCumulativeWei ? big(p.myCumulativeWei) : undefined }, h)),
   settle: (p: { auctionId: string; name?: string }) => flow(`Settle ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.settle({ auctionId: big(p.auctionId), name: p.name }, h)),
   cancelAuction: (p: { auctionId: string; name?: string }) => flow(`Cancel ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.cancelEarly({ auctionId: big(p.auctionId), name: p.name }, h)),
+  forceCancel: (p: { auctionId: string; name?: string }) => flow(`Force-cancel ${p.name ?? `auction #${p.auctionId}`}`, undefined, false, (h) => A.forceCancel({ auctionId: big(p.auctionId), name: p.name }, h)),
   withdrawLoserFunds: (p: { auctionId: string; amountWei?: string }) => flow('Withdraw your bid', undefined, false, (h) => A.withdrawLoserFunds({ auctionId: big(p.auctionId), amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
   withdrawRefund: (p: { amountWei?: string } = {}) => flow('Withdraw refund', undefined, false, (h) => A.withdrawRefund({ amountWei: p.amountWei ? big(p.amountWei) : undefined }, h)),
   minimumTopUp: (p: { currentHighestWei: string; reserveWei: string; myCumulativeWei?: string; minIncrementBps?: number }) =>

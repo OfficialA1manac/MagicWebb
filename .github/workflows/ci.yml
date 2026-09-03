@@ -107,6 +107,12 @@ jobs:
       - name: Test
         working-directory: contracts
         run: forge test -vvv
+      - name: Gas snapshot (v3.4 baseline, ±2%)
+        # contracts/.gas-snapshot is the committed v3.4 baseline for the
+        # GasTest battery; a regression beyond tolerance fails the job.
+        # Regenerate deliberately with `forge snapshot --match-contract GasTest`.
+        working-directory: contracts
+        run: forge snapshot --match-contract GasTest --check --tolerance 2
 
   slither:
     name: Contracts (Slither)

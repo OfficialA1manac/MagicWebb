@@ -44,16 +44,18 @@ NFT=$(forge create test/MockERC721.sol:MockERC721 --rpc-url "$RPC" --private-key
 echo "NFT=$NFT"
 NOW=$(cast block latest --field timestamp --rpc-url "$RPC")
 
-echo "== A. list -> buy (1 ether, fee split 1.5%) =="
+echo "== A. list -> buy (1 ether, fee 2%: 1.5% platform + 0.5% keeper) =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 1
 cast send "$NFT" "setApprovalForAll(address,bool)" "$MP" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 cast send "$MP" "list(address,uint256,uint128,uint64)" "$NFT" 1 1000000000000000000 86400 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
-S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
+KEEPER=$(cast call "$MGR" "keeper()(address)" --rpc-url "$RPC")   # 0.5% keeper share lands here
+S0=$(bal "$SELLER"); C0=$(bal "$CREATOR"); K0=$(bal "$KEEPER")
 cast send "$MP" "buy(address,uint256,address)" "$NFT" 1 "$SELLER" --value 1000000000000000000 --rpc-url "$RPC" --private-key "$PK_ALICE" >/dev/null
-S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
+S1=$(bal "$SELLER"); C1=$(bal "$CREATOR"); K1=$(bal "$KEEPER")
 check "buyer owns token 1" "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 1 --rpc-url "$RPC")"
-check "seller +0.985"      "985000000000000000"  "$(sub $S1 $S0)"
+check "seller +0.98"       "980000000000000000"  "$(sub $S1 $S0)"
 check "fee     +0.015"     "15000000000000000"   "$(sub $C1 $C0)"
+check "keeper  +0.005"     "5000000000000000"    "$(sub $K1 $K0)"
 
 echo "== B. auction -> bid -> outbid -> cumulative top-up -> settle -> loser refund =="
 cast send "$NFT" "mint(address)" "$SELLER" --rpc-url "$RPC" --private-key "$PK_DEPLOY" >/dev/null   # id 2
@@ -70,7 +72,7 @@ check "alice cumulative=3e18" "3000000000000000000" "$(cast call "$AH" "cumulati
 warp 7200
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR"); B0=$(bal "$BOB")
 cast send "$AH" "settle(uint256)" "$AID" --rpc-url "$RPC" --private-key "$PK_KEEPER" >/dev/null
-S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
+S1=$(bal "$SELLER"); C1=$(bal "$CREATOR"); K1=$(bal "$KEEPER")
 check "auction NFT -> alice"   "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 2 --rpc-url "$RPC")"
 check "seller +2.95500"        "2955000000000000000" "$(sub $S1 $S0)"
 check "fee    +0.04500"        "45000000000000000"   "$(sub $C1 $C0)"
@@ -85,7 +87,7 @@ cast send "$OB" "makeOffer(address,uint256,uint128,uint64)" "$NFT" 3 20000000000
 cast send "$NFT" "setApprovalForAll(address,bool)" "$OB" true --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
 S0=$(bal "$SELLER"); C0=$(bal "$CREATOR")
 cast send "$OB" "acceptOffer(address,uint256,address,uint128)" "$NFT" 3 "$ALICE" 2000000000000000000 --rpc-url "$RPC" --private-key "$PK_SELLER" >/dev/null
-S1=$(bal "$SELLER"); C1=$(bal "$CREATOR")
+S1=$(bal "$SELLER"); C1=$(bal "$CREATOR"); K1=$(bal "$KEEPER")
 check "offer NFT -> alice" "$ALICE" "$(cast call "$NFT" "ownerOf(uint256)(address)" 3 --rpc-url "$RPC")"
 check "seller +1.97 (gas-adjusted >=1.96)" "1" "$(gt $S1 $S0 1960000000000000000)"
 check "fee    +0.03"       "30000000000000000" "$(sub $C1 $C0)"
@@ -102,13 +104,15 @@ check "expired offer refunded" "1000000000000000000" "$(sub $B1 $B0)"
 
 echo "== E. pause-free protocol: no circuit breaker exists =="
 # A revert alone doesn't prove the selector is gone (it could be an auth
-# revert) -- inspect the implementation bytecode for the 4-byte selector.
-MGR_IMPL=$(cast implementation "$MGR" --rpc-url "$RPC")
+# revert) -- inspect the bytecode for the 4-byte selector. v3.4: the manager
+# is PLAIN UNPROXIED bytecode (no ERC-1967 impl slot), so read its own code.
+MGR_CODE=$(cast code "$MGR" --rpc-url "$RPC")
+[ "$MGR_CODE" != "0x" ] || { echo "  FAIL  manager has no code at $MGR"; fail=1; }
 PAUSE_SEL=$(cast sig "pauseEntries()")
-if cast code "$MGR_IMPL" --rpc-url "$RPC" | grep -qi "${PAUSE_SEL#0x}"; then
-  echo "  FAIL  pauseEntries selector present in manager implementation"; fail=1
+if printf '%s' "$MGR_CODE" | grep -qi "${PAUSE_SEL#0x}"; then
+  echo "  FAIL  pauseEntries selector present in manager bytecode"; fail=1
 else
-  echo "  PASS  protocol has no pause (pauseEntries selector absent from bytecode)"
+  echo "  PASS  protocol has no pause (pauseEntries selector absent from manager bytecode)"
 fi
 cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null 2>&1   && { echo "  FAIL  pauseEntries call should revert"; fail=1; }   || echo "  PASS  pauseEntries reverts for the creator too"
 # Entries must always work -- nothing can halt them.

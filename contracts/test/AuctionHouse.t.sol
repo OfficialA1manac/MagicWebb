@@ -43,7 +43,9 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.deal(carol, 100 ether);
     }
 
-    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 150 / 10_000; }
+    // 2% total fee. This suite deploys with manager == address(0), so no keeper is
+    // resolvable and the WHOLE fee lands at feeRecipient (see FeeSplit.t.sol for the split).
+    function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 200 / 10_000; }
 
     function _create() internal returns (uint256 id, uint256 tid) {
         vm.startPrank(seller);
@@ -59,7 +61,10 @@ contract AuctionHouseTest is Test, TestHelpers {
     }
 
     function _leader(uint256 id) internal view returns (address l, uint128 t) {
-        (,,,,,,,,,,, l, t,) = ah.auctions(id);
+        // v3.4: leaderTotal is a derived view (== cumulative[id][leader]), not
+        // a stored field — read it alongside the packed struct.
+        l = ah.getAuction(id).leader;
+        t = ah.leaderTotal(id);
     }
 
     function test_firstBidAtReserveLeads() public {
@@ -151,6 +156,33 @@ contract AuctionHouseTest is Test, TestHelpers {
         ah.bid{value: 1.5 ether}(id2);
     }
 
+    function test_create_reserveAboveUint96RevertsBidOverflow() public {
+        // v3.4 repack: reserve is stored uint96 (external ABI keeps uint128);
+        // _create rejects anything wider outright.
+        vm.startPrank(seller);
+        uint256 tid = nft.mint(seller);
+        nft.setApprovalForAll(address(ah), true);
+        vm.expectRevert(BidOverflow.selector);
+        ah.create(address(nft), tid, uint128(type(uint96).max) + 1, uint64(24 hours));
+        // Exactly uint96.max still creates.
+        uint256 id = ah.create(address(nft), tid, type(uint96).max, uint64(24 hours));
+        vm.stopPrank();
+        assertEq(ah.getAuction(id).reserve, type(uint96).max);
+    }
+
+    function test_create1155_amountAboveUint96RevertsBidOverflow() public {
+        // v3.4 repack: amount is stored uint96 alongside reserve. Mint past
+        // the cap so the balance check (NotSeller) passes and the width bound
+        // is what reverts.
+        uint128 tooWide = uint128(type(uint96).max) + 1;
+        vm.startPrank(seller);
+        multi.mint(seller, 7, uint256(tooWide));
+        multi.setApprovalForAll(address(ah), true);
+        vm.expectRevert(BidOverflow.selector);
+        ah.create1155(address(multi), 7, tooWide, 1 ether, uint64(24 hours));
+        vm.stopPrank();
+    }
+
     function test_antiSnipeExtends() public {
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
@@ -160,7 +192,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.stopPrank();
         vm.warp(end - 1 minutes);
         _bid(id, alice, 1 ether);
-        (,,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
+        uint64 newEnd = ah.getAuction(id).endsAt;
         assertEq(newEnd, uint64(block.timestamp) + ah.EXTENSION_WINDOW());
     }
 
@@ -187,7 +219,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.prank(carol);
         vm.expectRevert(NotAuthorized.selector);
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        bool settled = ah.getAuction(id).settled;
         assertFalse(settled);
     }
 
@@ -197,7 +229,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 30 hours);
         vm.prank(alice); // winner settles with no manager configured
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -207,7 +239,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 30 hours);
         vm.prank(seller); // seller settles with no manager configured
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -223,7 +255,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 30 hours);
         vm.prank(seller);
         ah.settle(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -273,7 +305,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         (uint256 id,) = _create();
         vm.prank(seller);
         ah.cancelEarly(id);
-        (,,,bool settled,,,,,,,,,,) = ah.auctions(id);
+        bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -375,8 +407,8 @@ contract AuctionHouseTest is Test, TestHelpers {
     }
 
     function test_bid_flatIncrementIgnored() public {
-        // A hostile flat of uint128.max must not brick overtaking: bid() ignores
-        // minIncrementFlat entirely (it is deprecated, kept only for ABI shape).
+        // v3.4 deleted the vestigial minIncrementFlat field outright — the only
+        // overtaking step is the marketplace-wide 1-ether floor.
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(ah), true);
@@ -415,10 +447,10 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.prank(bob);
         vm.expectRevert(BidTooLow.selector);
         ah.bid{value: 0.5 ether}(id);
-        (,,,,,,,uint64 newEnd,,,,,,) = ah.auctions(id);
+        uint64 newEnd = ah.getAuction(id).endsAt;
         assertEq(newEnd, end, "timer NOT extended");
         _bid(id, bob, 3 ether);
-        (,,,,,,,newEnd,,,,,,) = ah.auctions(id);
+        newEnd = ah.getAuction(id).endsAt;
         assertGt(newEnd, end, "timer extended on newLead");
     }
 
@@ -467,7 +499,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 10 minutes);
         vm.prank(bob);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -486,7 +518,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.prank(carol);
         vm.expectRevert(NotAuthorized.selector);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertFalse(settled);
     }
 
@@ -509,7 +541,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         gated.settle(id);
         vm.prank(seller);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertTrue(settled);
     }
 
@@ -528,7 +560,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         uint256 sellerBefore = seller.balance;
         vm.prank(seller);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertTrue(settled);
         assertGt(seller.balance, sellerBefore);
     }
@@ -547,7 +579,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 3 minutes + 6 minutes);
         vm.prank(alice);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertTrue(settled);
         assertEq(nft.ownerOf(tid), alice);
     }
@@ -568,7 +600,7 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.prank(carol);
         vm.expectRevert(NotAuthorized.selector);
         gated.settle(id);
-        (,,,bool settled,,,,,,,,,,) = gated.auctions(id);
+        bool settled = gated.getAuction(id).settled;
         assertFalse(settled);
     }
 

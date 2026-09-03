@@ -14,6 +14,81 @@ numbered by the deployed contract/protocol generation instead —
 `MarketplaceManager`, timelocked upgrades and on-chain durations.
 The two schemes do not overlap: `v29` precedes `v3.0` in time.
 
+## v3.4 — 2026-09-02 — Gas repack + instant upgrades on every network
+
+The generation Songbird and Flare launch with. Fresh deployment on all
+three networks (no storage compatibility owed to v3.2/v3.3 proxies).
+
+### Protocol / gas (measured targets vs v3.2 baseline)
+
+- **Platform fee 1.5% → 2% total**, split **1.5% → `feeRecipient`** (owner's
+  platform wallet) and **0.5% → the network keeper** (`manager.keeper()`, gas
+  replenishment for instant settlement). Falls back to 100% `feeRecipient` when
+  no keeper is set. Still seller-pays, still only on a successful sale. New
+  `FeeSplit(feeRecipient, platformShare, keeper, keeperShare)` event.
+- **`Auction` struct repacked 6 → 4 slots** (`create` −66k, −42%): dropped
+  vestigial `minIncrementBps`/`minIncrementFlat`/`active`/`startsAt`;
+  `originalEndsAt` folded in from its mapping; `leaderTotal` is now DERIVED
+  from `cumulative[id][leader]` (compat view kept). `activateAuction()`
+  removed (creation = activation since v3.3).
+- **Bidder registry deleted** (first bid −44k, −31%): `_bidders` /
+  `_seenBidder` / `bidderCount` / `getBidder` were write-only; the indexer
+  reconstructs bidders from `BidPlaced`, `refundLosers` takes calldata.
+- **`OfferBook.Position` packed 2 → 1 slot** (`makeOffer` −22k, −40%).
+- **`MarketplaceManager` is UNPROXIED plain bytecode** and the cores hold
+  `manager` + `feeRecipient` as implementation **immutables** (keeper-path
+  consults −6.8k…−9.8k; fee reads −2.1k). Replacing either = new core impl
+  via the normal upgrade path.
+- **Transient-storage reentrancy guard** (EIP-1153 TSTORE/TLOAD, −2k per
+  guarded call), gated on a per-chain Cancun probe before deploy.
+- `buy()` uses `transferFrom` for ERC-721 (buyer is the caller; −2.6k);
+  `cancel()` reads a storage pointer; loops hoisted/unchecked.
+- Width bounds: auction `reserve`/`amount` → uint96, offer `units` → uint80,
+  timestamps → uint40 — external ABI unchanged (uint128/uint64), guarded.
+
+### Deployment / governance (owner directives 2026-09-02)
+
+- **Every network deploys UNSEALED and instantly upgradeable**:
+  `upgradeDelay()` is 0 on every chain; queue+upgrade run back-to-back. A
+  fresh, per-network admin wallet (saved offline by the owner) is the whole
+  upgrade authority until the owner orders that network immutable
+  (`renounceAdmin()` — see docs/UPGRADE_RUNBOOK.md, new).
+- `DeployV34.s.sol` replaces `DeployV32.s.sol` (7 CREATEs, manager plain,
+  no-arg initializers). `keeperrotate -grant` (dead `addKeeper`) replaced
+  by `-set` (`setKeeper`, admin-signed). foundry.toml gains songbird/flare
+  rpc + verify entries; the CI verify job loops all deployed networks.
+- **2-step admin rotation on the manager**: `transferAdmin(new)` →
+  `acceptAdmin()` from the new wallet, `cancelAdminTransfer()` aborts a
+  pending handover. The admin key is rotatable on every network until that
+  network's `renounceAdmin()`.
+
+### Backend / frontend / tooling
+
+- Indexer now indexes `AuctionForceCancelled`; the keeper auto-`forceCancel`s
+  unsettled auctions at `endsAt + 3d` (never-stuck completeness — no escrow
+  waits on a human).
+- Creator / Authentic badges now render on auction detail, offers, search
+  and profile tabs; offers + search API rows gained `collection_verified` /
+  `collection_creator`.
+- Gas snapshot baseline committed (`contracts/.gas-snapshot`); CI runs
+  `forge snapshot --check` against it.
+- Frontend ABI regenerated for v3.4.
+
+## v3.3 — 2026-08-31 — Flat bid increment, instant expiry
+
+- Marketplace-wide flat **+1-token bid increment** (seller increment knobs
+  removed); instant expiry handling and cleanExpired sweep integration.
+- Shipped as source + Coston2 app deploy; the on-chain Coston2 impls
+  remained v3.2 bytecode (resolved by the v3.4 fresh deploy).
+
+## v3.2 — 2026-08-31 — Single welded keeper, no grants
+
+- `MarketplaceManager` rebuilt: exactly ONE keeper (`setKeeper` replaces,
+  never adds), exactly ONE admin until `renounceAdmin()`; the v3.1
+  self-replenishing keeper fleet and all AccessControl grant paths deleted.
+- Deployed to Coston2 (block 34729709) behind UUPS proxies with timelocked
+  upgrades (0 on Coston2, 48h mainnets — superseded by v3.4's instant-everywhere).
+
 ## v3.1 — 2026-08-29 — Rules overhaul, badges, unpausable protocol
 
 Live on Coston2 from block 34619862. Songbird and Flare run the same

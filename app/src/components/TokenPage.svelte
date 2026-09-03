@@ -19,7 +19,7 @@
   import { onAccountChange, publicClient } from '../lib/tx/client';
   import { erc721Abi, erc1155Abi, auctionHouseAbi } from '../lib/abi';
   import { DEFAULT_DURATION } from '../lib/tx/durations';
-  import { minimumTopUp } from '../lib/tx/auction';
+  import { minimumTopUp, forceCancelUnlocked } from '../lib/tx/auction';
   import type { Address } from 'viem';
 
   type Listing = { collection: string; token_id: string; seller: string; price_wei: string; amount: number; standard: string; expires_at: string; name: string; image_uri: string; collection_verified: boolean };
@@ -92,6 +92,10 @@
   let isAuctionSeller = $derived(!!me && !!auction && auction.seller.toLowerCase() === me.toLowerCase());
   let auctionLive = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() > now);
   let auctionEnded = $derived(!!auction && auction.status === 'active' && new Date(auction.ends_at).getTime() <= now);
+  let isAuctionWinner = $derived(!!me && !!auction && auction.highest_bidder?.toLowerCase() === me.toLowerCase());
+  // forceCancel() (seller/winner/keeper) unlocks 3 days after endsAt while
+  // still unsettled — escrow recovery only, the NFT stays put.
+  let canForceCancel = $derived(auctionEnded && !!auction && forceCancelUnlocked(new Date(auction!.ends_at).getTime() / 1000, now));
   let myOffer = $derived(me ? offers.find((o) => o.bidder.toLowerCase() === me!.toLowerCase() && o.status === 'active') ?? null : null);
   let liveOffers = $derived(offers.filter((o) => o.status === 'active' && new Date(o.expires_at).getTime() > now));
   let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: myCumWei, minIncrementBps: auction.min_increment_bps }) : 0n);
@@ -280,6 +284,7 @@
   const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumWei.toString() }), 'Bid placed · syncing'); };
   const doSettle = () => auction && act(() => MW.settle({ auctionId: String(auction!.auction_id), name }), 'Settled · syncing');
   const doCancelAuction = () => auction && act(() => MW.cancelAuction({ auctionId: String(auction!.auction_id), name }), 'Auction cancelled · syncing');
+  const doForceCancel = () => auction && act(() => MW.forceCancel({ auctionId: String(auction!.auction_id), name }), 'Force-cancelled · refunds unlocked · syncing');
   const doOffer = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.makeOffer({ nft: coll, tokenId: tid, principalWei: p, duration, std, units: q, name }), 'Offer placed · syncing'); };
   const doAccept = (o: Offer) => act(() => MW.acceptOffer({ nft: coll, tokenId: tid, bidder: o.bidder, principalWei: o.amount_wei, std, name }), 'Offer accepted · syncing');
   const doReject = (o: Offer) => act(() => MW.rejectOffer({ nft: coll, tokenId: tid, bidder: o.bidder, name }), 'Offer declined · syncing');
@@ -346,11 +351,17 @@
               <div class="tp-inrow"><input id="bid-in" class="tp-input mono" inputmode="decimal" placeholder={fmtPrice(minBid)} bind:value={bidIn} /><button class="btn p" onclick={doBid}>Place bid</button></div>
             </div>
           {:else if canTrade && auctionEnded}
-            {#if isAuctionSeller || (me && auction && auction.highest_bidder?.toLowerCase() === me.toLowerCase())}
+            {#if isAuctionSeller || isAuctionWinner}
               <button class="btn p" onclick={doSettle}>Settle now</button>
               <p class="tp-hint">The marketplace settles this automatically within seconds; you can also settle it yourself.</p>
+              {#if canForceCancel}
+                <button class="btn g" onclick={doForceCancel}>Force-cancel &amp; refund</button>
+                <p class="tp-hint">Settlement has been stuck for 3+ days. Force-cancel closes the auction without a trade: every bid becomes refundable and the NFT stays where it is.</p>
+              {:else}
+                <p class="tp-hint">The keeper settles automatically; if it can't, force-cancel unlocks after 3 days.</p>
+              {/if}
             {:else}
-              <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 1.5%.</p>
+              <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 2%.</p>
             {/if}
           {:else if canTrade && isAuctionSeller && BigInt(auction.highest_bid_wei || '0') === 0n}
             <button class="btn g" onclick={doCancelAuction}>Cancel auction</button>
@@ -362,7 +373,7 @@
         <section class="tp-card is-gold" aria-labelledby="ls-h">
           <div class="tp-card-head"><span id="ls-h">Listed for sale</span><span>expires {timeAgo(listing.expires_at).replace(' ago', '')} from now</span></div>
           <div class="tp-price mono">{fmtPrice(listing.price_wei)} <small>{sym}</small></div>
-          <div class="tp-sub">Seller {isSeller ? 'you' : shortAddr(listing.seller)} · 1.5% fee paid by the seller</div>
+          <div class="tp-sub">Seller {isSeller ? 'you' : shortAddr(listing.seller)} · 2% fee paid by the seller</div>
           {#if isSeller}
             {#if canTrade}<div class="tp-btnrow"><button class="btn g" onclick={() => openPanel('edit')}>Change price</button><button class="btn g" onclick={doCancel}>Cancel listing</button></div>{/if}
           {:else if canTrade}
@@ -431,7 +442,7 @@
             {:else}<button class="btn gold" onclick={doOffer}>Place offer</button>{/if}
             <button class="btn g" onclick={() => (panel = 'none')}>Close</button>
           </div>
-          <p class="tp-hint">{panel === 'offer' ? (myOffer ? 'Changing an offer replaces the amount on-chain — the original expiry keeps counting down (it is not extended).' : 'Your offer amount is held in escrow and fully refundable until it expires.') : 'Listing is free; the 1.5% fee is taken from the sale only.'}</p>
+          <p class="tp-hint">{panel === 'offer' ? (myOffer ? 'Changing an offer replaces the amount on-chain — the original expiry keeps counting down (it is not extended).' : 'Your offer amount is held in escrow and fully refundable until it expires.') : 'Listing is free; the 2% fee is taken from the sale only.'}</p>
         </section>
       {/if}
 

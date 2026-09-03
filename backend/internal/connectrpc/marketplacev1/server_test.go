@@ -288,16 +288,17 @@ func TestGetOffer_Success(t *testing.T) {
 	defer mock.Close()
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text`).
+	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder, o\.collection, o\.token_id::text, o\.principal_wei::text`).
 		WithArgs("42").
 		WillReturnRows(pgxmock.NewRows([]string{
 			"offer_id", "bidder", "collection", "token_id",
 			"principal_wei", "fee_wei", "units", "standard",
 			"expires_at", "status", "make_tx", "created_at",
+			"collection_verified", "collection_creator",
 		}).AddRow(
 			"42", "0xbidder", "0xcol", "1",
 			"1000000000000000000", "10000000000000000", int64(1), "erc721",
-			now.Add(7*24*time.Hour), "pending", "0xmtx", now,
+			now.Add(7*24*time.Hour), "pending", "0xmtx", now, false, "",
 		))
 
 	srv := NewServer(db.New(mock), nil)
@@ -358,7 +359,7 @@ func TestGetOffer_NotFound(t *testing.T) {
 	}
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text`).
+	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder, o\.collection, o\.token_id::text, o\.principal_wei::text`).
 		WithArgs("nonexistent").
 		WillReturnError(pgx.ErrNoRows)
 
@@ -386,7 +387,7 @@ func TestGetOffer_DBError(t *testing.T) {
 	}
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text`).
+	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder, o\.collection, o\.token_id::text, o\.principal_wei::text`).
 		WithArgs("42").
 		WillReturnError(errors.New("connection refused"))
 
@@ -531,4 +532,3 @@ func TestGetToken_DBError(t *testing.T) {
 		t.Fatal(err)
 	}
 }
-

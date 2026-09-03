@@ -37,11 +37,11 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Open an active auction → enter bid amount
 2. Click **Bid** → confirm wallet — bidding is free; you send only your bid amount
 3. Bids are cumulative: to take the lead your TOTAL escrow must beat the leader's total by at least 1 native token (e.g. leader at 500 and you have 200 escrowed → send 301+). If you're outbid, your escrow stays in place so you can top up and retake the lead; the moment the auction settles, the keeper refunds every non-winner automatically within seconds. You can also pull your escrow yourself at any time before settlement via **Withdraw** (withdrawLoserFunds). If an automatic transfer fails (e.g., your wallet is a contract that cannot receive funds), the refund is credited to `pendingReturns` and you can withdraw it manually via **Withdraw Refund** on your profile page.
-4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days the **winner or seller** (or the keeper) can call `forceCancel` to release every bidder's escrow — the same parties as settle, and nobody else. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 1.5% platform fee (98.5%).
+4. At auction end, the platform's keeper bot settles automatically. If the keeper hasn't acted yet, the **auction winner or the seller** can call **settle** themselves — no other party can. If an ended auction is never settled, after 3 days the **winner or seller** (or the keeper) can call `forceCancel` to release every bidder's escrow — the same parties as settle, and nobody else. On settlement the NFT goes to the winner, and the seller receives the winning bid minus the 2% platform fee (98%).
 
 ## Auction fees
 - Bidding is free — you send only your bid amount.
-- If you win: the seller pays the 1.5% platform fee, so the seller receives 98.5% of the winning bid.
+- If you win: the seller pays the 2% platform fee, so the seller receives 98% of the winning bid.
 - If you lose (outbid) or the seller cancels early: your full bid is refunded — nothing is kept. Most refunds arrive automatically; if a push fails, the amount is parked in `pendingReturns` and you can pull it manually via **Withdraw Refund**.
 
 ## Offer on an NFT
@@ -55,7 +55,7 @@ You can offer on any NFT whose collection has offers enabled (the collection's c
 
 ## Accept an offer (owner)
 Go to **Offers → Received** → click **Accept** next to the offer you want → confirm wallet.
-NFT goes to bidder, you receive C2FLR minus 1.5% platform fee (native currency, C2FLR on testnet).
+NFT goes to bidder, you receive C2FLR minus 2% platform fee (native currency, C2FLR on testnet).
 
 ## No royalties
-MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98.5% of the sale price (a flat 1.5% platform fee is deducted). The guide uses the native C2FLR currency throughout (Coston2 testnet).
+MagicWebb does not pay, route, or enforce royalties of any kind. Sellers receive 98% of the sale price (a flat 2% fee is deducted: 1.5% platform, 0.5% keeper gas fund). The guide uses the native C2FLR currency throughout (Coston2 testnet).

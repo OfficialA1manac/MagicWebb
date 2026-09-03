@@ -29,7 +29,7 @@ wallets. You sign in with your wallet (Sign-In-with-Ethereum); there is no email
 password and no account to create.
 
 ### Is it custodial? Can MagicWebb freeze or take my NFT?
-No. The contracts are immutable and have **no pause switch and no admin override**.
+No. The contracts have **no pause switch and no admin override** over any trade or escrow.
 Your NFT stays in your wallet until a sale settles; offers escrow only the bidder's
 funds in the contract, refundable until accepted.
 
@@ -45,14 +45,14 @@ funds in the contract, refundable until accepted.
 | Create an auction | **Free** |
 | Place a bid | **Free** |
 | Make an offer | **Free** |
-| **Successful sale** | **1.5%, paid by the seller** |
+| **Successful sale** | **2%, paid by the seller** (1.5% platform + 0.5% keeper gas fund) |
 
 You only ever pay network gas for the transaction itself. There are no listing fees,
 no bidding fees, and no offer fees.
 
 ### Who pays the platform fee?
 The **seller**. On any successful sale — a fixed-price buy, a settled auction, or an
-accepted offer — a flat **1.5%** is deducted from the seller's proceeds. The seller
+accepted offer — a flat **2%** is deducted (1.5% to the platform wallet, 0.5% to the network's keeper bot to fund its settlement gas) from the seller's proceeds. The seller
 receives **98.5%** of the sale price. Buyers pay exactly the listed price.
 
 ### Are bids and offers really free?
@@ -71,7 +71,7 @@ this build.
 
 ### How do I buy a fixed-price NFT?
 Open the token page, connect your wallet, and click **Buy Now**. You send exactly the
-listed price. The NFT transfers to you and the seller receives the price minus the 1.5%
+listed price. The NFT transfers to you and the seller receives the price minus the 2%
 fee — atomically, in one transaction.
 
 ### What happens if two people try to buy the same NFT?
@@ -88,7 +88,7 @@ Approve the marketplace contract for your collection once, then list with a pric
 expiry (one of 15 fixed durations: 1min, 3min, 5min, 10min, 15min, 30min, 45min, 1hr, 2hr, 4hr, 8hr, 12hr, 16hr, 20hr, or 24hr). Listing is free. You keep the NFT in your wallet until someone buys it.
 
 ### How much do I receive on a sale?
-98.5% of the sale price. The 1.5% platform fee is deducted at settlement.
+98% of the sale price. The 2% platform fee is deducted at settlement.
 
 ### Can I cancel a listing?
 Yes, anytime before it sells, for the cost of gas.
@@ -109,7 +109,7 @@ The platform's keeper bot settles **instantly** the moment the auction expires �
 normally never have to do anything. If the keeper hasn't settled yet, the **auction
 winner or the seller** can call `settle` themselves. Apart from addresses holding the
 platform's `KEEPER_ROLE`, no one else can settle someone else's auction. The NFT goes to the winner, and the seller receives
-the winning bid minus the 1.5% fee. If the seller has moved the NFT or revoked approval,
+the winning bid minus the 2% fee. If the seller has moved the NFT or revoked approval,
 the winner is refunded in full and the auction finalises without a sale.
 
 ### Can an auction get stuck? Can the seller cancel it?
@@ -129,7 +129,7 @@ Make an offer on any NFT in an offer-enabled collection (the collection owner op
 
 ### When am I charged?
 Never as an offerer. If the owner accepts your offer, you receive the NFT and the seller
-receives your offer amount minus the 1.5% fee. If they reject it or it expires, you get
+receives your offer amount minus the 2% fee. If they reject it or it expires, you get
 your full principal back.
 
 ### Can I withdraw an offer early?
@@ -149,10 +149,12 @@ independent audit has been completed.
   withdrawal rather than locked.
 - The fee rate is a compile-time constant — it cannot be changed on any deployment.
 - Nothing is pausable — no entry or exit path can ever be halted.
-- Mainnet deployments are sealed at deploy: the admin is renounced in the deploy
-  transaction, after which there are no admin keys, no upgrades, and the fee
-  recipient and single keeper are fixed forever. (The Coston2 testnet keeps one
-  admin so the marketplace can iterate before mainnet.)
+- Every network (Coston2, Songbird, Flare) deploys unsealed with a single per-network
+  admin whose only powers are instant contract upgrades, keeper replacement and
+  rotating/renouncing its own key — it cannot pause trading or touch funds.
+  Immutability is a later, explicit per-network step: on the owner's order the admin
+  calls `renounceAdmin()`, after which there are no admin keys, no upgrades, and the
+  fee recipient and single keeper are fixed forever.
 
 ### What happens to my funds if something fails mid-transaction?
 Transactions are atomic: either the whole trade completes or it reverts with no fee

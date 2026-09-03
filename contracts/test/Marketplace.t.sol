@@ -157,7 +157,7 @@ contract MarketplaceTest is Test, TestHelpers {
         uint256 sb = s2.balance;
         vm.prank(b2);
         freshMp.buy{value: uint256(price)}(address(nft2), tid, s2);
-        uint256 fee = uint256(price) * 150 / 10_000;
+        uint256 fee = uint256(price) * 200 / 10_000;
         assertEq(s2.balance, sb + uint256(price) - fee);
     }
 

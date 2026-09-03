@@ -3,10 +3,15 @@ pragma solidity 0.8.26;
 
 import {Initializable} from "@openzeppelin/contracts-upgradeable/proxy/utils/Initializable.sol";
 import {UUPSUpgradeable} from "@openzeppelin/contracts-upgradeable/proxy/utils/UUPSUpgradeable.sol";
-import {ReentrancyGuardUpgradeable} from "@openzeppelin/contracts-upgradeable/security/ReentrancyGuardUpgradeable.sol";
 import {ERC1155HolderUpgradeable} from "@openzeppelin/contracts-upgradeable/token/ERC1155/utils/ERC1155HolderUpgradeable.sol";
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
+// v3.4: transient-storage (EIP-1153) reentrancy guard replaces OZ's
+// storage-slot ReentrancyGuardUpgradeable (−2k gas per guarded call). To
+// fall back (a target chain failing the Cancun probe), swap this import for
+// ReentrancyGuardUpgradeable, restore it in the inheritance list, and
+// re-add __ReentrancyGuard_init() in __MarketplaceCore_init.
+import {TransientReentrancyGuard} from "./TransientReentrancyGuard.sol";
 
 error TransferFailed();
 error WithdrawFailed();
@@ -54,14 +59,23 @@ uint64 constant DURATION_24HR  = 24 hours;
 
 /// @title MarketplaceCore
 /// @notice Shared base: immutable fee config, price floor, seller-pays fee math, NFT dispatch.
-/// @dev Single 1.5% platform fee, charged ONLY on a successful sale and DEDUCTED from the seller's
-///      proceeds — listing, auction creation, bids and offers are all free. feeRecipient lives in
-///      upgradeable storage but has no setter; only a UUPS upgrade can move it. Nothing on the
-///      protocol is pausable: no entry or exit path ever consults an off switch. Upgrades go
-///      through the timelocked UUPS path gated by _requireAdmin.
-abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, ERC1155HolderUpgradeable, UUPSUpgradeable {
-    /// @notice Platform fee: 1.5%. Hardcoded — cannot change post-deploy.
-    uint16 public constant PLATFORM_FEE_BPS = 150;
+/// @dev Single 2% platform fee (1.5% platform + 0.5% keeper), charged ONLY on a successful sale and
+///      DEDUCTED from the seller's proceeds — listing, auction creation, bids and offers are all
+///      free. The keeper share replenishes the network keeper bot's gas; it goes to whatever
+///      address the linked manager reports as `keeper()` at sale time. v3.4: feeRecipient and
+///      manager are IMMUTABLES baked into the implementation bytecode (no SLOAD on hot paths);
+///      changing either means installing a new implementation via the admin-gated UUPS path — the
+///      same trust model as the old storage-with-no-setter, minus the gas. Nothing on the protocol
+///      is pausable: no entry or exit path ever consults an off switch.
+abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ERC1155HolderUpgradeable, UUPSUpgradeable {
+    /// @notice Total platform fee: 2% of the sale. Hardcoded — cannot change post-deploy.
+    ///         Split PLATFORM_SHARE_BPS → feeRecipient and KEEPER_SHARE_BPS → manager.keeper().
+    uint16 public constant PLATFORM_FEE_BPS = 200;
+    /// @notice Share of the sale that goes to feeRecipient (the platform wallet): 1.5%.
+    uint16 public constant PLATFORM_SHARE_BPS = 150;
+    /// @notice Share of the sale that goes to the network keeper (gas replenishment): 0.5%.
+    /// @dev Invariant: PLATFORM_SHARE_BPS + KEEPER_SHARE_BPS == PLATFORM_FEE_BPS (asserted in tests).
+    uint16 public constant KEEPER_SHARE_BPS = 50;
 
     /// @notice Minimum accepted commitment everywhere (list price, auction reserve, offer amount).
     uint256 public constant MIN_PRICE = 1 ether;
@@ -81,10 +95,13 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
         return uint64(block.timestamp) + duration;
     }
 
-    /// @notice Wallet that receives all platform fees. Set once during initialization.
-    ///         Was immutable in v1; now upgradeable storage so future upgrades can
-    ///         point fees to a new recipient.
-    address public feeRecipient;
+    /// @notice Wallet that receives all platform fees. v3.4: immutable again —
+    ///         baked into the implementation at deploy (per-network constructor
+    ///         arg). Moving fees to a new recipient = building a new impl with
+    ///         the new address and installing it through the admin-gated UUPS
+    ///         path. Saves a cold SLOAD on every buy/acceptOffer/settle.
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    address public immutable feeRecipient;
 
     /// @notice Pull-pattern fallback for any push payment that fails.
     ///         Mirrors AuctionHouse / OfferBook pendingReturns so refund
@@ -95,12 +112,22 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     /// @notice Emitted when a push payment fails and the amount is credited to pendingReturns.
     event PushFailed(address indexed to, uint256 amount);
 
-    /// @notice Optional MarketplaceManager — the roles registry (keeper, admin)
-    ///         and the trust anchor for timelocked upgrades. address(0) = no
+    /// @notice Emitted on every fee payment with the exact split. `platformShare + keeperShare`
+    ///         equals the total fee carried in the sale event. `keeper` is address(0) and
+    ///         `keeperShare` is 0 when no manager/keeper is resolvable (whole fee → feeRecipient).
+    event FeeSplit(address indexed feeRecipient, uint256 platformShare, address indexed keeper, uint256 keeperShare);
+
+    /// @notice Optional MarketplaceManager — the authority anchor (keeper,
+    ///         admin) for upgrade gating and keeper consults. address(0) = no
     ///         roles and a permanently frozen implementation. It has no power
     ///         over funds and cannot halt any user action.
-    ///         Was immutable in v1; now upgradeable storage.
-    address public manager;
+    ///         v3.4: immutable, and the manager itself is UNPROXIED — killing
+    ///         both the SLOAD and the manager-side proxy hop on every keeper
+    ///         authority consult (−6.8k…−9.8k on settle/cleanExpired/refunds).
+    ///         Replacing the manager = new core impls baking the new address,
+    ///         installed via the (old) admin-gated UUPS path.
+    /// @custom:oz-upgrades-unsafe-allow state-variable-immutable
+    address public immutable manager;
 
     /// @notice Implementation queued for upgrade, or address(0) when none is
     ///         pending. Packs into a single slot with upgradeEta.
@@ -109,19 +136,14 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     ///         installed. Zero when nothing is queued.
     uint64  public upgradeEta;
 
+    /// @notice v3.4 implementation constructor: bakes feeRecipient + manager
+    ///         as immutables and validates them at impl-deploy time. The
+    ///         validation that used to live in the initializer moves here —
+    ///         a typo'd/EOA manager would silently disable keeper roles and
+    ///         freeze upgrades, so the probe runs before anything ships.
     /// @custom:oz-upgrades-unsafe-allow constructor
-    constructor() {}
-
-    /// @notice One-time initializer replacing the legacy constructor.
-    ///         Validates and stores feeRecipient + manager in upgradeable storage.
-    function __MarketplaceCore_init(address recipient, address manager_) internal onlyInitializing {
-        __ReentrancyGuard_init();
-        __ERC1155Holder_init();
-        __UUPSUpgradeable_init();
+    constructor(address recipient, address manager_) {
         if (recipient == address(0)) revert ZeroAddress();
-        // manager is stored in upgradeable storage (was immutable). A typo'd/EOA
-        // address would silently disable keeper roles and freeze upgrades, so
-        // validate it answers the role probe the cores actually consult.
         if (manager_ != address(0)) {
             if (manager_.code.length == 0) revert BadManager();
             (bool ok, bytes memory d) = manager_.staticcall(
@@ -133,15 +155,24 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
         manager      = manager_;
     }
 
+    /// @notice One-time proxy initializer. v3.4: takes no arguments —
+    ///         feeRecipient/manager live in the implementation as immutables.
+    ///         Still initializer-gated so nobody can call it on the proxy
+    ///         after deploy.
+    function __MarketplaceCore_init() internal onlyInitializing {
+        __ERC1155Holder_init();
+        __UUPSUpgradeable_init();
+    }
+
     // ═══════════════════════════════════════════════════════════════════════
-    // Fee math — 1.5% platform fee (seller-pays, immutable).
+    // Fee math — 2% platform fee (seller-pays, immutable), split 1.5% / 0.5%.
     // ═══════════════════════════════════════════════════════════════════════
 
-    /// @notice Compute 1.5% platform fee for a given sale commitment.
+    /// @notice Compute the 2% platform fee for a given sale commitment.
     /// @param commitment The gross sale amount (listing price / bid / offer principal).
-    /// @return The platform fee (1.5% of `commitment`).
-    /// @dev Seller-favourable TRUNCATION: `(commitment * 150) / 10_000` floors down.
-    ///      For example, a 99-wei sale computes 99*150/10000 = 1 (1.485 truncated to 1).
+    /// @return The total platform fee (2% of `commitment`; split by `_payFee`).
+    /// @dev Seller-favourable TRUNCATION: `(commitment * 200) / 10_000` floors down.
+    ///      For example, a 99-wei sale computes 99*200/10000 = 1 (1.98 truncated to 1).
     ///      The seller receives `commitment - fee`, so truncation always favours the
     ///      seller (less fee deducted). The lost fraction (< 1 wei per sale) is
     ///      economically negligible and cannot be gamed — the divisor (10_000) is
@@ -150,22 +181,46 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
         return (commitment * PLATFORM_FEE_BPS) / 10_000;
     }
 
-    /// @notice Pay the platform fee to the on-chain feeRecipient.
-    /// @param fee Amount to forward (already computed via `_feeOf`).
+    /// @notice Pay the platform fee: PLATFORM_SHARE_BPS/PLATFORM_FEE_BPS of it to the
+    ///         on-chain feeRecipient, the rest to the network keeper reported by the manager.
+    /// @param fee Total amount to forward (already computed via `_feeOf`).
     /// @dev Best-effort push with a 50,000-gas cap per EIP-150 63/64 forwarding.
     ///      If the feeRecipient is a contract that needs >50k gas for its receive()
     ///      (e.g. Gnosis Safe, Argent, smart wallet), the push falls back to
     ///      `pendingReturns[feeRecipient]` — the credit is visible on-chain and can
     ///      be pulled later via the uncapped `withdrawRefund()` path. This prevents
     ///      a broken or misconfigured feeRecipient from permanently DOSing every
-    ///      buy() and acceptOffer() transaction on the protocol.
+    ///      buy() and acceptOffer() transaction on the protocol. The keeper share
+    ///      uses the same push/pull-fallback via `_pay`.
+    ///
+    ///      Keeper share: `fee * KEEPER_SHARE_BPS / PLATFORM_FEE_BPS`, truncated
+    ///      (rounding favours the platform share). The keeper is resolved with a
+    ///      guarded staticcall to `manager.keeper()`; if there is no manager, the
+    ///      probe fails, or it reports address(0), the keeper share is 0 and the
+    ///      entire fee goes to feeRecipient. A fee payment can therefore never
+    ///      revert because of the keeper leg.
     function _payFee(uint256 fee) internal {
         if (fee == 0) return;
-        (bool ok,) = feeRecipient.call{gas: 50_000, value: fee}("");
-        if (!ok) {
-            pendingReturns[feeRecipient] += fee;
-            emit PushFailed(feeRecipient, fee);
+        uint256 keeperCut;
+        address k;
+        if (manager != address(0)) {
+            (bool okK, bytes memory data) = manager.staticcall(abi.encodeWithSignature("keeper()"));
+            if (okK && data.length == 32) {
+                k = abi.decode(data, (address));
+                if (k != address(0)) {
+                    keeperCut = (fee * KEEPER_SHARE_BPS) / PLATFORM_FEE_BPS;
+                }
+            }
         }
+        if (keeperCut == 0) k = address(0);
+        uint256 platformCut = fee - keeperCut;
+        (bool ok,) = feeRecipient.call{gas: 50_000, value: platformCut}("");
+        if (!ok) {
+            pendingReturns[feeRecipient] += platformCut;
+            emit PushFailed(feeRecipient, platformCut);
+        }
+        _pay(k, keeperCut);
+        emit FeeSplit(feeRecipient, platformCut, k, keeperCut);
     }
 
     /// @notice Send `amount` ETH to `to`. Best-effort push with pull-fallback.
@@ -228,16 +283,17 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
     // ── UUPS upgrade authorization ───────────────────────────────────────────
 
     /// @notice How long a queued upgrade must wait before it can be installed.
-    ///         0 on testnets while the marketplace is in active testing so fixes
-    ///         ship instantly; 48 hours on Songbird and Flare, where the escrow
-    ///         is real money and users need a window to exit if an upgrade looks
-    ///         hostile.
-    /// @dev Chain IDs: 114 Coston2, 16 Coston, 31337 anvil/local, 19 Songbird,
-    ///      14 Flare. Anything unrecognised gets the conservative 48h.
-    function upgradeDelay() public view returns (uint64) {
-        uint256 id = block.chainid;
-        if (id == 114 || id == 16 || id == 31337) return 0;
-        return 48 hours;
+    ///         v3.4 (owner directive 2026-09-02): ZERO on every network —
+    ///         queueUpgrade and upgradeTo run back-to-back, so upgrades are
+    ///         instant on Coston2, Songbird and Flare alike. The 2-step queue
+    ///         is retained for its event trail, exact-implementation match and
+    ///         cancelUpgrade, not as a delay. SECURITY MODEL: with no notice
+    ///         window, custody of the per-network admin key IS the entire
+    ///         upgrade security until renounceAdmin() seals the network.
+    /// @dev Kept as a function (not a constant) so a future upgrade can
+    ///      reintroduce a delay without touching call sites.
+    function upgradeDelay() public pure returns (uint64) {
+        return 0;
     }
 
     /// @notice Grace period after `upgradeEta` during which the queued
@@ -302,7 +358,9 @@ abstract contract MarketplaceCore is Initializable, ReentrancyGuardUpgradeable, 
 
     /// @dev Storage gap for future upgrades — preserves child storage layout
     ///      across implementation upgrades. Follows OpenZeppelin UUPS convention.
-    /// @dev 48 → 47: pendingImplementation (address) and upgradeEta (uint64)
-    ///      pack into one freshly-claimed slot ahead of this gap.
-    uint256[47] private __gap;
+    /// @dev v3.4: 47 → 49. feeRecipient and manager moved from storage to
+    ///      immutables, freeing their two slots (the transient guard uses no
+    ///      persistent storage either — ReentrancyGuardUpgradeable's _status
+    ///      slot came from its own inherited layout, not this region).
+    uint256[49] private __gap;
 }

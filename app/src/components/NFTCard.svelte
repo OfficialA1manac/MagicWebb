@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
   import VerifiedBadge from './VerifiedBadge.svelte';
+  import CreatorBadge from './CreatorBadge.svelte';
 
   interface ListingItem {
     collection: string;
@@ -20,6 +21,9 @@
     // one. Verified + creator is what upgrades the badge to "Authentic";
     // without passing it, this card was permanently stuck on "Verified NFT".
     collection_creator?: string;
+    collection_name?: string;
+    // Wallet-grid rows carry `owner` instead of `seller`.
+    owner?: string;
   }
 
   let { item }: { item: ListingItem } = $props();
@@ -48,6 +52,9 @@
     return typeof off === 'function' ? off : undefined;
   });
   let isOwnListing = $derived(!!me && item.seller?.toLowerCase() === me.toLowerCase());
+  // Seller/owner is the collection's on-chain creator (ERC-173 owner) → ★ Creator pill.
+  let holder = $derived(item.seller ?? item.owner ?? '');
+  let holderIsCreator = $derived(!!holder && !!item.collection_creator && holder.toLowerCase() === item.collection_creator.toLowerCase());
 
   // Quick buy straight from the card: opens the TxModal via window.MW.
   // Stops the click from following the card link to the token page.
@@ -124,7 +131,8 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      <VerifiedBadge verified={item.collection_verified} creatorAddr={item.collection_creator ?? ''} link={false} />
+      <VerifiedBadge verified={item.collection_verified} creatorAddr={item.collection_creator ?? ''} collectionName={item.collection_name ?? ''} link={false} />
+      {#if holderIsCreator}<CreatorBadge name={item.collection_name ?? ''} link={false} />{/if}
       {#if item.standard}
         <span class="standard-badge" title="Token standard">{item.standard}</span>
       {/if}

@@ -2,7 +2,7 @@
 
 A fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network.
 
-MagicWebb is a fixed-price + auction + offer marketplace with a **seller-pays 1.5%** fee model and **zero-admin** smart contracts (no pause, no owner withdrawal, no upgrade proxy, immutable fee). Listings, auction creation, bidding, and making offers are free. On any successful sale, 1.5% is deducted from the seller's proceeds — the seller receives 98.5% of the sale price.
+MagicWebb is a fixed-price + auction + offer marketplace with a **seller-pays 1.5%** fee model and **no-override** smart contracts (no pause, no owner withdrawal, immutable fee; upgrades are admin-gated per network until that network's admin is renounced). Listings, auction creation, bidding, and making offers are free. On any successful sale, 1.5% is deducted from the seller's proceeds — the seller receives 98.5% of the sale price.
 
 > Network: **Coston2 testnet** (chain `114`). This marketplace operates exclusively on Flare Coston2 testnet.
 
@@ -156,7 +156,8 @@ Each branch is a copy-on-write clone — zero additional storage cost until data
 cd contracts
 forge build
 forge test                       # full unit/scenario suite
-forge script script/DeployV32.s.sol --rpc-url coston2 --broadcast       # deploy (needs funded key + ADMIN/FEE_RECIPIENT/KEEPER addrs)
+PRIVATE_KEY=0x… ADMIN_ADDR=0x… FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
+  forge script script/DeployV34.s.sol --rpc-url coston2 --broadcast   # deploy unsealed (same env as `make deploy`)
 slither .                        # static analysis
 ```
 
@@ -174,7 +175,7 @@ See [`docs/DEPLOY_FLY.md`](docs/DEPLOY_FLY.md) for Fly.io deployment instruction
 |-----------|------|
 | Database | [Neon free tier](https://neon.tech/pricing) — 0.5 GB, 100 CU-hours/mo, 10k connections |
 | Hosting | [Fly.io](https://fly.io/pricing) — shared-cpu-1x/512MB ~$3-4/mo (trial credits available) |
-| Smart contracts | Deployed immutably on Flare Coston2 — no admin gas overhead |
+| Smart contracts | Deployed on Flare Coston2 — no admin gas overhead on any trade |
 | Image storage | Self-hosted in Postgres BYTEA — no IPFS/Pinata/CDN costs |
 | WalletConnect | Free project ID from [Reown Cloud](https://cloud.reown.com) |
 | RPC | Free public Flare Coston2 endpoints |
@@ -189,7 +190,7 @@ user guide, whitepaper, technical architecture, FAQ, token hooks, API (`/docs/ap
 Operator docs in [`docs/`](docs/):
 - **`DEPLOY_FLY.md`** — one Fly app per network, CI flow, bringing up Songbird/Flare
 - **`DEPLOY_CHECKLIST.md`** — contract deployment gates (audit + multisig on mainnet)
-- **`IMMUTABILITY_TRANSITION.md`** — time-locked UUPS upgrades, role handover
+- **`IMMUTABILITY_TRANSITION.md`** — unsealed-by-default networks, instant admin-gated upgrades, admin rotation, per-network `renounceAdmin()`
 - **`MONITORING.md`** — health endpoints, metrics, alerts
 
 Contract addresses: [`deployments/`](deployments/) is the single source of truth.

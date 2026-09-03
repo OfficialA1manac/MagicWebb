@@ -55,7 +55,7 @@ and indexer. Nothing is shared except the Docker image and the code.
 ## Enabling trading on a network
 
 ```text
-1. forge script contracts/script/Deploy<Network>.s.sol … --broadcast      (see DEPLOY_CHECKLIST.md)
+1. forge script contracts/script/DeployV34.s.sol (unsealed) … --broadcast      (see DEPLOY_CHECKLIST.md)
 2. edit deployments/<network>.json: status deployed, addresses, indexFromBlock
 3. fly secrets set -a magicwebb-<network> KEEPER_KEY=…
 4. push to main → CI redeploys; indexer/keepers/verifier start on the next boot

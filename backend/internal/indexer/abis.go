@@ -26,12 +26,21 @@ var (
 	// sale and returns the winner's escrow. Emitted INSTEAD OF AuctionSettled,
 	// so without this topic the auction would sit 'active' in the DB forever.
 	TopicAuctionSettlementFailed = crypto.Keccak256Hash([]byte("AuctionSettlementFailed(uint256,address,uint128)"))
-	TopicRefundPushed       = crypto.Keccak256Hash([]byte("RefundPushed(address,uint256)"))
+	// v3.4: keeper/seller/winner force-cancelled a stuck auction after
+	// endsAt + 3 days (SELLER_DEFAULT_WINDOW). Only sets settled=true so
+	// refundLosers unlocks — no sale, no AuctionSettled. Without this topic
+	// the row would sit 'active' forever and the keeper would keep re-settling.
+	TopicAuctionForceCancelled = crypto.Keccak256Hash([]byte("AuctionForceCancelled(uint256)"))
+	TopicRefundPushed          = crypto.Keccak256Hash([]byte("RefundPushed(address,uint256)"))
 
 	// OfferBook (Model A: stacked positions, fee taken at make)
 	TopicOfferMade     = crypto.Keccak256Hash([]byte("OfferMade(address,uint256,address,uint256,uint128,uint64)"))
 	TopicOfferAccepted = crypto.Keccak256Hash([]byte("OfferAccepted(address,uint256,address,address,uint256,uint256,uint128,uint8)"))
 	TopicOfferRefunded = crypto.Keccak256Hash([]byte("OfferRefunded(address,uint256,address,uint256)"))
+	// OfferEligibilitySet(address indexed coll, bool indexed eligible) — both
+	// params indexed, so the log carries no data words (topics[1]=coll,
+	// topics[2]=eligible).
+	TopicOfferEligibilitySet = crypto.Keccak256Hash([]byte("OfferEligibilitySet(address,bool)"))
 
 	// NFT collections (ERC-721 / ERC-1155) — watched on tracked collections to
 	// maintain ownership and orphan listings whose seller no longer holds the token.
@@ -46,9 +55,9 @@ func coreTopics() [][]common.Hash {
 		TopicListed, TopicCancelled, TopicBought,
 		TopicAuctionCreated, TopicBidPlaced, TopicOutbidNotification, TopicAuctionExtended,
 		TopicAuctionSettled, TopicLoserRefunded, TopicAuctionCancelled,
-		TopicAuctionSettlementFailed,
+		TopicAuctionSettlementFailed, TopicAuctionForceCancelled,
 		TopicRefundPushed,
-		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded,
+		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded, TopicOfferEligibilitySet,
 	}}
 }
 

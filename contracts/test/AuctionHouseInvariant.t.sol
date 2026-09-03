@@ -72,14 +72,17 @@ contract AuctionHouseHandler is Test {
         uint256 prevCum = uint256(ah.cumulative(auctionId, b));
 
         // Cumulative total this bidder must reach for bid() to accept the call.
+        // v3.4: leaderTotal is a derived view (cumulative[id][leader]), no
+        // longer a struct field.
+        uint128 lt = ah.leaderTotal(auctionId);
         uint256 minTotal;
         if (a.leader == b) {
             minTotal = prevCum + 1; // leader topping up: any non-zero value works
-        } else if (a.leaderTotal == 0) {
+        } else if (lt == 0) {
             minTotal = uint256(a.reserve); // no leader yet: must clear the reserve
         } else {
             // v3.3: flat marketplace-wide increment — leader + 1 native token.
-            minTotal = uint256(a.leaderTotal) + uint256(ah.MIN_BID_INCREMENT());
+            minTotal = uint256(lt) + uint256(ah.MIN_BID_INCREMENT());
         }
 
         uint256 need = minTotal > prevCum ? minTotal - prevCum : 1;
@@ -206,16 +209,18 @@ contract AuctionHouseInvariantTest is Test, TestHelpers {
     ///         deciding who is paid — if it ever breaks, settlement pays the
     ///         wrong bidder's escrow to the seller.
     function invariant_leaderHoldsMaxCumulative() public view {
-        AuctionHouse.Auction memory a = ah.getAuction(handler.auctionId());
+        uint256 id = handler.auctionId();
+        AuctionHouse.Auction memory a = ah.getAuction(id);
+        // v3.4: leaderTotal is the derived compat view, not a stored field.
+        uint128 lt = ah.leaderTotal(id);
         if (a.leader == address(0)) {
-            assertEq(a.leaderTotal, 0, "no leader but leaderTotal is set");
+            assertEq(lt, 0, "no leader but leaderTotal is set");
             return;
         }
         if (a.settled) return; // settle()/refundLosers() zero escrow by design
-        uint256 id = handler.auctionId();
         assertEq(
             uint256(ah.cumulative(id, a.leader)),
-            uint256(a.leaderTotal),
+            uint256(lt),
             "leaderTotal diverged from the leader's cumulative escrow"
         );
         for (uint256 i; i < 3; i++) {
@@ -223,7 +228,7 @@ contract AuctionHouseInvariantTest is Test, TestHelpers {
             if (b == a.leader) continue;
             assertLe(
                 uint256(ah.cumulative(id, b)),
-                uint256(a.leaderTotal),
+                uint256(lt),
                 "a non-leader out-escrows the leader"
             );
         }

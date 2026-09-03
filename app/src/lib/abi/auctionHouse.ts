@@ -15,6 +15,19 @@ export const auctionHouseAbi = [
   },
   {
     "type": "function",
+    "name": "KEEPER_SHARE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "MAX_TOTAL_EXTENSION",
     "inputs": [],
     "outputs": [
@@ -80,6 +93,19 @@ export const auctionHouseAbi = [
   },
   {
     "type": "function",
+    "name": "PLATFORM_SHARE_BPS",
+    "inputs": [],
+    "outputs": [
+      {
+        "name": "",
+        "type": "uint16",
+        "internalType": "uint16"
+      }
+    ],
+    "stateMutability": "view"
+  },
+  {
+    "type": "function",
     "name": "SELLER_DEFAULT_WINDOW",
     "inputs": [],
     "outputs": [
@@ -90,19 +116,6 @@ export const auctionHouseAbi = [
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "activateAuction",
-    "inputs": [
-      {
-        "name": "id",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -121,22 +134,17 @@ export const auctionHouseAbi = [
         "internalType": "address"
       },
       {
-        "name": "startsAt",
-        "type": "uint64",
-        "internalType": "uint64"
+        "name": "endsAt",
+        "type": "uint40",
+        "internalType": "uint40"
       },
       {
-        "name": "minIncrementBps",
-        "type": "uint16",
-        "internalType": "uint16"
+        "name": "originalEndsAt",
+        "type": "uint40",
+        "internalType": "uint40"
       },
       {
         "name": "settled",
-        "type": "bool",
-        "internalType": "bool"
-      },
-      {
-        "name": "active",
         "type": "bool",
         "internalType": "bool"
       },
@@ -151,9 +159,9 @@ export const auctionHouseAbi = [
         "internalType": "address"
       },
       {
-        "name": "endsAt",
-        "type": "uint64",
-        "internalType": "uint64"
+        "name": "reserve",
+        "type": "uint96",
+        "internalType": "uint96"
       },
       {
         "name": "tokenId",
@@ -161,29 +169,14 @@ export const auctionHouseAbi = [
         "internalType": "uint256"
       },
       {
-        "name": "reserve",
-        "type": "uint128",
-        "internalType": "uint128"
-      },
-      {
-        "name": "amount",
-        "type": "uint128",
-        "internalType": "uint128"
-      },
-      {
         "name": "leader",
         "type": "address",
         "internalType": "address"
       },
       {
-        "name": "leaderTotal",
-        "type": "uint128",
-        "internalType": "uint128"
-      },
-      {
-        "name": "minIncrementFlat",
-        "type": "uint128",
-        "internalType": "uint128"
+        "name": "amount",
+        "type": "uint96",
+        "internalType": "uint96"
       }
     ],
     "stateMutability": "view"
@@ -200,25 +193,6 @@ export const auctionHouseAbi = [
     ],
     "outputs": [],
     "stateMutability": "payable"
-  },
-  {
-    "type": "function",
-    "name": "bidderCount",
-    "inputs": [
-      {
-        "name": "id",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "outputs": [
-      {
-        "name": "",
-        "type": "uint256",
-        "internalType": "uint256"
-      }
-    ],
-    "stateMutability": "view"
   },
   {
     "type": "function",
@@ -385,22 +359,17 @@ export const auctionHouseAbi = [
             "internalType": "address"
           },
           {
-            "name": "startsAt",
-            "type": "uint64",
-            "internalType": "uint64"
+            "name": "endsAt",
+            "type": "uint40",
+            "internalType": "uint40"
           },
           {
-            "name": "minIncrementBps",
-            "type": "uint16",
-            "internalType": "uint16"
+            "name": "originalEndsAt",
+            "type": "uint40",
+            "internalType": "uint40"
           },
           {
             "name": "settled",
-            "type": "bool",
-            "internalType": "bool"
-          },
-          {
-            "name": "active",
             "type": "bool",
             "internalType": "bool"
           },
@@ -415,9 +384,9 @@ export const auctionHouseAbi = [
             "internalType": "address"
           },
           {
-            "name": "endsAt",
-            "type": "uint64",
-            "internalType": "uint64"
+            "name": "reserve",
+            "type": "uint96",
+            "internalType": "uint96"
           },
           {
             "name": "tokenId",
@@ -425,29 +394,14 @@ export const auctionHouseAbi = [
             "internalType": "uint256"
           },
           {
-            "name": "reserve",
-            "type": "uint128",
-            "internalType": "uint128"
-          },
-          {
-            "name": "amount",
-            "type": "uint128",
-            "internalType": "uint128"
-          },
-          {
             "name": "leader",
             "type": "address",
             "internalType": "address"
           },
           {
-            "name": "leaderTotal",
-            "type": "uint128",
-            "internalType": "uint128"
-          },
-          {
-            "name": "minIncrementFlat",
-            "type": "uint128",
-            "internalType": "uint128"
+            "name": "amount",
+            "type": "uint96",
+            "internalType": "uint96"
           }
         ]
       }
@@ -456,15 +410,17 @@ export const auctionHouseAbi = [
   },
   {
     "type": "function",
-    "name": "getBidder",
+    "name": "initialize",
+    "inputs": [],
+    "outputs": [],
+    "stateMutability": "nonpayable"
+  },
+  {
+    "type": "function",
+    "name": "leaderTotal",
     "inputs": [
       {
         "name": "id",
-        "type": "uint256",
-        "internalType": "uint256"
-      },
-      {
-        "name": "i",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -472,29 +428,11 @@ export const auctionHouseAbi = [
     "outputs": [
       {
         "name": "",
-        "type": "address",
-        "internalType": "address"
+        "type": "uint128",
+        "internalType": "uint128"
       }
     ],
     "stateMutability": "view"
-  },
-  {
-    "type": "function",
-    "name": "initialize",
-    "inputs": [
-      {
-        "name": "recipient",
-        "type": "address",
-        "internalType": "address"
-      },
-      {
-        "name": "manager_",
-        "type": "address",
-        "internalType": "address"
-      }
-    ],
-    "outputs": [],
-    "stateMutability": "nonpayable"
   },
   {
     "type": "function",
@@ -605,7 +543,7 @@ export const auctionHouseAbi = [
     "name": "originalEndsAt",
     "inputs": [
       {
-        "name": "",
+        "name": "id",
         "type": "uint256",
         "internalType": "uint256"
       }
@@ -738,7 +676,7 @@ export const auctionHouseAbi = [
         "internalType": "uint64"
       }
     ],
-    "stateMutability": "view"
+    "stateMutability": "pure"
   },
   {
     "type": "function",
@@ -819,19 +757,6 @@ export const auctionHouseAbi = [
         "type": "address",
         "indexed": false,
         "internalType": "address"
-      }
-    ],
-    "anonymous": false
-  },
-  {
-    "type": "event",
-    "name": "AuctionActivated",
-    "inputs": [
-      {
-        "name": "id",
-        "type": "uint256",
-        "indexed": true,
-        "internalType": "uint256"
       }
     ],
     "anonymous": false
@@ -1041,6 +966,37 @@ export const auctionHouseAbi = [
       },
       {
         "name": "newTotal",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      }
+    ],
+    "anonymous": false
+  },
+  {
+    "type": "event",
+    "name": "FeeSplit",
+    "inputs": [
+      {
+        "name": "feeRecipient",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "platformShare",
+        "type": "uint256",
+        "indexed": false,
+        "internalType": "uint256"
+      },
+      {
+        "name": "keeper",
+        "type": "address",
+        "indexed": true,
+        "internalType": "address"
+      },
+      {
+        "name": "keeperShare",
         "type": "uint256",
         "indexed": false,
         "internalType": "uint256"

@@ -43,20 +43,20 @@ Wallet (ethers.js) --writes--> Flare RPC --> Contracts --events--> Indexer
 
 ### 3.2 Platform fee (single, unified, immutable)
 
-MagicWebb charges a single **1.5% platform fee** (`PLATFORM_FEE_BPS = 150`), applied **only on a successful sale** and **deducted from the seller's proceeds**. Listing, auction creation, bidding, and making offers are all free. One constant governs every settlement path.
+MagicWebb charges a single **2% platform fee** (`PLATFORM_FEE_BPS = 200`, split `PLATFORM_SHARE_BPS = 150` to `feeRecipient` and `KEEPER_SHARE_BPS = 50` to the network keeper via `manager.keeper()` — falls back to 100% `feeRecipient` when no keeper is set), applied **only on a successful sale** and **deducted from the seller's proceeds**. Listing, auction creation, bidding, and making offers are all free. One constant governs every settlement path.
 
 The fee is a `constant` in `MarketplaceCore.sol`, not a constructor argument or mutable storage variable. It cannot be changed by any admin key, environment variable, or upgrade path. Changing it requires deploying new contracts.
 
 **Fee recipient:** `feeRecipient` — an immutable wallet address set once at deploy time. Fees are sent directly via `.call{value: fee}("")` to this address. No intermediary contract, no vault, no accumulator.
 
-The unified deploy script (`DeployV32.s.sol`) takes `FEE_RECIPIENT_ADDR` as the `feeRecipient` and `KEEPER_ADDR` as the network's single keeper — the only address that may ever settle on the keeper tier, with no mechanism anywhere to enroll another. With `SEAL=true` (mainnets) the script requires the fee recipient to be a multisig contract and calls `renounceAdmin()` as its final action, completing the immutability transition inside the deploy transaction itself; unsealed (testnet) deployments keep a single admin (`ADMIN_ADDR`) for iteration — see [`docs/IMMUTABILITY_TRANSITION.md`](https://github.com/OfficialA1manac/MagicWebb/blob/main/docs/IMMUTABILITY_TRANSITION.md). No `FEE_BPS` variable exists — the rate is fixed in code.
+The unified deploy script (`DeployV34.s.sol`) takes `FEE_RECIPIENT_ADDR` as the `feeRecipient` and `KEEPER_ADDR` as the network's single keeper — the only address that may ever settle on the keeper tier, with no mechanism anywhere to enroll another. Every network — Coston2, Songbird and Flare — deploys UNSEALED with a single per-network admin (`ADMIN_ADDR`) that can perform instant, admin-gated upgrades; each network becomes immutable only when its admin calls `renounceAdmin()` on the owner's explicit go-immutable order (a `SEAL=true` deploy mode also exists for sealing at deploy, requiring a multisig fee recipient) — see [`docs/IMMUTABILITY_TRANSITION.md`](https://github.com/OfficialA1manac/MagicWebb/blob/main/docs/IMMUTABILITY_TRANSITION.md). No `FEE_BPS` variable exists — the rate is fixed in code.
 
 ### 3.3 Fees applied, refunds, and failed transfers (all surfaces)
 
-**Where the 1.5% fee applies.** The platform fee is charged only when a sale settles, deducted from the seller's proceeds:
-- **Buy:** 1.5% of sale price, deducted from seller proceeds (`_payFee` + `_pay`) in the same atomic transaction as the NFT transfer. The buyer sends exactly the price.
-- **Auction settlement:** 1.5% of the winning bid, deducted from seller proceeds when `settle()` is called.
-- **Offer acceptance:** 1.5% of the offer amount, deducted from seller proceeds when `acceptOffer()` / `acceptOffer1155()` is called.
+**Where the 2% fee applies.** The platform fee is charged only when a sale settles, deducted from the seller's proceeds:
+- **Buy:** 2% of sale price, deducted from seller proceeds (`_payFee` + `_pay`) in the same atomic transaction as the NFT transfer. The buyer sends exactly the price.
+- **Auction settlement:** 2% of the winning bid, deducted from seller proceeds when `settle()` is called.
+- **Offer acceptance:** 2% of the offer amount, deducted from seller proceeds when `acceptOffer()` / `acceptOffer1155()` is called.
 
 **What is NOT charged:** Listing, auction creation, bid placement, outbid refunds, making/topping-up offers, offer rejection/expiry refunds, and listing cancellation — none of these deduct any fee. Bids and offer principals are fully refundable.
 
@@ -91,7 +91,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 
 1. Bidder calls `makeOffer` / `makeOffer1155` (**payable**), escrowing the full principal in `OfferBook`. Repeat offers on the same NFT stack into one position; top-ups do NOT refresh the expiry timer. Offering is free. Bidders can cancel their offer before expiry via `cancelOffer()`.
 2. Owner calls `acceptOffer` / `acceptOffer1155` (must currently own and have approved the NFT).
-3. Contract validates the position and ownership/approval, transfers the NFT to the bidder, then pays the seller `principal − 1.5%` and the fee to `feeRecipient` — one atomic transaction. Rejected or expired offers refund the full principal.
+3. Contract validates the position and ownership/approval, transfers the NFT to the bidder, then pays the seller `principal − 2%` and the fee split to `feeRecipient` / keeper (`FeeSplit` event) — one atomic transaction. Rejected or expired offers refund the full principal.
 
 ### 4.3 Auction settlement
 
@@ -106,7 +106,7 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 | Reentrancy on payable flows | `ReentrancyGuard` + checks-effects-interactions |
 | Auction griefing via refund callback | Pull-pattern refunds (`withdrawRefund`) |
 | Offer / escrow integrity | Offers are on-chain payable positions (no signatures to replay); escrowed balance always equals the sum of active principals — enforced by an invariant test |
-| Fee abuse | `PLATFORM_FEE_BPS` is a hardcoded `constant` (1.5%); no admin key, env var, or upgrade path can change it |
+| Fee abuse | `PLATFORM_FEE_BPS` is a hardcoded `constant` (2%); no admin key, env var, or upgrade path can change it |
 | Listing overwrite by third party | Seller collision checks (`AlreadyListed`) |
 
 Residual accepted risks:
