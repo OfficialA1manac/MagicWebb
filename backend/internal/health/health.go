@@ -43,16 +43,21 @@ type ProbeBlockNumber interface {
 // scrape every 15s).
 type Server struct {
 	grpc_health_v1.UnimplementedHealthServer
-	pinger    ProbePinger
-	blockNum  ProbeBlockNumber
-	headLag   func() uint64 // optional head-lag callback; nil = skip lag check
+	pinger   ProbePinger
+	blockNum ProbeBlockNumber
+	headLag  func() uint64 // optional head-lag callback; nil = skip lag check
 
 	mu     sync.RWMutex
 	cached cachedResult
+	// refreshMu serialises cache refreshes: when the entry expires, only one
+	// caller runs the probes; the rest block here, then re-read the cache
+	// that caller populated. Without it every concurrent Check/Watch that
+	// passed the expiry check would fan out its own DB + RPC probe burst.
+	refreshMu sync.Mutex
 }
 
 type cachedResult struct {
-	status   grpc_health_v1.HealthCheckResponse_ServingStatus
+	status    grpc_health_v1.HealthCheckResponse_ServingStatus
 	expiresAt time.Time
 }
 
@@ -102,20 +107,43 @@ func (s *Server) Check(ctx context.Context, req *grpc_health_v1.HealthCheckReque
 // cachedProbe runs probe() and refreshes the shared cache, so every caller
 // (Check and each Watch stream) draws from one probe per cacheTTL instead of
 // hammering the DB and RPC once per poller.
+//
+// Refreshes are single-flighted through refreshMu: the first caller to see an
+// expired entry probes, later callers wait for it and take its result. A probe
+// whose ctx was canceled mid-flight is returned to that caller but never
+// cached — NOT_SERVING there reflects the client hanging up, not the backends,
+// and caching it would hand every other health client a false NOT_SERVING for
+// a full cacheTTL.
 func (s *Server) cachedProbe(ctx context.Context) grpc_health_v1.HealthCheckResponse_ServingStatus {
-	s.mu.RLock()
-	if time.Now().Before(s.cached.expiresAt) {
-		st := s.cached.status
-		s.mu.RUnlock()
+	if st, ok := s.cachedStatus(); ok {
 		return st
 	}
-	s.mu.RUnlock()
+
+	s.refreshMu.Lock()
+	defer s.refreshMu.Unlock()
+	// Re-check: another caller may have refreshed while we waited.
+	if st, ok := s.cachedStatus(); ok {
+		return st
+	}
 
 	st := s.probe(ctx)
+	if ctx.Err() != nil {
+		return st
+	}
 	s.mu.Lock()
 	s.cached = cachedResult{status: st, expiresAt: time.Now().Add(cacheTTL)}
 	s.mu.Unlock()
 	return st
+}
+
+// cachedStatus returns the cached status when the entry is still fresh.
+func (s *Server) cachedStatus() (grpc_health_v1.HealthCheckResponse_ServingStatus, bool) {
+	s.mu.RLock()
+	defer s.mu.RUnlock()
+	if time.Now().Before(s.cached.expiresAt) {
+		return s.cached.status, true
+	}
+	return 0, false
 }
 
 // Watch implements grpc_health_v1.HealthServer.Watch (server-side streaming).

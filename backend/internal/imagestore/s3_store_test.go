@@ -385,10 +385,12 @@ func TestS3Store_GetImageByParent_PrefersWebP(t *testing.T) {
 	s3.objects[s3.key("test-bucket", "blobs/thumb456")] = body
 	s3.mu.Unlock()
 
-	// When preferWebP=true, the ORDER BY should prefer image/webp.
+	// When preferWebP=true, the ORDER BY must rank image/webp first. The
+	// matcher requires that exact expression so an implementation that
+	// ignores preferWebP (the mock returns a webp row either way) fails here.
 	rows := mock.NewRows([]string{"sha256", "mime", "source_uri"}).
 		AddRow("thumb456", "image/webp", "https://example.com/img.png")
-	mock.ExpectQuery(`SELECT sha256, mime, source_uri FROM nft_image_blobs`).
+	mock.ExpectQuery(`SELECT sha256, mime, source_uri FROM nft_image_blobs[\s\S]*ORDER BY CASE WHEN mime = 'image/webp' THEN 0 ELSE 1 END`).
 		WithArgs("parent123", 256).
 		WillReturnRows(rows)
 

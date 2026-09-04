@@ -3,12 +3,15 @@ package interceptors
 import (
 	"context"
 	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
 	"connectrpc.com/connect"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1/marketplacev1connect"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
 )
 
@@ -165,25 +168,53 @@ func TestClientIPFromRequest_Priority(t *testing.T) {
 
 // ── TieredRateLimitInterceptor ───────────────────────────────────────────────────
 
-func TestTieredRateLimitInterceptor_AllowsWithinLimit(t *testing.T) {
+// getListingStub is a MarketplaceService whose GetListing always succeeds,
+// so the interceptor is the only thing that can fail a call.
+type getListingStub struct {
+	marketplacev1connect.UnimplementedMarketplaceServiceHandler
+}
+
+func (getListingStub) GetListing(context.Context, *connect.Request[marketplacev1.GetListingRequest]) (*connect.Response[marketplacev1.GetListingResponse], error) {
+	return connect.NewResponse(&marketplacev1.GetListingResponse{}), nil
+}
+
+// Exercises the GetListing tier through the real mounted handler, so the
+// procedure name the interceptor keys on is the one Connect stamps on the
+// request — not the empty procedure a hand-built connect.Request carries.
+func TestTieredRateLimitInterceptor_GetListingTier(t *testing.T) {
 	rl := ratelimit.New()
 	tiers := map[string]RateLimitTier{
-		"/marketplace.v1.MarketplaceService/GetListing": {Limit: 5, Window: time.Minute},
+		marketplacev1connect.MarketplaceServiceGetListingProcedure: {Limit: 5, Window: time.Minute},
 	}
-	interceptor := TieredRateLimitInterceptor(rl, tiers)
+	mux := http.NewServeMux()
+	mux.Handle(marketplacev1connect.NewMarketplaceServiceHandler(getListingStub{},
+		connect.WithInterceptors(TieredRateLimitInterceptor(rl, tiers))))
+	srv := httptest.NewServer(mux)
+	defer srv.Close()
 
-	h := func(_ context.Context, _ connect.AnyRequest) (connect.AnyResponse, error) {
-		return connect.NewResponse(&emptypb.Empty{}), nil
+	client := marketplacev1connect.NewMarketplaceServiceClient(srv.Client(), srv.URL)
+	call := func(ip string) error {
+		req := connect.NewRequest(&marketplacev1.GetListingRequest{Collection: "0x0", TokenId: "1"})
+		req.Header().Set("Fly-Client-Ip", ip)
+		_, err := client.GetListing(context.Background(), req)
+		return err
 	}
 
-	req := newRLRequest(http.Header{"Fly-Client-Ip": {"10.0.0.1"}})
-
-	for i := 0; i < 5; i++ {
-		resp, err := interceptor(h)(context.Background(), req)
-		if err != nil {
-			t.Fatalf("request %d should succeed, got: %v", i+1, err)
+	for i := 1; i <= 5; i++ {
+		if err := call("10.0.0.1"); err != nil {
+			t.Fatalf("GetListing %d should succeed, got: %v", i, err)
 		}
-		_ = resp
+	}
+	err := call("10.0.0.1")
+	if err == nil {
+		t.Fatal("GetListing 6 should be rate limited")
+	}
+	if code := connect.CodeOf(err); code != connect.CodeResourceExhausted {
+		t.Fatalf("GetListing 6 code = %v, want CodeResourceExhausted (%v)", code, err)
+	}
+	// The tier is per-IP: a different client still has budget.
+	if err := call("10.0.0.2"); err != nil {
+		t.Fatalf("other IP should succeed, got: %v", err)
 	}
 }
 

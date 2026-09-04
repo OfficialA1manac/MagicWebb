@@ -22,7 +22,7 @@ func TestMemStoreSetIfFreeRejectsSecondIssue(t *testing.T) {
 	if !s.SetIfFree("0xexpired", "expired", -time.Second) {
 		t.Fatal("first SetIfFree with negative TTL should succeed (insert fresh entry)")
 	}
-	// Entry was stored but immediately expired; GetDel returns false.
+	// Entry was stored but immediately expired.
 	// The important check is that the next SetIfFree succeeds (slot is reusable).
 	if !s.SetIfFree("0xexpired", "n3", time.Minute) {
 		t.Fatal("SetIfFree should succeed after prior entry's TTL has expired")
@@ -46,7 +46,6 @@ func TestMemStoreGetDelIsSingleUse(t *testing.T) {
 	}
 }
 
-
 func TestMemStoreSetIfFreeConcurrentRace(t *testing.T) {
 	s := New()
 	s.SetIfFree("0xrace", "expired", -time.Second)
@@ -66,5 +65,7 @@ func TestMemStoreSetIfFreeConcurrentRace(t *testing.T) {
 		}(i)
 	}
 	wg.Wait()
-	if successes != 1 { t.Fatalf("expected 1, got %d", successes) }
+	if successes != 1 {
+		t.Fatalf("expected 1, got %d", successes)
+	}
 }

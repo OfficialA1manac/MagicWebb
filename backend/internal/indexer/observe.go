@@ -126,11 +126,18 @@ func (r *Runner) relevantAddresses(ctx context.Context) map[common.Address]struc
 }
 
 // observedSet remembers recently observed hashes so a client retrying the
-// POST (or two tabs) does not redo the work. Bounded, time-based.
+// POST (or two tabs) does not redo the work. Bounded by both time (entries
+// older than observedTTL are swept) and size (never more than
+// observedMaxEntries after mark returns).
 type observedSet struct {
-	mu   sync.Mutex
-	m    map[common.Hash]time.Time
+	mu sync.Mutex
+	m  map[common.Hash]time.Time
 }
+
+const (
+	observedTTL        = 10 * time.Minute
+	observedMaxEntries = 4096
+)
 
 func (s *observedSet) seen(h common.Hash) bool {
 	s.mu.Lock()
@@ -138,7 +145,7 @@ func (s *observedSet) seen(h common.Hash) bool {
 	if s.m == nil {
 		return false
 	}
-	return s.m[h].After(time.Now().Add(-10 * time.Minute))
+	return s.m[h].After(time.Now().Add(-observedTTL))
 }
 
 func (s *observedSet) mark(h common.Hash) {
@@ -149,11 +156,30 @@ func (s *observedSet) mark(h common.Hash) {
 	}
 	now := time.Now()
 	s.m[h] = now
-	if len(s.m) > 4096 {
+	if len(s.m) <= observedMaxEntries {
+		return
+	}
+	// Age sweep first: cheap, and normally enough.
+	for k, t := range s.m {
+		if now.Sub(t) > observedTTL {
+			delete(s.m, k)
+		}
+	}
+	// Hard cap: more than observedMaxEntries live hashes inside one TTL
+	// window means the age sweep freed nothing, so evict the oldest until
+	// we are under the cap. A dropped hash only costs a retry redoing its
+	// observation — cheaper than an unbounded map.
+	for len(s.m) > observedMaxEntries {
+		var (
+			oldestK common.Hash
+			oldestT time.Time
+			first   = true
+		)
 		for k, t := range s.m {
-			if now.Sub(t) > 10*time.Minute {
-				delete(s.m, k)
+			if first || t.Before(oldestT) {
+				oldestK, oldestT, first = k, t, false
 			}
 		}
+		delete(s.m, oldestK)
 	}
 }

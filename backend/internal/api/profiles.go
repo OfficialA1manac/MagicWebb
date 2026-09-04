@@ -47,7 +47,7 @@ type ProfilesService struct {
 	siblings []config.Network
 	httpc    *http.Client
 	// merged caches the exact JSON served by handleGet (local or carried
-	// over), 60s TTL. handlePut refreshes the entry so an edit is visible
+	// over), 5s TTL. handlePut refreshes the entry so an edit is visible
 	// immediately on its own network.
 	merged cache.CacheInterface
 }
@@ -267,7 +267,7 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 	if err != nil {
 		// The upsert succeeded, so a read-back failure is transient. Return
 		// the local struct as a degraded response rather than 5xx. The
-		// merged cache is left alone — its 60s TTL bounds the staleness.
+		// merged cache is left alone — its 5s TTL bounds the staleness.
 		log.Warn().Err(err).Str("address", addr).
 			Msg("profiles: read-back after upsert failed; returning degraded response")
 		return c.JSON(profileResponse{ProfileRow: &p, SourceChain: s.chainID})

@@ -52,7 +52,7 @@ func TestProfilesService_HandleGet_TagAndSourceChain(t *testing.T) {
 	}
 }
 
-// The 60s merged cache serves the second hit without touching the DB — the
+// The 5s merged cache serves the second hit without touching the DB — the
 // single ExpectQuery above would fail ExpectationsWereMet if it ran twice,
 // so here we assert a cached repeat works with NO expectations queued.
 func TestProfilesService_HandleGet_ServesFromCache(t *testing.T) {

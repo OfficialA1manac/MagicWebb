@@ -237,7 +237,7 @@ func TestComplexityConfig_ConnectionFields(t *testing.T) {
 
 	// bids(10): Bid has 3 scalar fields (bidder, amountWei, placedAt) + 1 time.
 	// childComplexity=4, count=10.
-	bidCost := cfg.Auction.Bids(4) // Auction.Bids only takes childComplexity
+	bidCost := cfg.Auction.Bids(4)              // Auction.Bids only takes childComplexity
 	wantBidCost := costConnBase + 4*costPerItem // 5 + 4*2 = 13
 	if bidCost != wantBidCost {
 		t.Errorf("Auction.Bids(4 child): want %d, got %d", wantBidCost, bidCost)
@@ -255,7 +255,8 @@ func TestComplexityConfig_ConnectionFields(t *testing.T) {
 
 // TestComplexityConfig_ListingsPage48 verifies the cost of a typical listings
 // page query: 48 listings with 12 scalar fields each. Expected cost:
-//   listCost(12, &48) = 10 + 12×48 = 586
+//
+//	listCost(12, &48) = 10 + 12×48 = 586
 //
 // Note: the user's ballpark estimate was ~960; the actual computed cost of 586
 // reflects the current model where each Listing field costs 1 (scalar/enum/time)
@@ -292,8 +293,9 @@ func TestComplexityConfig_ListingsPage48(t *testing.T) {
 
 // TestComplexityConfig_Collections10WithStats verifies the cost of a
 // collections page: 10 collections with their stats object. Expected cost:
-//   Per-collection: 10 scalars + 5 (stats object) + 3 (stats fields) = 18
-//   listCost(18, &10) = 10 + 18×10 = 190
+//
+//	Per-collection: 10 scalars + 5 (stats object) + 3 (stats fields) = 18
+//	listCost(18, &10) = 10 + 18×10 = 190
 //
 // Note: the user's ballpark estimate was ~200; actual is 190 with the current
 // model. The delta comes from per-collection fields that each cost only 1.
@@ -333,12 +335,13 @@ func TestComplexityConfig_Collections10WithStats(t *testing.T) {
 // TestComplexityConfig_CollectionDetailPage verifies the cost of a full
 // collection detail page: collection query + stats + 48 child listings.
 // Expected cost breakdown:
-//   Query.collection       = 10  (base)
-//   Collection scalars     = 6   (name, symbol, standard, verified, creatorAddr, address)
-//   Collection.stats       = 5   (object)
-//   Stats scalars          = 3   (floorPriceWei, listedCount, volume24hWei)
-//   Collection.listings    = listCost(12, &48) = 586
-//   TOTAL                  = 610
+//
+//	Query.collection       = 10  (base)
+//	Collection scalars     = 6   (name, symbol, standard, verified, creatorAddr, address)
+//	Collection.stats       = 5   (object)
+//	Stats scalars          = 3   (floorPriceWei, listedCount, volume24hWei)
+//	Collection.listings    = listCost(12, &48) = 586
+//	TOTAL                  = 610
 func TestComplexityConfig_CollectionDetailPage(t *testing.T) {
 	cfg := ComplexityConfig()
 
@@ -382,18 +385,20 @@ func TestComplexityConfig_CollectionDetailPage(t *testing.T) {
 
 // TestComplexityConfig_AuctionWithBids verifies the cost of a single auction
 // with 10 bids. Expected cost:
-//   Query.auction          = 10  (base)
-//   Auction scalars        = 3   (auctionID, seller, status)
-//   Auction.bids(10)       = 5 + 4×2×10... wait, bids takes childComplexity
-//   Bid child cost         = 4   (bidder, amountWei, placedAt, txHash)
-//   Auction.bids           = costConnBase + 4*costPerItem = 5+8 = 13
-//   Note: bids doesn't take a limit arg in the current schema — it uses
-//         the child complexity passed in by the gqlgen framework.
-//   TOTAL (basic)          = 10 + 3 + 13 = 26
+//
+//	Query.auction          = 10  (base)
+//	Auction scalars        = 3   (auctionID, seller, status)
+//	Auction.bids(10)       = 5 + 4×2×10... wait, bids takes childComplexity
+//	Bid child cost         = 4   (bidder, amountWei, placedAt, txHash)
+//	Auction.bids           = costConnBase + 4*costPerItem = 5+8 = 13
+//	Note: bids doesn't take a limit arg in the current schema — it uses
+//	      the child complexity passed in by the gqlgen framework.
+//	TOTAL (basic)          = 10 + 3 + 13 = 26
 //
 // With explicit child complexity passed by gqlgen (e.g., 10 bids × 4 fields):
-//   Auction.bids           = 5 + 4*2 = 13  (per-child, multiplied by gqlgen)
-//   gqlgen multiplies per-item cost by the number of items resolved.
+//
+//	Auction.bids           = 5 + 4*2 = 13  (per-child, multiplied by gqlgen)
+//	gqlgen multiplies per-item cost by the number of items resolved.
 func TestComplexityConfig_AuctionWithBids(t *testing.T) {
 	cfg := ComplexityConfig()
 
@@ -408,7 +413,7 @@ func TestComplexityConfig_AuctionWithBids(t *testing.T) {
 
 	// Auction.bids with Bid child complexity (4 fields: bidder, amountWei, placedAt, txHash).
 	bidChild := cfg.Bid.Bidder(0) + cfg.Bid.AmountWei(0) + cfg.Bid.PlacedAt(0) + cfg.Bid.TxHash(0) // 4
-	bidsCost := cfg.Auction.Bids(bidChild) // costConnBase + bidChild*costPerItem = 5 + 4*2 = 13
+	bidsCost := cfg.Auction.Bids(bidChild)                                                         // costConnBase + bidChild*costPerItem = 5 + 4*2 = 13
 
 	total := rootCost + auctionScalars + bidsCost
 	want := costListBase + 3*costScalar + costConnBase + 4*costPerItem // 10 + 3 + 5 + 8 = 26
@@ -475,7 +480,7 @@ func TestComplexityConfig_BelowMaxQueryCost(t *testing.T) {
 		{"metrics", 11},
 		{"single listing", listCost(12, intPtr(1))}, // 10 + 12 = 22
 		{"single auction", listCost(4, intPtr(1))},  // 10 + 4 = 14
-		{"single collection", costListBase},          // 10
+		{"single collection", costListBase},         // 10
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -617,13 +622,24 @@ func TestComplexityConfig_RemainingQueryRoots(t *testing.T) {
 			if tt.cost < 0 {
 				t.Errorf("%s cost is negative: %d", tt.name, tt.cost)
 			}
-			// All query root costs should be strictly positive (except subscriptions).
-			if tt.cost == 0 && tt.name != "" {
-				t.Logf("%s cost is 0 — verify this is intentional", tt.name)
+			// Every query root must cost something, or the complexity limiter
+			// cannot see its work. No root is allowlisted to cost 0 today; a
+			// root that legitimately should (a constant, no DB touch) must be
+			// added to zeroCostRoots with the reason, not silently pass here.
+			if tt.cost == 0 {
+				if reason, ok := zeroCostRoots[tt.name]; ok {
+					t.Logf("%s cost is 0 (allowlisted: %s)", tt.name, reason)
+					return
+				}
+				t.Errorf("%s returned zero cost; add it to zeroCostRoots with a reason if intentional", tt.name)
 			}
 		})
 	}
 }
+
+// zeroCostRoots lists query roots allowed to report cost 0, keyed by root
+// name with the reason they do no work. Empty: every root today hits the DB.
+var zeroCostRoots = map[string]string{}
 
 // ── Helpers ────────────────────────────────────────────────────────────
 

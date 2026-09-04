@@ -39,12 +39,12 @@ func DefaultRateLimits() map[string]RateLimitTier {
 		// Single-entity lookups — standard limit.
 		"/marketplace.v1.MarketplaceService/GetListing":    {60, time.Minute},
 		"/marketplace.v1.MarketplaceService/GetAuction":    {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetOffer":       {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetToken":       {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetCollection":  {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetProfile":     {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetWalletNFTs":  {60, time.Minute},
-		"/marketplace.v1.MarketplaceService/GetMetrics":     {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetOffer":      {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetToken":      {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetCollection": {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetProfile":    {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetWalletNFTs": {60, time.Minute},
+		"/marketplace.v1.MarketplaceService/GetMetrics":    {60, time.Minute},
 
 		// Search — expensive full-text query, tighter limit.
 		"/marketplace.v1.MarketplaceService/Search": {30, time.Minute},
