@@ -426,6 +426,11 @@ jobs:
           # read-only networks are real origins (browse/wallet/profile) and must
           # appear in every sibling's switcher; only not-deployed stays hidden.
           NETWORK_URLS=$(jq -r '[inputs | select(.status=="deployed" or .status=="read-only") | "\(.chainId)=\(.app.origin)"] | join(",")' -n deployments/coston2.json deployments/songbird.json deployments/flare.json)
+          # NETWORK_TRADING tells each app whether its siblings trade
+          # ("deployed" → live) or only browse ("read-only" → browse-only);
+          # a process cannot see another network's contracts. Same shape as
+          # NETWORK_URLS; read by config.buildNetworks.
+          NETWORK_TRADING=$(jq -r '[inputs | select(.status=="deployed" or .status=="read-only") | "\(.chainId)=\(if .status=="deployed" then "live" else "browse-only" end)"] | join(",")' -n deployments/coston2.json deployments/songbird.json deployments/flare.json)
           if [ "$STATUS" = "deployed" ]; then
             for v in MARKETPLACE_ADDR AUCTION_ADDR OFFERBOOK_ADDR NFT_ADDR MARKETPLACE_MANAGER_ADDR INDEX_FROM_BLOCK; do
               [ -n "${!v}" ] || { echo "::error::$DEP is 'deployed' but $v is empty"; exit 1; }
@@ -442,11 +447,11 @@ jobs:
           # wrong-network banner can link to them. Inserted into [env] right
           # after HTTP_ADDR (templates keep it out so forks do not advertise
           # apps that may not exist).
-          sed -i "s|^  HTTP_ADDR = \":8080\"|  HTTP_ADDR = \":8080\"\n  NETWORK_URLS = \"${NETWORK_URLS}\"|" fly.toml
+          sed -i "s|^  HTTP_ADDR = \":8080\"|  HTTP_ADDR = \":8080\"\n  NETWORK_URLS = \"${NETWORK_URLS}\"\n  NETWORK_TRADING = \"${NETWORK_TRADING}\"|" fly.toml
           UNRESOLVED=$(grep -v '^[[:space:]]*#' fly.toml | grep -o 'CHANGE_ME_[A-Z_]*' | sort -u | xargs || true)
           if [ -n "$UNRESOLVED" ]; then echo "::error::unresolved placeholders in fly.toml: ${UNRESOLVED}"; exit 1; fi
           echo "  generated fly.toml for ${NETWORK} (app $(jq -r .app.flyApp "$DEP"), status ${STATUS})"
-          grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS)\s*=' fly.toml
+          grep -E '^\s*(app|CHAIN_ID|MARKETPLACE_ADDR|NETWORK_URLS|NETWORK_TRADING)\s*=' fly.toml
       - name: Deploy image (rolling release)
         id: fly_deploy
         # No build happens here: the image was built once by the `build` job and

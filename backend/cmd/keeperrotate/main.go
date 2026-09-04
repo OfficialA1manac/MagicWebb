@@ -39,6 +39,8 @@ import (
 	"github.com/ethereum/go-ethereum/core/types"
 	"github.com/ethereum/go-ethereum/crypto"
 	"github.com/ethereum/go-ethereum/ethclient"
+
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain/profile"
 )
 
 func die(f string, a ...any) { fmt.Fprintf(os.Stderr, "FATAL: "+f+"\n", a...); os.Exit(1) }
@@ -63,9 +65,18 @@ func main() {
 	granter := flag.String("granter", "", "hex private key of the sender (ADMIN for -set/-transfer-admin; NEW admin for -accept-admin)")
 	to := flag.String("to", "", "target address")
 	manager := flag.String("manager", "", "MarketplaceManager address")
-	rpc := flag.String("rpc", "https://coston2-api.flare.network/ext/C/rpc", "RPC URL")
+	chain := flag.Uint64("chain", 114, "chain id; selects the default -rpc from the network profile (114 Coston2, 19 Songbird, 14 Flare)")
+	rpc := flag.String("rpc", "", "RPC URL (default: the -chain profile's primary RPC)")
 	wei := flag.String("wei", "", "amount in wei for -fund")
 	flag.Parse()
+
+	if *rpc == "" {
+		prof, err := profile.For(*chain)
+		if err != nil {
+			die("%v", err)
+		}
+		*rpc = prof.DefaultRPCs[0]
+	}
 
 	switch {
 	case *derive != "":

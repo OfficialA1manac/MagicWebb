@@ -31,6 +31,34 @@ type MediaService struct {
 	// allowCheck is the SSRF gate (media.ProxyAllowedContext by default).
 	// Injected so tests don't depend on live DNS resolution of gateway hosts.
 	allowCheck func(ctx context.Context, uri string) bool
+	// proxySem bounds concurrent OUTBOUND fetches through handleProxy
+	// (profile.ImageProxyConcurrency; nil = unbounded, tests). Blob-store and
+	// data: URI paths never touch the network and are not gated.
+	proxySem chan struct{}
+}
+
+// SetProxyConcurrency bounds concurrent upstream fetches; n <= 0 removes the
+// bound. Called by Mount from config.ImageProxyConcurrency.
+func (s *MediaService) SetProxyConcurrency(n int) {
+	if n <= 0 {
+		s.proxySem = nil
+		return
+	}
+	s.proxySem = make(chan struct{}, n)
+}
+
+// acquireProxySlot blocks until an outbound slot is free or the request is
+// gone. Returns false when the client went away first.
+func (s *MediaService) acquireProxySlot(ctx context.Context) (release func(), ok bool) {
+	if s.proxySem == nil {
+		return func() {}, true
+	}
+	select {
+	case s.proxySem <- struct{}{}:
+		return func() { <-s.proxySem }, true
+	case <-ctx.Done():
+		return func() {}, false
+	}
 }
 
 // imageRetryFetcher is the signature of media.FetchBytes.
@@ -125,7 +153,12 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	if !s.allowed(c.Context(), resolved) {
 		return c.Status(fiber.StatusBadRequest).SendString("invalid url")
 	}
+	release, ok := s.acquireProxySlot(c.Context())
+	if !ok {
+		return c.Status(fiber.StatusServiceUnavailable).SendString("proxy busy")
+	}
 	body, err := media.FetchBytes(c.Context(), raw, tokenID)
+	release()
 	if err != nil {
 		return c.Status(fiber.StatusBadGateway).SendString("upstream unavailable")
 	}

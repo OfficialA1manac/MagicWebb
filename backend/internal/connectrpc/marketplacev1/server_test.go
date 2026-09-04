@@ -30,10 +30,11 @@ func TestGetListing_Success(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator",
+			"collection_name", "collection_tracked",
 		}).AddRow(
 			"0xabc", "1", "0xseller", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx",
-			"MyToken", "https://example.com/img.png", true, "0xcreator",
+			"MyToken", "https://example.com/img.png", true, "0xcreator", "My Collection", true,
 		))
 
 	srv := NewServer(db.New(mock), nil)
@@ -162,10 +163,11 @@ func TestGetAuction_Success(t *testing.T) {
 			"auction_id", "collection", "token_id", "seller", "standard",
 			"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
 			"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator",
+			"collection_name", "collection_tracked",
 		}).AddRow(
 			int64(42), "0xcol", "1", "0xseller", "erc721",
 			"5000000000000000000", "6000000000000000000", "0xbidder", int16(100),
-			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "", true, "0xcreator",
+			now, now.Add(24*time.Hour), "active", "0xtx", "Auction 42", "", true, "0xcreator", "My Collection", true,
 		))
 
 	srv := NewServer(db.New(mock), nil)
@@ -295,10 +297,11 @@ func TestGetOffer_Success(t *testing.T) {
 			"principal_wei", "fee_wei", "units", "standard",
 			"expires_at", "status", "make_tx", "created_at",
 			"collection_verified", "collection_creator",
+			"collection_name", "collection_tracked", "name", "image_uri",
 		}).AddRow(
 			"42", "0xbidder", "0xcol", "1",
 			"1000000000000000000", "10000000000000000", int64(1), "erc721",
-			now.Add(7*24*time.Hour), "pending", "0xmtx", now, false, "",
+			now.Add(7*24*time.Hour), "pending", "0xmtx", now, false, "", "My Collection", true, "MyToken", "",
 		))
 
 	srv := NewServer(db.New(mock), nil)

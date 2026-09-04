@@ -118,6 +118,14 @@ func run() error {
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
 
+	// Redis is per network. Claim (or verify) the instance's chain marker
+	// before any cache is built: a REDIS_URL that another network already
+	// bound is a deploy mistake, not something to run through. Unreachable
+	// Redis is tolerated (caches fall back to memory, as NewRedisOrMemory).
+	if err := cache.BindChainURL(ctx, config.C.RedisURL, config.C.ChainID); err != nil {
+		return fatal(err, "redis chain binding refused")
+	}
+
 	// DB
 	if err := db.Migrate(config.C.PostgresURL); err != nil {
 		return fatal(err, "db migration failed")

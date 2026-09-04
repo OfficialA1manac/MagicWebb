@@ -59,7 +59,16 @@ type Connection struct {
 	// instead of websocket.TextMessage. Negotiated via MsgBinaryUpgrade from client.
 	// Atomic because readPump writes it and writePump reads it (different goroutines).
 	useBinary atomic.Bool
+
+	// coalesceWindow is how long writePump waits for more messages before
+	// flushing a batch. Set from config.WSCoalesceMs (profile default per
+	// network); zero falls back to defaultCoalesceWindow.
+	coalesceWindow time.Duration
 }
+
+// defaultCoalesceWindow is the WS-3 window used when no profile value is set
+// (struct-literal connections in tests).
+const defaultCoalesceWindow = 2 * time.Millisecond
 
 // writePump sends messages from the broadcaster to the WebSocket connection.
 //
@@ -78,7 +87,10 @@ type Connection struct {
 // When only one message arrives in the window, it's sent immediately with
 // no added latency.
 func (c *Connection) writePump() {
-	const coalesceWindow = 2 * time.Millisecond
+	coalesceWindow := c.coalesceWindow
+	if coalesceWindow <= 0 {
+		coalesceWindow = defaultCoalesceWindow
+	}
 
 	ticker := time.NewTicker(30 * time.Second)
 	defer ticker.Stop()
@@ -537,6 +549,9 @@ func (h *Handler) HandleWebSocket(c *fiber.Ctx) error {
 			ip:   ip,
 			send: make(chan []byte, 64),
 			done: make(chan struct{}),
+		}
+		if h.cfg != nil && h.cfg.WSCoalesceMs > 0 {
+			conn.coalesceWindow = time.Duration(h.cfg.WSCoalesceMs) * time.Millisecond
 		}
 
 		// Welcome first: enqueue it before registering the connection so it

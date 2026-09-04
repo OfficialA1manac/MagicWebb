@@ -17,7 +17,7 @@ func find(t *testing.T, ns []Network, chainID uint64) Network {
 // Coston2 has contracts deployed, so the other two are destinations that do not
 // exist yet and must render disabled rather than linking to a dead app.
 func TestBuildNetworksUnsetMarksOthersUnavailable(t *testing.T) {
-	ns := buildNetworks("", 114)
+	ns := buildNetworks("", "", 114, TradingLive)
 	if len(ns) != 3 {
 		t.Fatalf("got %d networks, want 3", len(ns))
 	}
@@ -35,7 +35,7 @@ func TestBuildNetworksUnsetMarksOthersUnavailable(t *testing.T) {
 // user is already on it, and a missing self-entry is a typo rather than a
 // reason to grey out the page being viewed.
 func TestBuildNetworksCurrentIsAlwaysAvailable(t *testing.T) {
-	ns := buildNetworks("19=https://magicwebb-songbird.fly.dev", 114)
+	ns := buildNetworks("19=https://magicwebb-songbird.fly.dev", "19=browse-only", 114, TradingLive)
 	if c := find(t, ns, 114); !c.Available || c.URL != "" {
 		t.Fatalf("coston2 = %+v, want available with no URL", c)
 	}
@@ -45,7 +45,7 @@ func TestBuildNetworksCurrentIsAlwaysAvailable(t *testing.T) {
 }
 
 func TestBuildNetworksParsing(t *testing.T) {
-	ns := buildNetworks(" 114 = https://a.example/ , 19=https://b.example ,19=,bogus,xx=https://c.example ", 114)
+	ns := buildNetworks(" 114 = https://a.example/ , 19=https://b.example ,19=,bogus,xx=https://c.example ", "", 114, TradingLive)
 
 	// Trailing slash stripped so template concatenation never doubles it.
 	if got := find(t, ns, 114).URL; got != "https://a.example" {
@@ -59,5 +59,32 @@ func TestBuildNetworksParsing(t *testing.T) {
 	// take the switcher down.
 	if n := find(t, ns, 14); n.Available {
 		t.Fatalf("flare = %+v, want unavailable", n)
+	}
+}
+
+// Trading status: the current network reports its own (from
+// ContractsDeployed), siblings come from NETWORK_TRADING, anything else is
+// unknown (empty) rather than a guess. Unknown values are dropped, not fatal.
+func TestBuildNetworksTrading(t *testing.T) {
+	ns := buildNetworks("19=https://b.example,14=https://c.example", "114=browse-only,19=browse-only,14=bogus", 114, TradingLive)
+	if got := find(t, ns, 114).Trading; got != TradingLive {
+		t.Fatalf("current trading = %q, want %q (never from NETWORK_TRADING)", got, TradingLive)
+	}
+	if got := find(t, ns, 19).Trading; got != TradingBrowseOnly {
+		t.Fatalf("songbird trading = %q, want %q", got, TradingBrowseOnly)
+	}
+	if got := find(t, ns, 14).Trading; got != "" {
+		t.Fatalf("flare trading = %q, want empty for an invalid value", got)
+	}
+}
+
+func TestRateLimitForTier(t *testing.T) {
+	if got := rateLimitForTier("testnet"); got != 120 {
+		t.Fatalf("testnet = %d, want 120", got)
+	}
+	for _, tier := range []string{"mainnet", "", "other"} {
+		if got := rateLimitForTier(tier); got != 60 {
+			t.Fatalf("%q = %d, want 60", tier, got)
+		}
 	}
 }

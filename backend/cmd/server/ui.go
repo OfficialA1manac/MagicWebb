@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/json"
 	"fmt"
 	"html"
 	"os"
@@ -93,19 +94,10 @@ func mountAstro(app *fiber.App) {
 		// Try directory index.html.
 		indexPath := filepath.Join(distPath, cleanRel, "index.html")
 		if _, err := os.Stat(indexPath); err == nil {
-			// Redirect /listings → /listings/ so relative asset paths resolve.
-			// Use 302 (temporary) so browsers don't cache the redirect — if
-			// the site architecture changes, users won't be stuck in a loop.
-			if !strings.HasSuffix(c.Path(), "/") {
-				// Preserve the query string — c.Path() drops it, and a
-				// redirect from /listings?page=2 to /listings/ would silently
-				// reset pagination, filters and search terms.
-				target := c.Path() + "/"
-				if q := string(c.Request().URI().QueryString()); q != "" {
-					target += "?" + q
-				}
-				return c.Redirect(target, fiber.StatusFound)
-			}
+			// Pretty URLs are served directly: /listings and /listings/ both
+			// return listings/index.html. Astro emits root-absolute asset
+			// paths (/_astro/...), so the former 302 to the slash form only
+			// cost every navigation a round-trip and reset nothing [W25].
 			c.Set("Cache-Control", "public, max-age=300")
 			return sendHTMLWithConfig(c, indexPath)
 		}
@@ -179,6 +171,11 @@ window.MW_MARKETPLACE='%s';
 window.MW_AUCTION='%s';
 window.MW_OFFERBOOK='%s';
 window.MW_NETWORK_URLS='%s';
+window.MW_CURRENCY='%s';
+window.MW_TRADING='%s';
+window.MW_FAUCET_URL='%s';
+window.MW_AUDIT_NOTE='%s';
+window.MW_NETWORK_STATUS_JSON='%s';
 </script>`,
 		config.C.ChainID,
 		jsStringEscape(config.C.RPCURL),
@@ -190,7 +187,44 @@ window.MW_NETWORK_URLS='%s';
 		jsStringEscape(config.C.AuctionAddr),
 		jsStringEscape(config.C.OfferBookAddr),
 		jsStringEscape(networkURLs()),
+		// MW_CURRENCY duplicates MW_NATIVE_CURRENCY under the name the v3.5 UI
+		// spec uses; both stay so no page needs a hardcoded fallback.
+		jsStringEscape(config.C.NativeCurrency),
+		jsStringEscape(config.C.TradingStatus()),
+		jsStringEscape(config.C.Profile.FaucetURL),
+		jsStringEscape(config.C.Profile.AuditNote),
+		jsStringEscape(networkStatusJSON()),
 	)
+}
+
+// networkStatus is one entry of window.MW_NETWORK_STATUS_JSON: everything the
+// network switcher needs to render a row (name, where it lives, whether it
+// trades) without a second request.
+type networkStatus struct {
+	ChainID   uint64 `json:"chain_id"`
+	Name      string `json:"name"`
+	Origin    string `json:"origin"`
+	Trading   string `json:"trading"` // live | browse-only | "" (unknown sibling)
+	Current   bool   `json:"current"`
+	Available bool   `json:"available"`
+}
+
+// networkStatusJSON serialises config.Networks (every chain in
+// chain/profile, in catalogue order) for the switcher. The current network's
+// origin is left empty — the browser already knows it.
+func networkStatusJSON() string {
+	out := make([]networkStatus, 0, len(config.C.Networks))
+	for _, n := range config.C.Networks {
+		out = append(out, networkStatus{
+			ChainID: n.ChainID, Name: n.Name, Origin: n.URL,
+			Trading: n.Trading, Current: n.Current, Available: n.Available,
+		})
+	}
+	b, err := json.Marshal(out)
+	if err != nil {
+		return "[]"
+	}
+	return string(b)
 }
 
 // networkURLs renders config.Networks back into the NETWORK_URLS wire format

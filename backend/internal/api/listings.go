@@ -22,6 +22,9 @@ type ListingsService struct {
 	// cache at all while collections/trending/activity/wallet all had one, so
 	// every browse hit Postgres. Short TTL: listings must still feel live.
 	listCache cache.CacheInterface
+	// chainID namespaces every cache key (cache.Key) so two networks can never
+	// read each other's entries out of a shared Redis. Set by Mount.
+	chainID uint64
 }
 
 // NewListingsService creates a ListingsService. cache may be nil (tests).
@@ -34,14 +37,16 @@ func (s *ListingsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/listings", ValidateQuery(QuerySchema{
 		{Name: "collection", Type: ParamAddress},
 		{Name: "seller", Type: ParamAddress},
-		{Name: "sort", OneOf: []string{"recent", "price_asc", "price_desc"}},
+		{Name: "sort", OneOf: []string{"recent", "price_asc", "price_desc", "ending"}},
 		{Name: "limit", Type: ParamInt},
+		{Name: "page", Type: ParamInt},
 		{Name: "min_price", Type: ParamWei},
 		{Name: "max_price", Type: ParamWei},
 		{Name: "traits"},
 	}), s.handleList)
 	api.Get("/listings/:collection/:id/preflight", s.handlePreflight)
 	api.Get("/listings/:collection/:id", s.handleGet)
+	api.Get("/token/:collection/:id", s.handleTokenDetail)
 	api.Post("/token/:collection/:id/view", s.handleTokenView)
 }
 
@@ -63,6 +68,12 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 				n = 100
 			}
 			f.Limit = n
+		}
+	}
+	// page is 1-based; anything below 1 is the first page.
+	if pg := c.Query("page"); pg != "" {
+		if n, err := strconv.Atoi(pg); err == nil && n > 1 {
+			f.Page = n
 		}
 	}
 	// Parse price range filters (in wei) with validation
@@ -91,8 +102,8 @@ func (s *ListingsService) handleList(c *fiber.Ctx) error {
 	// Cache key is the full filter set — two different filters must never
 	// share an entry. Stored as a string: the Redis backend JSON-round-trips
 	// values and a []byte would come back base64-encoded (see cachedBytes).
-	ck := fmt.Sprintf("ls:%s|%s|%s|%s|%s|%d|%v",
-		f.Collection, f.Seller, f.Sort, f.MinPriceWei, f.MaxPriceWei, f.Limit, f.Traits)
+	ck := cache.Key(s.chainID, "ls", fmt.Sprintf("%s|%s|%s|%s|%s|%d|%d|%v",
+		f.Collection, f.Seller, f.Sort, f.MinPriceWei, f.MaxPriceWei, f.Limit, f.Page, f.Traits))
 	if s.listCache != nil {
 		if v, ok := s.listCache.Get(ck); ok {
 			if body := cachedBytes(v); body != nil {
@@ -147,6 +158,39 @@ func (s *ListingsService) handleGet(c *fiber.Ctx) error {
 
 func (s *ListingsService) handlePreflight(c *fiber.Ctx) error {
 	return listingPreflightWithChain(s.q, s.eth)(c)
+}
+
+// handleTokenDetail serves GET /api/v1/token/:collection/:id — the indexed
+// token with owner, last sale and indexed_at. A token the indexer has never
+// seen is a 404 {"error":"not found"}, not an empty row: the token page uses
+// the status to show "not indexed yet" instead of a blank card.
+func (s *ListingsService) handleTokenDetail(c *fiber.Ctx) error {
+	collection := strings.ToLower(c.Params("collection"))
+	id := c.Params("id")
+	if !isValidHexAddress(collection) || !isValidTokenID(id) {
+		return writeErr(c, fiber.StatusNotFound, "not found")
+	}
+	d, err := s.q.GetTokenDetail(c.Context(), collection, id)
+	if err != nil {
+		if isNotFound(err) {
+			return writeErr(c, fiber.StatusNotFound, "not found")
+		}
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	return c.JSON(d)
+}
+
+// isValidTokenID accepts a decimal uint256 (1–78 digits).
+func isValidTokenID(s string) bool {
+	if s == "" || len(s) > 78 {
+		return false
+	}
+	for i := 0; i < len(s); i++ {
+		if s[i] < '0' || s[i] > '9' {
+			return false
+		}
+	}
+	return true
 }
 
 // handleTokenView increments the view counter for a token (fire-and-forget).

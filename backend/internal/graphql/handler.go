@@ -112,7 +112,11 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	// The ComplexityRoot (set in NewExecutableSchema Config) assigns
 	// per-field cost weights: scalars=1, list resolvers=10+child×limit.
 	// Max total cost per query: 1000.
-	srv.Use(extension.FixedComplexityLimit(MaxQueryCost))
+	maxCost := MaxQueryCost
+	if cfg != nil && cfg.GraphQLMaxCost > 0 {
+		maxCost = cfg.GraphQLMaxCost // per-network budget (chain/profile, GRAPHQL_MAX_COST)
+	}
+	srv.Use(extension.FixedComplexityLimit(maxCost))
 
 	// APQ (Automatic Persisted Queries): clients send a hash first;
 	// full query only on cache miss. Halves bandwidth for repeated

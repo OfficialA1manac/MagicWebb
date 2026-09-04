@@ -67,6 +67,29 @@ type Profile struct {
 
 	// MetadataConcurrency bounds concurrent tokenURI fetches.
 	MetadataConcurrency int
+
+	// ProfileSource orders networks for the cross-network profile read-through
+	// (api/profiles.go): a wallet with no profile here is looked up on siblings
+	// in ascending ProfileSource order. 1 = where users edit profiles today.
+	ProfileSource int
+
+	// WSCoalesceMs is the WebSocket write-coalescing window in milliseconds:
+	// events arriving within it are batched into one NDJSON frame.
+	WSCoalesceMs int
+	// ImageProxyConcurrency bounds concurrent outbound fetches through the
+	// /api/v1/media proxy (upstream IPFS gateways are slow and rate-limited).
+	ImageProxyConcurrency int
+	// RateLimitTier names the rate-limit posture: "testnet" | "mainnet"
+	// (config.APIRateLimitPerMin derives the per-IP budget from it).
+	RateLimitTier string
+	// GraphQLMaxCost is the per-query complexity budget enforced by the
+	// GraphQL server (graphql.MaxQueryCost is the compile-time fallback).
+	GraphQLMaxCost int
+	// FaucetURL is where testers get gas; "" on networks with real value.
+	FaucetURL string
+	// AuditNote is surfaced to the UI while a network is browse-only; "" when
+	// there is nothing to say.
+	AuditNote string
 }
 
 var table = map[uint64]Profile{
@@ -92,6 +115,8 @@ var table = map[uint64]Profile{
 		// nothing real, while a starved cap silently halts settlement. The
 		// mainnet profiles below keep tight caps on purpose.
 		MaxFeeCapGwei: 3000, MaxTipCapGwei: 300, MetadataConcurrency: 3,
+		ProfileSource: 1, WSCoalesceMs: 50, ImageProxyConcurrency: 8, RateLimitTier: "testnet", GraphQLMaxCost: 1000,
+		FaucetURL: "https://faucet.flare.network/coston2", AuditNote: "",
 	},
 	19: {
 		ChainID: 19, Key: "songbird", Name: "Songbird", Currency: "SGB",
@@ -103,6 +128,8 @@ var table = map[uint64]Profile{
 		VerifierTick: 10 * time.Minute, VerifierRecheck: 24 * time.Hour,
 		GetLogsChunk: 30, GetLogsBlockCap: 30,
 		MaxFeeCapGwei: 60, MaxTipCapGwei: 3, MetadataConcurrency: 3,
+		ProfileSource: 3, WSCoalesceMs: 100, ImageProxyConcurrency: 4, RateLimitTier: "mainnet", GraphQLMaxCost: 1000,
+		FaucetURL: "", AuditNote: "view-only until the security audit finishes",
 	},
 	14: {
 		ChainID: 14, Key: "flare", Name: "Flare", Currency: "FLR",
@@ -114,6 +141,8 @@ var table = map[uint64]Profile{
 		VerifierTick: 10 * time.Minute, VerifierRecheck: 24 * time.Hour,
 		GetLogsChunk: 30, GetLogsBlockCap: 30,
 		MaxFeeCapGwei: 50, MaxTipCapGwei: 2, MetadataConcurrency: 3,
+		ProfileSource: 2, WSCoalesceMs: 100, ImageProxyConcurrency: 4, RateLimitTier: "mainnet", GraphQLMaxCost: 1000,
+		FaucetURL: "", AuditNote: "view-only until the security audit finishes",
 	},
 }
 

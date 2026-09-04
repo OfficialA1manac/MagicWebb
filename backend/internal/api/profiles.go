@@ -6,6 +6,7 @@ import (
 	"io"
 	"net/http"
 	"net/url"
+	"sort"
 	"strings"
 	"time"
 	"unicode"
@@ -14,6 +15,7 @@ import (
 	"github.com/rs/zerolog/log"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/cache"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain/profile"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
@@ -39,8 +41,9 @@ type profileResponse struct {
 type ProfilesService struct {
 	q       *db.Q
 	chainID uint64
-	// siblings are the other deployed networks from NETWORK_URLS, chain 114
-	// first (that is where users edit profiles today), own origin excluded.
+	// siblings are the other deployed networks from NETWORK_URLS, ordered by
+	// profile.ProfileSource (lowest first — where users edit profiles today),
+	// own origin excluded.
 	siblings []config.Network
 	httpc    *http.Client
 	// merged caches the exact JSON served by handleGet (local or carried
@@ -58,20 +61,30 @@ func NewProfilesService(q *db.Q, cfg *config.Config) *ProfilesService {
 		// 5s: live-read requirement (owner directive 2026-09-01). Saves refresh
 		// this cache in-place, so 5s only bounds staleness on paths that miss
 		// that refresh (e.g. a future second instance without Redis).
-		merged:  cache.NewRedisOrMemory(cfg.RedisURL, 5*time.Second),
+		merged: cache.NewRedisOrMemory(cfg.RedisURL, 5*time.Second),
 	}
-	// Chain 114 first, then the catalogue order for the rest.
-	for _, wantFirst := range []bool{true, false} {
-		for _, n := range cfg.Networks {
-			if n.Current || n.URL == "" {
-				continue
-			}
-			if (n.ChainID == 114) == wantFirst {
-				s.siblings = append(s.siblings, n)
-			}
+	for _, n := range cfg.Networks {
+		if n.Current || n.URL == "" {
+			continue
 		}
+		s.siblings = append(s.siblings, n)
 	}
+	// Stable: the catalogue order breaks ties for chains without a profile
+	// (there are none today — every switcher entry comes from profile.All).
+	sort.SliceStable(s.siblings, func(i, j int) bool {
+		return profileSource(s.siblings[i].ChainID) < profileSource(s.siblings[j].ChainID)
+	})
 	return s
+}
+
+// profileSource is the network's read-through priority; unknown chains sort
+// last so a stray NETWORK_URLS entry can never jump the queue.
+func profileSource(chainID uint64) int {
+	p, err := profile.For(chainID)
+	if err != nil {
+		return 1 << 30
+	}
+	return p.ProfileSource
 }
 
 // RegisterRoutes registers all profile-related routes under the given router group.
@@ -101,7 +114,7 @@ func cachedBytes(v any) []byte {
 }
 
 func (s *ProfilesService) profileCacheKey(addr string) string {
-	return "profile-merged:" + addr
+	return cache.Key(s.chainID, "profile-merged", addr)
 }
 
 func (s *ProfilesService) handleGet(c *fiber.Ctx) error {

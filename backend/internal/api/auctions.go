@@ -37,6 +37,14 @@ func (s *AuctionsService) handleList(c *fiber.Ctx) error {
 		Seller:  c.Query("seller"),
 		Status:  c.Query("status"),
 	}
+	// status is validated here rather than in SQL: the column is a Postgres
+	// enum, so an unknown value ("all" — which the auctions page sends for
+	// its default tab) used to fail the cast and surface as a 500.
+	switch f.Status {
+	case "", "all", "active", "ended", "settled", "cancelled":
+	default:
+		return writeErr(c, fiber.StatusBadRequest, "status must be one of all, active, ended, settled, cancelled")
+	}
 	if lim := c.Query("limit"); lim != "" {
 		if n, err := strconv.Atoi(lim); err == nil {
 			if n < 1 {
@@ -105,5 +113,3 @@ func (s *AuctionsService) handleBids(c *fiber.Ctx) error {
 	}
 	return c.JSON(rows)
 }
-
-

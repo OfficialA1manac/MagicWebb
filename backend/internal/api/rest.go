@@ -269,7 +269,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// to the local Fiber server (which also mounts the Connect-RPC handler).
 	gql := graphql.NewGraphQLServer(q, bcast, wsClient, cfg)
 	GlobalGraphQLCache = gql.ResponseCache // GQL-2: expose cache stats for Prometheus /metrics
-	gqlLimiter := rateLimitMiddleware(rl)
+	gqlLimiter := apiRateLimitMiddleware(rl, cfg.APIRateLimitPerMin)
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
 	app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
@@ -338,7 +338,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 		})
 	}
 
-	api := app.Group("/api/v1", rateLimitMiddleware(rl), browserCacheReads(), etag.New(etag.Config{
+	api := app.Group("/api/v1", apiRateLimitMiddleware(rl, cfg.APIRateLimitPerMin), browserCacheReads(), etag.New(etag.Config{
 		// Weak validators: JSON bodies are byte-stable per render but we don't
 		// need octet-exact semantics. Skip non-GET and the media/image proxies
 		// (already long-lived immutable, large/binary — hashing buys nothing).
@@ -404,14 +404,25 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// (the WS tx-indexed event also drives a client refresh), long enough to
 	// absorb the burst of identical requests a grid page fires on load.
 	listingsCache := cache.NewRedisOrMemory(cfg.RedisURL, 10*time.Second)
-	NewListingsService(q, eth, listingsCache).RegisterRoutes(api)
+	// Every Redis-backed cache keys through cache.Key(chainID, ...): one
+	// Redis per network is enforced at boot (cache.BindChainURL) and the
+	// prefix makes a cross-network hit impossible even if that guard is
+	// bypassed.
+	ls := NewListingsService(q, eth, listingsCache)
+	ls.chainID = cfg.ChainID
+	ls.RegisterRoutes(api)
 	NewAuctionsService(q).RegisterRoutes(api)
 	NewOffersService(q).RegisterRoutes(api)
-	NewCollectionsService(q, trendingCache).RegisterRoutes(api)
+	cs := NewCollectionsService(q, trendingCache)
+	cs.chainID = cfg.ChainID
+	cs.RegisterRoutes(api)
 	ms := NewMediaService(q, eth, rl)
 	ms.imgStore = imgStore // IMG-3: wire S3/blob store backend to media service
+	ms.SetProxyConcurrency(cfg.ImageProxyConcurrency)
 	ms.RegisterRoutes(api)
-	NewWalletService(q, cfg.ExplorerURL, cfg.RedisURL).RegisterRoutes(api)
+	wallet := NewWalletService(q, cfg.ExplorerURL, cfg.RedisURL)
+	wallet.chainID = cfg.ChainID
+	wallet.RegisterRoutes(api)
 	NewNotificationsService(q).RegisterRoutes(api, cfg)
 	NewProfilesService(q, cfg).RegisterRoutes(api, cfg)
 	NewSearchService(q).RegisterRoutes(apiSearch)
@@ -532,6 +543,16 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 
 func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
 	return tieredRateLimitMiddleware(rl, "api", 60, time.Minute)
+}
+
+// apiRateLimitMiddleware is rateLimitMiddleware with the per-network budget
+// (config.APIRateLimitPerMin, from the profile's RateLimitTier); a zero or
+// negative budget keeps the historical 60/min.
+func apiRateLimitMiddleware(rl *ratelimit.Limiter, perMin int) fiber.Handler {
+	if perMin <= 0 {
+		perMin = 60
+	}
+	return tieredRateLimitMiddleware(rl, "api", perMin, time.Minute)
 }
 
 // tieredRateLimitMiddleware returns a rate-limit middleware with a custom

@@ -7,6 +7,7 @@ import (
 	"math"
 	"strconv"
 	"strings"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
@@ -54,6 +55,7 @@ func NewMetricsService(q *db.Q, c cache.CacheInterface, ws WSStatsProvider) *Met
 // RegisterRoutes registers metrics and activity routes under the given router group.
 func (s *MetricsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/metrics", s.handleMetrics)
+	api.Get("/stats", s.handleStats)
 	api.Get("/metrics/gas", s.handleGasMetrics)
 	api.Get("/metrics/gas/alerts", s.handleGasAlerts)
 	api.Get("/activity", ValidateQuery(QuerySchema{
@@ -76,8 +78,8 @@ func (s *MetricsService) handleGasMetrics(c *fiber.Ctx) error {
 		logs = []db.GasLogRow{}
 	}
 	return c.JSON(fiber.Map{
-		"summary":     summary,
-		"recentLogs":  logs,
+		"summary":    summary,
+		"recentLogs": logs,
 	})
 }
 
@@ -103,6 +105,21 @@ func (s *MetricsService) handleGasAlerts(c *fiber.Ctx) error {
 
 func (s *MetricsService) handleMetrics(c *fiber.Ctx) error {
 	return c.JSON(s.BuildResponse(c.Context()))
+}
+
+// handleStats is GET /api/v1/stats: the /metrics body plus collections_tracked
+// (the same count the trending list draws from — the homepage used to show
+// "0 collections" beside two trending cards) and updated_at.
+func (s *MetricsService) handleStats(c *fiber.Ctx) error {
+	out := s.BuildResponse(c.Context())
+	n, err := s.q.CountCollections(c.Context())
+	if err != nil {
+		log.Warn().Err(err).Msg("stats: CountCollections failed; reporting 0")
+		n = 0
+	}
+	out["collections_tracked"] = n
+	out["updated_at"] = time.Now().UTC().Format(time.RFC3339)
+	return c.JSON(out)
 }
 
 func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
@@ -226,20 +243,20 @@ func (s *MetricsService) BuildResponse(ctx context.Context) fiber.Map {
 		"sse_saturation_streak":  sse.SaturationStreak.Load(),
 		"sse_client_drops_total": sse.DroppedClientsGauge(), // SSE-2
 	}
-	out["ws_connections"]        = int64(0)
-	out["ws_subscriptions"]      = 0
-	out["ws_events_sent"]        = int64(0)
-	out["ws_total_conns"]        = int64(0)
-	out["ws_msg_rate_limited"]   = int64(0)
-	out["ws_conns_rejected_ip"]  = int64(0)
+	out["ws_connections"] = int64(0)
+	out["ws_subscriptions"] = 0
+	out["ws_events_sent"] = int64(0)
+	out["ws_total_conns"] = int64(0)
+	out["ws_msg_rate_limited"] = int64(0)
+	out["ws_conns_rejected_ip"] = int64(0)
 	out["ws_conns_rejected_global"] = int64(0)
 	if s.ws != nil {
-		out["ws_connections"]        = int64(s.ws.ActiveConns())
-		out["ws_subscriptions"]      = s.ws.TotalSubscriptions()
-		out["ws_events_sent"]        = s.ws.EventsSent()
-		out["ws_total_conns"]        = s.ws.TotalConns()
-		out["ws_msg_rate_limited"]   = s.ws.MsgRateLimited()
-		out["ws_conns_rejected_ip"]  = s.ws.ConnsRejectedIP()
+		out["ws_connections"] = int64(s.ws.ActiveConns())
+		out["ws_subscriptions"] = s.ws.TotalSubscriptions()
+		out["ws_events_sent"] = s.ws.EventsSent()
+		out["ws_total_conns"] = s.ws.TotalConns()
+		out["ws_msg_rate_limited"] = s.ws.MsgRateLimited()
+		out["ws_conns_rejected_ip"] = s.ws.ConnsRejectedIP()
 		out["ws_conns_rejected_global"] = s.ws.ConnsRejectedGlobal()
 	}
 	const unavailableMsg = "metrics temporarily unavailable"

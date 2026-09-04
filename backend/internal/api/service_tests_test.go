@@ -59,14 +59,15 @@ func TestListingsService_HandleList_Success(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
+			"collection_name", "collection_tracked",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0),
+			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0), "Collection One", true,
 		).AddRow(
 			"0xcol2", "2", "0xseller2", "2000000000000000000", int64(1),
 			"erc1155", now.Add(48*time.Hour), now, "0xtx2",
-			"Token Two", "https://example.com/2.png", false, "0xcreator1", int64(100),
+			"Token Two", "https://example.com/2.png", false, "0xcreator1", int64(100), "Collection One", true,
 		))
 
 	svc := NewListingsService(db.New(mock), nil, nil)
@@ -102,10 +103,11 @@ func TestListingsService_HandleList_WithCollectionFilter(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
+			"collection_name", "collection_tracked",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0),
+			"Token One", "https://example.com/1.png", true, "0xcreator1", int64(0), "Collection One", true,
 		))
 
 	svc := NewListingsService(db.New(mock), nil, nil)
@@ -137,6 +139,7 @@ func TestListingsService_HandleList_Empty(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
+			"collection_name", "collection_tracked",
 		}))
 
 	svc := NewListingsService(db.New(mock), nil, nil)
@@ -191,10 +194,11 @@ func TestListingsService_HandleGet_Success(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator",
+			"collection_name", "collection_tracked",
 		}).AddRow(
 			"0xcol1", "1", "0xseller1", "1000000000000000000", int64(1),
 			"erc721", now.Add(24*time.Hour), now, "0xtx1",
-			"Token One", "https://example.com/1.png", false, "0xcreator1",
+			"Token One", "https://example.com/1.png", false, "0xcreator1", "Collection One", true,
 		))
 
 	svc := NewListingsService(db.New(mock), nil, nil)
@@ -316,14 +320,15 @@ func TestAuctionsService_HandleList_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator",
+		"collection_name", "collection_tracked"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(1), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "", "", int16(100),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", "", true, "0xcreator1"))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction One", "", true, "0xcreator1", "Collection One", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -351,14 +356,15 @@ func TestAuctionsService_HandleList_Filtered(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator",
+		"collection_name", "collection_tracked"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(50, "0xcol1", "active").
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(2), "0xcol1", "2", "0xseller2", "erc1155",
 				"10000000000000000000", "15000000000000000000", "0xbidder1", int16(200),
-				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", "", true, "0xcreator1"))
+				now, now.Add(48*time.Hour), "active", "0xtx2", "Auction Two", "", true, "0xcreator1", "Collection One", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -386,14 +392,15 @@ func TestAuctionsService_HandleGet_Success(t *testing.T) {
 	now := time.Now()
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator",
+		"collection_name", "collection_tracked"}
 
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
 		WithArgs(int64(42)).
 		WillReturnRows(pgxmock.NewRows(cols).
 			AddRow(int64(42), "0xcol1", "1", "0xseller1", "erc721",
 				"5000000000000000000", "6000000000000000000", "0xbidder1", int16(150),
-				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", "", true, "0xcreator1"))
+				now, now.Add(24*time.Hour), "active", "0xtx1", "Auction 42", "", true, "0xcreator1", "Collection One", true))
 
 	svc := NewAuctionsService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -563,6 +570,7 @@ func TestOffersService_HandleList_Success(t *testing.T) {
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
 		"collection_verified", "collection_creator",
+		"collection_name", "collection_tracked", "name", "image_uri",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -570,7 +578,7 @@ func TestOffersService_HandleList_Success(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows(offerCols).
 			AddRow("1", "0xbidder1", "0xcol1", "1",
 				"1000000000000000000", "10000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, ""))
+				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, "", "Collection One", true, "Token One", "ipfs://img"))
 
 	svc := NewOffersService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -601,6 +609,7 @@ func TestOffersService_HandleList_FilteredByBidder(t *testing.T) {
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
 		"collection_verified", "collection_creator",
+		"collection_name", "collection_tracked", "name", "image_uri",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -608,7 +617,7 @@ func TestOffersService_HandleList_FilteredByBidder(t *testing.T) {
 		WillReturnRows(pgxmock.NewRows(offerCols).
 			AddRow("1", "0xbidder1", "0xcol1", "1",
 				"1000000000000000000", "10000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, ""))
+				now.Add(7*24*time.Hour), "pending", "0xmaketx1", now, false, "", "Collection One", true, "Token One", "ipfs://img"))
 
 	svc := NewOffersService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -638,6 +647,7 @@ func TestOffersService_HandleList_Empty(t *testing.T) {
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
 		"collection_verified", "collection_creator",
+		"collection_name", "collection_tracked", "name", "image_uri",
 	}
 
 	mock.ExpectQuery(`SELECT o\.offer_id::text, o\.bidder`).
@@ -1024,11 +1034,12 @@ func TestCollectionsService_HandleTrending_Success(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT collection, \"window\", score, views, bids, volume_wei::text`).
+	mock.ExpectQuery(`SELECT s\.collection, s\."window", s\.score, s\.views, s\.bids, s\.volume_wei::text`).
 		WithArgs("24h", 20).
-		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei"}).
-			AddRow("0xcol1", "24h", 95.5, int64(1000), int64(5), "50000000000000000000").
-			AddRow("0xcol2", "24h", 80.0, int64(500), int64(2), "20000000000000000000"))
+		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei",
+			"collection_name", "standard", "collection_verified", "collection_creator", "collection_tracked"}).
+			AddRow("0xcol1", "24h", 95.5, int64(1000), int64(5), "50000000000000000000", "Collection One", "erc721", true, "0xcreator1", true).
+			AddRow("0xcol2", "24h", 80.0, int64(500), int64(2), "20000000000000000000", "Collection One", "erc721", true, "0xcreator1", true))
 
 	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -1044,6 +1055,9 @@ func TestCollectionsService_HandleTrending_Success(t *testing.T) {
 	if len(rows) != 2 || rows[0].Collection != "0xcol1" || rows[1].Collection != "0xcol2" {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
+	if !rows[0].CollectionTracked || rows[0].CollectionName != "Collection One" || rows[0].Standard != "erc721" {
+		t.Fatalf("trending card fields missing: %+v", rows[0])
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -1053,9 +1067,10 @@ func TestCollectionsService_HandleTrending_Empty(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT collection, \"window\", score, views, bids, volume_wei::text`).
+	mock.ExpectQuery(`SELECT s\.collection, s\."window", s\.score, s\.views, s\.bids, s\.volume_wei::text`).
 		WithArgs("24h", 20).
-		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei"}))
+		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei",
+			"collection_name", "standard", "collection_verified", "collection_creator", "collection_tracked"}))
 
 	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -1080,10 +1095,11 @@ func TestCollectionsService_HandleTrending_CustomWindow(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT collection, \"window\", score, views, bids, volume_wei::text`).
+	mock.ExpectQuery(`SELECT s\.collection, s\."window", s\.score, s\.views, s\.bids, s\.volume_wei::text`).
 		WithArgs("7d", 20).
-		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei"}).
-			AddRow("0xcol1", "7d", 95.5, int64(1000), int64(5), "50000000000000000000"))
+		WillReturnRows(pgxmock.NewRows([]string{"collection", "window", "score", "views", "bids", "volume_wei",
+			"collection_name", "standard", "collection_verified", "collection_creator", "collection_tracked"}).
+			AddRow("0xcol1", "7d", 95.5, int64(1000), int64(5), "50000000000000000000", "Collection One", "erc721", true, "0xcreator1", true))
 
 	svc := NewCollectionsService(db.New(mock), cache.New(0))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -1169,6 +1185,7 @@ func TestListingsService_HandleList_InvalidLimit(t *testing.T) {
 			"collection", "token_id", "seller", "price_wei", "amount",
 			"standard", "expires_at", "listed_at", "tx_hash",
 			"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
+			"collection_name", "collection_tracked",
 		}))
 
 	svc := NewListingsService(db.New(mock), nil, nil)
@@ -1191,7 +1208,8 @@ func TestAuctionsService_HandleList_InvalidLimit(t *testing.T) {
 
 	cols := []string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
-		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator"}
+		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri", "collection_verified", "collection_creator",
+		"collection_name", "collection_tracked"}
 
 	// limit=-5 is clamped by the handler to 1 (n < 1 → n = 1)
 	mock.ExpectQuery(`SELECT a\.auction_id, a\.collection`).
@@ -1262,6 +1280,7 @@ func TestLimitClamping(t *testing.T) {
 				"collection", "token_id", "seller", "price_wei", "amount",
 				"standard", "expires_at", "listed_at", "tx_hash",
 				"name", "image_uri", "collection_verified", "collection_creator", "total_supply",
+				"collection_name", "collection_tracked",
 			}))
 
 		url := "/api/v1/listings"

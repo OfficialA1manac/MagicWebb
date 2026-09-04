@@ -21,10 +21,10 @@ const (
 
 // QueryParam describes one allowed query parameter for a route.
 type QueryParam struct {
-	Name     string     // query parameter name (e.g. "collection")
-	Required bool       // must be present and non-empty
-	Type     ParamType  // expected value type
-	OneOf    []string   // if non-nil, value must match one of these (case-sensitive)
+	Name     string    // query parameter name (e.g. "collection")
+	Required bool      // must be present and non-empty
+	Type     ParamType // expected value type
+	OneOf    []string  // if non-nil, value must match one of these (case-sensitive)
 }
 
 // QuerySchema is a list of query parameters accepted by a route.

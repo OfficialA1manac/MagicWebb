@@ -118,6 +118,158 @@ func (q *Q) GetCollection(ctx context.Context, address string) (*CollectionRow, 
 	return &c, err
 }
 
+// VerifiedReason explains the collection badge so the UI can show WHY a
+// collection is (not) verified: ERC-165 says it is a standard NFT contract,
+// at least one token has resolved metadata, and the ERC-173 owner is known.
+type VerifiedReason struct {
+	StandardOK   bool `json:"standard_ok"`
+	MetadataOK   bool `json:"metadata_ok"`
+	CreatorKnown bool `json:"creator_known"`
+}
+
+// GetCollectionVerifiedReason returns the badge breakdown for one collection.
+// Unknown collections yield all-false with no error (the caller has already
+// 404'd on GetCollection).
+func (q *Q) GetCollectionVerifiedReason(ctx context.Context, address string) (VerifiedReason, error) {
+	var v VerifiedReason
+	err := q.reader().QueryRow(ctx,
+		`SELECT COALESCE(c.standard_verified,false),
+		        EXISTS (SELECT 1 FROM nft_metadata m WHERE m.collection=c.address
+		                AND (m.name IS NOT NULL OR m.image_uri IS NOT NULL)),
+		        COALESCE(c.creator_addr,'') <> ''
+		 FROM collections c WHERE c.address=$1`, address).
+		Scan(&v.StandardOK, &v.MetadataOK, &v.CreatorKnown)
+	if err == pgx.ErrNoRows {
+		return VerifiedReason{}, nil
+	}
+	return v, err
+}
+
+// CollectionTokenRow is one indexed token of a collection for the collection
+// page grid: who holds it, how it looks, whether it is listed and at what.
+type CollectionTokenRow struct {
+	TokenID     string `json:"token_id"`
+	Owner       string `json:"owner"`
+	Name        string `json:"name"`
+	Image       string `json:"image"`
+	Listed      bool   `json:"listed"`
+	PriceWei    string `json:"price_wei,omitempty"`
+	LastSaleWei string `json:"last_sale_wei,omitempty"`
+}
+
+// ListCollectionTokens pages through a collection's indexed tokens
+// (nft_ownership rows with units > 0, one row per token — the largest holder
+// wins for ERC-1155), joined with metadata, the cheapest active listing and
+// the most recent sale. Ordered by token id so pages are stable.
+func (q *Q) ListCollectionTokens(ctx context.Context, collection string, limit, offset int) ([]CollectionTokenRow, error) {
+	if limit <= 0 || limit > 200 {
+		limit = 48
+	}
+	if offset < 0 {
+		offset = 0
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT DISTINCT ON (n.token_id) n.token_id::text, n.owner,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
+		        l.price_wei IS NOT NULL, COALESCE(l.price_wei::text,''), COALESCE(s.price_wei::text,'')
+		 FROM nft_ownership n
+		 LEFT JOIN nft_metadata m ON m.collection=n.collection AND m.token_id=n.token_id
+		 LEFT JOIN nft_tokens   t ON t.collection=n.collection AND t.token_id=n.token_id
+		 LEFT JOIN LATERAL (SELECT price_wei FROM listings l
+		                    WHERE l.collection=n.collection AND l.token_id=n.token_id
+		                      AND l.active AND NOT l.orphaned AND l.expires_at > now()
+		                    ORDER BY l.price_wei ASC LIMIT 1) l ON true
+		 LEFT JOIN LATERAL (SELECT price_wei FROM sales s
+		                    WHERE s.collection=n.collection AND s.token_id=n.token_id
+		                    ORDER BY s.occurred_at DESC LIMIT 1) s ON true
+		 WHERE n.collection=$1 AND n.units > 0
+		 ORDER BY n.token_id ASC, n.units DESC
+		 LIMIT $2 OFFSET $3`, collection, limit, offset)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []CollectionTokenRow
+	for rows.Next() {
+		var r CollectionTokenRow
+		if err := rows.Scan(&r.TokenID, &r.Owner, &r.Name, &r.Image, &r.Listed, &r.PriceWei, &r.LastSaleWei); err != nil {
+			return nil, err
+		}
+		out = append(out, r)
+	}
+	return out, rows.Err()
+}
+
+// CountCollectionTokens is the total ListCollectionTokens pages over.
+func (q *Q) CountCollectionTokens(ctx context.Context, collection string) (int64, error) {
+	var n int64
+	err := q.reader().QueryRow(ctx,
+		`SELECT COUNT(DISTINCT token_id) FROM nft_ownership WHERE collection=$1 AND units > 0`,
+		collection).Scan(&n)
+	return n, err
+}
+
+// TokenDetail is GET /api/v1/token/:collection/:id — everything the indexer
+// knows about one token. Unknown tokens are a not-found error, never a
+// fabricated empty row.
+type TokenDetail struct {
+	Collection   string     `json:"collection"`
+	TokenID      string     `json:"token_id"`
+	Name         string     `json:"name"`
+	Description  string     `json:"description"`
+	ImageURI     string     `json:"image_uri"`
+	AnimationURI string     `json:"animation_uri"`
+	MetadataURI  string     `json:"metadata_uri"`
+	Owner        string     `json:"owner"`
+	IndexedAt    time.Time  `json:"indexed_at"`
+	LastSaleWei  string     `json:"last_sale_wei"`
+	LastSaleAt   *time.Time `json:"last_sale_at"`
+	// Collection facts (same names as the card rows).
+	CollectionName     string `json:"collection_name"`
+	Standard           string `json:"standard"`
+	CollectionVerified bool   `json:"collection_verified"`
+	CollectionCreator  string `json:"collection_creator"`
+	CollectionTracked  bool   `json:"collection_tracked"`
+}
+
+// GetTokenDetail returns the indexed token or a not-found error when neither
+// nft_tokens nor nft_metadata has heard of it.
+func (q *Q) GetTokenDetail(ctx context.Context, collection, tokenID string) (*TokenDetail, error) {
+	d := TokenDetail{Collection: collection, TokenID: tokenID}
+	err := q.reader().QueryRow(ctx,
+		`SELECT COALESCE(m.name, t.name, ''), COALESCE(m.description, t.description, ''),
+		        COALESCE(m.image_uri, t.image_uri, ''), COALESCE(m.animation_uri, ''),
+		        COALESCE(m.metadata_uri, t.metadata_uri, ''),
+		        COALESCE(NULLIF(t.owner,''),
+		                 (SELECT n.owner FROM nft_ownership n
+		                   WHERE n.collection=$1 AND n.token_id=$2 AND n.units > 0
+		                   ORDER BY n.units DESC, n.updated_at DESC LIMIT 1), ''),
+		        COALESCE(t.last_synced_at, m.fetched_at, now()),
+		        COALESCE((SELECT s.price_wei::text FROM sales s
+		                   WHERE s.collection=$1 AND s.token_id=$2
+		                   ORDER BY s.occurred_at DESC LIMIT 1), ''),
+		        (SELECT s.occurred_at FROM sales s
+		          WHERE s.collection=$1 AND s.token_id=$2
+		          ORDER BY s.occurred_at DESC LIMIT 1),
+		        COALESCE(c.name,''), COALESCE(c.standard::text,''), COALESCE(c.verified,false),
+		        COALESCE(c.creator_addr,''), c.address IS NOT NULL
+		 FROM nft_tokens t
+		 FULL OUTER JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
+		 LEFT JOIN collections c ON c.address=COALESCE(t.collection, m.collection)
+		 WHERE COALESCE(t.collection, m.collection)=$1 AND COALESCE(t.token_id, m.token_id)=$2`,
+		collection, tokenID).
+		Scan(&d.Name, &d.Description, &d.ImageURI, &d.AnimationURI, &d.MetadataURI,
+			&d.Owner, &d.IndexedAt, &d.LastSaleWei, &d.LastSaleAt,
+			&d.CollectionName, &d.Standard, &d.CollectionVerified, &d.CollectionCreator, &d.CollectionTracked)
+	if err == pgx.ErrNoRows {
+		return nil, fmt.Errorf("token not found: %s/%s", collection, tokenID)
+	}
+	if err != nil {
+		return nil, err
+	}
+	return &d, nil
+}
+
 // GetCollectionByAddress returns a collection's name and address by contract address.
 // Used by the search handler to resolve 0x-prefixed address queries. Lightweight
 // lookup returning only the fields needed for search results.
@@ -485,6 +637,11 @@ type ListingRow struct {
 	// "Authentic" only when BOTH are present — without this field every card
 	// renderer was permanently stuck on the lesser badge.
 	CollectionCreator string `json:"collection_creator"`
+	// CollectionName / CollectionTracked come from the collections join:
+	// Tracked is true when the join hit (the indexer knows the contract), so
+	// the UI can tell "unknown contract" apart from "known, not verified".
+	CollectionName    string `json:"collection_name"`
+	CollectionTracked bool   `json:"collection_tracked"`
 }
 
 func (q *Q) UpsertListing(ctx context.Context, r ListingRow) error {
@@ -525,7 +682,8 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 		`SELECT l.collection, l.token_id::text, l.seller, l.price_wei::text, l.amount,
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
+		        COALESCE(c.name,''), c.address IS NOT NULL
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
@@ -535,7 +693,7 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 		collection, tokenID).
 		Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
-			&r.CollectionVerified, &r.CollectionCreator)
+			&r.CollectionVerified, &r.CollectionCreator, &r.CollectionName, &r.CollectionTracked)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("listing not found")
 	}
@@ -543,14 +701,16 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 }
 
 type ListingsFilter struct {
-	Collection string
-	Seller     string
-	Sort       string            // "recent" | "price_asc" | "price_desc"
-	MinPriceWei string          // minimum price in wei (inclusive)
-	MaxPriceWei string          // maximum price in wei (inclusive)
-	Traits     map[string]string // trait_type -> value (AND across traits)
-	Limit      int
-	Cursor     string
+	Collection  string
+	Seller      string
+	Sort        string            // "recent" | "price_asc" | "price_desc" | "ending"
+	MinPriceWei string            // minimum price in wei (inclusive)
+	MaxPriceWei string            // maximum price in wei (inclusive)
+	Traits      map[string]string // trait_type -> value (AND across traits)
+	Limit       int
+	// Page is 1-based; pages beyond the first add OFFSET (page-1)*limit.
+	Page   int
+	Cursor string
 }
 
 func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]ListingRow, error) {
@@ -593,6 +753,15 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		orderBy = "CAST(l.price_wei AS numeric) ASC"
 	case "price_desc":
 		orderBy = "CAST(l.price_wei AS numeric) DESC"
+	case "ending":
+		orderBy = "l.expires_at ASC"
+	}
+	// Tie-break on the key so pagination is stable across equal sort values.
+	orderBy += ", l.collection, l.token_id, l.seller"
+	offset := ""
+	if f.Page > 1 {
+		args = append(args, (f.Page-1)*f.Limit)
+		offset = fmt.Sprintf(" OFFSET $%d", len(args))
 	}
 
 	rows, err := q.reader().Query(ctx,
@@ -600,13 +769,14 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		        l.standard::text, l.expires_at, l.listed_at, l.tx_hash,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
 		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
-		        0 AS total_supply
+		        0 AS total_supply,
+		        COALESCE(c.name,''), c.address IS NOT NULL
 		 FROM listings l
 		 LEFT JOIN nft_metadata m ON m.collection=l.collection AND m.token_id=l.token_id
 		 LEFT JOIN nft_tokens t ON t.collection=l.collection AND l.token_id=t.token_id
 		 LEFT JOIN collections c ON c.address=l.collection
 		 `+where+`
-		 ORDER BY `+orderBy+` LIMIT $1`, args...)
+		 ORDER BY `+orderBy+` LIMIT $1`+offset, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -617,7 +787,8 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		var r ListingRow
 		if err := rows.Scan(&r.Collection, &r.TokenID, &r.Seller, &r.PriceWei, &r.Amount,
 			&r.Standard, &r.ExpiresAt, &r.ListedAt, &r.TxHash, &r.Name, &r.ImageURI,
-			&r.CollectionVerified, &r.CollectionCreator, &r.TotalSupply); err != nil {
+			&r.CollectionVerified, &r.CollectionCreator, &r.TotalSupply,
+			&r.CollectionName, &r.CollectionTracked); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -649,6 +820,9 @@ type AuctionRow struct {
 	// CollectionCreator mirrors ListingRow: ERC-173 owner() from migration 036,
 	// "" when never resolved. Required for the "Authentic" badge upgrade.
 	CollectionCreator string `json:"collection_creator"`
+	// CollectionName / CollectionTracked mirror ListingRow (collections join).
+	CollectionName    string `json:"collection_name"`
+	CollectionTracked bool   `json:"collection_tracked"`
 }
 
 // auctionSelectCols is the canonical SELECT projection for an AuctionRow.
@@ -659,7 +833,8 @@ const auctionSelectCols = `a.auction_id, a.collection, a.token_id::text, a.selle
 		        a.reserve_price_wei::text, a.highest_bid_wei::text, COALESCE(a.highest_bidder,''),
 		        a.min_increment_bps, a.starts_at, a.ends_at, a.status::text, a.create_tx,
 		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
-		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')`
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
+		        COALESCE(c.name,''), c.address IS NOT NULL`
 
 const auctionFromJoin = ` FROM auctions a
 		 LEFT JOIN nft_metadata m ON m.collection=a.collection AND m.token_id=a.token_id
@@ -671,7 +846,7 @@ func scanAuctionRow(rows pgx.Rows) (AuctionRow, error) {
 	err := rows.Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 		&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder, &r.MinIncrementBps,
 		&r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx, &r.Name, &r.ImageURI,
-		&r.CollectionVerified, &r.CollectionCreator)
+		&r.CollectionVerified, &r.CollectionCreator, &r.CollectionName, &r.CollectionTracked)
 	return r, err
 }
 
@@ -716,7 +891,8 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 		Scan(&r.AuctionID, &r.Collection, &r.TokenID, &r.Seller, &r.Standard,
 			&r.ReservePriceWei, &r.HighestBidWei, &r.HighestBidder,
 			&r.MinIncrementBps, &r.StartsAt, &r.EndsAt, &r.Status, &r.CreateTx,
-			&r.Name, &r.ImageURI, &r.CollectionVerified, &r.CollectionCreator)
+			&r.Name, &r.ImageURI, &r.CollectionVerified, &r.CollectionCreator,
+			&r.CollectionName, &r.CollectionTracked)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("auction not found: %d", auctionID)
 	}
@@ -724,10 +900,14 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 }
 
 type AuctionsFilter struct {
-	Collection  string
-	TokenID     string // exact token within Collection; "" = every token
-	Seller      string
-	Status      string // "active" | "settled" | "cancelled" | "" = all
+	Collection string
+	TokenID    string // exact token within Collection; "" = every token
+	Seller     string
+	// Status filters on the stored enum: "active" | "settled" | "cancelled".
+	// "" and "all" apply no filter; "ended" is the derived state "active but
+	// past ends_at" (awaiting settlement) — it is not a stored value, so the
+	// enum cast would otherwise 500 on it.
+	Status      string
 	MinPriceWei string // minimum reserve price in wei (inclusive)
 	MaxPriceWei string // maximum reserve price in wei (inclusive)
 	Limit       int
@@ -754,7 +934,11 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 		args = append(args, f.Seller)
 		where += fmt.Sprintf(" AND a.seller=$%d", len(args))
 	}
-	if f.Status != "" {
+	switch f.Status {
+	case "", "all":
+	case "ended":
+		where += " AND a.status='active' AND a.ends_at < now()"
+	default:
 		args = append(args, f.Status)
 		where += fmt.Sprintf(" AND a.status=$%d", len(args))
 	}
@@ -1121,6 +1305,13 @@ type TrendingScore struct {
 	Views      int64    `json:"views"`
 	Bids       int64    `json:"bids"`
 	VolumeWei  *big.Int `json:"volume_wei"`
+	// Collection card fields from the collections join (read path only; the
+	// score worker leaves them zero on write).
+	CollectionName     string `json:"collection_name"`
+	Standard           string `json:"standard"`
+	CollectionVerified bool   `json:"collection_verified"`
+	CollectionCreator  string `json:"collection_creator"`
+	CollectionTracked  bool   `json:"collection_tracked"`
 }
 
 func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
@@ -1136,9 +1327,13 @@ func (q *Q) UpsertTrendingScore(ctx context.Context, s TrendingScore) error {
 
 func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int) ([]TrendingScore, error) {
 	rows, err := q.reader().Query(ctx,
-		`SELECT collection, "window", score, views, bids, volume_wei::text
-		 FROM trending_scores WHERE "window"=$1
-		 ORDER BY score DESC LIMIT $2`, window, limit)
+		`SELECT s.collection, s."window", s.score, s.views, s.bids, s.volume_wei::text,
+		        COALESCE(c.name,''), COALESCE(c.standard::text,''), COALESCE(c.verified,false),
+		        COALESCE(c.creator_addr,''), c.address IS NOT NULL
+		 FROM trending_scores s
+		 LEFT JOIN collections c ON c.address=s.collection
+		 WHERE s."window"=$1
+		 ORDER BY s.score DESC LIMIT $2`, window, limit)
 	if err != nil {
 		return nil, err
 	}
@@ -1148,7 +1343,8 @@ func (q *Q) GetTrendingCollections(ctx context.Context, window string, limit int
 	for rows.Next() {
 		var s TrendingScore
 		var volStr string
-		if err := rows.Scan(&s.Collection, &s.Window, &s.Score, &s.Views, &s.Bids, &volStr); err != nil {
+		if err := rows.Scan(&s.Collection, &s.Window, &s.Score, &s.Views, &s.Bids, &volStr,
+			&s.CollectionName, &s.Standard, &s.CollectionVerified, &s.CollectionCreator, &s.CollectionTracked); err != nil {
 			return nil, err
 		}
 		s.VolumeWei = ParseWeiOrZero(volStr)
@@ -1350,6 +1546,12 @@ type OfferRow struct {
 	// 034/036) so offer cards can render the Verified / Authentic badges.
 	CollectionVerified bool   `json:"collection_verified"`
 	CollectionCreator  string `json:"collection_creator"`
+	// CollectionName / CollectionTracked mirror ListingRow (collections join).
+	CollectionName    string `json:"collection_name"`
+	CollectionTracked bool   `json:"collection_tracked"`
+	// Name / ImageURI are the token's denormalised metadata (may be empty).
+	Name     string `json:"name"`
+	ImageURI string `json:"image_uri"`
 }
 
 type OffersFilter struct {
@@ -1367,13 +1569,18 @@ func (q *Q) GetOffer(ctx context.Context, offerID string) (*OfferRow, error) {
 		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text, o.principal_wei::text,
 		        o.fee_wei::text, o.units, o.standard::text, o.expires_at, o.status::text,
 		        COALESCE(o.make_tx,''), o.created_at,
-		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
+		        COALESCE(c.name,''), c.address IS NOT NULL,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM offers o
 		 LEFT JOIN collections c ON c.address=o.collection
+		 LEFT JOIN nft_metadata m ON m.collection=o.collection AND m.token_id=o.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=o.collection AND t.token_id=o.token_id
 		 WHERE o.offer_id=$1`, offerID).
 		Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
 			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt,
-			&r.CollectionVerified, &r.CollectionCreator)
+			&r.CollectionVerified, &r.CollectionCreator, &r.CollectionName, &r.CollectionTracked,
+			&r.Name, &r.ImageURI)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("offer not found: %s", offerID)
 	}
@@ -1413,9 +1620,13 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text,
 		        o.principal_wei::text, o.fee_wei::text, o.units, o.standard::text,
 		        o.expires_at, o.status::text, COALESCE(o.make_tx,''), o.created_at,
-		        COALESCE(c.verified,false), COALESCE(c.creator_addr,'')
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
+		        COALESCE(c.name,''), c.address IS NOT NULL,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
 		 FROM offers o
 		 LEFT JOIN collections c ON c.address=o.collection
+		 LEFT JOIN nft_metadata m ON m.collection=o.collection AND m.token_id=o.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=o.collection AND t.token_id=o.token_id
 		 `+where+` ORDER BY o.created_at DESC LIMIT $1`, args...)
 	if err != nil {
 		return nil, err
@@ -1427,7 +1638,8 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID,
 			&r.AmountWei, &r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt,
 			&r.Status, &r.MakeTx, &r.CreatedAt,
-			&r.CollectionVerified, &r.CollectionCreator); err != nil {
+			&r.CollectionVerified, &r.CollectionCreator, &r.CollectionName, &r.CollectionTracked,
+			&r.Name, &r.ImageURI); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1524,6 +1736,10 @@ type SearchResult struct {
 	// Creator is the collection's ERC-173 owner() (migration 036), "" when
 	// unresolved — feeds the "Authentic" badge on search results.
 	Creator string `json:"collection_creator"`
+	// Standard / CollectionName / CollectionTracked from the collections join.
+	Standard          string `json:"standard"`
+	CollectionName    string `json:"collection_name"`
+	CollectionTracked bool   `json:"collection_tracked"`
 }
 
 // Search finds NFTs and collections matching query using Postgres full-text search.
@@ -1544,7 +1760,10 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       coalesce(m.name, t.name, '') AS name,
 			       coalesce(m.image_uri, t.image_uri, '') AS image_uri,
 			       coalesce(c.verified, false) AS verified,
-			       coalesce(c.creator_addr, '') AS creator
+			       coalesce(c.creator_addr, '') AS creator,
+			       coalesce(c.standard::text, '') AS standard,
+			       coalesce(c.name, '') AS collection_name,
+			       c.address IS NOT NULL AS tracked
 			FROM nft_tokens t
 			LEFT JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 			LEFT JOIN collections c ON c.address=t.collection
@@ -1560,7 +1779,10 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 			       c.name,
 			       ''::text,
 			       coalesce(c.verified, false),
-			       coalesce(c.creator_addr, '')
+			       coalesce(c.creator_addr, ''),
+			       coalesce(c.standard::text, ''),
+			       c.name,
+			       true
 			FROM collections c
 			WHERE c.search_vec @@ plainto_tsquery('english', $1)
 			ORDER BY c.name ASC
@@ -1576,7 +1798,8 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 	var out []SearchResult
 	for rows.Next() {
 		var r SearchResult
-		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI, &r.Verified, &r.Creator); err != nil {
+		if err := rows.Scan(&r.Kind, &r.Collection, &r.TokenID, &r.Name, &r.ImageURI, &r.Verified, &r.Creator,
+			&r.Standard, &r.CollectionName, &r.CollectionTracked); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -1589,10 +1812,10 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 // ExpiredListingRow is one listing that has passed its expiry time and should
 // be deactivated with a notification sent to the seller.
 type ExpiredListingRow struct {
-	Collection string `json:"collection"`
-	TokenID    string `json:"token_id"`
-	Seller     string `json:"seller"`
-	Name       string `json:"name"`
+	Collection string    `json:"collection"`
+	TokenID    string    `json:"token_id"`
+	Seller     string    `json:"seller"`
+	Name       string    `json:"name"`
 	ExpiresAt  time.Time `json:"expires_at"`
 }
 
@@ -1715,7 +1938,6 @@ func (q *Q) GetVerifiedPendingWithdrawal(ctx context.Context, address string) (s
 	}
 	return amt, err
 }
-
 
 // ── Atomic combined writes ────────────────────────────────────────────────
 
@@ -1903,7 +2125,7 @@ func (q *Q) GetMarketMetrics(ctx context.Context) (*MarketMetrics, error) {
 type StalledAuctionCounts struct {
 	ExpiredUnsettled int64 `json:"expiredUnsettled"` // active but ended — keeper hasn't settled
 	InactiveNoBids   int64 `json:"inactiveNoBids"`   // active >30min with zero bids — should be cancelled
-	Unrefunded       int64 `json:"unrefunded"`        // settled/cancelled but losers not yet refunded
+	Unrefunded       int64 `json:"unrefunded"`       // settled/cancelled but losers not yet refunded
 }
 
 // GetStalledAuctionCounts returns counts of stalled / stuck auctions across
@@ -1997,6 +2219,67 @@ type ActivityRow struct {
 	AmountWei  string    `json:"amountWei"`
 	Timestamp  time.Time `json:"timestamp"`
 	TxHash     string    `json:"txHash"`
+	// Ts is Timestamp as Unix milliseconds — what the UI's relative-time
+	// formatter wants without a Date parse.
+	Ts int64 `json:"ts"`
+	// Status is the current state of the thing the event created:
+	// active | expired | sold | cancelled.
+	Status string `json:"status"`
+	// Token link fields: denormalised token metadata + collection facts so an
+	// activity row can render as a card link without a second request.
+	Name              string `json:"name"`
+	ImageURI          string `json:"image_uri"`
+	CollectionName    string `json:"collection_name"`
+	Standard          string `json:"standard"`
+	CollectionTracked bool   `json:"collection_tracked"`
+	TokenURL          string `json:"token_url"`
+}
+
+// finish fills the derived fields (Ts, TokenURL) after a scan.
+func (r *ActivityRow) finish() {
+	r.Ts = r.Timestamp.UnixMilli()
+	if r.Collection != "" && r.TokenID != "" {
+		r.TokenURL = "/token/" + r.Collection + "/" + r.TokenID
+	}
+}
+
+// activityStatusListing derives a listing's status: still active, active but
+// past expiry, or closed — closed splits into sold (a sale by that seller at or
+// after listing) and cancelled.
+const activityStatusListing = `CASE
+	WHEN l.active AND l.expires_at > now() THEN 'active'
+	WHEN l.active THEN 'expired'
+	WHEN EXISTS (SELECT 1 FROM sales s WHERE s.collection=l.collection AND s.token_id=l.token_id
+	             AND s.seller=l.seller AND s.occurred_at >= l.listed_at) THEN 'sold'
+	ELSE 'cancelled' END`
+
+// activityStatusAuction maps the stored auction enum onto the activity
+// vocabulary; an active auction past ends_at is "expired" (awaiting settle).
+const activityStatusAuction = `CASE a.status::text
+	WHEN 'settled' THEN 'sold'
+	WHEN 'cancelled' THEN 'cancelled'
+	WHEN 'active' THEN CASE WHEN a.ends_at > now() THEN 'active' ELSE 'expired' END
+	ELSE a.status::text END`
+
+// activityOuterSelect projects the union with token + collection facts.
+const activityOuterSelect = `
+		SELECT act.type, act.collection, act.token_id::text, act.amount_wei::text, act.at, act.tx_hash, act.status,
+		       COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, ''),
+		       COALESCE(c.name,''), COALESCE(c.standard::text,''), c.address IS NOT NULL
+		FROM (`
+
+const activityOuterJoins = `) AS act
+		LEFT JOIN nft_metadata m ON m.collection=act.collection AND m.token_id=act.token_id
+		LEFT JOIN nft_tokens   t ON t.collection=act.collection AND t.token_id=act.token_id
+		LEFT JOIN collections  c ON c.address=act.collection
+		ORDER BY act.at DESC`
+
+func scanActivityRow(rows pgx.Rows) (ActivityRow, error) {
+	var r ActivityRow
+	err := rows.Scan(&r.Type, &r.Collection, &r.TokenID, &r.AmountWei, &r.Timestamp, &r.TxHash, &r.Status,
+		&r.Name, &r.ImageURI, &r.CollectionName, &r.Standard, &r.CollectionTracked)
+	r.finish()
+	return r, err
 }
 
 // GetRecentTransactions returns the last `limit` marketplace events across all tables,
@@ -2012,22 +2295,23 @@ func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.reader().Query(ctx, `
-		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
-			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
-			   FROM listings ORDER BY listed_at DESC LIMIT $1)
+	rows, err := q.reader().Query(ctx, activityOuterSelect+`
+			(SELECT 'Listed' AS type, l.collection, l.token_id, l.price_wei AS amount_wei, l.listed_at AS at, l.tx_hash,
+			        `+activityStatusListing+` AS status
+			   FROM listings l ORDER BY l.listed_at DESC LIMIT $1)
 			UNION ALL
-			(SELECT 'Sold',            collection, token_id, price_wei,            occurred_at, tx_hash
+			(SELECT 'Sold', collection, token_id, price_wei, occurred_at, tx_hash, 'sold'
 			   FROM sales ORDER BY occurred_at DESC LIMIT $1)
 			UNION ALL
-			(SELECT 'AuctionCreated',  collection, token_id, reserve_price_wei,   starts_at,   create_tx
-			   FROM auctions ORDER BY starts_at DESC LIMIT $1)
+			(SELECT 'AuctionCreated', a.collection, a.token_id, a.reserve_price_wei, a.starts_at, a.create_tx,
+			        `+activityStatusAuction+`
+			   FROM auctions a ORDER BY a.starts_at DESC LIMIT $1)
 			UNION ALL
-			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
+			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash,
+			        `+activityStatusAuction+`
 			   FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
 			   ORDER BY b.placed_at DESC LIMIT $1)
-		) AS activity
-		ORDER BY at DESC
+		`+activityOuterJoins+`
 		LIMIT $1
 	`, limit)
 	if err != nil {
@@ -2036,8 +2320,8 @@ func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow
 	defer rows.Close()
 	var out []ActivityRow
 	for rows.Next() {
-		var r ActivityRow
-		if err := rows.Scan(&r.Type, &r.Collection, &r.TokenID, &r.AmountWei, &r.Timestamp, &r.TxHash); err != nil {
+		r, err := scanActivityRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)
@@ -2054,26 +2338,27 @@ func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, 
 	if limit <= 0 || limit > 200 {
 		limit = 50
 	}
-	rows, err := q.reader().Query(ctx, `
-		SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash FROM (
-			(SELECT 'Listed' AS type, collection, token_id, price_wei AS amount_wei, listed_at AS at, tx_hash
-			   FROM listings WHERE lower(seller) = lower($1)
-			   ORDER BY listed_at DESC LIMIT $2)
+	rows, err := q.reader().Query(ctx, activityOuterSelect+`
+			(SELECT 'Listed' AS type, l.collection, l.token_id, l.price_wei AS amount_wei, l.listed_at AS at, l.tx_hash,
+			        `+activityStatusListing+` AS status
+			   FROM listings l WHERE lower(l.seller) = lower($1)
+			   ORDER BY l.listed_at DESC LIMIT $2)
 			UNION ALL
-			(SELECT 'Sold', collection, token_id, price_wei, occurred_at, tx_hash
+			(SELECT 'Sold', collection, token_id, price_wei, occurred_at, tx_hash, 'sold'
 			   FROM sales WHERE lower(seller) = lower($1) OR lower(buyer) = lower($1)
 			   ORDER BY occurred_at DESC LIMIT $2)
 			UNION ALL
-			(SELECT 'AuctionCreated', collection, token_id, reserve_price_wei, starts_at, create_tx
-			   FROM auctions WHERE lower(seller) = lower($1)
-			   ORDER BY starts_at DESC LIMIT $2)
+			(SELECT 'AuctionCreated', a.collection, a.token_id, a.reserve_price_wei, a.starts_at, a.create_tx,
+			        `+activityStatusAuction+`
+			   FROM auctions a WHERE lower(a.seller) = lower($1)
+			   ORDER BY a.starts_at DESC LIMIT $2)
 			UNION ALL
-			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash
+			(SELECT 'BidPlaced', a.collection, a.token_id, b.amount_wei, b.placed_at, b.tx_hash,
+			        `+activityStatusAuction+`
 			   FROM bids b JOIN auctions a ON a.auction_id = b.auction_id
 			   WHERE lower(b.bidder) = lower($1)
 			   ORDER BY b.placed_at DESC LIMIT $2)
-		) AS activity
-		ORDER BY at DESC
+		`+activityOuterJoins+`
 		LIMIT $2
 	`, address, limit)
 	if err != nil {
@@ -2082,8 +2367,8 @@ func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, 
 	defer rows.Close()
 	var out []ActivityRow
 	for rows.Next() {
-		var r ActivityRow
-		if err := rows.Scan(&r.Type, &r.Collection, &r.TokenID, &r.AmountWei, &r.Timestamp, &r.TxHash); err != nil {
+		r, err := scanActivityRow(rows)
+		if err != nil {
 			return nil, err
 		}
 		out = append(out, r)

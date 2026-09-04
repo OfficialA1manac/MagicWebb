@@ -23,7 +23,7 @@ func listingPageHTML() string {
 		b.WriteByte(byte('0' + (i/10)%10))
 		b.WriteByte(byte('0' + i%10))
 		b.WriteString(` - Rare Edition with Descriptive Name</p><p class="card-price">`)
-		b.WriteByte(byte('0' + (i%5) + 1))
+		b.WriteByte(byte('0' + (i % 5) + 1))
 		b.WriteString(`.5 FLR</p></div></div>`)
 	}
 	b.WriteString(`</div></div><footer>MagicWebb NFT Marketplace</footer></body></html>`)

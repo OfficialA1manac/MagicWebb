@@ -14,17 +14,18 @@ import (
 
 // Valid 42-char hex addresses used as test fixtures.
 const (
-	testAddr1     = "0x0000000000000000000000000000000000000001"
-	testAddr2     = "0x0000000000000000000000000000000000000002"
-	testSeller    = "0x00000000000000000000000000000000000000bb"
-	testBuyer     = "0x00000000000000000000000000000000000000cc"
-	testBidder    = "0x00000000000000000000000000000000000000dd"
+	testAddr1      = "0x0000000000000000000000000000000000000001"
+	testAddr2      = "0x0000000000000000000000000000000000000002"
+	testSeller     = "0x00000000000000000000000000000000000000bb"
+	testBuyer      = "0x00000000000000000000000000000000000000cc"
+	testBidder     = "0x00000000000000000000000000000000000000dd"
 	testCollection = "0x000000000000000000000000000000000000000a"
-	testTokenID   = "42"
+	testTokenID    = "42"
 )
 
 // activityCols matches the ActivityRow scan columns from GetRecentTransactions.
-var activityCols = []string{"type", "collection", "token_id", "amount_wei", "at", "tx_hash"}
+var activityCols = []string{"type", "collection", "token_id", "amount_wei", "at", "tx_hash", "status",
+	"name", "image_uri", "collection_name", "standard", "collection_tracked"}
 
 // newActivityApp creates a Fiber app with the activity endpoint registered
 // (including the ValidateQuery middleware) backed by a pgxmock pool.
@@ -48,11 +49,11 @@ func TestActivity_Global_Success(t *testing.T) {
 	defer mock.Close()
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows(activityCols).
-			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1").
-			AddRow("Sold", testAddr2, "2", "2000000000000000000", now.Add(-time.Hour), "0xtx2"))
+			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1", "active", "Token One", "ipfs://img1", "Collection One", "erc721", true).
+			AddRow("Sold", testAddr2, "2", "2000000000000000000", now.Add(-time.Hour), "0xtx2", "sold", "Token Two", "ipfs://img2", "Collection Two", "erc721", true))
 
 	app := newActivityApp(t, mock)
 	resp := doGet(t, app, "/api/v1/activity")
@@ -67,6 +68,11 @@ func TestActivity_Global_Success(t *testing.T) {
 	if rows[0].Type != "Listed" || rows[1].Type != "Sold" {
 		t.Fatalf("unexpected rows: %+v", rows)
 	}
+	// A3: every activity row carries ts, status and a token link.
+	if rows[0].Status != "active" || rows[1].Status != "sold" || rows[0].Ts != now.UnixMilli() ||
+		rows[0].TokenURL != "/token/"+testAddr1+"/1" || !rows[0].CollectionTracked || rows[0].CollectionName != "Collection One" {
+		t.Fatalf("activity link fields missing: %+v", rows[0])
+	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
 	}
@@ -76,7 +82,7 @@ func TestActivity_Global_Empty(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(50).
 		WillReturnRows(pgxmock.NewRows(activityCols))
 
@@ -99,7 +105,7 @@ func TestActivity_Global_DBError(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(50).
 		WillReturnError(fiber.ErrInternalServerError)
 
@@ -120,10 +126,10 @@ func TestActivity_ByAddress_Success(t *testing.T) {
 	defer mock.Close()
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(testAddr1, 50).
 		WillReturnRows(pgxmock.NewRows(activityCols).
-			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1"))
+			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1", "active", "Token One", "ipfs://img1", "Collection One", "erc721", true))
 
 	app := newActivityApp(t, mock)
 	resp := doGet(t, app, "/api/v1/activity?address="+testAddr1)
@@ -144,7 +150,7 @@ func TestActivity_ByAddress_Empty(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(testAddr1, 50).
 		WillReturnRows(pgxmock.NewRows(activityCols))
 
@@ -294,7 +300,7 @@ func TestActivity_ByAddress_DBError(t *testing.T) {
 	mock, _ := pgxmock.NewPool()
 	defer mock.Close()
 
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(testAddr1, 50).
 		WillReturnError(fiber.ErrInternalServerError)
 
@@ -313,10 +319,10 @@ func TestActivity_ByAddress_WithCustomLimit(t *testing.T) {
 	defer mock.Close()
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(testAddr1, 5).
 		WillReturnRows(pgxmock.NewRows(activityCols).
-			AddRow("Sold", testAddr1, "1", "1000000000000000000", now, "0xtx1"))
+			AddRow("Sold", testAddr1, "1", "1000000000000000000", now, "0xtx1", "sold", "Token One", "ipfs://img1", "Collection One", "erc721", true))
 
 	app := newActivityApp(t, mock)
 	resp := doGet(t, app, "/api/v1/activity?address="+testAddr1+"&limit=5")
@@ -443,10 +449,10 @@ func TestActivity_WithCustomLimit(t *testing.T) {
 	defer mock.Close()
 
 	now := time.Now()
-	mock.ExpectQuery(`SELECT type, collection, token_id::text, amount_wei::text, at, tx_hash`).
+	mock.ExpectQuery(`SELECT act\.type, act\.collection, act\.token_id::text, act\.amount_wei::text, act\.at, act\.tx_hash, act\.status`).
 		WithArgs(10).
 		WillReturnRows(pgxmock.NewRows(activityCols).
-			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1"))
+			AddRow("Listed", testAddr1, "1", "1000000000000000000", now, "0xtx1", "active", "Token One", "ipfs://img1", "Collection One", "erc721", true))
 
 	app := newActivityApp(t, mock)
 	resp := doGet(t, app, "/api/v1/activity?limit=10")

@@ -84,10 +84,30 @@ paths:
           in: query
           schema: { type: string, example: "0xabcd...1234" }
           description: Filter by seller address
+        - name: sort
+          in: query
+          schema: { type: string, enum: [recent, price_asc, price_desc, ending], default: recent }
+          description: Sort order; `ending` = soonest expiry first
+        - name: min_price
+          in: query
+          schema: { type: string, example: "1000000000000000000" }
+          description: Minimum price in wei (inclusive)
+        - name: max_price
+          in: query
+          schema: { type: string, example: "5000000000000000000" }
+          description: Maximum price in wei (inclusive)
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+          description: 1-based page; pages beyond the first add OFFSET (page-1)*limit
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
           description: Max results (clamped to 1-200)
+        - name: traits
+          in: query
+          schema: { type: string, example: "Background=Blue,Eyes=Laser" }
+          description: Comma-separated trait_type=value pairs (AND across traits)
       responses:
         "200":
           description: Array of listing rows
@@ -166,18 +186,55 @@ paths:
           $ref: "#/components/responses/InternalError"
 
   # ── Auctions ────────────────────────────────────────────────────────
+  /api/v1/token/{collection}/{id}:
+    get:
+      summary: Get indexed token detail
+      description: |
+        Everything the indexer knows about one token: metadata, current
+        owner, last sale and when it was indexed, plus the collection's card
+        facts. A token the indexer has never seen is a 404 — never an empty
+        row — so the token page can say "not indexed yet".
+      tags: [Listings]
+      parameters:
+        - name: collection
+          in: path
+          required: true
+          schema: { type: string, example: "0x..." }
+        - name: id
+          in: path
+          required: true
+          schema: { type: string, example: "1" }
+          description: Token ID (decimal)
+      responses:
+        "200":
+          description: Token detail
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/TokenDetail"
+        "404":
+          $ref: "#/components/responses/NotFound"
+        "500":
+          $ref: "#/components/responses/InternalError"
+
   /api/v1/auctions:
     get:
       summary: List auctions
-      description: Filterable by collection and status.
+      description: |
+        Filterable by collection, seller and status. `ended` is the derived
+        state "active but past ends_at" (awaiting settlement); `all` and an
+        empty status apply no filter. Any other value is a 400.
       tags: [Auctions]
       parameters:
         - name: collection
           in: query
           schema: { type: string }
+        - name: seller
+          in: query
+          schema: { type: string }
         - name: status
           in: query
-          schema: { type: string, enum: [active, settled, cancelled], example: "active" }
+          schema: { type: string, enum: [all, active, ended, settled, cancelled], example: "active" }
         - name: limit
           in: query
           schema: { type: integer, minimum: 1, maximum: 200, default: 50 }
@@ -190,6 +247,8 @@ paths:
                 type: array
                 items:
                   $ref: "#/components/schemas/AuctionRow"
+        "400":
+          $ref: "#/components/responses/BadRequest"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -357,7 +416,10 @@ paths:
   /api/v1/collections/{address}:
     get:
       summary: Get collection detail with stats
-      description: Returns collection metadata + floor price, 24h volume, and listed count.
+      description: |
+        Returns collection metadata + floor price, 24h volume, listed count and
+        `verified_reason` (why the badge is what it is, for tooltips).
+        Unknown or malformed addresses are 404.
       tags: [Collections]
       parameters:
         - name: address
@@ -399,6 +461,38 @@ paths:
               example:
                 Background: ["Red", "Blue", "Gold"]
                 Fur: ["Striped", "Spotted"]
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/collections/{address}/tokens:
+    get:
+      summary: Page through a collection's indexed tokens
+      description: |
+        Indexed tokens of a collection with current owner, listed flag (and
+        price when listed) and last sale, ordered by token id so pages are
+        stable. The parent collection's card facts are included once.
+        Unknown collections are 404.
+      tags: [Collections]
+      parameters:
+        - name: address
+          in: path
+          required: true
+          schema: { type: string, example: "0x..." }
+        - name: page
+          in: query
+          schema: { type: integer, minimum: 1, default: 1 }
+        - name: limit
+          in: query
+          schema: { type: integer, minimum: 1, maximum: 200, default: 48 }
+      responses:
+        "200":
+          description: One page of tokens
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/CollectionTokensPage"
+        "404":
+          $ref: "#/components/responses/NotFound"
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -710,12 +804,35 @@ paths:
                   sse_saturation_streak: { type: integer, description: "Consecutive saturated intervals" }
                   metrics_unavailable:  { type: string, description: "Empty when healthy" }
 
+  /api/v1/stats:
+    get:
+      summary: Market stats for the homepage
+      description: |
+        The /metrics body plus `collections_tracked` (the same count the
+        trending list draws from) and `updated_at`.
+      tags: [Metrics]
+      responses:
+        "200":
+          description: Market metrics + tracked-collection count
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  totalActiveListings:  { type: integer }
+                  totalSales:           { type: integer }
+                  grossVolumeWei:       { type: string }
+                  totalAuctions:        { type: integer }
+                  collections_tracked:  { type: integer, description: "Collections the indexer tracks" }
+                  updated_at:           { type: string, format: date-time }
+
   /api/v1/activity:
     get:
       summary: Recent marketplace activity
       description: |
         Returns recent Listed, Sold, AuctionCreated, and BidPlaced events
-        across all collections, newest first.
+        across all collections, newest first. Every row carries `ts`,
+        `status` (active | expired | sold | cancelled) and a token link.
       tags: [Metrics]
       parameters:
         - name: limit
@@ -827,7 +944,7 @@ components:
     BearerAuth:
       type: http
       scheme: bearer
-      description: SIWE JWT via Authorization: Bearer <token>
+      description: "SIWE JWT via Authorization: Bearer <token>"
     CookieAuth:
       type: apiKey
       in: cookie
@@ -885,7 +1002,10 @@ components:
         name:                  { type: string }
         image_uri:             { type: string }
         total_supply:          { type: integer, description: "Collection-level total supply (0 when unindexed)" }
-        collection_verified:   { type: boolean }
+        collection_verified:   { type: boolean, description: "Collection passed the standard + metadata verifier" }
+        collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
+        collection_name:       { type: string }
+        collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
 
     # ── Auctions ──────────────────────────────────────────────────────
     AuctionRow:
@@ -906,6 +1026,10 @@ components:
         create_tx:           { type: string }
         name:                { type: string }
         image_uri:           { type: string }
+        collection_verified:   { type: boolean, description: "Collection passed the standard + metadata verifier" }
+        collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
+        collection_name:       { type: string }
+        collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
 
     BidRow:
       type: object
@@ -931,6 +1055,12 @@ components:
         status:      { type: string, enum: [pending, accepted, cancelled, expired] }
         make_tx:     { type: string }
         created_at:  { type: string, format: date-time }
+        name:        { type: string, description: "Token name (may be empty)" }
+        image_uri:   { type: string }
+        collection_verified:   { type: boolean, description: "Collection passed the standard + metadata verifier" }
+        collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
+        collection_name:       { type: string }
+        collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
 
     # ── Collections ───────────────────────────────────────────────────
     CollectionRow:
@@ -942,6 +1072,15 @@ components:
         standard:     { type: string, enum: [erc721, erc1155] }
         deploy_block: { type: integer }
         verified:     { type: boolean }
+        creator_addr: { type: string, description: "ERC-173 owner(); empty when unresolved" }
+
+    VerifiedReason:
+      type: object
+      description: Why the collection badge is what it is (tooltip breakdown).
+      properties:
+        standard_ok:   { type: boolean, description: "ERC-165 says standard NFT contract" }
+        metadata_ok:   { type: boolean, description: "At least one token has resolved metadata" }
+        creator_known: { type: boolean, description: "ERC-173 owner() resolved" }
 
     CollectionDetail:
       type: object
@@ -952,6 +1091,52 @@ components:
             floor_price_wei:  { type: string }
             volume_24h_wei:   { type: string }
             listed_count:     { type: integer }
+            verified_reason:
+              $ref: "#/components/schemas/VerifiedReason"
+
+    CollectionTokenRow:
+      type: object
+      properties:
+        token_id:      { type: string }
+        owner:         { type: string, description: "Current holder (largest holder for ERC-1155)" }
+        name:          { type: string }
+        image:         { type: string }
+        listed:        { type: boolean }
+        price_wei:     { type: string, description: "Cheapest active listing; omitted when not listed" }
+        last_sale_wei: { type: string, description: "Most recent sale; omitted when never sold" }
+
+    CollectionTokensPage:
+      type: object
+      properties:
+        collection:
+          $ref: "#/components/schemas/CollectionRow"
+        tokens:
+          type: array
+          items:
+            $ref: "#/components/schemas/CollectionTokenRow"
+        page:  { type: integer }
+        limit: { type: integer }
+        total: { type: integer, description: "Distinct held tokens in the collection" }
+
+    TokenDetail:
+      type: object
+      properties:
+        collection:          { type: string }
+        token_id:            { type: string }
+        name:                { type: string }
+        description:         { type: string }
+        image_uri:           { type: string }
+        animation_uri:       { type: string }
+        metadata_uri:        { type: string }
+        owner:               { type: string, description: "Current holder; empty when unknown" }
+        indexed_at:          { type: string, format: date-time }
+        last_sale_wei:       { type: string, description: "Empty when never sold" }
+        last_sale_at:        { type: string, format: date-time, nullable: true }
+        collection_name:     { type: string }
+        standard:            { type: string, enum: [erc721, erc1155, ""] }
+        collection_verified: { type: boolean }
+        collection_creator:  { type: string }
+        collection_tracked:  { type: boolean }
 
     TrendingScore:
       type: object
@@ -962,6 +1147,11 @@ components:
         views:      { type: integer }
         bids:       { type: integer }
         volume_wei: { type: string, description: "Volume in wei" }
+        collection_name:     { type: string }
+        standard:            { type: string, enum: [erc721, erc1155, ""] }
+        collection_verified: { type: boolean }
+        collection_creator:  { type: string }
+        collection_tracked:  { type: boolean }
 
     # ── Wallet ────────────────────────────────────────────────────────
     OwnedNFT:
@@ -1008,6 +1198,11 @@ components:
         token_id:   { type: string }
         name:       { type: string }
         image_uri:  { type: string }
+        collection_verified: { type: boolean }
+        collection_creator:  { type: string }
+        standard:            { type: string, enum: [erc721, erc1155, ""] }
+        collection_name:     { type: string }
+        collection_tracked:  { type: boolean }
 
     # ── Activity ──────────────────────────────────────────────────────
     ActivityRow:
@@ -1019,3 +1214,11 @@ components:
         amountWei:  { type: string }
         timestamp:  { type: string, format: date-time }
         txHash:     { type: string }
+        ts:         { type: integer, format: int64, description: "timestamp as Unix milliseconds" }
+        status:     { type: string, enum: [active, expired, sold, cancelled], description: "Current state of what the event created" }
+        name:       { type: string }
+        image_uri:  { type: string }
+        collection_name:    { type: string }
+        standard:           { type: string, enum: [erc721, erc1155, ""] }
+        collection_tracked: { type: boolean }
+        token_url:  { type: string, example: "/token/0x.../1" }

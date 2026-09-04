@@ -31,16 +31,19 @@ type Network struct {
 	URL       string // origin of that network's app; empty when not deployed
 	Current   bool   // the network this process serves
 	Available bool   // has a URL, so it can be navigated to
+	// Trading is "live" when that network has marketplace contracts and
+	// "browse-only" otherwise. For the current network it is derived from
+	// ContractsDeployed; for siblings it is declared through NETWORK_TRADING
+	// ("114=live,19=browse-only") because this process cannot see their
+	// contracts. Empty when a sibling is not listed there.
+	Trading string
 }
 
-// knownNetworks is the catalogue the switcher is built from, in display order.
-// It mirrors the CHAIN_ID validation switch below: a chain the backend refuses
-// to run must not appear as a destination in the UI.
-var knownNetworks = []Network{
-	{ChainID: 114, Name: "Coston2"},
-	{ChainID: 19, Name: "Songbird"},
-	{ChainID: 14, Name: "Flare"},
-}
+// TradingLive / TradingBrowseOnly are the two values Network.Trading takes.
+const (
+	TradingLive       = "live"
+	TradingBrowseOnly = "browse-only"
+)
 
 type Config struct {
 	// Runtime
@@ -124,6 +127,20 @@ type Config struct {
 	// Metadata worker
 	MetadataConcurrency int // concurrent metadata fetches per tick; env METADATA_CONCURRENCY
 
+	// WSCoalesceMs is the WebSocket write-coalescing window (ms); profile
+	// default, env WS_COALESCE_MS overrides.
+	WSCoalesceMs int
+	// ImageProxyConcurrency bounds concurrent outbound /api/v1/media fetches;
+	// profile default, env IMAGE_PROXY_CONCURRENCY overrides.
+	ImageProxyConcurrency int
+	// GraphQLMaxCost is the per-query complexity budget; profile default,
+	// env GRAPHQL_MAX_COST overrides.
+	GraphQLMaxCost int
+	// APIRateLimitPerMin is the per-IP budget for /api/v1 and /graphql.
+	// Derived from the profile's RateLimitTier (testnet 120, mainnet 60);
+	// env API_RATE_LIMIT_PER_MIN overrides.
+	APIRateLimitPerMin int
+
 	// Keeper bot (optional): hex-encoded ECDSA private key for on-chain auction settlement
 	KeeperKey string
 
@@ -196,17 +213,11 @@ func Load() {
 		RPCURL:  required("RPC_URL"),
 		ChainID: requiredUint64("CHAIN_ID"),
 
-		// Chain-metadata block. Required by the UI for WalletConnect
-		// pairing (chains:[1]+optionalChains:[CHAIN_ID]+rpcMap:{CHAIN_ID:RPC_URL}),
-		// user-facing labels (toast summaries, ctaLabels, summary rows —
-		// wallet.js reads window.MW_NATIVE_CURRENCY/NETWORK_NAME), and
-		// explorer <a href="{{$.ExplorerURL}}/tx/..."> links. Defaults are
-		// Coston2-specific. envOrDefault returns the .env-supplied value if
-		// non-empty, else the compile-time default — the deploy defaults are
-		// the FAILSAFE for misconfiguration. This build targets Coston2 (chain
-		// 114) exclusively; NETWORK_NAME, NATIVE_CURRENCY, and EXPLORER_URL
-		// allow operators to customise display labels WITHOUT changing the
-		// underlying chain or the chain-ID validation below.
+		// Chain identity. Required by the UI for WalletConnect pairing,
+		// user-facing labels (window.MW_NATIVE_CURRENCY / MW_NETWORK_NAME) and
+		// explorer links. The profile supplies the defaults for every
+		// supported chain; NETWORK_NAME, NATIVE_CURRENCY and EXPLORER_URL let
+		// an operator customise display labels without changing the chain.
 		NetworkName:    envOrDefault("NETWORK_NAME", prof.Name),
 		NativeCurrency: envOrDefault("NATIVE_CURRENCY", prof.Currency),
 		ExplorerURL:    envOrDefault("EXPLORER_URL", prof.Explorer),
@@ -241,11 +252,15 @@ func Load() {
 		JWTSecret:  required("JWT_SECRET"),
 		NonceTTL:   optDuration("NONCE_TTL", 5*time.Minute),
 
-		IndexFromBlock:      optUint64("INDEX_FROM_BLOCK", 0),
-		GetLogsChunk:        optUint64("GETLOGS_CHUNK", prof.GetLogsChunk),
-		GetLogsBlockCap:     optUint64("GETLOGS_BLOCK_CAP", prof.GetLogsBlockCap),
-		MetadataConcurrency: optInt("METADATA_CONCURRENCY", prof.MetadataConcurrency),
-		TrackedCollections:  parseAddrList(envOrDefault("TRACKED_COLLECTIONS", "")),
+		IndexFromBlock:        optUint64("INDEX_FROM_BLOCK", 0),
+		GetLogsChunk:          optUint64("GETLOGS_CHUNK", prof.GetLogsChunk),
+		GetLogsBlockCap:       optUint64("GETLOGS_BLOCK_CAP", prof.GetLogsBlockCap),
+		MetadataConcurrency:   optInt("METADATA_CONCURRENCY", prof.MetadataConcurrency),
+		WSCoalesceMs:          optInt("WS_COALESCE_MS", prof.WSCoalesceMs),
+		ImageProxyConcurrency: optInt("IMAGE_PROXY_CONCURRENCY", prof.ImageProxyConcurrency),
+		GraphQLMaxCost:        optInt("GRAPHQL_MAX_COST", prof.GraphQLMaxCost),
+		APIRateLimitPerMin:    optInt("API_RATE_LIMIT_PER_MIN", rateLimitForTier(prof.RateLimitTier)),
+		TrackedCollections:    parseAddrList(envOrDefault("TRACKED_COLLECTIONS", "")),
 
 		ScoreWViews:  optFloat64("SCORE_W_VIEWS", 0.3),
 		ScoreWBids:   optFloat64("SCORE_W_BIDS", 0.5),
@@ -293,21 +308,6 @@ func Load() {
 	C.SafeAddr = strings.ToLower(C.SafeAddr)
 	C.PersonalWalletAddr = strings.ToLower(C.PersonalWalletAddr)
 
-	// Chain metadata validation — supports Coston2 (114), Flare mainnet (14),
-	// and Songbird (19). Any unrecognised chain ID is a fatal error: silently
-	// using wrong defaults on a misconfigured deploy would produce incorrect
-	// labels and broken wallet pairing. Operators can override NETWORK_NAME,
-	// NATIVE_CURRENCY, EXPLORER_URL via .env for any chain.
-	//
-	// Per-chain defaults: only set when the operator has NOT explicitly set
-	// the env var (os.Getenv returns ""). envOrDefault would have already
-	// set the Coston2 defaults above; we only overwrite for non-Coston2.
-	// Identity, cadences and caps all came from the profile above; the only
-	// thing left to enforce is that the chain id was one we have a profile for
-	// (profileFor already exited otherwise).
-
-	C.Networks = buildNetworks(os.Getenv("NETWORK_URLS"), C.ChainID)
-
 	// All-or-nothing on the three cores. An operator who sets one address but
 	// not the others has a broken deploy, not a read-only one.
 	set := 0
@@ -323,6 +323,10 @@ func Load() {
 	if set == 0 {
 		fmt.Fprintf(os.Stderr, "WARN: no contract addresses for chain %d — read-only network mode: API and UI serve, indexer/keepers/verifier idle (see deployments/%s.json)\n", C.ChainID, C.Profile.Key)
 	}
+
+	// The switcher catalogue needs ContractsDeployed (above) to label this
+	// network's own trading status.
+	C.Networks = buildNetworks(os.Getenv("NETWORK_URLS"), os.Getenv("NETWORK_TRADING"), C.ChainID, C.TradingStatus())
 
 	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
 	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
@@ -502,37 +506,70 @@ func parseURLList(v string) []string {
 //
 //	NETWORK_URLS="114=https://magicwebb.fly.dev,19=https://magicwebb-songbird.fly.dev"
 //
-// A chain absent from the list, or listed with an empty origin, is marked
+// and NETWORK_TRADING, the same shape with a trading status per sibling:
+//
+//	NETWORK_TRADING="114=live,19=browse-only,14=browse-only"
+//
+// The catalogue itself is chain/profile.All() — the one per-network table —
+// so a chain the backend cannot run never appears as a destination.
+//
+// A chain absent from NETWORK_URLS, or listed with an empty origin, is marked
 // unavailable. That is the correct default rather than a degraded one: at the
 // time of writing only Coston2 has contracts deployed, so an operator who sets
 // nothing gets a switcher that tells the truth.
 //
 // The current network is always available regardless of the list — the user is
 // already looking at it, and a missing self-entry is a config typo, not a
-// reason to grey out the page they are on.
-func buildNetworks(networkURLs string, currentChainID uint64) []Network {
-	urls := make(map[uint64]string, len(knownNetworks))
-	for _, pair := range strings.Split(networkURLs, ",") {
-		id, origin, ok := strings.Cut(strings.TrimSpace(pair), "=")
+// reason to grey out the page they are on. Its trading status comes from
+// currentTrading (ContractsDeployed), never from NETWORK_TRADING.
+func buildNetworks(networkURLs, networkTrading string, currentChainID uint64, currentTrading string) []Network {
+	urls := parseChainMap(networkURLs, "NETWORK_URLS")
+	for id, origin := range urls {
+		urls[id] = strings.TrimRight(origin, "/")
+	}
+	trading := parseChainMap(networkTrading, "NETWORK_TRADING")
+
+	all := profile.All()
+	out := make([]Network, 0, len(all))
+	for _, p := range all {
+		n := Network{ChainID: p.ChainID, Name: p.Name}
+		n.URL = urls[n.ChainID]
+		n.Current = n.ChainID == currentChainID
+		n.Available = n.URL != "" || n.Current
+		if n.Current {
+			n.Trading = currentTrading
+		} else {
+			switch t := trading[n.ChainID]; t {
+			case TradingLive, TradingBrowseOnly:
+				n.Trading = t
+			case "":
+			default:
+				fmt.Fprintf(os.Stderr, "WARN: NETWORK_TRADING for chain %d is %q; expected live|browse-only, ignoring\n", n.ChainID, t)
+			}
+		}
+		out = append(out, n)
+	}
+	return out
+}
+
+// parseChainMap parses a comma-separated `chainID=value` list. Malformed
+// entries are skipped with a warning naming the env var; a later empty value
+// never erases an earlier non-empty one.
+func parseChainMap(list, envName string) map[uint64]string {
+	out := map[uint64]string{}
+	for _, pair := range strings.Split(list, ",") {
+		id, val, ok := strings.Cut(strings.TrimSpace(pair), "=")
 		if !ok {
 			continue
 		}
 		chainID, err := strconv.ParseUint(strings.TrimSpace(id), 10, 64)
 		if err != nil {
-			fmt.Fprintf(os.Stderr, "WARN: NETWORK_URLS entry %q has a non-numeric chain id; ignoring\n", pair)
+			fmt.Fprintf(os.Stderr, "WARN: %s entry %q has a non-numeric chain id; ignoring\n", envName, pair)
 			continue
 		}
-		if origin = strings.TrimRight(strings.TrimSpace(origin), "/"); origin != "" {
-			urls[chainID] = origin
+		if val = strings.TrimSpace(val); val != "" {
+			out[chainID] = val
 		}
-	}
-
-	out := make([]Network, 0, len(knownNetworks))
-	for _, n := range knownNetworks {
-		n.URL = urls[n.ChainID]
-		n.Current = n.ChainID == currentChainID
-		n.Available = n.URL != "" || n.Current
-		out = append(out, n)
 	}
 	return out
 }
@@ -650,6 +687,26 @@ func profileFor(chainID uint64) profile.Profile {
 		os.Exit(1)
 	}
 	return p
+}
+
+// rateLimitForTier maps a profile's RateLimitTier onto the per-IP /api/v1
+// budget per minute. Testnets are generous (testers hammer refresh);
+// mainnets keep the historical 60/min.
+func rateLimitForTier(tier string) int {
+	if tier == "testnet" {
+		return 120
+	}
+	return 60
+}
+
+// TradingStatus is "live" when this network has marketplace contracts and
+// "browse-only" otherwise (read-only network mode). Surfaced to the UI as
+// window.MW_TRADING and in the network switcher.
+func (c *Config) TradingStatus() string {
+	if c.ContractsDeployed() {
+		return TradingLive
+	}
+	return TradingBrowseOnly
 }
 
 // ContractsDeployed reports whether this network has marketplace contracts.

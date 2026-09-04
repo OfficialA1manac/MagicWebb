@@ -30,6 +30,8 @@ type WalletService struct {
 	explorerURL string
 	httpc       *http.Client
 	merged      cache.CacheInterface // 30s per-address cache of the merged inventory
+	// chainID namespaces the cache keys (cache.Key). Set by Mount.
+	chainID uint64
 }
 
 // NewWalletService creates a WalletService. explorerURL is the network's
@@ -44,7 +46,7 @@ func NewWalletService(q *db.Q, explorerURL, redisURL string) *WalletService {
 		// user-visible may lag >1s beyond transport). The cache only
 		// deduplicates bursts (grid + header ask together); every navigation
 		// re-reads the wallet live.
-		merged:      cache.NewRedisOrMemory(redisURL, 2*time.Second),
+		merged: cache.NewRedisOrMemory(redisURL, 2*time.Second),
 	}
 }
 
@@ -59,13 +61,13 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusBadRequest, "address required")
 	}
 
-	if v, ok := s.merged.Get("wallet-nfts:" + addr); ok {
+	if v, ok := s.merged.Get(cache.Key(s.chainID, "wallet-nfts", addr)); ok {
 		// cachedBytes, not a []byte assertion: the Redis backend
 		// JSON-round-trips cache values into strings, so a bare assertion
 		// discards every hit whenever REDIS_URL is set.
 		if body := cachedBytes(v); body != nil {
 			src := "db"
-			if sv, ok := s.merged.Get("wallet-nfts-src:" + addr); ok {
+			if sv, ok := s.merged.Get(cache.Key(s.chainID, "wallet-nfts-src", addr)); ok {
 				if b := cachedBytes(sv); b != nil {
 					src = string(b)
 				}
@@ -122,8 +124,8 @@ func (s *WalletService) handleNFTs(c *fiber.Ctx) error {
 	if !(s.explorerURL != "" && source == "db") {
 		// Stored as a string — see cachedBytes: a []byte would return from
 		// Redis base64-encoded and be served as the response body.
-		s.merged.Set("wallet-nfts:"+addr, string(body))
-		s.merged.Set("wallet-nfts-src:"+addr, source)
+		s.merged.Set(cache.Key(s.chainID, "wallet-nfts", addr), string(body))
+		s.merged.Set(cache.Key(s.chainID, "wallet-nfts-src", addr), source)
 	}
 	c.Set("Content-Type", "application/json")
 	return c.Send(body)

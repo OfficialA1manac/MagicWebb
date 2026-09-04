@@ -1,7 +1,6 @@
 package api
 
 import (
-	"fmt"
 	"strconv"
 	"strings"
 
@@ -15,6 +14,8 @@ import (
 type CollectionsService struct {
 	q     *db.Q
 	cache cache.CacheInterface
+	// chainID namespaces cache keys (cache.Key). Set by Mount.
+	chainID uint64
 }
 
 // NewCollectionsService creates a CollectionsService. The cache backend
@@ -29,6 +30,7 @@ func NewCollectionsService(q *db.Q, c cache.CacheInterface) *CollectionsService 
 func (s *CollectionsService) RegisterRoutes(api fiber.Router) {
 	api.Get("/collections", s.handleList)
 	api.Get("/collections/:address/traits", s.handleTraits)
+	api.Get("/collections/:address/tokens", s.handleTokens)
 	api.Get("/collections/:address", s.handleGet)
 	api.Get("/trending", s.handleTrending)
 }
@@ -63,7 +65,7 @@ func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	// 3 DB round-trips (GetCollection + GetFloorPrice + Get24hVolume +
 	// GetListedCount) on every listing page load. Cache misses fall
 	// through to the full DB path; cache hits return immediately.
-	ckey := fmt.Sprintf("col:%s", address)
+	ckey := cache.Key(s.chainID, "col", address)
 	if cached, ok := s.cache.Get(ckey); ok {
 		return c.JSON(cached)
 	}
@@ -71,7 +73,7 @@ func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	col, err := s.q.GetCollection(c.Context(), address)
 	if err != nil {
 		if isNotFound(err) {
-			return writeErr(c, fiber.StatusNotFound, "collection not found")
+			return writeErr(c, fiber.StatusNotFound, "not found")
 		}
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
@@ -85,6 +87,8 @@ func (s *CollectionsService) handleGet(c *fiber.Ctx) error {
 	}
 
 	detail := collectionDetail{CollectionRow: *col, ListedCount: listed}
+	// Best-effort: the badge breakdown is a tooltip, never a reason to 500.
+	detail.VerifiedReason, _ = s.q.GetCollectionVerifiedReason(c.Context(), address)
 	if floor != nil {
 		detail.FloorPriceWei = floor.String()
 	}
@@ -127,7 +131,7 @@ func (s *CollectionsService) handleTrending(c *fiber.Ctx) error {
 	}
 
 	// Cache hit → return immediately, no DB query.
-	ckey := fmt.Sprintf("tr:%s:%d", window, limit)
+	ckey := cache.Key(s.chainID, "tr", window, strconv.Itoa(limit))
 	if cached, ok := s.cache.Get(ckey); ok {
 		return c.JSON(cached)
 	}
@@ -148,7 +152,63 @@ func (s *CollectionsService) handleTrending(c *fiber.Ctx) error {
 // collectionDetail is the JSON shape for a collection with computed stats.
 type collectionDetail struct {
 	db.CollectionRow
-	FloorPriceWei string `json:"floor_price_wei"`
-	Volume24hWei  string `json:"volume_24h_wei"`
-	ListedCount   int    `json:"listed_count"`
+	FloorPriceWei  string            `json:"floor_price_wei"`
+	Volume24hWei   string            `json:"volume_24h_wei"`
+	ListedCount    int               `json:"listed_count"`
+	VerifiedReason db.VerifiedReason `json:"verified_reason"`
+}
+
+// collectionTokensPage is GET /api/v1/collections/:address/tokens.
+type collectionTokensPage struct {
+	// Collection is the parent's card facts (name, standard, verified,
+	// creator) so a token card can render its badge without a second call.
+	Collection db.CollectionRow        `json:"collection"`
+	Tokens     []db.CollectionTokenRow `json:"tokens"`
+	Page       int                     `json:"page"`
+	Limit      int                     `json:"limit"`
+	Total      int64                   `json:"total"`
+}
+
+// handleTokens pages through a collection's indexed tokens
+// (?page=1&limit=48). Unknown collections 404 like handleGet.
+func (s *CollectionsService) handleTokens(c *fiber.Ctx) error {
+	address := strings.ToLower(c.Params("address"))
+	if !isValidHexAddress(address) {
+		return writeErr(c, fiber.StatusNotFound, "not found")
+	}
+	page, limit := 1, 48
+	if v := c.Query("page"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil && n > 1 {
+			page = n
+		}
+	}
+	if v := c.Query("limit"); v != "" {
+		if n, err := strconv.Atoi(v); err == nil {
+			if n < 1 {
+				n = 1
+			} else if n > 200 {
+				n = 200
+			}
+			limit = n
+		}
+	}
+	col, err := s.q.GetCollection(c.Context(), address)
+	if err != nil {
+		if isNotFound(err) {
+			return writeErr(c, fiber.StatusNotFound, "not found")
+		}
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	total, err := s.q.CountCollectionTokens(c.Context(), address)
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	rows, err := s.q.ListCollectionTokens(c.Context(), address, limit, (page-1)*limit)
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if rows == nil {
+		rows = []db.CollectionTokenRow{}
+	}
+	return c.JSON(collectionTokensPage{Collection: *col, Tokens: rows, Page: page, Limit: limit, Total: total})
 }

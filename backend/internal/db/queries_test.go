@@ -1003,10 +1003,10 @@ func auctionMockRow(mock pgxmock.PgxPoolIface, id int64, now time.Time) *pgxmock
 	return mock.NewRows([]string{"auction_id", "collection", "token_id", "seller", "standard",
 		"reserve_price_wei", "highest_bid_wei", "highest_bidder", "min_increment_bps",
 		"starts_at", "ends_at", "status", "create_tx", "name", "image_uri",
-		"verified", "creator_addr"}).
+		"verified", "creator_addr", "collection_name", "collection_tracked"}).
 		AddRow(id, "0xc", "1", "0xs", "erc721", "0", "0", "", 500,
 			now.Add(-96*time.Hour), now.Add(-80*time.Hour), "active", "0xtx", "", "",
-			false, "")
+			false, "", "", false)
 }
 
 // The keeper's force-cancel sweep must key on ends_at + the 72h contract
@@ -1057,9 +1057,9 @@ func TestSetCollectionOfferEligibleUpserts(t *testing.T) {
 func offerMockRows(mock pgxmock.PgxPoolIface, now time.Time) *pgxmock.Rows {
 	return mock.NewRows([]string{"offer_id", "bidder", "collection", "token_id", "principal_wei",
 		"fee_wei", "units", "standard", "expires_at", "status", "make_tx", "created_at",
-		"verified", "creator_addr"}).
+		"verified", "creator_addr", "collection_name", "collection_tracked", "name", "image_uri"}).
 		AddRow("1", "0xb", "0xc", "5", "1000", "15", int64(1), "erc721",
-			now.Add(time.Hour), "pending", "0xtx", now, true, "0xcreator")
+			now.Add(time.Hour), "pending", "0xtx", now, true, "0xcreator", "Coll", true, "Tok", "ipfs://i")
 }
 
 // OfferRow now carries the collection badge columns (Verified / Authentic)
@@ -1071,7 +1071,7 @@ func TestGetOfferCarriesBadgeColumns(t *testing.T) {
 	q := New(mock)
 
 	now := time.Unix(1_700_000_000, 0)
-	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+WHERE o\.offer_id=\$1`).
+	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\),\s+COALESCE\(c\.name,''\), c\.address IS NOT NULL,\s+COALESCE\(m\.name, t\.name, ''\), COALESCE\(m\.image_uri, t\.image_uri, ''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+LEFT JOIN nft_metadata m ON m\.collection=o\.collection AND m\.token_id=o\.token_id\s+LEFT JOIN nft_tokens t ON t\.collection=o\.collection AND t\.token_id=o\.token_id\s+WHERE o\.offer_id=\$1`).
 		WithArgs("1").
 		WillReturnRows(offerMockRows(mock, now))
 
@@ -1081,6 +1081,9 @@ func TestGetOfferCarriesBadgeColumns(t *testing.T) {
 	}
 	if !got.CollectionVerified || got.CollectionCreator != "0xcreator" {
 		t.Fatalf("badge cols = %v/%q", got.CollectionVerified, got.CollectionCreator)
+	}
+	if got.CollectionName != "Coll" || !got.CollectionTracked || got.Name != "Tok" || got.ImageURI != "ipfs://i" {
+		t.Fatalf("card cols = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
 		t.Fatal(err)
@@ -1093,7 +1096,7 @@ func TestListOffersCarriesBadgeColumns(t *testing.T) {
 	q := New(mock)
 
 	now := time.Unix(1_700_000_000, 0)
-	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+WHERE o\.expires_at > now\(\) AND o\.collection=\$2 ORDER BY o\.created_at DESC LIMIT \$1`).
+	mock.ExpectQuery(`COALESCE\(c\.verified,false\), COALESCE\(c\.creator_addr,''\),\s+COALESCE\(c\.name,''\), c\.address IS NOT NULL,\s+COALESCE\(m\.name, t\.name, ''\), COALESCE\(m\.image_uri, t\.image_uri, ''\)\s+FROM offers o\s+LEFT JOIN collections c ON c\.address=o\.collection\s+LEFT JOIN nft_metadata m ON m\.collection=o\.collection AND m\.token_id=o\.token_id\s+LEFT JOIN nft_tokens t ON t\.collection=o\.collection AND t\.token_id=o\.token_id\s+WHERE o\.expires_at > now\(\) AND o\.collection=\$2 ORDER BY o\.created_at DESC LIMIT \$1`).
 		WithArgs(50, "0xc").
 		WillReturnRows(offerMockRows(mock, now))
 
@@ -1101,7 +1104,8 @@ func TestListOffersCarriesBadgeColumns(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 1 || !got[0].CollectionVerified || got[0].CollectionCreator != "0xcreator" {
+	if len(got) != 1 || !got[0].CollectionVerified || got[0].CollectionCreator != "0xcreator" ||
+		got[0].CollectionName != "Coll" || !got[0].CollectionTracked || got[0].Name != "Tok" {
 		t.Fatalf("rows = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
@@ -1116,10 +1120,11 @@ func TestSearchCarriesCreatorInBothBranches(t *testing.T) {
 	defer mock.Close()
 	q := New(mock)
 
-	rows := mock.NewRows([]string{"kind", "collection", "token_id", "name", "image_uri", "verified", "creator"}).
-		AddRow("nft", "0xc", "1", "Alpha", "ipfs://x", true, "0xcreator").
-		AddRow("collection", "0xc", "", "Alpha Coll", "", true, "0xcreator")
-	mock.ExpectQuery(`coalesce\(c\.verified, false\) AS verified,\s+coalesce\(c\.creator_addr, ''\) AS creator\s+FROM nft_tokens t[\s\S]*coalesce\(c\.verified, false\),\s+coalesce\(c\.creator_addr, ''\)\s+FROM collections c`).
+	rows := mock.NewRows([]string{"kind", "collection", "token_id", "name", "image_uri", "verified", "creator",
+		"standard", "collection_name", "tracked"}).
+		AddRow("nft", "0xc", "1", "Alpha", "ipfs://x", true, "0xcreator", "erc721", "Alpha Coll", true).
+		AddRow("collection", "0xc", "", "Alpha Coll", "", true, "0xcreator", "erc721", "Alpha Coll", true)
+	mock.ExpectQuery(`coalesce\(c\.verified, false\) AS verified,\s+coalesce\(c\.creator_addr, ''\) AS creator,\s+coalesce\(c\.standard::text, ''\) AS standard,\s+coalesce\(c\.name, ''\) AS collection_name,\s+c\.address IS NOT NULL AS tracked\s+FROM nft_tokens t[\s\S]*coalesce\(c\.verified, false\),\s+coalesce\(c\.creator_addr, ''\),\s+coalesce\(c\.standard::text, ''\),\s+c\.name,\s+true\s+FROM collections c`).
 		WithArgs("alpha", 20).
 		WillReturnRows(rows)
 
@@ -1127,7 +1132,8 @@ func TestSearchCarriesCreatorInBothBranches(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	if len(got) != 2 || got[0].Creator != "0xcreator" || got[1].Creator != "0xcreator" {
+	if len(got) != 2 || got[0].Creator != "0xcreator" || got[1].Creator != "0xcreator" ||
+		!got[0].CollectionTracked || !got[1].CollectionTracked || got[0].CollectionName != "Alpha Coll" || got[1].Standard != "erc721" {
 		t.Fatalf("rows = %+v", got)
 	}
 	if err := mock.ExpectationsWereMet(); err != nil {
