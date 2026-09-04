@@ -9,4 +9,11 @@ import TokenPage from '../components/TokenPage.svelte';
   <section id="token-page" style="max-width:80rem;margin:0 auto;padding:1.5rem 1rem 3rem;">
     <TokenPage client:load />
   </section>
+  <script is:inline>
+    // The token page's islands need the wallet immediately (spec B4):
+    // WalletConnect boots AppKit at mount when main[data-mw-needs-wallet] is
+    // set. BaseLayout also sets this from the path; this keeps the contract
+    // explicit for this page.
+    document.getElementById('main')?.setAttribute('data-mw-needs-wallet', '');
+  </script>
 </BaseLayout>

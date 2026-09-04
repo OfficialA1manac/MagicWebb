@@ -1,3 +1,66 @@
+<script module lang="ts">
+  // Pure action-zone matrix (spec B4 "Token"): status × role → cells. The
+  // template's controls and the mobile sticky bar follow this table, and the
+  // component tests assert every cell without mounting the page. Every cell
+  // is a visible control or a disabled control with a Hint `reason`.
+  export type TokenStatus = 'not-listed' | 'listed' | 'auction-live' | 'auction-ended';
+  export type TokenRole = 'viewer' | 'buyer' | 'seller';
+  export interface ActionCell { kind: string; label: string; disabled?: boolean; reason?: string; hint?: string }
+
+  export function actionZone(i: {
+    status: TokenStatus; role: TokenRole; browseOnly?: boolean;
+    offersEligible?: boolean | null; priceLabel?: string; hasBids?: boolean;
+    canForceCancel?: boolean; outbid?: boolean; isWinner?: boolean; hasOwnOffer?: boolean;
+  }): ActionCell[] {
+    if (i.browseOnly) return [{ kind: 'browse-only', label: 'Browse only' }];
+    const offersOff = i.offersEligible === false;
+    const offerCell = (connect: boolean): ActionCell => {
+      if (offersOff) return { kind: connect ? 'offer-connect' : 'make-offer', label: connect ? 'Connect wallet to make an offer' : 'Make offer', disabled: true, reason: 'Offers are off for this collection' };
+      if (connect) return { kind: 'offer-connect', label: 'Connect wallet to make an offer' };
+      return i.hasOwnOffer ? { kind: 'raise-offer', label: 'Raise offer' } : { kind: 'make-offer', label: 'Make offer' };
+    };
+    switch (i.status) {
+      case 'not-listed':
+        if (i.role === 'seller') return [
+          { kind: 'list', label: 'List for sale · free' },
+          { kind: 'auction', label: 'Start auction · free' },
+        ];
+        return [offerCell(i.role === 'viewer')];
+      case 'listed':
+        if (i.role === 'viewer') return [{ kind: 'buy-connect', label: `Connect to buy${i.priceLabel ? ' · ' + i.priceLabel : ''}`, hint: 'You pay exactly this price. Seller pays the 2% fee.' }];
+        if (i.role === 'seller') return [
+          { kind: 'edit-price', label: 'Change price' },
+          { kind: 'cancel-listing', label: 'Cancel listing' },
+        ];
+        return [{ kind: 'buy', label: `Buy now${i.priceLabel ? ' · ' + i.priceLabel : ''}` }, offerCell(false)];
+      case 'auction-live': {
+        if (i.role === 'seller') return [
+          i.hasBids
+            ? { kind: 'cancel-auction', label: 'Cancel auction', disabled: true, reason: 'An auction with bids cannot be cancelled — it settles when it ends.' }
+            : { kind: 'cancel-auction', label: 'Cancel auction' },
+        ];
+        const cells: ActionCell[] = i.role === 'viewer'
+          ? [{ kind: 'bid-connect', label: 'Connect to bid' }]
+          : [{ kind: 'bid', label: 'Place bid' }];
+        if (i.role === 'buyer' && i.outbid) cells.push({ kind: 'withdraw-bid', label: 'Withdraw your bid' });
+        return cells;
+      }
+      case 'auction-ended': {
+        if (i.role === 'viewer') return [{ kind: 'ended-info', label: 'Auction ended — settling', disabled: true, reason: 'The auction is being settled automatically.' }];
+        const cells: ActionCell[] = [];
+        if (i.role === 'seller' || i.isWinner) {
+          cells.push({ kind: 'settle', label: 'Settle now' });
+          if (i.canForceCancel) cells.push({ kind: 'force-cancel', label: 'Force-cancel & refund' });
+        } else {
+          cells.push({ kind: 'ended-info', label: 'Auction ended — settling', disabled: true, reason: 'The auction is being settled automatically. NFT to the winner, seller paid minus 2%.' });
+          if (i.outbid) cells.push({ kind: 'withdraw-bid', label: 'Withdraw your bid' });
+        }
+        return cells;
+      }
+    }
+  }
+</script>
+
 <script lang="ts">
   // Token detail: media, verified badge, price/auction state, and EVERY action
   // (buy, list, cancel, edit price, create auction, bid, make/accept/reject
@@ -9,6 +72,7 @@
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
+  import Hint from './Hint.svelte';
   import DurationPicker from './DurationPicker.svelte';
   import { MW } from '../lib/mw';
   import { ws } from '../lib/ws/client';
@@ -27,6 +91,7 @@
   type Auction = { auction_id: number; collection: string; token_id: string; seller: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps?: number; ends_at: string; status: string; name: string; image_uri: string; collection_verified: boolean };
   type Offer = { offer_id: string; bidder: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string };
   type Activity = { type: string; amountWei: string; timestamp: string; txHash: string };
+  type TokenDetail = { owner?: string; last_sale_wei?: string; indexed_at?: string };
 
   let coll = $state('');
   let tid = $state('');
@@ -65,6 +130,13 @@
   let ocName = $state('');
   let ocImg = $state('');
   let ocStd = $state<'erc721' | 'erc1155' | null>(null);
+  // GET /api/v1/token/:coll/:id — indexed owner + last sale; 404 = the
+  // indexer has never seen this token id.
+  let tokenDetail = $state<TokenDetail | null>(null);
+  // Collection IS tracked but this token id isn't in it → spec 404 copy.
+  let unknownToken = $state(false);
+  let imageError = $state(false);
+  let refreshingMeta = $state(false);
 
   // forms
   let panel = $state<'none' | 'list' | 'auction' | 'offer' | 'edit'>('none');
@@ -99,6 +171,21 @@
   let myOffer = $derived(me ? offers.find((o) => o.bidder.toLowerCase() === me!.toLowerCase() && o.status === 'active') ?? null : null);
   let liveOffers = $derived(offers.filter((o) => o.status === 'active' && new Date(o.expires_at).getTime() > now));
   let minBid = $derived(auction ? minimumTopUp({ currentHighestWei: BigInt(auction.highest_bid_wei || '0'), reserveWei: BigInt(auction.reserve_price_wei || '0'), myCumulativeWei: myCumWei, minIncrementBps: auction.min_increment_bps }) : 0n);
+  // Outbid: escrow on this auction but not the current leader → Withdraw here (spec).
+  let outbid = $derived(!!auction && myCumWei > 0n && !isAuctionWinner);
+  // Expired offers stay on the page with "Get refund" — never filtered out (audit item).
+  let expiredOffers = $derived(offers.filter((o) => (o.status === 'active' || o.status === 'expired') && new Date(o.expires_at).getTime() <= now));
+  // Edition chip (spec): "1 of 1" or "Multi-edition · you hold n".
+  let editionChip = $derived(std === 'erc1155' ? `Multi-edition${myBalance1155 > 0n ? ` · you hold ${myBalance1155}` : ''}` : '1 of 1');
+  // Status × role for the matrix (sticky bar + tests share actionZone()).
+  let tokenStatus: TokenStatus = $derived(auctionLive ? 'auction-live' : auctionEnded ? 'auction-ended' : listing ? 'listed' : 'not-listed');
+  let tokenRole: TokenRole = $derived(!me ? 'viewer' : (isOwner || isSeller || isAuctionSeller) ? 'seller' : 'buyer');
+  let primaryCell = $derived(actionZone({
+    status: tokenStatus, role: tokenRole, browseOnly: !canTrade, offersEligible: offerEligible,
+    priceLabel: listing ? `${fmtPrice(listing.price_wei)} ${sym}` : undefined,
+    hasBids: !!auction && BigInt(auction?.highest_bid_wei || '0') > 0n,
+    canForceCancel, outbid, isWinner: isAuctionWinner, hasOwnOffer: !!myOffer,
+  })[0]);
 
   // Read the caller's cumulative escrow so the min top-up is the real amount
   // still owed, not the full leader total (matches AuctionPage behaviour).
@@ -126,7 +213,8 @@
       } else {
         owner = (await pub.readContract({ address: coll as Address, abi: erc721Abi, functionName: 'ownerOf', args: [BigInt(tid)] })) as string;
       }
-    } catch { /* unknown owner: UI simply hides owner actions */ }
+    } catch { /* unknown owner: fall back to the indexed owner below */ }
+    if (!owner && tokenDetail?.owner) owner = tokenDetail.owner;
     // Live profile tag for the owner badge — never cached client-side.
     if (owner) {
       const prof = await j<{ tag?: string }>(`/api/v1/profile/${owner.toLowerCase()}`);
@@ -204,7 +292,7 @@
     if (initial) loading = true;
     error = '';
     const q = `collection=${encodeURIComponent(coll)}&token_id=${encodeURIComponent(tid)}`;
-    const [l, c, t, a, o, au] = await Promise.all([
+    const [l, c, t, a, o, au, td] = await Promise.all([
       j<Listing>(`/api/v1/listings/${coll}/${tid}`),
       j<Collection>(`/api/v1/collections/${coll}`),
       j<Record<string, string>>(`/api/v1/collections/${coll}/traits`),
@@ -216,7 +304,11 @@
       // the token's own auction invisible — the page then rendered as if no
       // auction existed.
       j<Auction[]>(`/api/v1/auctions?collection=${encodeURIComponent(coll)}&token_id=${encodeURIComponent(tid)}&status=active&limit=1`),
+      // Indexed owner + last sale; a 404 here with a KNOWN collection is the
+      // "Token #N doesn't exist in this collection" state (spec).
+      j<TokenDetail>(`/api/v1/token/${coll}/${tid}`),
     ]);
+    tokenDetail = td;
     listing = l && l.price_wei ? l : null;
     collection = c; traits = t ?? {}; activity = a ?? []; offers = o ?? [];
     // The server filters by token_id, so this is a correctness backstop, not a
@@ -235,6 +327,14 @@
       if (!onchain) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
     } else {
       onchain = false;
+    }
+    // The collection IS tracked but this token id has never been indexed,
+    // isn't listed, isn't auctioned and can't be read on-chain → the spec's
+    // "Token #N doesn't exist in this collection" 404 state.
+    unknownToken = false;
+    if (c && !l && !auction && !td) {
+      if (!onchain) onchain = await loadOnChainFallback();
+      unknownToken = !onchain;
     }
     await loadOwner();
     // Deep link from profile "List →": open the list panel once ownership confirms.
@@ -290,8 +390,52 @@
   const doReject = (o: Offer) => act(() => MW.rejectOffer({ nft: coll, tokenId: tid, bidder: o.bidder, name }), 'Offer declined · syncing');
   const doCancelOffer = () => act(() => MW.cancelOffer({ nft: coll, tokenId: tid, name }), 'Offer cancelled · syncing');
   const doEnableOffers = () => act(() => MW.setOfferEligible({ nft: coll, eligible: true, name: collection?.name }), 'Offers enabled · syncing');
+  // Withdraw a losing/outbid escrow right here on the token page (spec).
+  const doWithdrawBid = () => auction && act(() => MW.withdrawLoserFunds({ auctionId: String(auction!.auction_id), amountWei: myCumWei.toString() }), 'Bid withdrawn · syncing');
+  // Expired-offer refunds live on the token page too (audit item).
+  const doRefundExpired = (o: Offer) => act(() => MW.refundExpiredOffer({ nft: coll, tokenId: tid, bidder: o.bidder }), 'Refunded · syncing');
+  const connectWallet = () => { MW.connect().catch(() => {}); };
+  // "Refresh metadata": re-read on-chain metadata + the API in place.
+  async function refreshMetadata() {
+    refreshingMeta = true;
+    imageError = false;
+    onchain = false; ocImg = ''; ocName = '';
+    await load();
+    if (!img) await loadOnChainFallback().then((ok) => (onchain = onchain || ok));
+    refreshingMeta = false;
+  }
 
   const openPanel = (p: typeof panel) => { panel = panel === p ? 'none' : p; formErr = ''; priceIn = ''; };
+
+  /** Activity in words (spec): "Listed for 10", "Sold for 12.5", time + tx link. */
+  function actWords(a: Activity): string {
+    const amt = a.amountWei && a.amountWei !== '0' ? `${fmtPrice(a.amountWei)} ${sym}` : '';
+    const t = a.type.toLowerCase();
+    if (t.includes('sale') || t.includes('sold') || t.includes('buy')) return amt ? `Sold for ${amt}` : 'Sold';
+    if (t.includes('cancel')) return 'Listing cancelled';
+    if (t.includes('list')) return amt ? `Listed for ${amt}` : 'Listed';
+    if (t.includes('bid')) return amt ? `Bid of ${amt}` : 'Bid placed';
+    if (t.includes('offer')) return amt ? `Offer of ${amt}` : 'Offer made';
+    if (t.includes('settle')) return amt ? `Auction settled for ${amt}` : 'Auction settled';
+    if (t.includes('auction')) return 'Auction started';
+    return amt ? `${a.type} · ${amt}` : a.type;
+  }
+
+  /** Mobile sticky-bar primary action, from the same matrix as everything else. */
+  function stickyAction() {
+    switch (primaryCell?.kind) {
+      case 'buy': return doBuy();
+      case 'buy-connect': case 'bid-connect': case 'offer-connect': return connectWallet();
+      case 'list': return openPanel('list');
+      case 'edit-price': return openPanel('edit');
+      case 'make-offer': case 'raise-offer': return openPanel('offer');
+      case 'bid': return document.getElementById('bid-in')?.focus();
+      case 'settle': return doSettle();
+      case 'cancel-auction': return doCancelAuction();
+      case 'cancel-listing': return doCancel();
+      default: return;
+    }
+  }
 </script>
 
 {#if loading}
@@ -299,12 +443,25 @@
     <Skeleton square r="20px" />
     <div style="display:flex;flex-direction:column;gap:12px"><Skeleton w="40%" h="14px" /><Skeleton w="70%" h="28px" /><Skeleton w="50%" h="34px" /><Skeleton h="48px" r="12px" /><Skeleton h="48px" r="12px" /></div>
   </div>
+{:else if unknownToken}
+  <EmptyState
+    title={`Token #${tid} doesn't exist in this collection`}
+    body="Check the token id, or browse the collection's items."
+    icon="image"
+    cta={{ label: 'Browse the collection', href: `/collection/${coll}` }} />
 {:else if error && !collection && !listing && !auction}
   <ErrorState message={error} retry={() => load(true)} />
 {:else}
   <div class="tp-grid">
     <div class="tp-media">
-      {#if img}<img src={img} alt={name} loading="eager" />{:else}<div class="tp-noimg" aria-hidden="true">🖼</div>{/if}
+      {#if img && !imageError}
+        <img src={img} alt={name} loading="eager" onerror={() => (imageError = true)} />
+      {:else}
+        <div class="tp-nometa">
+          <p>No image in metadata</p>
+          <button class="btn btn-secondary" disabled={refreshingMeta} onclick={() => void refreshMetadata()}>{refreshingMeta ? 'Refreshing…' : 'Refresh metadata'}</button>
+        </div>
+      {/if}
     </div>
 
     <div class="tp-side">
@@ -313,10 +470,18 @@
         <VerifiedBadge {verified} showUnverified={true} network={chain.name} collectionName={collection?.name || ''} {creatorAddr} />
         {#if live}<span class="tp-live" title="Live updates connected">● live</span>{/if}
       </div>
-      <h1 class="tp-title">{name}</h1>
+      <div class="tp-titlerow">
+        <h1 class="tp-title">{name}</h1>
+        <span class="tp-edition" title={std === 'erc1155' ? 'Several copies of this token exist' : 'Only one copy of this token exists'}>{editionChip}</span>
+      </div>
+      {#if owner}
+        <div class="tp-meta">
+          Owned by <a href={`/profile/${owner}`} class="mono">{shortAddr(owner)}</a>{#if isOwner}&nbsp;(you){/if}
+          <span class="vb is-holder sm" title={HOLDER_BADGE_TIP}>{ownerTag || holderBadgeName(owner)}</span>
+        </div>
+      {/if}
       <div class="tp-meta mono">
         <a href={explorerAddress(coll)} target="_blank" rel="noopener">{shortAddr(coll)}</a> · #{tid} · {std.toUpperCase()}
-        {#if owner} · owner <a href={`/profile/${owner}`}>{isOwner ? 'you' : shortAddr(owner)}</a> <span class="vb is-holder sm" title={HOLDER_BADGE_TIP}>{ownerTag || holderBadgeName(owner)}</span>{/if}
       </div>
       {#if creatorAddr}
         <div class="tp-meta mono">
@@ -346,10 +511,18 @@
           <div class="tp-price mono">{fmtPrice(BigInt(auction.highest_bid_wei || '0') > 0n ? auction.highest_bid_wei : auction.reserve_price_wei)} <small>{sym}</small></div>
           <div class="tp-sub">{BigInt(auction.highest_bid_wei || '0') > 0n ? `Highest bid by ${shortAddr(auction.highest_bidder)}` : 'No bids yet · reserve shown'} · bids in the last 3 min extend the auction</div>
           {#if canTrade && auctionLive && !isAuctionSeller}
-            <div class="tp-form">
-              <label class="tp-label" for="bid-in">Your bid ({sym}) · min {fmtPrice(minBid)}</label>
-              <div class="tp-inrow"><input id="bid-in" class="tp-input mono" inputmode="decimal" placeholder={fmtPrice(minBid)} bind:value={bidIn} /><button class="btn p" onclick={doBid}>Place bid</button></div>
-            </div>
+            {#if me}
+              <div class="tp-form">
+                <label class="tp-label" for="bid-in">Your bid ({sym}) · min {fmtPrice(minBid)}</label>
+                <div class="tp-inrow"><input id="bid-in" class="tp-input mono" inputmode="decimal" placeholder={fmtPrice(minBid)} bind:value={bidIn} /><button class="btn p" onclick={doBid}>Place bid</button></div>
+              </div>
+            {:else}
+              <button class="btn p" onclick={connectWallet}>Connect to bid</button>
+            {/if}
+            {#if outbid}
+              <button class="btn g" onclick={doWithdrawBid}>Withdraw your bid · {fmtPrice(myCumWei)} {sym}</button>
+              <p class="tp-hint">You've been outbid. Your escrowed {fmtPrice(myCumWei)} {sym} is fully refundable right now.</p>
+            {/if}
           {:else if canTrade && auctionEnded}
             {#if isAuctionSeller || isAuctionWinner}
               <button class="btn p" onclick={doSettle}>Settle now</button>
@@ -362,11 +535,17 @@
               {/if}
             {:else}
               <p class="tp-hint">Auction ended — settling automatically. NFT to the winner, seller paid minus 2%.</p>
+              {#if outbid}
+                <button class="btn g" onclick={doWithdrawBid}>Withdraw your bid · {fmtPrice(myCumWei)} {sym}</button>
+              {/if}
             {/if}
           {:else if canTrade && isAuctionSeller && BigInt(auction.highest_bid_wei || '0') === 0n}
             <button class="btn g" onclick={doCancelAuction}>Cancel auction</button>
           {:else if canTrade && isAuctionSeller}
-            <p class="tp-hint">Your auction has bids and will settle when it ends.</p>
+            <div class="tp-btnrow">
+              <button class="btn g" disabled aria-disabled="true">Cancel auction</button>
+              <Hint text="An auction with bids cannot be cancelled — it settles when it ends." label="Why can't I cancel?" />
+            </div>
           {/if}
         </section>
       {:else if listing}
@@ -377,7 +556,8 @@
           {#if isSeller}
             {#if canTrade}<div class="tp-btnrow"><button class="btn g" onclick={() => openPanel('edit')}>Change price</button><button class="btn g" onclick={doCancel}>Cancel listing</button></div>{/if}
           {:else if canTrade}
-            <button class="btn p" onclick={doBuy}>{me ? `Buy now · ${fmtPrice(listing.price_wei)} ${sym}` : `Connect to buy · ${fmtPrice(listing.price_wei)} ${sym}`}</button>
+            <button class="btn p" onclick={me ? doBuy : connectWallet}>{me ? `Buy now · ${fmtPrice(listing.price_wei)} ${sym}` : `Connect to buy · ${fmtPrice(listing.price_wei)} ${sym}`}</button>
+            <p class="tp-hint">You pay exactly this price. Seller pays the 2% fee.</p>
           {/if}
         </section>
       {:else}
@@ -393,17 +573,25 @@
            same token twice and strands whichever action loses the race. -->
       {#if canTrade && isOwner && !listing && !auctionLive && !auctionEnded}
         <div class="tp-btnrow">
-          <button class="btn p" onclick={() => openPanel('list')}>List for sale</button>
-          <button class="btn v" onclick={() => openPanel('auction')}>Start auction</button>
+          <button class="btn p" onclick={() => openPanel('list')}>List for sale · free</button>
+          <button class="btn v" onclick={() => openPanel('auction')}>Start auction · free</button>
         </div>
       {/if}
       {#if canTrade && !isOwner && !isSeller}
         <div class="tp-btnrow">
-          {#if myOffer}
-            <button class="btn gold" onclick={() => openPanel('offer')}>Change offer ({fmtPrice(myOffer.amount_wei)} {sym})</button>
-            <button class="btn g" onclick={doCancelOffer}>Cancel my offer</button>
+          {#if !me}
+            {#if offerEligible === false}
+              <button class="btn gold" disabled aria-disabled="true">Connect wallet to make an offer</button>
+              <Hint text="Offers are off for this collection" label="Why is this disabled?" />
+            {:else}
+              <button class="btn gold" onclick={connectWallet}>Connect wallet to make an offer</button>
+            {/if}
+          {:else if myOffer}
+            <button class="btn gold" onclick={() => openPanel('offer')}>Raise offer ({fmtPrice(myOffer.amount_wei)} {sym})</button>
+            <button class="btn g" onclick={doCancelOffer}>Withdraw my offer</button>
           {:else if offerEligible === false}
-            <span class="tp-hint">Offers are off for this collection.{isOwner ? '' : ' The collection owner can enable them.'}</span>
+            <button class="btn gold" disabled aria-disabled="true">Make offer</button>
+            <Hint text="Offers are off for this collection. The collection owner can enable them." label="Why is this disabled?" />
           {:else}
             <button class="btn gold" onclick={() => openPanel('offer')}>Make offer</button>
           {/if}
@@ -425,7 +613,8 @@
           <label class="tp-label" for="price-in">
             {panel === 'list' ? `Price (${sym})` : panel === 'edit' ? `New price (${sym})` : panel === 'auction' ? `Reserve price (${sym})` : `Your offer (${sym})`}
           </label>
-          <input id="price-in" class="tp-input mono" inputmode="decimal" placeholder="min 1" bind:value={priceIn} />
+          <input id="price-in" class="tp-input mono" inputmode="decimal" placeholder={`Min 1 ${sym}`} bind:value={priceIn} />
+          {#if panel === 'list'}<p class="tp-hint">You receive 98% when it sells.</p>{/if}
           {#if std === 'erc1155' && panel !== 'edit'}
             <label class="tp-label" for="qty-in">{panel === 'offer' ? 'Units wanted' : 'Units to sell'}{myBalance1155 > 0n && panel !== 'offer' ? ` (you hold ${myBalance1155})` : ''}</label>
             <input id="qty-in" class="tp-input mono" inputmode="numeric" placeholder="1" bind:value={qtyIn} />
@@ -433,7 +622,8 @@
           {#if panel === 'auction'}
             <p class="tp-hint">Bids raise the lead by at least 1 {sym} — the same rule for every auction.</p>
           {/if}
-          {#if panel !== 'edit'}<DurationPicker bind:value={duration} label={panel === 'auction' ? 'Auction length' : 'Valid for'} />{/if}
+          <!-- Raising an existing offer keeps its expiry: no DurationPicker (audit). -->
+          {#if panel !== 'edit' && !(panel === 'offer' && myOffer)}<DurationPicker bind:value={duration} label={panel === 'auction' ? 'Auction length' : 'Valid for'} />{/if}
           {#if formErr}<div class="tp-formerr" role="alert">{formErr}</div>{/if}
           <div class="tp-btnrow">
             {#if panel === 'list'}<button class="btn p" onclick={doList}>List · free</button>
@@ -457,7 +647,28 @@
               <li>
                 <span class="mono">{fmtPrice(o.amount_wei)} {sym}</span>
                 <span class="tp-dim">{me && o.bidder.toLowerCase() === me.toLowerCase() ? 'you' : shortAddr(o.bidder)} · ends {fmtCountdown(new Date(o.expires_at).getTime() / 1000, now)}</span>
-                {#if isOwner}<span class="tp-btnrow"><button class="btn p sm" onclick={() => doAccept(o)}>Accept</button><button class="btn g sm" onclick={() => doReject(o)}>Decline</button></span>{/if}
+                {#if isOwner}
+                  <span class="tp-btnrow"><button class="btn p sm" onclick={() => doAccept(o)}>Accept</button><button class="btn g sm" onclick={() => doReject(o)}>Decline</button></span>
+                {:else if me && o.bidder.toLowerCase() === me.toLowerCase()}
+                  <span class="tp-btnrow"><button class="btn gold sm" onclick={() => openPanel('offer')}>Raise</button><button class="btn g sm" onclick={doCancelOffer}>Withdraw</button></span>
+                {/if}
+              </li>
+            {/each}
+          </ul>
+        {/if}
+        {#if expiredOffers.length}
+          <!-- Expired offers stay visible with their refund path (audit item). -->
+          <h3 class="tp-subhead">Expired offers</h3>
+          <ul class="tp-list">
+            {#each expiredOffers as o (o.offer_id)}
+              <li class="tp-expired">
+                <span class="mono">{fmtPrice(o.amount_wei)} {sym}</span>
+                <span class="tp-dim">{me && o.bidder.toLowerCase() === me.toLowerCase() ? 'you' : shortAddr(o.bidder)} · expired {timeAgo(o.expires_at)}</span>
+                {#if me && o.bidder.toLowerCase() === me.toLowerCase()}
+                  <button class="btn p sm" onclick={() => doRefundExpired(o)}>Get refund</button>
+                {:else if isOwner}
+                  <button class="btn g sm" onclick={() => doRefundExpired(o)}>Return funds</button>
+                {/if}
               </li>
             {/each}
           </ul>
@@ -477,11 +688,23 @@
     {:else}
       <ul class="tp-list">
         {#each activity as a (a.txHash + a.type + a.timestamp)}
-          <li><span class="tp-tag">{a.type}</span><span class="tp-dim">{timeAgo(a.timestamp)}</span><span class="mono">{a.amountWei && a.amountWei !== '0' ? `${fmtPrice(a.amountWei)} ${sym}` : ''}</span><a class="tp-dim" href={MW.explorerTx(a.txHash)} target="_blank" rel="noopener">↗</a></li>
+          <!-- Rows in words (spec): "Listed for 10" · time · tx link. -->
+          <li><span class="tp-act">{actWords(a)}</span><span class="tp-dim">{timeAgo(a.timestamp)}</span><a class="tp-dim" href={MW.explorerTx(a.txHash)} target="_blank" rel="noopener" aria-label="View transaction in the explorer">↗</a></li>
         {/each}
       </ul>
     {/if}
   </section>
+
+  <!-- Mobile sticky action bar (spec): the matrix's primary action, 48px,
+       pinned above the tab bar. Hidden on desktop. -->
+  {#if canTrade && primaryCell && primaryCell.kind !== 'browse-only'}
+    <div class="tp-sticky" data-testid="sticky-bar">
+      <button class="btn p tp-sticky-btn" disabled={primaryCell.disabled} aria-disabled={primaryCell.disabled ? 'true' : undefined}
+              title={primaryCell.disabled ? primaryCell.reason : undefined} onclick={() => stickyAction()}>
+        {primaryCell.label}
+      </button>
+    </div>
+  {/if}
 {/if}
 
 <style>
@@ -528,5 +751,17 @@
   .tp-traits { display: flex; flex-wrap: wrap; gap: 6px; }
   .tp-trait { padding: 4px 10px; border-radius: 999px; background: rgba(167,139,250,.1); border: 1px solid rgba(167,139,250,.2); font-size: 12px; color: #c4b5fd; }
   .tp-activity { margin-top: 32px; }
+  .tp-titlerow { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+  .tp-edition { padding: 3px 10px; border-radius: 999px; background: rgba(255,255,255,.08); border: 1px solid rgba(255,255,255,.14); font-size: 11px; font-weight: 800; color: rgba(255,255,255,.65); white-space: nowrap; }
+  .tp-nometa { display: flex; flex-direction: column; align-items: center; gap: 12px; color: rgba(255,255,255,.5); font-size: 14px; padding: 24px; text-align: center; }
+  .tp-nometa p { margin: 0; }
+  .tp-subhead { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: rgba(255,255,255,.4); margin: 14px 0 8px; }
+  .tp-expired { opacity: .75; }
+  .tp-act { font-weight: 600; }
+  .tp-sticky { display: none; }
+  @media (max-width: 767px) {
+    .tp-sticky { display: block; position: fixed; left: 0; right: 0; bottom: calc(var(--tabbar-h, 56px) + env(safe-area-inset-bottom)); z-index: var(--z-banner, 40); padding: 8px 12px; background: rgba(9,9,11,.92); backdrop-filter: blur(8px); border-top: 1px solid rgba(255,255,255,.1); }
+    .tp-sticky-btn { width: 100%; min-height: 48px; }
+  }
   @media (prefers-reduced-motion: reduce) { .tp-spin { animation: none; } }
 </style>

@@ -1,283 +1,186 @@
-<script>
+<script lang="ts">
+  // Listings grid (spec B4). Receives filter state from ListingsFilters via
+  // the FILTERS_EVENT window event (or a `filters` prop in tests), fetches in
+  // place (never navigates), pages with "Load more" (48/page), and renders the
+  // full state table: skeleton 8/4, empty vs no-match, error + Retry.
   import { onMount } from 'svelte';
+  import NFTCard from './NFTCard.svelte';
+  import EmptyState from './EmptyState.svelte';
+  import ErrorState from './ErrorState.svelte';
+  import Skeleton from './Skeleton.svelte';
   import { ws } from '../lib/ws/client';
   import { ACTIVITY_CHANNEL } from '../lib/ws/channels';
-  import NFTCard from './NFTCard.svelte';
   import { tradingLive, readOnlyCopy } from '../lib/chains';
+  import {
+    json, jsonOrNull, listingsApiParams, parseListingsParams, hasActiveFilters,
+    FILTERS_EVENT, CLEAR_FILTERS_EVENT, EMPTY_FILTERS, type ListingsFilterState,
+  } from '../lib/api';
+
+  interface ListingItem {
+    collection: string; token_id: string; seller: string; price_wei: string;
+    amount: number; standard: string; expires_at: string; listed_at: string;
+    tx_hash: string; name: string; image_uri: string; total_supply: number;
+    collection_verified: boolean; collection_creator?: string;
+    collection_name?: string; collection_tracked?: boolean;
+  }
+
+  let { filters = null, pageSize = 48 }: { filters?: ListingsFilterState | null; pageSize?: number } = $props();
 
   const live = tradingLive();
   const ro = readOnlyCopy();
 
-  let items = [];
-  let loading = true;
-  let error = null;
-  let count = 0;
-  let sortBy = 'recent';
-  let _fetchGen = 0;
+  let state = $state<ListingsFilterState>({ ...EMPTY_FILTERS });
+  let items = $state<ListingItem[]>([]);
+  let loading = $state(true);
+  let error = $state('');
+  let page = $state(1);
+  let lastBatch = $state(0);
+  let loadingMore = $state(false);
+  /** Total live listings — only known while unfiltered (from /api/v1/metrics). */
+  let total = $state<number | null>(null);
+  let gen = 0;
 
-  export let collection = '';
-  export let seller = '';
-  export let minPrice = '';
-  export let maxPrice = '';
-  export let traitFilters = '';
+  let filtered = $derived(hasActiveFilters(state));
+  let hasMore = $derived(lastBatch === pageSize);
 
-  async function fetchListings() {
-    const gen = ++_fetchGen;
+  async function fetchPage(p: number): Promise<ListingItem[]> {
+    return await json<ListingItem[]>(`/api/v1/listings?${listingsApiParams(state, p, pageSize)}`);
+  }
+
+  /** Full (re)load: pages 1..state.page so a deep-linked ?page=3 shows all rows up to it. */
+  async function load() {
+    const g = ++gen;
     loading = true;
-    error = null;
-
+    error = '';
     try {
-      const params = new URLSearchParams({ limit: '48', sort: sortBy });
-      if (collection) params.set('collection', collection);
-      if (seller) params.set('seller', seller);
-      if (minPrice) params.set('min_price', minPrice);
-      if (maxPrice) params.set('max_price', maxPrice);
-      if (traitFilters) params.set('traits', traitFilters);
-      const res = await fetch(`/api/v1/listings?${params}`);
-      if (!res.ok) throw new Error('The marketplace did not respond. It may be busy — try again in a moment.');
-      if (gen !== _fetchGen) return;
-
-      const data = await res.json();
-      if (gen !== _fetchGen) return;
-      items = data;
-      count = data.length;
-    } catch (e) {
-      if (gen !== _fetchGen) return;
-      error = e.message || 'Could not load listings. Check your connection and try again.';
+      const pages = Math.max(1, Math.min(state.page, 10));
+      const batches = await Promise.all(Array.from({ length: pages }, (_, i) => fetchPage(i + 1)));
+      if (g !== gen) return;
+      items = batches.flat();
+      page = pages;
+      lastBatch = batches[batches.length - 1]?.length ?? 0;
+    } catch {
+      if (g !== gen) return;
+      error = 'The marketplace did not respond. It may be busy — try again in a moment.';
       items = [];
     } finally {
-      if (gen === _fetchGen) loading = false;
+      if (g === gen) loading = false;
+    }
+    if (!filtered) {
+      const m = await jsonOrNull<{ totalActiveListings?: number }>('/api/v1/metrics');
+      if (g === gen) total = typeof m?.totalActiveListings === 'number' ? m.totalActiveListings : null;
+    } else if (g === gen) {
+      total = null;
     }
   }
 
-  onMount(() => {
-    fetchListings();
-    // Live: any marketplace activity (sale, new listing, cancel) refreshes the
-    // grid, debounced so a burst of events is one refetch.
-    let t = null;
-    const offWs = ws.on('*', (_d, meta) => {
-      if (meta.type === 'notification') return;
-      if (t) clearTimeout(t);
-      t = setTimeout(() => { t = null; fetchListings(); }, 400);
-    });
-    ws.subscribe(ACTIVITY_CHANNEL);
-    return () => { offWs(); ws.unsubscribe(ACTIVITY_CHANNEL); if (t) clearTimeout(t); };
-  });
+  async function loadMore() {
+    if (loadingMore) return;
+    const g = gen;
+    loadingMore = true;
+    try {
+      const next = await fetchPage(page + 1);
+      if (g !== gen) return;
+      page += 1;
+      lastBatch = next.length;
+      items = [...items, ...next];
+      state.page = page;
+      history.replaceState(null, '', location.pathname + toSearch());
+    } catch { /* keep what we have; the button stays for another try */ }
+    finally { if (g === gen) loadingMore = false; }
+  }
 
-  function handleSortChange(e) {
-    sortBy = e.target.value;
-    fetchListings();
+  function toSearch(): string {
+    // NFTGrid only advances `page`; everything else is ListingsFilters' job.
+    const p = new URLSearchParams(location.search);
+    if (page > 1) p.set('page', String(page)); else p.delete('page');
+    const s = p.toString();
+    return s ? `?${s}` : '';
+  }
+
+  function applyFilters(f: ListingsFilterState) {
+    state = { ...f };
+    void load();
+  }
+
+  function clearFilters() {
+    window.dispatchEvent(new CustomEvent(CLEAR_FILTERS_EVENT));
+    applyFilters({ ...EMPTY_FILTERS });
   }
 
   function goListNFT() {
-    // Route to the profile's My NFTs tab (real scroll target) where every
-    // held NFT has a List action + batch listing. Connect first if needed.
-    if (typeof window === 'undefined') return;
     const mw = window.MW;
     const connected = (() => { try { return !!mw?.address?.(); } catch { return false; } })();
-    if (!connected && window.__MW_APPKIT_OPEN__) { window.__MW_APPKIT_OPEN__(); return; }
+    if (!connected && mw) { mw.connect().then(() => { location.href = '/profile#nfts'; }).catch(() => {}); return; }
     location.href = '/profile#nfts';
   }
+
+  onMount(() => {
+    applyFilters(filters ?? parseListingsParams(location.search).filters);
+    const onFilters = (e: Event) => applyFilters((e as CustomEvent<ListingsFilterState>).detail);
+    window.addEventListener(FILTERS_EVENT, onFilters);
+    // Live: marketplace activity refreshes the grid in place, debounced.
+    let t: ReturnType<typeof setTimeout> | null = null;
+    const offWs = ws.on('*', (_d, meta) => {
+      if (meta.type === 'notification') return;
+      if (t) clearTimeout(t);
+      t = setTimeout(() => { t = null; void load(); }, 400);
+    });
+    ws.subscribe(ACTIVITY_CHANNEL);
+    return () => {
+      window.removeEventListener(FILTERS_EVENT, onFilters);
+      offWs();
+      ws.unsubscribe(ACTIVITY_CHANNEL);
+      if (t) clearTimeout(t);
+    };
+  });
 </script>
 
-<div class="grid-section">
-  <div class="grid-header">
-    <div class="header-left">
-      <h2>{#if collection}Collection Listings{:else}Current Listings{/if}</h2>
-      {#if !loading}
-        <span class="count-badge">{count} item{count !== 1 ? 's' : ''}</span>
-      {/if}
-    </div>
-    <div class="controls">
-      <select class="sort-select" bind:value={sortBy} on:change={handleSortChange}>
-        <option value="recent">Most Recent</option>
-        <option value="price_asc">Price: Low to High</option>
-        <option value="price_desc">Price: High to Low</option>
-      </select>
-      {#if live}
-        <button on:click={goListNFT} class="list-btn">
-          ＋ List NFT
-        </button>
-      {/if}
-    </div>
-  </div>
-
+<section class="ng" aria-label="Listings">
   {#if loading}
-    <div class="loading-grid">
-      {#each Array(8) as _, i}
-        <div class="card-skeleton" style="animation-delay: {i * 0.05}s">
-          <div class="skeleton-image"></div>
-          <div class="skeleton-body">
-            <div class="skeleton-line" style="width:75%"></div>
-            <div class="skeleton-line" style="width:50%"></div>
-            <div class="skeleton-line" style="width:66%"></div>
-          </div>
-        </div>
+    <div class="ng-grid" aria-hidden="true">
+      {#each Array(8) as _, i (i)}
+        <div class="ng-sk" class:ng-sk-extra={i >= 4}><Skeleton card /></div>
       {/each}
     </div>
   {:else if error}
-    <div class="error-card">
-      <div style="font-size:2rem;margin-bottom:0.5rem;">⚠</div>
-      <p style="font-size:1rem;font-weight:700;color:#fca5a5;">Failed to load listings</p>
-      <p class="error-detail">{error}</p>
-      <div style="display:flex;gap:0.5rem;margin-top:0.5rem;">
-        <button class="retry-btn" on:click={() => { error = null; loading = true; fetchListings(); }}>Retry</button>
-      </div>
-    </div>
+    <ErrorState title="Failed to load listings" message={error} retry={() => void load()} />
   {:else if items.length === 0}
-    <div class="empty-card">
-      <div style="font-size:3rem;margin-bottom:1rem;opacity:0.2;">✦</div>
-      {#if live}
-        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">No active listings</p>
-        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.2);margin-top:0.25rem;">Be the first to list an NFT on the marketplace!</p>
-        <button on:click={goListNFT} class="retry-btn" style="margin-top:0.75rem;">＋ List an NFT</button>
-      {:else}
-        <p style="font-size:1.125rem;font-weight:700;color:rgba(255,255,255,0.4);">{ro.heading}</p>
-        <p style="font-size:0.8125rem;color:rgba(255,255,255,0.25);margin-top:0.25rem;">{ro.body}</p>
-        {#if ro.ctaHref}
-          <a href={ro.ctaHref} class="retry-btn" style="margin-top:0.75rem;display:inline-flex;align-items:center;min-height:44px;text-decoration:none;">{ro.cta}</a>
-        {/if}
-        <a href="/docs/faq" style="display:block;margin-top:0.5rem;font-size:0.75rem;color:#7dd3fc;">Learn more</a>
-      {/if}
-    </div>
+    {#if !live}
+      <EmptyState title={ro.heading} body={ro.body} cta={ro.ctaHref ? { label: ro.cta, href: ro.ctaHref } : undefined} />
+    {:else if filtered}
+      <EmptyState title="No listings match" body="Try widening the price range or clearing a filter." icon="search"
+                  cta={{ label: 'Clear filters', onclick: clearFilters }} />
+    {:else}
+      <EmptyState title="Nothing is listed yet" body="Listing is free — you only pay 2% when it sells." icon="tag"
+                  cta={{ label: 'List an NFT', onclick: goListNFT }} />
+    {/if}
   {:else}
-    <div class="nft-grid">
+    <div class="ng-grid">
       {#each items as item (item.collection + item.token_id + item.seller)}
         <NFTCard {item} />
       {/each}
     </div>
+    <footer class="ng-foot">
+      <span class="ng-count" data-testid="showing">
+        {total !== null && total >= items.length ? `Showing ${items.length} of ${total}` : `Showing ${items.length}`}
+      </span>
+      {#if hasMore}
+        <button class="btn btn-secondary btn-lg" onclick={() => void loadMore()} disabled={loadingMore}>
+          {loadingMore ? 'Loading…' : 'Load more'}
+        </button>
+      {/if}
+    </footer>
   {/if}
-</div>
+</section>
 
 <style>
-  .grid-section {
-    max-width: 80rem;
-    margin: 0 auto;
-  }
-  .grid-header {
-    display: flex;
-    align-items: center;
-    justify-content: space-between;
-    margin-bottom: 1.5rem;
-    flex-wrap: wrap;
-    gap: 0.75rem;
-  }
-  .header-left {
-    display: flex;
-    align-items: center;
-    gap: 0.75rem;
-  }
-  .grid-header h2 {
-    font-size: 1.25rem;
-    font-weight: 800;
-    color: #fafafa;
-    margin: 0;
-    letter-spacing: -0.02em;
-  }
-  .controls { display: flex; align-items: center; gap: 0.75rem; flex-wrap: wrap; }
-  .count-badge {
-    padding: 0.25rem 0.75rem;
-    background: rgba(125, 211, 252, 0.1);
-    border: 1px solid rgba(125, 211, 252, 0.2);
-    border-radius: 2rem;
-    color: #7dd3fc;
-    font-size: 0.75rem;
-    font-weight: 700;
-  }
-  .sort-select {
-    padding: 0.5rem 0.75rem;
-    border: 1px solid rgba(255, 255, 255, 0.1);
-    border-radius: 0.5rem;
-    background: rgba(15, 15, 19, 0.6);
-    color: #fafafa;
-    font-size: 0.8125rem;
-    cursor: pointer;
-    outline: none;
-    font-family: inherit;
-    transition: border-color 0.2s;
-  }
-  .sort-select:hover, .sort-select:focus {
-    border-color: rgba(167, 139, 250, 0.4);
-  }
-  .list-btn {
-    padding: 0.5rem 1rem;
-    border-radius: 0.75rem;
-    background: linear-gradient(135deg, #7dd3fc, #0ea5e9);
-    color: #09090b;
-    font-weight: 800;
-    font-size: 0.8125rem;
-    border: none;
-    cursor: pointer;
-    transition: all 0.2s;
-    box-shadow: 0 0 22px -6px rgba(56,189,248,0.45), 0 4px 12px -4px rgba(14,165,233,0.3);
-    font-family: inherit;
-    display: inline-flex;
-    align-items: center;
-    gap: 0.375rem;
-  }
-  .list-btn:hover {
-    opacity: 0.92;
-    transform: scale(1.02);
-  }
-  .nft-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1.25rem;
-  }
-  .loading-grid {
-    display: grid;
-    grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
-    gap: 1.25rem;
-  }
-  .card-skeleton {
-    background: rgba(15, 15, 19, 0.5);
-    border-radius: 0.875rem;
-    overflow: hidden;
-    border: 1px solid rgba(255, 255, 255, 0.05);
-    animation: shimmer 1.5s ease-in-out infinite;
-  }
-  @keyframes shimmer {
-    0% { opacity: 0.3; }
-    50% { opacity: 0.7; }
-    100% { opacity: 0.3; }
-  }
-  .skeleton-image { aspect-ratio: 1; background: rgba(255, 255, 255, 0.03); }
-  .skeleton-body { padding: 0.875rem; display: flex; flex-direction: column; gap: 0.5rem; }
-  .skeleton-line {
-    height: 0.75rem;
-    background: rgba(255, 255, 255, 0.04);
-    border-radius: 0.25rem;
-  }
-  .error-card, .empty-card {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.5rem;
-    padding: 4rem 1.5rem;
-    text-align: center;
-    border-radius: 1rem;
-    background: rgba(15, 15, 19, 0.5);
-    border: 1px solid rgba(255, 255, 255, 0.05);
-  }
-  .error-detail { font-size: 0.8125rem; color: rgba(255, 255, 255, 0.3); }
-  .retry-btn {
-    padding: 0.5rem 1.25rem;
-    border-radius: 0.625rem;
-    background: rgba(167, 139, 250, 0.1);
-    border: 1px solid rgba(167, 139, 250, 0.25);
-    color: #a78bfa;
-    font-size: 0.8125rem;
-    font-weight: 700;
-    cursor: pointer;
-    font-family: inherit;
-    transition: all 0.2s;
-  }
-  .retry-btn:hover {
-    background: rgba(167, 139, 250, 0.2);
-  }
-  .retry-btn.secondary {
-    background: rgba(255, 255, 255, 0.04);
-    border-color: rgba(255, 255, 255, 0.1);
-    color: rgba(255, 255, 255, 0.5);
-  }
+  .ng-grid { display: grid; grid-template-columns: repeat(1, 1fr); gap: var(--sp-4); }
+  @media (min-width: 640px) { .ng-grid { grid-template-columns: repeat(2, 1fr); } }
+  @media (min-width: 960px) { .ng-grid { grid-template-columns: repeat(3, 1fr); } }
+  @media (min-width: 1280px) { .ng-grid { grid-template-columns: repeat(4, 1fr); } }
+  /* Skeleton 8 on desktop, 4 on mobile (spec). */
+  @media (max-width: 639px) { .ng-sk-extra { display: none; } }
+  .ng-foot { display: flex; flex-direction: column; align-items: center; gap: var(--sp-3); margin-top: var(--sp-6); }
+  .ng-count { color: var(--text-3); font-size: var(--fs-small); }
 </style>
