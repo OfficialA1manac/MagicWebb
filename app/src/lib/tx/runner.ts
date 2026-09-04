@@ -9,6 +9,9 @@ import { requireWallet, type WalletCtx } from './client';
 import { decodeRevert, TxError } from './errors';
 import { ws } from '../ws/client';
 import { txChannel } from '../ws/channels';
+import { txModal } from '../stores/txmodal.svelte';
+import { toastError, toastSuccess } from '../toast.svelte';
+import { fmtPrice } from '../format';
 
 export type TxStep = 'idle' | 'approve' | 'sign' | 'pending' | 'confirmed' | 'indexed' | 'error';
 
@@ -42,8 +45,10 @@ export interface TxPlan {
   approval?: (ctx: WalletCtx) => Promise<TxRequest | null>;
   /** The main write. */
   request: (ctx: WalletCtx) => Promise<TxRequest>;
-  /** Summary rows for the modal (label, value). */
+  /** Summary rows for the modal (label, value) — rendered BEFORE the step rail. */
   summary?: Array<[string, string]>;
+  /** Success card: what changed + the one primary next action (spec B3). */
+  success?: { message: string; action?: { label: string; href: string } };
 }
 
 export interface TxResult {
@@ -62,13 +67,40 @@ export interface RunOptions {
 
 const STEP_LABEL: Record<TxStep, string> = {
   idle: '',
-  approve: 'Approve the marketplace for this collection',
+  approve: 'Allow MagicWebb to move this NFT (one time)',
   sign: 'Confirm in your wallet',
-  pending: 'Waiting for the network',
-  confirmed: 'Done — confirmed on chain',
+  pending: 'Waiting for the network (~3s)',
+  confirmed: 'Done',
   indexed: 'Done — the marketplace is up to date',
   error: 'Something went wrong',
 };
+
+function stepLabel(s: TxStep): string {
+  return s === 'pending' ? `Waiting for ${currentChain().name} (~3s)` : STEP_LABEL[s];
+}
+
+/** Best effort: estimateGas × gasPrice → "≈ 0.02 C2FLR". Never throws. */
+export async function estimateFee(ctx: WalletCtx, req: TxRequest): Promise<string | undefined> {
+  try {
+    const [gas, price] = await Promise.all([
+      ctx.pub.estimateContractGas({
+        account: ctx.account,
+        address: req.address,
+        abi: req.abi,
+        functionName: req.functionName,
+        args: req.args as unknown[],
+        value: req.value,
+      } as Parameters<typeof ctx.pub.estimateContractGas>[0]),
+      ctx.pub.getGasPrice(),
+    ]);
+    const wei = BigInt(gas) * BigInt(price);
+    if (wei <= 0n) return undefined;
+    const text = fmtPrice(wei, 4);
+    return `≈ ${text === '0' ? '<0.0001' : text} ${currentChain().currency}`;
+  } catch {
+    return undefined;
+  }
+}
 
 async function send(ctx: WalletCtx, req: TxRequest): Promise<Hex> {
   // simulate first so reverts surface as decoded custom errors, not a wallet
@@ -97,8 +129,13 @@ async function observe(hash: Hex): Promise<void> {
 }
 
 export async function runTx(plan: TxPlan, hooks: TxHooks = {}, opts: RunOptions = {}): Promise<TxResult> {
-  const step = (s: TxStep, meta: Partial<TxStepMeta> = {}) => hooks.onStep?.(s, { label: STEP_LABEL[s], ...meta });
+  const step = (s: TxStep, meta: Partial<TxStepMeta> = {}) => hooks.onStep?.(s, { label: stepLabel(s), ...meta });
   const chain = currentChain();
+  // The plan is the source of the modal's "what happens next" rows and the
+  // success card; mw.ts flow() only carries the title/approval flag.
+  if (plan.summary) txModal.summary = plan.summary;
+  txModal.feeEstimate = undefined;
+  txModal.success = undefined;
   try {
     const ctx = await requireWallet();
 
@@ -115,6 +152,8 @@ export async function runTx(plan: TxPlan, hooks: TxHooks = {}, opts: RunOptions 
 
     step('sign', { approvalHash });
     const req = await plan.request(ctx);
+    // Fee preflight is advisory: it must never delay or block the wallet prompt.
+    void estimateFee(ctx, req).then((fee) => { if (fee) txModal.feeEstimate = fee; });
     const hash = await send(ctx, req);
     step('pending', { hash, approvalHash, explorerUrl: explorerTx(hash) });
 
@@ -128,7 +167,10 @@ export async function runTx(plan: TxPlan, hooks: TxHooks = {}, opts: RunOptions 
       throw new TxError('ContractRevert', 'The transaction was mined but reverted.', { hash });
     }
     if (opts.observe !== false) void observe(hash);
+    const success = plan.success ?? { message: `${plan.title} — confirmed` };
+    txModal.success = success;
     step('confirmed', { hash, approvalHash, receipt, explorerUrl: explorerTx(hash) });
+    toastSuccess(success.message, success.action ? { action: { label: success.action.label, href: success.action.href } } : {});
 
     const indexed = await indexedP;
     if (indexed) step('indexed', { hash, approvalHash, receipt, explorerUrl: explorerTx(hash) });
@@ -136,6 +178,8 @@ export async function runTx(plan: TxPlan, hooks: TxHooks = {}, opts: RunOptions 
   } catch (e) {
     const err = decodeRevert(e);
     step('error', { error: err, hash: err.hash, explorerUrl: err.hash ? explorerTx(err.hash) : undefined });
+    // A cancelled wallet prompt is not an error worth a toast — the modal says so.
+    if (err.kind !== 'UserRejected') toastError(err.message);
     throw err;
   }
 }

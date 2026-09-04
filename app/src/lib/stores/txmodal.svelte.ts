@@ -17,6 +17,10 @@ export interface TxModalState {
   retry?: () => void;
   /** Optional CTA shown on success (e.g. "View in my profile"). */
   successAction?: { label: string; href: string };
+  /** Estimated network fee, e.g. "≈ 0.02 C2FLR" (best effort; unset on failure). */
+  feeEstimate?: string;
+  /** Success card copy set by the runner from `plan.success` (what changed + next action). */
+  success?: { message: string; action?: { label: string; href: string } };
 }
 
 const initial: TxModalState = { open: false, title: '', summary: [], step: 'idle', hasApproval: false };

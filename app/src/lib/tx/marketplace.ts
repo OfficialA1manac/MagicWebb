@@ -8,7 +8,7 @@ import { marketplaceAbi } from '../abi';
 import { currentChain } from '../chains';
 import { fmtPrice } from '../format';
 import { ensureOperatorApproval, type TokenStandard } from './approve';
-import { isValidDuration, type DurationSeconds } from './durations';
+import { DURATIONS, isValidDuration, type DurationSeconds } from './durations';
 import { TxError } from './errors';
 import { runTx, type TxHooks, type TxPlan, type TxRequest, type TxResult } from './runner';
 
@@ -25,6 +25,16 @@ export function assertPrice(priceWei: bigint): void {
   if (priceWei < MIN_PRICE_WEI) throw new TxError('PriceBelowMin', `Price must be at least 1 ${currentChain().currency}.`);
   if (priceWei > U128) throw new TxError('Invalid', 'Price is too large.');
 }
+
+/** "24 hours" for a contract duration; falls back to minutes for odd values. */
+export function durationLabel(seconds: number): string {
+  return DURATIONS.find((d) => d.seconds === seconds)?.label ?? `${Math.round(seconds / 60)} minutes`;
+}
+
+/** Marketplace fee (2%: 1.5% platform + 0.5% keeper), paid by the seller on sale. */
+export const feeWei = (priceWei: bigint): bigint => (priceWei * 200n) / 10_000n;
+
+export const tokenHref = (nft: Address, tokenId: bigint | string): string => `/token/${nft}/${tokenId}`;
 
 export function assertDuration(d: number): asserts d is DurationSeconds {
   if (!isValidDuration(d)) throw new TxError('Invalid', 'Pick one of the allowed durations (1m–24h).');
@@ -66,17 +76,18 @@ export interface ListArgs { nft: Address; tokenId: bigint; priceWei: bigint; dur
 export function list(a: ListArgs, hooks?: TxHooks): Promise<TxResult> {
   const req = buildList(a.nft, a.tokenId, a.priceWei, a.duration, a.std, a.amount); // validate early
   const sym = currentChain().currency;
-  const fee = (a.priceWei * 200n) / 10_000n;
+  const fee = feeWei(a.priceWei);
   const plan: TxPlan = {
     title: `List ${a.name ?? `#${a.tokenId}`}`,
     approval: (ctx) => ensureOperatorApproval(ctx, a.nft, marketplaceAddress(), a.std),
     request: async () => req,
     summary: [
       ['Price', `${fmtPrice(a.priceWei)} ${sym}`],
-      ['You receive on sale', `${fmtPrice(a.priceWei - fee)} ${sym} (98%)`],
-      ['Marketplace fee', `${fmtPrice(fee)} ${sym} (2%: 1.5% platform + 0.5% keeper) · only when it sells`],
-      ['Listing cost', 'Free · gas only'],
+      ['You receive', `${fmtPrice(a.priceWei - fee)} ${sym} when it sells`],
+      ['Listing', 'Free'],
+      ['Expires in', durationLabel(a.duration)],
     ],
+    success: { message: 'Listed!', action: { label: 'View listing', href: tokenHref(a.nft, a.tokenId) } },
   };
   return runTx(plan, hooks);
 }
@@ -86,6 +97,7 @@ export interface BuyArgs { nft: Address; tokenId: bigint; seller: Address; price
 /** Server preflight + buy. Price is re-read from the preflight so a stale page cannot overpay. */
 export function buy(a: BuyArgs, hooks?: TxHooks): Promise<TxResult> {
   const sym = currentChain().currency;
+  const fee = feeWei(a.priceWei);
   const plan: TxPlan = {
     title: `Buy ${a.name ?? `#${a.tokenId}`}`,
     request: async () => {
@@ -107,10 +119,11 @@ export function buy(a: BuyArgs, hooks?: TxHooks): Promise<TxResult> {
       return buildBuy(a.nft, a.tokenId, a.seller, price);
     },
     summary: [
-      ['Price', `${fmtPrice(a.priceWei)} ${sym}`],
-      ['Marketplace fee', '2% (1.5% platform + 0.5% keeper gas fund) · paid by the seller'],
-      ['You pay', `${fmtPrice(a.priceWei)} ${sym} + gas`],
+      ['You pay', `${fmtPrice(a.priceWei)} ${sym}`],
+      ['Seller receives', `${fmtPrice(a.priceWei - fee)} ${sym} (2% fee)`],
+      ['You get', 'The NFT instantly'],
     ],
+    success: { message: `You bought ${a.name ?? `#${a.tokenId}`}`, action: { label: 'View in your profile', href: '/profile' } },
   };
   return runTx(plan, hooks);
 }
@@ -145,18 +158,19 @@ export function batchList(a: BatchListArgs, hooks?: TxHooks): Promise<TxResult> 
     summary: [
       ['Items', `${a.items.length}`],
       ['Total asking price', `${fmtPrice(total)} ${sym}`],
-      ['Marketplace fee', '2% per sale (1.5% platform + 0.5% keeper) · paid by the seller'],
-      ['Listing cost', 'Free · gas only'],
+      ['You receive', `${fmtPrice(total - feeWei(total))} ${sym} when they all sell (2% fee)`],
+      ['Listing', 'Free'],
     ],
+    success: { message: `Listed ${a.items.length} NFTs!`, action: { label: 'View your listings', href: '/profile' } },
   };
   return runTx(plan, hooks);
 }
 
 export function cancel(a: { nft: Address; tokenId: bigint; name?: string }, hooks?: TxHooks): Promise<TxResult> {
-  return runTx({ title: `Cancel listing ${a.name ?? `#${a.tokenId}`}`, request: async () => buildCancel(a.nft, a.tokenId), summary: [['Cost', 'Gas only · your NFT stays in your wallet']] }, hooks);
+  return runTx({ title: `Cancel listing ${a.name ?? `#${a.tokenId}`}`, request: async () => buildCancel(a.nft, a.tokenId), summary: [['Cost', 'Gas only · your NFT stays in your wallet']], success: { message: 'Listing cancelled', action: { label: 'View in your profile', href: '/profile' } } }, hooks);
 }
 
 export function editPrice(a: { nft: Address; tokenId: bigint; newPriceWei: bigint; name?: string }, hooks?: TxHooks): Promise<TxResult> {
   const req = buildEditPrice(a.nft, a.tokenId, a.newPriceWei);
-  return runTx({ title: `Change price ${a.name ?? `#${a.tokenId}`}`, request: async () => req, summary: [['New price', `${fmtPrice(a.newPriceWei)} ${currentChain().currency}`]] }, hooks);
+  return runTx({ title: `Change price ${a.name ?? `#${a.tokenId}`}`, request: async () => req, summary: [['New price', `${fmtPrice(a.newPriceWei)} ${currentChain().currency}`], ['You receive', `${fmtPrice(a.newPriceWei - feeWei(a.newPriceWei))} ${currentChain().currency} when it sells`]], success: { message: 'Price updated', action: { label: 'View listing', href: tokenHref(a.nft, a.tokenId) } } }, hooks);
 }

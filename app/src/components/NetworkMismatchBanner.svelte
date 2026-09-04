@@ -2,8 +2,7 @@
   // Wallet on chain X while this site serves chain Y. One sentence, one tap
   // to fix, and an honest cross-link only when that network is deployed.
   import { onMount } from 'svelte';
-  import { onAccountChange, waitForWagmi } from '../lib/tx/client';
-  import { switchChain } from '@wagmi/core';
+  import { onAccountChange, switchToSiteChain, waitForWagmi } from '../lib/tx/client';
   import { chainName, currentChain, networkOrigins } from '../lib/chains';
   import { toastError } from '../lib/toast.svelte';
 
@@ -21,7 +20,7 @@
     switching = true;
     try {
       const cfg = await waitForWagmi();
-      await switchChain(cfg, { chainId: site.id });
+      await switchToSiteChain(cfg); // adds the chain (wallet_addEthereumChain) on 4902
     } catch {
       toastError(`Could not switch automatically. Open your wallet and choose ${site.name}.`);
     } finally { switching = false; }

@@ -11,7 +11,7 @@ import { fmtPrice } from '../format';
 import { ensureOperatorApproval, type TokenStandard } from './approve';
 import { publicClient } from './client';
 import { TxError } from './errors';
-import { assertDuration, assertPrice } from './marketplace';
+import { assertDuration, assertPrice, durationLabel, feeWei, tokenHref } from './marketplace';
 import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 
 export function offerBookAddress(): Address {
@@ -59,35 +59,38 @@ export function makeOffer(a: MakeOfferArgs, hooks?: TxHooks): Promise<TxResult> 
       return req;
     },
     summary: [
-      ['You escrow', `${fmtPrice(a.principalWei)} ${sym}`],
-      ['If not accepted', 'Cancel any time before expiry for a full refund'],
-      ['Marketplace fee', '2% (1.5% platform + 0.5% keeper) · paid by the seller if they accept'],
+      ['Held safely', `${fmtPrice(a.principalWei)} ${sym}`],
+      ['If not accepted', 'Refunded'],
+      ['Expires in', durationLabel(a.duration)],
     ],
+    success: { message: 'Offer sent', action: { label: 'See your offers', href: '/offers' } },
   }, hooks);
 }
 
 export const acceptOffer = (a: { nft: Address; tokenId: bigint; bidder: Address; principalWei: bigint; std?: TokenStandard; name?: string }, hooks?: TxHooks) => {
   const sym = currentChain().currency;
-  const fee = (a.principalWei * 200n) / 10_000n;
+  const fee = feeWei(a.principalWei);
   return runTx({
     title: `Accept offer on ${a.name ?? `#${a.tokenId}`}`,
     approval: (ctx) => ensureOperatorApproval(ctx, a.nft, offerBookAddress(), a.std),
     request: async () => buildAcceptOffer(a.nft, a.tokenId, a.bidder, a.principalWei),
     summary: [
       ['Offer', `${fmtPrice(a.principalWei)} ${sym}`],
-      ['You receive', `${fmtPrice(a.principalWei - fee)} ${sym} (after 2% fee)`],
+      ['You receive', `${fmtPrice(a.principalWei - fee)} ${sym} (2% fee)`],
+      ['The buyer gets', 'The NFT instantly'],
     ],
+    success: { message: `Sold ${a.name ?? `#${a.tokenId}`}`, action: { label: 'View in your profile', href: '/profile' } },
   }, hooks);
 };
 
 export const cancelOffer = (a: { nft: Address; tokenId: bigint; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Cancel offer on ${a.name ?? `#${a.tokenId}`}`, request: async () => buildCancelOffer(a.nft, a.tokenId), summary: [['Refund', 'Full amount back to your wallet']] }, hooks);
+  runTx({ title: `Cancel offer on ${a.name ?? `#${a.tokenId}`}`, request: async () => buildCancelOffer(a.nft, a.tokenId), summary: [['Refund', 'Full amount back to your wallet']], success: { message: 'Offer cancelled — funds returned', action: { label: 'See your offers', href: '/offers' } } }, hooks);
 
 export const rejectOffer = (a: { nft: Address; tokenId: bigint; bidder: Address; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Decline offer on ${a.name ?? `#${a.tokenId}`}`, request: async () => buildRejectOffer(a.nft, a.tokenId, a.bidder), summary: [['Effect', 'Bidder is refunded in full']] }, hooks);
+  runTx({ title: `Decline offer on ${a.name ?? `#${a.tokenId}`}`, request: async () => buildRejectOffer(a.nft, a.tokenId, a.bidder), summary: [['Effect', 'Bidder is refunded in full']], success: { message: 'Offer declined', action: { label: 'View listing', href: tokenHref(a.nft, a.tokenId) } } }, hooks);
 
 export const refundExpiredOffer = (a: { nft: Address; tokenId: bigint; bidder: Address }, hooks?: TxHooks) =>
-  runTx({ title: 'Refund expired offer', request: async () => buildRefundExpiredOffer(a.nft, a.tokenId, a.bidder) }, hooks);
+  runTx({ title: 'Refund expired offer', request: async () => buildRefundExpiredOffer(a.nft, a.tokenId, a.bidder), success: { message: 'Expired offer refunded' } }, hooks);
 
 export const setOfferEligible = (a: { nft: Address; eligible: boolean; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `${a.eligible ? 'Enable' : 'Disable'} offers for ${a.name ?? 'collection'}`, request: async () => buildSetOfferEligible(a.nft, a.eligible), summary: [['Who can do this', 'Only the collection owner']] }, hooks);
+  runTx({ title: `${a.eligible ? 'Enable' : 'Disable'} offers for ${a.name ?? 'collection'}`, request: async () => buildSetOfferEligible(a.nft, a.eligible), summary: [['Who can do this', 'Only the collection owner']], success: { message: a.eligible ? 'Offers enabled' : 'Offers disabled' } }, hooks);

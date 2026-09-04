@@ -19,6 +19,9 @@ import { DURATIONS, DEFAULT_DURATION } from './tx/durations';
 const addr = (s: string) => s as Address;
 const big = (v: string | number | bigint) => BigInt(v);
 
+// `summary`/`successAction` here are fallbacks only: runTx() copies each
+// plan's own rows and success card onto the modal store, so the flows in
+// tx/*.ts stay the single source of the "what happens next" copy (spec B3).
 function flow<T extends TxResult>(title: string, summary: Array<[string, string]> | undefined, hasApproval: boolean, run: (hooks: Parameters<typeof M.buy>[1]) => Promise<T>, successAction?: { label: string; href: string }) {
   return runWithModal({ title, summary, hasApproval, successAction }, run);
 }

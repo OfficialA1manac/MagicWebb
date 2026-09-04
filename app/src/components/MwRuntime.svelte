@@ -6,10 +6,12 @@
   import NetworkMismatchBanner from './NetworkMismatchBanner.svelte';
   import Toasts from './Toasts.svelte';
   import { installMW } from '../lib/mw';
+  import { mwBadgeGlobal } from '../lib/badge';
   import { ws } from '../lib/ws/client';
 
   onMount(() => {
     installMW();
+    mwBadgeGlobal();
     ws.connect();
     const onVis = () => { if (document.visibilityState === 'visible') ws.connect(); };
     document.addEventListener('visibilitychange', onVis);

@@ -16,7 +16,7 @@ import { fmtPrice } from '../format';
 import { ensureOperatorApproval, type TokenStandard } from './approve';
 import { isValidDuration, type DurationSeconds } from './durations';
 import { TxError } from './errors';
-import { assertPrice } from './marketplace';
+import { assertPrice, durationLabel, feeWei } from './marketplace';
 import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 
 export const MIN_BID_INCREMENT_WEI = 10n ** 18n; // AuctionHouse.MIN_BID_INCREMENT = 1 ether
@@ -89,10 +89,11 @@ export function createAuction(a: CreateAuctionArgs, hooks?: TxHooks): Promise<Tx
     request: async () => req,
     summary: [
       ['Reserve', `${fmtPrice(a.reserveWei)} ${sym}`],
-      ['Anti-snipe', 'Bids in the last 3 minutes extend the auction (up to 30 min total)'],
-      ['Marketplace fee', '2% (1.5% platform + 0.5% keeper) · deducted from the winning bid when settled'],
-      ['Cost now', 'Free · gas only'],
+      ['You receive', `${fmtPrice(a.reserveWei - feeWei(a.reserveWei))} ${sym} or more when it settles (2% fee)`],
+      ['Listing', 'Free'],
+      ['Ends in', durationLabel(a.duration)],
     ],
+    success: { message: 'Auction started!', action: { label: 'See live auctions', href: '/auctions' } },
   }, hooks);
 }
 
@@ -106,24 +107,26 @@ export function bid(a: BidArgs, hooks?: TxHooks): Promise<TxResult> {
     title: `Bid on ${a.name ?? `auction #${a.auctionId}`}`,
     request: async () => req,
     summary: [
-      ['You send now', `${fmtPrice(a.amountWei)} ${sym}`],
+      ['Your bid', `${fmtPrice(a.amountWei)} ${sym}`],
       ...(a.myCumulativeWei ? [['Your total bid', `${fmtPrice(total)} ${sym}`] as [string, string]] : []),
-      ['If outbid', 'Your funds are refundable any time — nothing is lost'],
+      ['Held safely', 'Until the auction ends'],
+      ['If outbid', 'Refundable'],
     ],
+    success: { message: 'Bid placed', action: { label: 'Watch the auction', href: `/auction/${a.auctionId}` } },
   }, hooks);
 }
 
 export const settle = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Settle ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildSettle(a.auctionId), summary: [['Who can settle', 'The keeper (automatic), the winner, or the seller'], ['What happens', 'NFT to the winner, proceeds (minus 2%) to the seller']] }, hooks);
+  runTx({ title: `Settle ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildSettle(a.auctionId), summary: [['Who can settle', 'The keeper (automatic), the winner, or the seller'], ['What happens', 'NFT to the winner, proceeds (minus 2%) to the seller']], success: { message: 'Auction settled', action: { label: 'View in your profile', href: '/profile' } } }, hooks);
 
 export const cancelEarly = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildCancelEarly(a.auctionId), summary: [['Allowed when', 'No bids yet · NFT stays with you']] }, hooks);
+  runTx({ title: `Cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildCancelEarly(a.auctionId), summary: [['Allowed when', 'No bids yet · NFT stays with you']], success: { message: 'Auction cancelled', action: { label: 'View in your profile', href: '/profile' } } }, hooks);
 
 export const forceCancel = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
   runTx({ title: `Force-cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildForceCancel(a.auctionId), summary: [['Allowed when', 'Ended 3+ days ago and still unsettled · seller, winner, or keeper'], ['What happens', 'Auction closes without a trade — every bid becomes refundable, the NFT stays where it is']] }, hooks);
 
 export const withdrawLoserFunds = (a: { auctionId: bigint; amountWei?: bigint }, hooks?: TxHooks) =>
-  runTx({ title: 'Withdraw your bid', request: async () => buildWithdrawLoserFunds(a.auctionId), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [] }, hooks);
+  runTx({ title: 'Withdraw your bid', request: async () => buildWithdrawLoserFunds(a.auctionId), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Bid withdrawn to your wallet' } }, hooks);
 
 export const withdrawRefund = (a: { amountWei?: bigint } = {}, hooks?: TxHooks) =>
-  runTx({ title: 'Withdraw refund', request: async () => buildWithdrawRefund(), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [] }, hooks);
+  runTx({ title: 'Withdraw refund', request: async () => buildWithdrawRefund(), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Refund sent to your wallet' } }, hooks);

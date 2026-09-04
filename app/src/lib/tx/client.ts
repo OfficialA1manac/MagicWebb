@@ -2,8 +2,50 @@
 // wagmi config) and the rest of the UI (Astro pages + Svelte islands).
 import { getAccount, getPublicClient, getWalletClient, switchChain, watchAccount, type Config } from '@wagmi/core';
 import type { Address, PublicClient, WalletClient } from 'viem';
-import { currentChain } from '../chains';
+import { currentChain, type ChainProfile } from '../chains';
 import { TxError } from './errors';
+
+/** EIP-3085 params for wallet_addEthereumChain, from the chain profile. */
+export function addChainParams(chain: ChainProfile = currentChain()) {
+  return {
+    chainId: `0x${chain.id.toString(16)}`,
+    chainName: chain.name,
+    nativeCurrency: { name: chain.currency, symbol: chain.currency, decimals: 18 },
+    rpcUrls: [chain.rpc],
+    blockExplorerUrls: [chain.explorer],
+  };
+}
+
+/** EIP-3326: 4902 = the wallet does not know this chain yet. Walks `cause`. */
+export function isUnrecognizedChainError(e: unknown): boolean {
+  let cur: unknown = e;
+  for (let i = 0; i < 6 && cur && typeof cur === 'object'; i++) {
+    const o = cur as { code?: unknown; data?: { originalError?: { code?: unknown } }; message?: unknown; cause?: unknown };
+    if (o.code === 4902 || o.data?.originalError?.code === 4902) return true;
+    if (typeof o.message === 'string' && /4902|unrecognized chain|unknown chain|chain not added|Try adding the chain/i.test(o.message)) return true;
+    cur = o.cause;
+  }
+  return false;
+}
+
+/**
+ * Switch the wallet to this deployment's chain. When the wallet answers
+ * 4902 (chain not added) we add it with the profile from chains.ts and
+ * switch again. Throws the wallet's error when the user declines.
+ */
+export async function switchToSiteChain(config: Config): Promise<void> {
+  const chain = currentChain();
+  try {
+    await switchChain(config, { chainId: chain.id });
+  } catch (e) {
+    if (!isUnrecognizedChainError(e)) throw e;
+    const wc = await getWalletClient(config);
+    await (wc as unknown as { request: (a: { method: string; params: unknown[] }) => Promise<unknown> })
+      .request({ method: 'wallet_addEthereumChain', params: [addChainParams(chain)] });
+    // Most wallets switch as part of adding; a second switch is harmless.
+    try { await switchChain(config, { chainId: chain.id }); } catch { /* already on it */ }
+  }
+}
 
 export function getWagmiConfig(): Config | null {
   return (typeof window !== 'undefined' && window.__MW_WAGMI_CONFIG__) || null;
@@ -49,7 +91,7 @@ export async function requireWallet(): Promise<WalletCtx> {
   }
   if (acct.chainId !== chain.id) {
     try {
-      await switchChain(config, { chainId: chain.id });
+      await switchToSiteChain(config);
     } catch (e) {
       throw new TxError('WrongChain', `Your wallet is on a different network. Switch it to ${chain.name} to continue.`, { cause: e });
     }

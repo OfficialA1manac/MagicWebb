@@ -22,6 +22,9 @@
     // without passing it, this card was permanently stuck on "Verified NFT".
     collection_creator?: string;
     collection_name?: string;
+    // Present on rows from tracked collections (lib/badge.ts treats
+    // `undefined` as tracked when collection_verified is a boolean).
+    collection_tracked?: boolean;
     // Wallet-grid rows carry `owner` instead of `seller`.
     owner?: string;
   }
@@ -55,6 +58,8 @@
   // Seller/owner is the collection's on-chain creator (ERC-173 owner) → ★ Creator pill.
   let holder = $derived(item.seller ?? item.owner ?? '');
   let holderIsCreator = $derived(!!holder && !!item.collection_creator && holder.toLowerCase() === item.collection_creator.toLowerCase());
+  // Edition chip (spec B2): humans read "1 of 1" / "Multi-edition", not ERC numbers.
+  let edition = $derived(item.standard === 'erc1155' ? 'Multi-edition' : item.standard ? '1 of 1' : '');
 
   // Quick buy straight from the card: opens the TxModal via window.MW.
   // Stops the click from following the card link to the token page.
@@ -131,10 +136,10 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      <VerifiedBadge verified={item.collection_verified} creatorAddr={item.collection_creator ?? ''} collectionName={item.collection_name ?? ''} link={false} />
+      <VerifiedBadge verified={item.collection_verified} tracked={item.collection_tracked} creatorAddr={item.collection_creator ?? ''} collectionName={item.collection_name ?? ''} link={false} />
       {#if holderIsCreator}<CreatorBadge name={item.collection_name ?? ''} link={false} />{/if}
-      {#if item.standard}
-        <span class="standard-badge" title="Token standard">{item.standard}</span>
+      {#if edition}
+        <span class="standard-badge" title={item.standard === 'erc1155' ? 'Several copies of this token exist' : 'Only one copy of this token exists'}>{edition}</span>
       {/if}
     </div>
 
@@ -225,8 +230,7 @@
     border: 1px solid rgba(255, 255, 255, 0.12);
     font-size: 0.5625rem;
     font-weight: 800;
-    text-transform: uppercase;
-    letter-spacing: 0.05em;
+    letter-spacing: 0.02em;
     color: rgba(255, 255, 255, 0.6);
     backdrop-filter: blur(4px);
   }
