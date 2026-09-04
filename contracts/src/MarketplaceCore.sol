@@ -230,6 +230,10 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     ///      surface the credit without polling storage.
     function _pay(address to, uint256 amount) internal {
         if (amount == 0) return;
+        // `to` is never caller-controlled: it is a recorded seller/bidder/offerer
+        // being refunded or paid, or the manager's keeper (fee share). Value is
+        // always the exact amount that party is owed.
+        // slither-disable-next-line arbitrary-send-eth
         (bool ok,) = to.call{gas: 50_000, value: amount}("");
         if (!ok) {
             pendingReturns[to] += amount;
