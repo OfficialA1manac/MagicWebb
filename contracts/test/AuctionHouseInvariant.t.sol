@@ -10,7 +10,7 @@ import {TestHelpers} from "./TestHelpers.sol";
 /// @dev Reads auction state through `getAuction()` — AuctionHouse.sol:118-124
 ///      mandates it over the positional `auctions(id)` tuple, which silently
 ///      misreads if a field is ever inserted before `leader`.
-contract AuctionHouseHandler is Test {
+contract AuctionHouseHandler is Test, TestHelpers {
     AuctionHouse public ah;
     MockERC721 public nft;
     address public seller = address(0xA0);
@@ -48,6 +48,7 @@ contract AuctionHouseHandler is Test {
         }
         total += ah.pendingReturns(seller);
         total += ah.pendingReturns(ah.feeRecipient());
+        total += ah.pendingReturns(TEST_SENTINEL_KEEPER);
     }
 
     function isSettled() public view returns (bool) {
@@ -173,7 +174,7 @@ contract AuctionHouseInvariantTest is Test, TestHelpers {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        ah = _deployAuctionHouse(feeRecipient, address(0));
+        ah = _deployAuctionHouse(feeRecipient, address(_deployMarketplaceManager()));
         nft = new MockERC721();
         handler = new AuctionHouseHandler(ah, nft);
         targetContract(address(handler));

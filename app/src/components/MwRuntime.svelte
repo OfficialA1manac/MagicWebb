@@ -1,9 +1,10 @@
 <script lang="ts">
   // Mounted once in BaseLayout (client:load). Installs window.MW, opens the
-  // WebSocket, hosts the TxModal and the wrong-network banner.
+  // WebSocket, hosts the TxModal, the wrong-network banner and the toasts.
   import { onMount } from 'svelte';
   import TxModal from './TxModal.svelte';
   import NetworkMismatchBanner from './NetworkMismatchBanner.svelte';
+  import Toasts from './Toasts.svelte';
   import { installMW } from '../lib/mw';
   import { ws } from '../lib/ws/client';
 
@@ -18,3 +19,4 @@
 
 <NetworkMismatchBanner />
 <TxModal />
+<Toasts />

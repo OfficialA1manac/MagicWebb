@@ -40,7 +40,7 @@ to a different site, so you connect your wallet again on arrival.
 | Browse, filter, sort, search, see price history | ✓ | ✓ | ✓ |
 | See the Verified NFT badge and what it means | ✓ | ✓ | ✓ |
 | Buy (pays the price; receives the NFT in the same tx) | connect first | ✓ | not your own |
-| List an NFT (price ≥ 1 native, duration 1m–24h (15 fixed durations)) | — | only NFTs you own | ✓ |
+| List an NFT (price ≥ 1 native, duration 1m–24h (14 fixed durations)) | — | only NFTs you own | ✓ |
 | Change price | — | — | ✓ own listing |
 | Cancel listing (NFT never left your wallet) | — | — | ✓ own listing |
 | Batch-list up to 50 | — | — | ✓ |
@@ -51,7 +51,7 @@ to a different site, so you connect your wallet again on arrival.
 | Action | Viewer | Buyer | Seller / owner |
 |---|---|---|---|
 | Watch live countdown, bids, anti-snipe extensions | ✓ | ✓ | ✓ |
-| Create auction (reserve ≥ 1 native, duration 1m–24h (15 fixed durations)) | — | — | ✓ |
+| Create auction (reserve ≥ 1 native, duration 1m–24h (14 fixed durations)) | — | — | ✓ |
 | Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
 | Be outbid → withdraw your total any time | — | ✓ | — |
 | Settle after it ends (NFT → winner, proceeds → seller minus 2%) | — | ✓ if you won it | ✓ |
@@ -73,7 +73,7 @@ end up with money locked behind a position that cannot win.
 | Action | Viewer | Buyer | Seller / owner |
 |---|---|---|---|
 | See open offers on any NFT | ✓ | ✓ | ✓ |
-| Make an offer (amount ≥ 1 native escrowed, duration 1m–24h (15 fixed durations)) | — | ✓ if the collection allows offers | not on your own |
+| Make an offer (amount ≥ 1 native escrowed, duration 1m–24h (14 fixed durations)) | — | ✓ if the collection allows offers | not on your own |
 | Raise / lower your offer (keeps original expiry) | — | ✓ | — |
 | Cancel your offer → full refund | — | ✓ before expiry | — |
 | Accept an offer (NFT → bidder, funds → you minus 2%) | — | — | ✓ owner |
@@ -120,7 +120,7 @@ you in the contract. **Profile → "Refunds waiting for you" → Withdraw.** Nev
 
 ## Why durations instead of dates?
 
-The contracts accept exactly fifteen durations (1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h, 2h,
+The contracts accept exactly fourteen durations (1m, 3m, 5m, 15m, 30m, 45m, 1h, 2h,
 4h, 8h, 12h, 16h, 20h, 24h) and compute the expiry from the block that mines
 your transaction. A date picker cannot satisfy that from a wallet (you do not know the
 mining block's timestamp), so every time-bound action asks for a duration.

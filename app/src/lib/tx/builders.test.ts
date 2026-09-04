@@ -36,7 +36,7 @@ describe('marketplace builders (ABI: list(coll,id,uint128 price,uint64 duration)
     expect(() => buildList(NFT, 1n, MIN_PRICE_WEI - 1n, 86400)).toThrowError(TxError);
     expect(() => buildList(NFT, 1n, MIN_PRICE_WEI, 86400)).not.toThrow();
   });
-  it('accepts exactly the fifteen shared durations', () => {
+  it('accepts exactly the fourteen shared durations', () => {
     for (const d of DURATIONS) expect(() => buildList(NFT, 1n, E, d.seconds)).not.toThrow();
     for (const bad of [0, 1, 120, 420, 7201, 86401, 90000]) expect(() => buildList(NFT, 1n, E, bad)).toThrowError(/durations/);
   });
@@ -73,7 +73,7 @@ describe('auction builders', () => {
   it('create1155 inserts amount', () => {
     expect(buildCreate(NFT, 9n, E, 14400, 'erc1155', 3n).args).toEqual([NFT, 9n, 3n, E, 14400n]);
   });
-  it('create accepts exactly the fifteen shared durations', () => {
+  it('create accepts exactly the fourteen shared durations', () => {
     for (const d of DURATIONS) expect(() => buildCreate(NFT, 1n, E, d.seconds)).not.toThrow();
     for (const bad of [0, 1, 120, 420, 7201, 86401, 90000]) expect(() => buildCreate(NFT, 1n, E, bad)).toThrowError(/durations/);
     expect(() => buildCreate(NFT, 1n, E, 120, 'erc1155', 2n)).toThrowError(/durations/);

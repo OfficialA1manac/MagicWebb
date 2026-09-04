@@ -6,7 +6,7 @@ import {OfferBook} from "../src/OfferBook.sol";
 import {MockERC721} from "./MockERC721.sol";
 import {TestHelpers} from "./TestHelpers.sol";
 
-contract OfferHandler is Test {
+contract OfferHandler is Test, TestHelpers {
     OfferBook public ob;
     MockERC721 public nft;
     address public owner = address(0xA0);
@@ -39,15 +39,15 @@ contract OfferHandler is Test {
         // leaving the suite almost no real coverage.
         principal = uint128(bound(principal, ob.MIN_PRICE(), 100 ether));
         (uint128 existingPrincipal,,,) = ob.positions(address(nft), tid, b);
-        uint64[15] memory durations = [
+        uint64[14] memory durations = [
             uint64(1 minutes), uint64(3 minutes), uint64(5 minutes),
-            uint64(10 minutes), uint64(15 minutes), uint64(30 minutes),
+            uint64(15 minutes), uint64(30 minutes),
             uint64(45 minutes), uint64(1 hours), uint64(2 hours),
             uint64(4 hours), uint64(8 hours), uint64(12 hours),
             uint64(16 hours), uint64(20 hours), uint64(24 hours)
         ];
         vm.prank(b);
-        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 15]);
+        ob.makeOffer{value: uint256(principal)}(address(nft), tid, principal, durations[ttl % 14]);
         ghostEscrowed = ghostEscrowed + principal - uint256(existingPrincipal);
     }
 
@@ -106,6 +106,7 @@ contract OfferHandler is Test {
         }
         total += ob.pendingReturns(owner);
         total += ob.pendingReturns(ob.feeRecipient());
+        total += ob.pendingReturns(TEST_SENTINEL_KEEPER);
     }
 }
 
@@ -116,7 +117,7 @@ contract OfferBookInvariantTest is Test, TestHelpers {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        ob = _deployOfferBook(feeRecipient, address(0));
+        ob = _deployOfferBook(feeRecipient, address(_deployMarketplaceManager()));
         nft = new MockERC721();
         // Token 0 was minted to this test contract by MockERC721's constructor.
         // Enable offers here (as the token-0 owner) so OfferHandler doesn't

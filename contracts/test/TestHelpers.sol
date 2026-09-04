@@ -57,6 +57,19 @@ contract TestHelpers {
         return _deployMarketplaceManager(admin, TEST_SENTINEL_KEEPER);
     }
 
+    /// @dev Zero-arg convenience: admin = the calling test, keeper = sentinel.
+    ///      The manager is MANDATORY on every core since the keeper fee split
+    ///      (the hasRole probe only needs a contract, so any admin is fine).
+    function _deployMarketplaceManager() internal returns (MarketplaceManager) {
+        return _deployMarketplaceManager(address(this), TEST_SENTINEL_KEEPER);
+    }
+
+    // ── Fee split math mirroring MarketplaceCore._feeOf / _payFee exactly ──
+    //    fee = gross*200/10_000; keeper = fee*50/200 (truncated); platform = fee - keeper.
+    function _totalFee(uint256 gross) internal pure returns (uint256) { return gross * 200 / 10_000; }
+    function _keeperCut(uint256 gross) internal pure returns (uint256) { return _totalFee(gross) * 50 / 200; }
+    function _platformCut(uint256 gross) internal pure returns (uint256) { return _totalFee(gross) - _keeperCut(gross); }
+
     function _deployMarketplaceManager(address admin, address keeper)
         internal returns (MarketplaceManager)
     {

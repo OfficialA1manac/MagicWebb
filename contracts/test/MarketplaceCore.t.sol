@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
 import {Marketplace, NotOwner, NotListed} from "../src/Marketplace.sol";
 import {
-    BelowMinPrice, ZeroAddress, NotAdmin, NoManager, BadImplementation, BadManager,
+    BelowMinPrice, ZeroAddress, NotAdmin, BadImplementation, BadManager,
     UpgradeNotQueued, UpgradeNotReady, UpgradeExpired
 } from "../src/MarketplaceCore.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
@@ -13,13 +13,15 @@ import {TestHelpers} from "./TestHelpers.sol";
 
 contract MarketplaceCoreTest is Test, TestHelpers {
     Marketplace mp;
+    MarketplaceManager mgr;
     address creator = address(0xCCCC);
 
     /// ERC-1967 implementation slot: keccak256("eip1967.proxy.implementation") - 1.
     bytes32 constant IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
 
     function setUp() public {
-        mp = _deployMarketplace(creator, address(0));
+        mgr = _deployMarketplaceManager();
+        mp = _deployMarketplace(creator, address(mgr));
         vm.deal(creator, 100 ether);
     }
 
@@ -44,7 +46,13 @@ contract MarketplaceCoreTest is Test, TestHelpers {
         // v3.4: validation moved from the initializer to the implementation
         // constructor (fee recipient + manager are immutables).
         vm.expectRevert(ZeroAddress.selector);
-        new Marketplace(address(0), address(0));
+        new Marketplace(address(0), address(mgr));
+    }
+
+    function test_constructorZeroManagerReverts() public {
+        // The manager is mandatory: the keeper fee split resolves through it.
+        vm.expectRevert(ZeroAddress.selector);
+        new Marketplace(creator, address(0));
     }
 
     function test_constructorRejectsEOAManager() public {
@@ -76,16 +84,6 @@ contract MarketplaceCoreTest is Test, TestHelpers {
         assertEq(mp.upgradeDelay(), 0); // Songbird — instant, per owner
         vm.chainId(14);
         assertEq(mp.upgradeDelay(), 0); // Flare — instant, per owner
-    }
-
-    function test_ungatedProxy_cannotBeUpgradedAtAll() public {
-        // mp has manager == address(0): the implementation is frozen, rather
-        // than upgradable by anyone as it was before the timelock landed.
-        Marketplace next = new Marketplace(creator, address(0));
-        vm.expectRevert(NoManager.selector);
-        mp.queueUpgrade(address(next));
-        vm.expectRevert(NoManager.selector);
-        mp.upgradeTo(address(next));
     }
 
     function test_queueUpgrade_nonAdminReverts() public {

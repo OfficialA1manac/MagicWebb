@@ -1,0 +1,44 @@
+---
+// Branded not-found page (spec B1). Astro emits dist/404.html; the Go server
+// (cmd/server/ui.go) serves this file with HTTP status 404 for any unknown
+// route — the backend agent wires that; this page has no runtime dependency.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+import { iconSvg } from '../lib/icons';
+---
+
+<BaseLayout title="Page not found" description="The link may be old, or the NFT may not be tracked yet.">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section class="nf">
+    <div class="nf-glyph" aria-hidden="true"><Fragment set:html={iconSvg('search', 32)} /></div>
+    <h1>We can't find that page</h1>
+    <p class="nf-body">The link may be old, or the NFT may not be tracked yet.</p>
+
+    <form class="nf-search" action="/search" method="get" role="search">
+      <label for="nf-q" class="label">Search collections and NFTs</label>
+      <div class="nf-row">
+        <input id="nf-q" name="q" type="search" placeholder="Collection name, token number or address" autocomplete="off" />
+        <button type="submit" class="btn btn-primary btn-lg"><Fragment set:html={iconSvg('search', 18)} />Search</button>
+      </div>
+    </form>
+
+    <nav class="nf-links" aria-label="Helpful links">
+      <a class="btn btn-secondary" href="/">Home</a>
+      <a class="btn btn-secondary" href="/listings">Listings</a>
+      <a class="btn btn-secondary" href="/docs">Docs</a>
+    </nav>
+  </section>
+</BaseLayout>
+
+<style>
+  .nf { max-width: 40rem; margin: 0 auto; padding: var(--sp-16) var(--sp-4) var(--sp-12); text-align: center; display: flex; flex-direction: column; align-items: center; gap: var(--sp-4); }
+  .nf-glyph { color: var(--text-3); display: inline-flex; }
+  .nf h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); margin: 0; }
+  .nf-body { color: var(--text-2); font-size: var(--fs-body); line-height: var(--lh-body); margin: 0; }
+  .nf-search { width: 100%; display: flex; flex-direction: column; gap: 6px; text-align: left; margin-top: var(--sp-2); }
+  .nf-row { display: flex; gap: var(--sp-2); }
+  .nf-row input { flex: 1 1 auto; min-height: 48px; }
+  .nf-links { display: flex; flex-wrap: wrap; justify-content: center; gap: var(--sp-2); margin-top: var(--sp-2); }
+  @media (max-width: 480px) { .nf-row { flex-direction: column; } .nf-row .btn { width: 100%; } }
+</style>

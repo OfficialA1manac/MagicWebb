@@ -5,7 +5,7 @@ import {Test} from "forge-std/Test.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
-import {MarketplaceCore} from "../src/MarketplaceCore.sol";
+import {MarketplaceCore, NoKeeper, ZeroAddress} from "../src/MarketplaceCore.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {MockERC721} from "./MockERC721.sol";
 import {TestHelpers} from "./TestHelpers.sol";
@@ -14,6 +14,32 @@ import {TestHelpers} from "./TestHelpers.sol";
 ///      _payFee onto the pendingReturns fallback.
 contract RevertingKeeper {
     receive() external payable { revert("no"); }
+}
+
+/// @dev Passes the constructor's hasRole probe but cannot report a keeper:
+///      keeper() reverts. Every fee-paying action must revert NoKeeper.
+contract FakeManagerNoKeeper {
+    function hasRole(bytes32, address) external pure returns (bool) { return false; }
+    function keeper() external pure returns (address) { revert("no keeper"); }
+}
+
+/// @dev Passes the probe and answers keeper() with address(0).
+contract FakeManagerZeroKeeper {
+    function hasRole(bytes32, address) external pure returns (bool) { return false; }
+    function keeper() external pure returns (address) { return address(0); }
+}
+
+/// @dev Passes the probe; keeper() hits the fallback and returns 64 bytes
+///      (wrong length) — the decode guard must treat that as "no keeper".
+contract FakeManagerBadLength {
+    function hasRole(bytes32, address) external pure returns (bool) { return false; }
+    fallback() external {
+        assembly {
+            mstore(0, 1)
+            mstore(32, 2)
+            return(0, 64)
+        }
+    }
 }
 
 /// @dev Minimal concrete core so _payFee can be driven with an exact wei fee
@@ -139,25 +165,67 @@ contract FeeSplitTest is Test, TestHelpers {
         assertEq(seller.balance - sB, 2 ether - fee, "seller nets 98%");
     }
 
-    // ── manager == 0: whole 2% to feeRecipient ───────────────────────────────
+    // ── Keeper is MANDATORY: no manager → no core; no keeper → no fee → no sale ──
 
-    function test_buy_noManager_wholeFeeToRecipient() public {
-        Marketplace bare = _deployMarketplace(feeRecipient, address(0));
+    function test_constructor_zeroManagerReverts() public {
+        vm.expectRevert(ZeroAddress.selector);
+        new Marketplace(feeRecipient, address(0));
+        vm.expectRevert(ZeroAddress.selector);
+        new AuctionHouse(feeRecipient, address(0));
+        vm.expectRevert(ZeroAddress.selector);
+        new OfferBook(feeRecipient, address(0));
+    }
+
+    function test_payFee_revertsNoKeeper_whenKeeperCallFails() public {
+        FeeHarness h = new FeeHarness(feeRecipient, address(new FakeManagerNoKeeper()));
+        vm.deal(address(this), 1 ether);
+        vm.expectRevert(NoKeeper.selector);
+        h.payFee{value: 1 ether}(1 ether);
+    }
+
+    function test_payFee_revertsNoKeeper_whenKeeperIsZero() public {
+        FeeHarness h = new FeeHarness(feeRecipient, address(new FakeManagerZeroKeeper()));
+        vm.deal(address(this), 1 ether);
+        vm.expectRevert(NoKeeper.selector);
+        h.payFee{value: 1 ether}(1 ether);
+    }
+
+    function test_payFee_revertsNoKeeper_whenReturnLengthWrong() public {
+        FeeHarness h = new FeeHarness(feeRecipient, address(new FakeManagerBadLength()));
+        vm.deal(address(this), 1 ether);
+        vm.expectRevert(NoKeeper.selector);
+        h.payFee{value: 1 ether}(1 ether);
+    }
+
+    function test_payFee_zeroFeeIsNoopEvenWithoutKeeper() public {
+        // fee == 0 short-circuits before the keeper probe.
+        FeeHarness h = new FeeHarness(feeRecipient, address(new FakeManagerNoKeeper()));
+        vm.recordLogs();
+        h.payFee(0);
+        assertEq(vm.getRecordedLogs().length, 0);
+    }
+
+    /// End-to-end: a Marketplace whose manager cannot name a keeper blocks the
+    /// SALE (buy reverts NoKeeper) rather than silently paying the whole fee to
+    /// feeRecipient. Listing itself is unaffected (no fee leg).
+    function test_buy_revertsNoKeeper_whenManagerHasNoKeeper() public {
+        Marketplace blocked = _deployMarketplace(feeRecipient, address(new FakeManagerNoKeeper()));
         uint256 tid = nft.mint(seller);
         vm.startPrank(seller);
-        nft.setApprovalForAll(address(bare), true);
-        bare.list(address(nft), tid, 10 ether, uint64(24 hours));
+        nft.setApprovalForAll(address(blocked), true);
+        blocked.list(address(nft), tid, 10 ether, uint64(24 hours));
         vm.stopPrank();
 
-        uint256 fee = uint256(10 ether) * 200 / 10_000;
-        uint256 fB = feeRecipient.balance; uint256 kB = keeper.balance;
-        vm.expectEmit(true, true, false, true, address(bare));
-        emit FeeSplit(feeRecipient, fee, address(0), 0);
+        uint256 fB = feeRecipient.balance; uint256 sB = seller.balance;
         vm.prank(buyer);
-        bare.buy{value: 10 ether}(address(nft), tid, seller);
+        vm.expectRevert(NoKeeper.selector);
+        blocked.buy{value: 10 ether}(address(nft), tid, seller);
 
-        assertEq(feeRecipient.balance - fB, fee, "whole 2% to feeRecipient");
-        assertEq(keeper.balance, kB, "keeper untouched");
+        assertEq(feeRecipient.balance, fB, "feeRecipient untouched");
+        assertEq(seller.balance, sB, "seller untouched");
+        assertEq(nft.ownerOf(tid), seller, "NFT stays with seller");
+        (address s_,,,,) = blocked.listings(address(nft), tid, seller);
+        assertEq(s_, seller, "listing intact");
     }
 
     // ── Reverting keeper: keeper share falls back to pendingReturns ─────────
@@ -211,8 +279,9 @@ contract FeeSplitTest is Test, TestHelpers {
         uint256 fB = feeRecipient.balance; uint256 kB = keeper.balance;
 
         // fee = 3 wei → keeperCut = 3*50/200 = 0 (truncated), platform = 3.
+        // The keeper is still resolved (and reported) — only the share is 0.
         vm.expectEmit(true, true, false, true, address(h));
-        emit FeeSplit(feeRecipient, 3, address(0), 0);
+        emit FeeSplit(feeRecipient, 3, keeper, 0);
         h.payFee{value: 3}(3);
         assertEq(feeRecipient.balance - fB, 3, "platform gets all 3 wei");
         assertEq(keeper.balance, kB, "keeper gets 0");

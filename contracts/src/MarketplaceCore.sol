@@ -22,8 +22,8 @@ error BadManager();
 error InvalidDuration();
 /// @dev Caller does not hold DEFAULT_ADMIN_ROLE on the linked manager.
 error NotAdmin();
-/// @dev No manager is configured, so upgrade authorization has no trust anchor.
-error NoManager();
+/// @dev The manager reports no keeper (call failed, bad return, or address(0)); fee split cannot proceed.
+error NoKeeper();
 /// @dev queueUpgrade was given a zero address or an EOA.
 error BadImplementation();
 /// @dev The implementation being installed is not the queued one.
@@ -36,7 +36,7 @@ error UpgradeExpired();
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @dev Shared durations for listings, auctions, and offers across all cores.
-///      Every time-bound action must pick one of these exact fifteen values.
+///      Every time-bound action must pick one of these exact fourteen values.
 ///      Callers pass the DURATION; the contract computes the expiry from
 ///      block.timestamp (MarketplaceCore._expiryFor). Passing an absolute
 ///      expiresAt was unusable from a wallet: the caller cannot know the
@@ -44,7 +44,6 @@ enum TokenStandard { ERC721, ERC1155 }
 uint64 constant DURATION_1MIN  = 1 minutes;
 uint64 constant DURATION_3MIN  = 3 minutes;
 uint64 constant DURATION_5MIN  = 5 minutes;
-uint64 constant DURATION_10MIN = 10 minutes;
 uint64 constant DURATION_15MIN = 15 minutes;
 uint64 constant DURATION_30MIN = 30 minutes;
 uint64 constant DURATION_45MIN = 45 minutes;
@@ -81,16 +80,15 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     uint256 public constant MIN_PRICE = 1 ether;
 
     /// @dev Validate a caller-supplied duration and turn it into an absolute expiry.
-    ///      Reverts InvalidDuration unless duration is one of the fifteen shared values.
+    ///      Reverts InvalidDuration unless duration is one of the fourteen shared values.
     function _expiryFor(uint64 duration) internal view returns (uint64) {
         bool ok = duration == DURATION_1MIN  || duration == DURATION_3MIN
-               || duration == DURATION_5MIN  || duration == DURATION_10MIN
-               || duration == DURATION_15MIN || duration == DURATION_30MIN
-               || duration == DURATION_45MIN || duration == DURATION_1HR
-               || duration == DURATION_2HR   || duration == DURATION_4HR
-               || duration == DURATION_8HR   || duration == DURATION_12HR
-               || duration == DURATION_16HR  || duration == DURATION_20HR
-               || duration == DURATION_24HR;
+               || duration == DURATION_5MIN  || duration == DURATION_15MIN
+               || duration == DURATION_30MIN || duration == DURATION_45MIN
+               || duration == DURATION_1HR   || duration == DURATION_2HR
+               || duration == DURATION_4HR   || duration == DURATION_8HR
+               || duration == DURATION_12HR  || duration == DURATION_16HR
+               || duration == DURATION_20HR  || duration == DURATION_24HR;
         if (!ok) revert InvalidDuration();
         return uint64(block.timestamp) + duration;
     }
@@ -113,14 +111,16 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     event PushFailed(address indexed to, uint256 amount);
 
     /// @notice Emitted on every fee payment with the exact split. `platformShare + keeperShare`
-    ///         equals the total fee carried in the sale event. `keeper` is address(0) and
-    ///         `keeperShare` is 0 when no manager/keeper is resolvable (whole fee → feeRecipient).
+    ///         equals the total fee carried in the sale event. `keeper` is always the keeper the
+    ///         manager reported at sale time (the fee reverts NoKeeper otherwise); `keeperShare`
+    ///         can be 0 only by truncation (fee < 4 wei).
     event FeeSplit(address indexed feeRecipient, uint256 platformShare, address indexed keeper, uint256 keeperShare);
 
-    /// @notice Optional MarketplaceManager — the authority anchor (keeper,
-    ///         admin) for upgrade gating and keeper consults. address(0) = no
-    ///         roles and a permanently frozen implementation. It has no power
-    ///         over funds and cannot halt any user action.
+    /// @notice MarketplaceManager — the authority anchor (keeper, admin) for
+    ///         upgrade gating and keeper consults. MANDATORY: the keeper share
+    ///         of every fee is paid to `manager.keeper()`, so a core cannot be
+    ///         built without one (constructor reverts ZeroAddress). It has no
+    ///         power over funds and cannot halt any user action.
     ///         v3.4: immutable, and the manager itself is UNPROXIED — killing
     ///         both the SLOAD and the manager-side proxy hop on every keeper
     ///         authority consult (−6.8k…−9.8k on settle/cleanExpired/refunds).
@@ -141,16 +141,16 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     ///         validation that used to live in the initializer moves here —
     ///         a typo'd/EOA manager would silently disable keeper roles and
     ///         freeze upgrades, so the probe runs before anything ships.
+    ///         The manager is MANDATORY (the keeper fee split depends on it):
+    ///         address(0) reverts ZeroAddress, a non-manager reverts BadManager.
     /// @custom:oz-upgrades-unsafe-allow constructor
     constructor(address recipient, address manager_) {
-        if (recipient == address(0)) revert ZeroAddress();
-        if (manager_ != address(0)) {
-            if (manager_.code.length == 0) revert BadManager();
-            (bool ok, bytes memory d) = manager_.staticcall(
-                abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), address(0))
-            );
-            if (!ok || d.length != 32) revert BadManager();
-        }
+        if (recipient == address(0) || manager_ == address(0)) revert ZeroAddress();
+        if (manager_.code.length == 0) revert BadManager();
+        (bool ok, bytes memory d) = manager_.staticcall(
+            abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), address(0))
+        );
+        if (!ok || d.length != 32) revert BadManager();
         feeRecipient = recipient;
         manager      = manager_;
     }
@@ -195,24 +195,18 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     ///
     ///      Keeper share: `fee * KEEPER_SHARE_BPS / PLATFORM_FEE_BPS`, truncated
     ///      (rounding favours the platform share). The keeper is resolved with a
-    ///      guarded staticcall to `manager.keeper()`; if there is no manager, the
-    ///      probe fails, or it reports address(0), the keeper share is 0 and the
-    ///      entire fee goes to feeRecipient. A fee payment can therefore never
-    ///      revert because of the keeper leg.
+    ///      guarded staticcall to `manager.keeper()`. Reverts NoKeeper if the
+    ///      manager cannot report a non-zero keeper (call failed, bad return
+    ///      length, or address(0)) — the keeper is mandatory and the split is
+    ///      never silently redirected to feeRecipient. The keeper PUSH itself
+    ///      never reverts: it uses the same pull-fallback via `_pay`.
     function _payFee(uint256 fee) internal {
         if (fee == 0) return;
-        uint256 keeperCut;
-        address k;
-        if (manager != address(0)) {
-            (bool okK, bytes memory data) = manager.staticcall(abi.encodeWithSignature("keeper()"));
-            if (okK && data.length == 32) {
-                k = abi.decode(data, (address));
-                if (k != address(0)) {
-                    keeperCut = (fee * KEEPER_SHARE_BPS) / PLATFORM_FEE_BPS;
-                }
-            }
-        }
-        if (keeperCut == 0) k = address(0);
+        (bool okK, bytes memory data) = manager.staticcall(abi.encodeWithSignature("keeper()"));
+        if (!okK || data.length != 32) revert NoKeeper();
+        address k = abi.decode(data, (address));
+        if (k == address(0)) revert NoKeeper();
+        uint256 keeperCut = (fee * KEEPER_SHARE_BPS) / PLATFORM_FEE_BPS;
         uint256 platformCut = fee - keeperCut;
         (bool ok,) = feeRecipient.call{gas: 50_000, value: platformCut}("");
         if (!ok) {
@@ -319,7 +313,6 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     ///         holders can see a pending implementation and exit before it lands.
     /// @param impl The implementation contract to install after the delay.
     function queueUpgrade(address impl) external {
-        if (manager == address(0)) revert NoManager();
         _requireAdmin();
         if (impl == address(0) || impl.code.length == 0) revert BadImplementation();
         pendingImplementation = impl;
@@ -330,7 +323,6 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     /// @notice Abandon the queued upgrade. Used to withdraw a proposal, and as
     ///         the immediate response if an admin key is suspected compromised.
     function cancelUpgrade() external {
-        if (manager == address(0)) revert NoManager();
         _requireAdmin();
         emit UpgradeCancelled(pendingImplementation);
         pendingImplementation = address(0);
@@ -342,12 +334,10 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     ///         queued at least `upgradeDelay()` ago and not left to go stale.
     /// @dev Previously this was a bare role check, so one compromised admin key
     ///      could swap in a malicious implementation and sweep every escrowed
-    ///      wei in a single transaction with no warning. It was also a complete
-    ///      no-op when manager == address(0), which made such a proxy upgradable
-    ///      by anyone; that case now reverts, permanently freezing the
-    ///      implementation of any ungated (test-only) deployment.
+    ///      wei in a single transaction with no warning. The manager is
+    ///      mandatory (constructor-enforced), so every proxy is admin-gated;
+    ///      there is no ungated deployment shape any more.
     function _authorizeUpgrade(address newImplementation) internal override {
-        if (manager == address(0)) revert NoManager();
         _requireAdmin();
         if (newImplementation != pendingImplementation) revert UpgradeNotQueued();
         if (block.timestamp < upgradeEta) revert UpgradeNotReady();

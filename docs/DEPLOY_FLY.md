@@ -21,18 +21,22 @@ See `deployments/README.md`.
 
 1. `test` — Zig libs + `go test -tags zigmedia -race`.
 2. `frontend-lint` — `astro check`, vitest, test-file guard.
-3. `deploy` — checks repository variables against `deployments/<NETWORK>.json`
-   (`tools/check-deployments.sh`), generates `fly.toml` from
-   `fly.<NETWORK>.toml.example` by substituting `CHANGE_ME_*`, fails on any leftover
-   placeholder, then `fly deploy --remote-only --strategy rolling`, then smoke-tests
-   `/healthz` and `/readyz` and runs `tools/check-fly-sync.sh`.
+3. `plan` → `build` → `deploy` — `plan` picks the enabled networks from the
+   repository variables `COSTON2_ENABLED` (default true), `SONGBIRD_ENABLED`,
+   `FLARE_ENABLED`; `build` builds ONE image for all of them; the `deploy`
+   matrix validates `deployments/<network>.json` (`tools/check-deployments.sh`),
+   generates `fly.toml` from `fly.<network>.toml.example` by substituting every
+   `CHANGE_ME_*` from that JSON (addresses, tracked collections, index-from
+   block) plus the computed `NETWORK_URLS`, fails on any leftover placeholder,
+   then `fly deploy --image <built image> --strategy rolling`, smoke-tests
+   `/readyz` and runs `tools/check-fly-sync.sh` against that origin.
 4. `verify` (tags `v*` only) — `forge verify-contract` for Marketplace, AuctionHouse,
    OfferBook, MarketplaceManager on the network's explorer, addresses from
    `deployments/<NETWORK>.json`.
 
 Repository **variables** (Settings → Secrets and variables → Actions → Variables):
-`NETWORK`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `NFT_ADDR`,
-`MARKETPLACE_MANAGER_ADDR`, `TRACKED_COLLECTIONS`, `INDEX_FROM_BLOCK`.
+only `COSTON2_ENABLED`, `SONGBIRD_ENABLED`, `FLARE_ENABLED`. Addresses and
+index blocks are NOT variables — they come from `deployments/<network>.json`.
 
 Repository **secrets**: `FLY_API_TOKEN`, `REOWN_PROJECT_ID`, `WC_PROJECT_ID`,
 `EXPLORER_API_KEY`.

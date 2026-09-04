@@ -22,7 +22,7 @@ import { runTx, type TxHooks, type TxRequest, type TxResult } from './runner';
 export const MIN_BID_INCREMENT_WEI = 10n ** 18n; // AuctionHouse.MIN_BID_INCREMENT = 1 ether
 export const FORCE_CANCEL_WINDOW_SEC = 3 * 86400; // AuctionHouse.SELLER_DEFAULT_WINDOW = 3 days
 
-/** Same rule as MarketplaceCore: only the shared 15 durations are accepted on-chain. */
+/** Same rule as MarketplaceCore: only the shared 14 durations are accepted on-chain. */
 export function assertAuctionDuration(d: number): asserts d is DurationSeconds {
   if (!isValidDuration(d)) throw new TxError('Invalid', 'Pick one of the allowed durations (1m–24h).');
 }

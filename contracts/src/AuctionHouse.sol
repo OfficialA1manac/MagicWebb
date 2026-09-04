@@ -64,7 +64,7 @@ error CannotCancel();
 ///      (startsAt, endsAt, extension window). Miners can manipulate
 ///      block.timestamp by up to ~15 seconds on Ethereum mainnet (less on Flare),
 ///      but all time windows are far larger than the manipulation threshold:
-///      - Auctions last from 1 minute to 24 hours (one of 15 fixed durations)
+///      - Auctions last from 1 minute to 24 hours (one of 14 fixed durations)
 ///      - Anti-snipe extension window is 3 minutes (EXTENSION_WINDOW)
 ///      - No stall window: a failed NFT transfer finalises the auction and refunds
 ///        the winner on the spot (AuctionSettlementFailed) — nothing waits on a retry
@@ -230,7 +230,7 @@ contract AuctionHouse is MarketplaceCore {
     // the vestigial `active` field is gone from the struct.
 
     /// @notice Create an ERC-721 auction. Starts immediately.
-    /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
+    /// @param duration One of the fourteen shared durations; endsAt is computed on-chain.
     /// @dev v3.3: no increment parameters. The overtake step is the
     ///      marketplace-wide MIN_BID_INCREMENT (1 native token) — sellers
     ///      cannot raise or lower it.
@@ -256,7 +256,7 @@ contract AuctionHouse is MarketplaceCore {
         uint128 reserve,
         uint64  endsAt
     ) internal returns (uint256 id) {
-        // endsAt was produced by _expiryFor(): in the future, one of the fifteen durations.
+        // endsAt was produced by _expiryFor(): in the future, one of the fourteen durations.
         if (endsAt <= block.timestamp) revert InvalidWindow();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
 
@@ -410,7 +410,7 @@ contract AuctionHouse is MarketplaceCore {
         // keeper checked via the manager role registry. No time-based fallback:
         // settlement authority never widens beyond keeper + seller + winner.
         bool authorized = (msg.sender == a.seller || msg.sender == a.leader);
-        if (!authorized && manager != address(0)) {
+        if (!authorized) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );
@@ -615,7 +615,7 @@ contract AuctionHouse is MarketplaceCore {
         // Same authority shape as settle(): parties first, then the keeper
         // probe via the manager. No permissionless tier.
         bool authorized = (msg.sender == a.seller || msg.sender == a.leader);
-        if (!authorized && manager != address(0)) {
+        if (!authorized) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );

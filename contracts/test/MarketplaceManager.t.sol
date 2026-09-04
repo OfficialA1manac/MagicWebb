@@ -7,7 +7,7 @@ import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
 import {MockERC721} from "./MockERC721.sol";
-import {BadManager, NotAdmin as CoreNotAdmin} from "../src/MarketplaceCore.sol";
+import {BadManager, ZeroAddress, NotAdmin as CoreNotAdmin} from "../src/MarketplaceCore.sol";
 import {TestHelpers} from "./TestHelpers.sol";
 
 contract MarketplaceManagerTest is Test, TestHelpers {
@@ -340,11 +340,18 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         new Marketplace(feeRecipient, address(nonManager));
     }
 
-    function test_zeroManagerCoreListsFreely() public {
-        // manager == address(0): no roles, frozen implementation — but every
-        // user action still works (nothing is ever gated on the manager).
-        Marketplace freeMp = _deployMarketplace(feeRecipient, address(0));
-        assertTrue(freeMp.manager() == address(0));
+    function test_zeroManagerCoreReverts() public {
+        // The manager is MANDATORY: the keeper fee split resolves through it,
+        // so a core cannot be constructed without one.
+        vm.expectRevert(ZeroAddress.selector);
+        new Marketplace(feeRecipient, address(0));
+    }
+
+    function test_managedCoreListsFreely() public {
+        // With a manager installed every user action still works — nothing
+        // user-facing is ever gated on the manager beyond the keeper consults.
+        Marketplace freeMp = _deployMarketplace(feeRecipient, address(mgr));
+        assertTrue(freeMp.manager() == address(mgr));
 
         MockERC721 nft = new MockERC721();
         vm.startPrank(address(0xBEEF));

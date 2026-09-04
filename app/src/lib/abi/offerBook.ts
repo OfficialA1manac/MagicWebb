@@ -873,7 +873,7 @@ export const offerBookAbi = [
   },
   {
     "type": "error",
-    "name": "NoManager",
+    "name": "NoKeeper",
     "inputs": []
   },
   {

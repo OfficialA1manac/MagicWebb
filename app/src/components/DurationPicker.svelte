@@ -4,7 +4,7 @@
 
   // ARIA radiogroup means ONE tab stop with arrow keys inside it, not one tab
   // stop per option. Every option was natively focusable, so a keyboard user
-  // had to tab through all 15 durations to reach the next field, and arrow
+  // had to tab through all 14 durations to reach the next field, and arrow
   // keys did nothing at all.
   let selectedIndex = $derived(Math.max(0, DURATIONS.findIndex((d) => d.seconds === value)));
 

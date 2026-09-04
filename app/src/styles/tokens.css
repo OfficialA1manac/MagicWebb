@@ -1,0 +1,111 @@
+/* MagicWebb design tokens (spec B0, docs/DESIGN.md). Imported before base.css.
+   Every component references these vars — no raw hex in new code. Dark is the
+   default; the light theme swaps the surface/text/line tokens only. */
+
+:root {
+  /* ── Surfaces ─────────────────────────────────────────────────────────── */
+  --bg: #09090b;
+  --surface: #0f0f13;
+  --surface-2: #16161c;
+  --line: rgba(255, 255, 255, 0.08);
+  --line-strong: rgba(255, 255, 255, 0.16);
+
+  /* ── Text (never below .56 alpha for text) ────────────────────────────── */
+  --text: #f4f4f5;
+  --text-2: rgba(255, 255, 255, 0.72);
+  --text-3: rgba(255, 255, 255, 0.56);
+  --text-on-accent: #09090b;
+
+  /* ── Accents ──────────────────────────────────────────────────────────── */
+  --sky: #7dd3fc;      /* primary / listings */
+  --gold: #fcd34d;     /* price / offers */
+  --violet: #a78bfa;   /* auctions */
+  --green: #4ade80;    /* success / live */
+  --red: #fca5a5;      /* error */
+  --amber: #fbbf24;    /* creator */
+  /* Tinted fills derived from the accents (borders/backgrounds of pills). */
+  --sky-12: rgba(125, 211, 252, 0.12);
+  --sky-35: rgba(125, 211, 252, 0.35);
+  --gold-12: rgba(252, 211, 77, 0.12);
+  --gold-35: rgba(252, 211, 77, 0.35);
+  --violet-12: rgba(167, 139, 250, 0.12);
+  --violet-35: rgba(167, 139, 250, 0.35);
+  --green-12: rgba(74, 222, 128, 0.12);
+  --red-12: rgba(252, 165, 165, 0.12);
+  --red-35: rgba(252, 165, 165, 0.35);
+  --amber-12: rgba(251, 191, 36, 0.12);
+  --amber-35: rgba(251, 191, 36, 0.35);
+
+  /* ── Type ─────────────────────────────────────────────────────────────── */
+  --font-sans: 'Inter', system-ui, -apple-system, 'Segoe UI', Roboto, sans-serif;
+  --font-mono: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+  --fs-display: 44px; --lh-display: 48px;
+  --fs-h1: 28px; --lh-h1: 34px;
+  --fs-h2: 22px; --lh-h2: 28px;
+  --fs-h3: 17px; --lh-h3: 24px;
+  --fs-body: 15px; --lh-body: 22px;
+  --fs-small: 13px; --lh-small: 18px;
+  --fs-caption: 12px; --lh-caption: 16px;
+  --ls-caption: 0.04em;
+
+  /* ── Spacing (4-pt) ───────────────────────────────────────────────────── */
+  --sp-1: 4px; --sp-2: 8px; --sp-3: 12px; --sp-4: 16px;
+  --sp-6: 24px; --sp-8: 32px; --sp-12: 48px; --sp-16: 64px;
+
+  /* ── Radius ───────────────────────────────────────────────────────────── */
+  --r-control: 8px;
+  --r-card: 12px;
+  --r-pill: 999px;
+
+  /* ── Elevation (menus/modals only; cards use border) ──────────────────── */
+  --shadow: 0 8px 24px rgba(0, 0, 0, 0.35);
+
+  /* ── Motion ───────────────────────────────────────────────────────────── */
+  --dur-fast: 120ms;
+  --dur: 200ms;
+  --ease: cubic-bezier(0.2, 0.8, 0.2, 1);
+
+  /* ── Layout ───────────────────────────────────────────────────────────── */
+  --header-h: 60px;
+  --tabbar-h: 60px;
+  --hit: 44px;
+  --z-header: 40; --z-banner: 30; --z-drawer: 50; --z-modal: 60; --z-toast: 70;
+  --bp-sm: 480px; --bp-md: 768px; --bp-lg: 1024px;
+
+  /* ── Legacy aliases (pages not yet migrated still reference these) ────── */
+  --ink-950: var(--bg); --ink-900: var(--surface); --ink-800: #1a1a24;
+  --sky-300: var(--sky); --sky-500: #0ea5e9;
+  --gold-300: var(--gold); --gold-500: #f59e0b;
+  --violet-300: var(--violet); --violet-500: #7c3aed;
+  --white: var(--text);
+  --white-10: rgba(255, 255, 255, 0.1); --white-20: rgba(255, 255, 255, 0.2);
+  --white-40: rgba(255, 255, 255, 0.4); --white-60: rgba(255, 255, 255, 0.6); --white-80: rgba(255, 255, 255, 0.8);
+}
+
+@media (max-width: 640px) {
+  :root { --fs-display: 32px; --lh-display: 36px; --header-h: 56px; }
+}
+
+/* Light theme: tokens only, no toggle in v1. Accents stay; surfaces and text
+   invert so the same components read correctly. */
+@media (prefers-color-scheme: light) {
+  :root {
+    --bg: #fafafa;
+    --surface: #ffffff;
+    --surface-2: #f1f1f4;
+    --line: rgba(0, 0, 0, 0.08);
+    --line-strong: rgba(0, 0, 0, 0.18);
+    --text: #111114;
+    --text-2: rgba(0, 0, 0, 0.72);
+    --text-3: rgba(0, 0, 0, 0.58);
+    --sky: #0284c7;
+    --gold: #b45309;
+    --violet: #6d28d9;
+    --green: #15803d;
+    --red: #b91c1c;
+    --amber: #b45309;
+    --shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
+    --white-10: rgba(0, 0, 0, 0.06); --white-20: rgba(0, 0, 0, 0.12);
+    --white-40: rgba(0, 0, 0, 0.4); --white-60: rgba(0, 0, 0, 0.6); --white-80: rgba(0, 0, 0, 0.8);
+  }
+}

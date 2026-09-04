@@ -17,7 +17,7 @@ contract MarketplaceTest is Test, TestHelpers {
     address buyer = address(0xCAFE);
 
     function setUp() public {
-        mp = _deployMarketplace(creator, address(0));
+        mp = _deployMarketplace(creator, address(_deployMarketplaceManager()));
         nft = new MockERC721();
         multi = new MockERC1155();
         vm.deal(seller, 100 ether);
@@ -126,7 +126,8 @@ contract MarketplaceTest is Test, TestHelpers {
     }
 
     function test_cleanExpiredOnlyKeeper() public {
-        // manager == address(0) → permissionless. Works as fallback.
+        // The manager is mandatory, so cleanExpired is ALWAYS keeper-gated:
+        // a stranger reverts NotOwner, the manager's keeper succeeds.
         vm.startPrank(seller);
         uint256 tid = nft.mint(seller);
         nft.setApprovalForAll(address(mp), true);
@@ -134,6 +135,11 @@ contract MarketplaceTest is Test, TestHelpers {
         vm.stopPrank();
 
         vm.warp(block.timestamp + 5 minutes);
+        vm.prank(address(0x57A4E));
+        vm.expectRevert(NotOwner.selector);
+        mp.cleanExpired(address(nft), tid, seller);
+
+        vm.prank(TEST_SENTINEL_KEEPER);
         mp.cleanExpired(address(nft), tid, seller);
         (address s, , ,,) = mp.listings(address(nft), tid, seller);
         assertEq(s, address(0));
@@ -141,7 +147,7 @@ contract MarketplaceTest is Test, TestHelpers {
 
     function testFuzz_sellerPaysFee(uint128 price) public {
         price = uint128(bound(price, 1 ether, 50 ether));
-        Marketplace freshMp = _deployMarketplace(creator, address(0));
+        Marketplace freshMp = _deployMarketplace(creator, address(_deployMarketplaceManager()));
         MockERC721 nft2 = new MockERC721();
         address s2 = address(0xBEEF);
         vm.deal(s2, 100 ether);
@@ -161,9 +167,9 @@ contract MarketplaceTest is Test, TestHelpers {
         assertEq(s2.balance, sb + uint256(price) - fee);
     }
 
-    /// Fifteen shared durations accepted; expiry computed on-chain from block.timestamp.
+    /// Fourteen shared durations accepted; expiry computed on-chain from block.timestamp.
     function test_list_durationsAndExpiry() public {
-        uint64[15] memory ok = [uint64(1 minutes), uint64(3 minutes), uint64(5 minutes), uint64(10 minutes), uint64(15 minutes), uint64(30 minutes), uint64(45 minutes), uint64(1 hours), uint64(2 hours), uint64(4 hours), uint64(8 hours), uint64(12 hours), uint64(16 hours), uint64(20 hours), uint64(24 hours)];
+        uint64[14] memory ok = [uint64(1 minutes), uint64(3 minutes), uint64(5 minutes), uint64(15 minutes), uint64(30 minutes), uint64(45 minutes), uint64(1 hours), uint64(2 hours), uint64(4 hours), uint64(8 hours), uint64(12 hours), uint64(16 hours), uint64(20 hours), uint64(24 hours)];
         vm.warp(1_700_000_000);
         for (uint256 i; i < ok.length; ++i) {
             vm.startPrank(seller);
@@ -183,6 +189,8 @@ contract MarketplaceTest is Test, TestHelpers {
         nft.setApprovalForAll(address(mp), true);
         vm.expectRevert(InvalidDuration.selector);
         mp.list(address(nft), tid, 1 ether, 7 minutes);
+        vm.expectRevert(InvalidDuration.selector);
+        mp.list(address(nft), tid, 1 ether, 10 minutes); // dropped from the shared set
         vm.expectRevert(InvalidDuration.selector);
         mp.list(address(nft), tid, 1 ether, 2 hours + 1);
         vm.expectRevert(InvalidDuration.selector);

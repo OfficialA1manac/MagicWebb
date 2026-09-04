@@ -1,18 +1,39 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
-import { WagmiProvider, useDisconnect } from 'wagmi';
-import { createAppKit } from '@reown/appkit/react';
-import { WagmiAdapter } from '@reown/appkit-adapter-wagmi';
-import { useAppKit, useAppKitAccount, useAppKitNetwork } from '@reown/appkit/react';
-import { http } from 'wagmi';
+import { useCallback, useEffect, useRef, useState, type MutableRefObject } from 'react';
 
-// Target chain is derived from server-injected window globals so the
-// same build works for Coston2 (chain 114) and mainnet (chain 14) without
-// recompilation. The backend injects MW_CHAIN_ID, MW_RPC_URL,
-// MW_NETWORK_NAME, MW_NATIVE_CURRENCY, MW_EXPLORER via layout.html.
-// Falls back to Coston2 defaults if the globals are absent (dev mode).
+// ── Lazy wallet stack ────────────────────────────────────────────────────────
+// AppKit + wagmi + react-query are ~1.9 MB of JS. They load on demand:
+//   • at mount when the page needs the wallet (`main[data-mw-needs-wallet]`,
+//     set by BaseLayout for /token /auction(s) /offers /profile),
+//   • on the first click of Connect / Reconnect anywhere else,
+//   • when page chrome calls window.__MW_APPKIT_OPEN__ before the stack is up
+//     (NFTGrid "Buy", profile empty state) — the shim loads, then opens.
+// The reconnect pill (address from localStorage) renders without any of it.
+type Mods = {
+  wagmi: typeof import('wagmi');
+  appkit: typeof import('@reown/appkit/react');
+  adapter: typeof import('@reown/appkit-adapter-wagmi');
+  rq: typeof import('@tanstack/react-query');
+};
+let _mods: Mods | null = null;
+let _modsP: Promise<Mods> | null = null;
+function loadMods(): Promise<Mods> {
+  if (_mods) return Promise.resolve(_mods);
+  if (!_modsP) {
+    _modsP = Promise.all([
+      import('wagmi'),
+      import('@reown/appkit/react'),
+      import('@reown/appkit-adapter-wagmi'),
+      import('@tanstack/react-query'),
+    ]).then(([wagmi, appkit, adapter, rq]) => (_mods = { wagmi, appkit, adapter, rq }));
+  }
+  return _modsP;
+}
+
+// Target chain is derived from server-injected window globals so the same
+// build works for Coston2 (114), Songbird (19) and Flare (14). Falls back to
+// Coston2 defaults if the globals are absent (dev mode).
 function getTargetChain() {
   if (typeof window === 'undefined') {
     return { id: 114, name: 'Flare Coston2', nativeCurrency: { name: 'Coston2 Flare', symbol: 'C2FLR', decimals: 18 }, rpcUrls: { default: { http: ['https://coston2-api.flare.network/ext/C/rpc'] } }, blockExplorers: { default: { name: 'Coston2 Explorer', url: 'https://coston2-explorer.flare.network' } } };
@@ -22,13 +43,10 @@ function getTargetChain() {
   const name = window.MW_NETWORK_NAME || 'Flare Coston2';
   const currency = window.MW_NATIVE_CURRENCY || 'C2FLR';
   const explorer = window.MW_EXPLORER || 'https://coston2-explorer.flare.network';
-  // Derive the currency name from the network name — works for any chain
-  // (Coston2, Flare mainnet, Songbird) without hardcoded mappings.
-  const currencyName = name;
   return {
     id: chainId,
     name,
-    nativeCurrency: { name: currencyName, symbol: currency, decimals: 18 },
+    nativeCurrency: { name, symbol: currency, decimals: 18 },
     rpcUrls: { default: { http: [rpcUrl] } },
     blockExplorers: { default: { name: name + ' Explorer', url: explorer } },
   };
@@ -37,48 +55,70 @@ function getTargetChain() {
 const targetChain = getTargetChain();
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- AppKitNetwork type differs between library versions; cast once at the boundary
 const targetAppKitNetwork = targetChain as any;
-
 const chains = [targetChain];
-const transports = {
-  [targetChain.id]: http(targetChain.rpcUrls.default.http[0]),
-};
 
 function getProjectId(): string {
-  // Primary: Astro build-time env var (PUBLIC_REOWN_PROJECT_ID in app/.env).
   let id = (import.meta.env.PUBLIC_REOWN_PROJECT_ID as string) || '';
-  // Fallback: the Go backend injects window.MW_WC_PROJECT_ID on HTMX pages;
-  // also works on Astro pages when served through the Go binary in production.
-  if (!id && typeof window !== 'undefined') {
-    id = window.MW_WC_PROJECT_ID || '';
-  }
+  if (!id && typeof window !== 'undefined') id = window.MW_WC_PROJECT_ID || '';
   return id;
 }
 
-function WalletButton() {
-  const { open } = useAppKit();
-  const { disconnect } = useDisconnect();
-  const { address, isConnected, status } = useAppKitAccount();
-  const { chainId } = useAppKitNetwork();
+function readStoredAddr(): string | null {
+  try {
+    const a = localStorage.getItem('mw_addr');
+    return a && a.length === 42 && a.startsWith('0x') ? a : null;
+  } catch { return null; }
+}
+function forgetStoredAddr() {
+  try { localStorage.removeItem('mw_addr'); localStorage.removeItem('mw_kind'); } catch { /* ignore */ }
+}
+const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
+const explorerAddr = (a: string) => `${(typeof window !== 'undefined' && window.MW_EXPLORER) || targetChain.blockExplorers.default.url}/address/${a}`;
+
+// ── Light shell pieces (no wallet libs) ──────────────────────────────────────
+function ConnectButton({ onClick, busy, label }: { onClick: () => void; busy?: boolean; label?: string }) {
+  return (
+    <button type="button" className="btn btn-primary wc-connect" onClick={onClick} disabled={busy} aria-busy={busy || undefined}>
+      {busy ? (
+        <><span className="wc-spin" aria-hidden="true" />{label || 'Loading…'}</>
+      ) : (
+        <><span className="wc-connect-full">Connect wallet</span><span className="wc-connect-short">Connect</span></>
+      )}
+    </button>
+  );
+}
+
+function ReconnectPill({ addr, onReconnect, onForget, busy }: { addr: string; onReconnect: () => void; onForget: () => void; busy?: boolean }) {
+  return (
+    <div className="wc-pill">
+      <button type="button" className="btn btn-secondary btn-sm" onClick={onReconnect} disabled={busy}>
+        <span className="wc-dot" aria-hidden="true" />{busy ? 'Reconnecting…' : 'Reconnect'}
+      </button>
+      <span className="mono wc-addr">{short(addr)}</span>
+      <button type="button" className="icon-btn wc-forget" onClick={onForget} title="Forget wallet" aria-label="Forget wallet">✕</button>
+    </div>
+  );
+}
+
+// ── Connected pill with menu (needs the wallet libs) ─────────────────────────
+function WalletButton({ wantOpen }: { wantOpen: MutableRefObject<boolean> }) {
+  const m = _mods!;
+  const { open } = m.appkit.useAppKit();
+  const { disconnect } = m.wagmi.useDisconnect();
+  const { address, isConnected, status } = m.appkit.useAppKitAccount();
+  const { chainId } = m.appkit.useAppKitNetwork();
 
   const connecting = (status as string) === 'connecting' || (status as string) === 'reconnecting' || (status as string) === 'initializing';
   const wrongNetwork = isConnected && chainId !== undefined && chainId !== targetChain.id;
 
-  // Check localStorage for previously connected wallet
-  const [storedAddr, setStoredAddr] = useState<string | null>(null);
-  const [hasStoredWallet, setHasStoredWallet] = useState(false);
-  useEffect(() => {
-    try {
-      const a = localStorage.getItem('mw_addr');
-      if (a && a.length === 42 && a.startsWith('0x')) {
-        setStoredAddr(a);
-        setHasStoredWallet(true);
-      }
-    } catch (_) {}
-  }, []);
+  const [storedAddr, setStoredAddr] = useState<string | null>(() => readStoredAddr());
+  const [menuOpen, setMenuOpen] = useState(false);
+  const menuRef = useRef<HTMLDivElement | null>(null);
 
-  const displayAddr = address ? `${address.slice(0, 6)}...${address.slice(-4)}` : '';
-  // navigator.clipboard is undefined in non-secure contexts (plain-HTTP LAN).
-  const copyAddress = () => { if (address) navigator.clipboard?.writeText(address).catch(() => {}); };
+  // Open the modal once if the user asked for it before the stack loaded.
+  useEffect(() => {
+    if (wantOpen.current && !isConnected && !connecting) { wantOpen.current = false; open(); }
+  }, [wantOpen, isConnected, connecting, open]);
 
   const wasConnectedRef = useRef(false);
   const prevAddressRef = useRef<string | null>(null);
@@ -86,244 +126,80 @@ function WalletButton() {
     if (isConnected && address) {
       wasConnectedRef.current = true;
       const addrLower = address.toLowerCase();
-      // Only write to localStorage and fire event when the address
-      // has *actually* changed. Without this guard, wagmi's hydration
-      // (initializing→reconnecting→connected) fires mw-wallet-changed
-      // on every page load, even when the wallet didn't change — which
-      // causes the profile page to re-render needlessly and can trigger
-      // a visible disconnect/reconnect flicker.
+      // Only persist + notify when the address actually changed: wagmi's
+      // hydration (initializing→reconnecting→connected) must not re-render
+      // the profile page on every load.
       if (prevAddressRef.current !== addrLower) {
         prevAddressRef.current = addrLower;
-        try {
-          localStorage.setItem('mw_addr', addrLower);
-          localStorage.setItem('mw_kind', 'walletconnect');
-        } catch (_) {}
-        // Sync React state so stored-address is shown immediately after reconnect
+        try { localStorage.setItem('mw_addr', addrLower); localStorage.setItem('mw_kind', 'walletconnect'); } catch { /* ignore */ }
         setStoredAddr(addrLower);
-        setHasStoredWallet(true);
-        // Notify the page so saved-search buttons appear
-        if (typeof window !== 'undefined') {
-          window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-        }
+        window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
       }
     } else if (wasConnectedRef.current && !isConnected) {
       wasConnectedRef.current = false;
       prevAddressRef.current = null;
-      try {
-        localStorage.removeItem('mw_addr');
-        localStorage.removeItem('mw_kind');
-      } catch (_) {}
+      forgetStoredAddr();
       setStoredAddr(null);
-      setHasStoredWallet(false);
-      if (typeof window !== 'undefined') {
-        window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-      }
+      window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
     }
   }, [isConnected, address]);
 
-  // Expose globals so the mobile menu / external triggers can open AppKit
+  // Real globals replace the shell's shim once the stack is live.
   useEffect(() => {
-    if (typeof window !== 'undefined') {
-      window.__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
-      window.__MW_APPKIT_DISCONNECT__ = () => { disconnect(); };
-      window.__MW_APPKIT_READY__ = true;
-    }
-    return () => {
-      if (typeof window !== 'undefined') {
-        delete window.__MW_APPKIT_OPEN__;
-        delete window.__MW_APPKIT_DISCONNECT__;
-        delete window.__MW_APPKIT_READY__;
-      }
-    };
+    window.__MW_APPKIT_OPEN__ = () => { if (!isConnected && !connecting) open(); };
+    window.__MW_APPKIT_DISCONNECT__ = () => { disconnect(); };
+    window.__MW_APPKIT_READY__ = true;
+    return () => { delete window.__MW_APPKIT_OPEN__; delete window.__MW_APPKIT_DISCONNECT__; delete window.__MW_APPKIT_READY__; };
   }, [isConnected, connecting, open, disconnect]);
 
-  // Show stored wallet address as a click-to-reconnect button while wagmi is initializing.
-  // Guard: hide while connecting to prevent repeated open() calls.
-  if (!isConnected && !connecting && hasStoredWallet && storedAddr) {
-    return (
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
-        <button
-          onClick={() => open()}
-          style={{
-            padding: '0.25rem 0.75rem',
-            borderRadius: '0.5rem',
-            background: 'linear-gradient(135deg, rgba(167,139,250,0.2), rgba(124,58,237,0.15))',
-            border: '1px solid rgba(167,139,250,0.3)',
-            color: '#c4b5fd',
-            fontWeight: 700,
-            fontSize: '0.6875rem',
-            cursor: 'pointer',
-            fontFamily: 'inherit',
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '0.375rem',
-            transition: 'all 0.2s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.35), rgba(124,58,237,0.25))'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.background = 'linear-gradient(135deg, rgba(167,139,250,0.2), rgba(124,58,237,0.15))'; }}
-        >
-          <span style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: '#7dd3fc', boxShadow: '0 0 8px rgba(125,211,252,0.5)' }} />
-          Reconnect
-        </button>
-        <span style={{ fontSize: '0.625rem', fontWeight: 600, color: 'rgba(255,255,255,0.35)', fontFamily: "'JetBrains Mono', 'Fira Code', monospace" }}>
-          {storedAddr.slice(0, 6)}...{storedAddr.slice(-4)}
-        </span>
-        <button
-          onClick={() => {
-            try {
-              localStorage.removeItem('mw_addr');
-              localStorage.removeItem('mw_kind');
-              setStoredAddr(null);
-              setHasStoredWallet(false);
-            } catch (_) {}
-          }}
-          style={{
-            background: 'none',
-            border: 'none',
-            color: 'rgba(255,255,255,0.2)',
-            cursor: 'pointer',
-            padding: '0.25rem',
-            fontSize: '0.75rem',
-            fontFamily: 'inherit',
-            transition: 'color 0.2s',
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#fca5a5'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = 'rgba(255,255,255,0.2)'; }}
-          title="Forget wallet"
-        >
-          ✕
-        </button>
-      </div>
-    );
-  }
+  // Menu: outside click + Escape.
+  useEffect(() => {
+    if (!menuOpen) return;
+    const onDoc = (e: MouseEvent) => { if (menuRef.current && !menuRef.current.contains(e.target as Node)) setMenuOpen(false); };
+    const onKey = (e: KeyboardEvent) => { if (e.key === 'Escape') setMenuOpen(false); };
+    document.addEventListener('click', onDoc, true);
+    document.addEventListener('keydown', onKey);
+    return () => { document.removeEventListener('click', onDoc, true); document.removeEventListener('keydown', onKey); };
+  }, [menuOpen]);
 
+  if (!isConnected && !connecting && storedAddr) {
+    return <ReconnectPill addr={storedAddr} onReconnect={() => open()} onForget={() => { forgetStoredAddr(); setStoredAddr(null); }} />;
+  }
   if (!isConnected) {
-    return (
-      <button
-        onClick={() => open()}
-        disabled={connecting}
-        style={{
-          padding: '0.625rem 1.25rem',
-          borderRadius: '0.75rem',
-          background: connecting
-            ? 'linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25))'
-            : 'linear-gradient(135deg, #a78bfa, #7c3aed)',
-          color: connecting ? 'rgba(255,255,255,0.4)' : '#ffffff',
-          fontWeight: 800,
-          fontSize: '0.8125rem',
-          border: 'none',
-          cursor: connecting ? 'not-allowed' : 'pointer',
-          display: 'inline-flex',
-          alignItems: 'center',
-          gap: '0.5rem',
-          transition: 'all 0.2s ease',
-          boxShadow: connecting ? 'none' : '0 0 22px -6px rgba(167,139,250,0.45), 0 4px 12px -4px rgba(124,58,237,0.3)',
-          fontFamily: 'inherit',
-          lineHeight: 1,
-        }}
-        onMouseEnter={(e) => {
-          if (!connecting) {
-            e.currentTarget.style.opacity = '0.92';
-            e.currentTarget.style.transform = 'scale(1.02)';
-            e.currentTarget.style.boxShadow = '0 0 30px -4px rgba(167,139,250,0.6), 0 6px 20px -6px rgba(124,58,237,0.35)';
-          }
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.opacity = '1';
-          e.currentTarget.style.transform = 'scale(1)';
-          e.currentTarget.style.boxShadow = '0 0 22px -6px rgba(167,139,250,0.45), 0 4px 12px -4px rgba(124,58,237,0.3)';
-        }}
-        onMouseDown={(e) => {
-          if (!connecting) e.currentTarget.style.transform = 'scale(0.97)';
-        }}
-        onMouseUp={(e) => {
-          if (!connecting) e.currentTarget.style.transform = 'scale(1.02)';
-        }}
-      >
-        {connecting ? (
-          <>
-            <span style={{ display: 'inline-block', width: '1rem', height: '1rem', border: '2px solid rgba(255,255,255,0.2)', borderTopColor: '#a78bfa', borderRadius: '50%', animation: 'spin 0.8s linear infinite' }} />
-            Reconnecting…
-          </>
-        ) : (
-          <>
-            <span style={{ fontSize: '1rem', lineHeight: 1, color: '#ddd6fe' }}>⌬</span>
-            <span>Connect Wallet</span>
-          </>
-        )}
-      </button>
-    );
+    return <ConnectButton onClick={() => open()} busy={connecting} label="Reconnecting…" />;
   }
 
-  // Wrong network: no separate pill here — NetworkMismatchBanner is the single
-  // messaging surface with the switch action. The wallet chip only carries a
-  // compact amber warning dot so the state is still visible in the nav.
+  const addr = address as string;
+  const copyAddress = () => { navigator.clipboard?.writeText(addr).catch(() => {}); setMenuOpen(false); window.dispatchEvent(new CustomEvent('mw-toast', { detail: { message: 'Address copied', variant: 'success' } })); };
   return (
-    <div className="wc-pill" style={{ display: 'flex', alignItems: 'center', gap: '0.5rem', padding: '0.375rem 0.5rem 0.375rem 0.75rem', borderRadius: '0.75rem', background: 'rgba(255,255,255,0.04)', border: wrongNetwork ? '1px solid rgba(251,191,36,0.35)' : '1px solid rgba(255,255,255,0.08)', transition: 'all 0.2s' }}>
-      <div style={{ display: 'flex', alignItems: 'center', gap: '0.375rem' }}>
-        <span title={wrongNetwork ? `Wallet is on the wrong network — switch to ${targetChain.name}` : undefined} style={{ display: 'inline-block', width: '0.5rem', height: '0.5rem', borderRadius: '50%', background: wrongNetwork ? '#fcd34d' : '#7dd3fc', boxShadow: wrongNetwork ? '0 0 8px rgba(251,191,36,0.6)' : '0 0 8px rgba(125,211,252,0.5)', position: 'relative' }}>
-          <span style={{ position: 'absolute', inset: '-3px', borderRadius: '50%', background: wrongNetwork ? 'rgba(251,191,36,0.25)' : 'rgba(125,211,252,0.2)', animation: 'pulse-ring 1.5s ease-out infinite' }} />
-        </span>
-        <span className="wc-label" style={{ fontSize: '0.5625rem', fontWeight: 700, color: 'rgba(255,255,255,0.35)', textTransform: 'uppercase', letterSpacing: '0.1em' }}>Wallet</span>
-        <span className="wc-badge" style={{ fontSize: '0.5rem', padding: '0.125rem 0.375rem', borderRadius: '0.25rem', background: 'rgba(167,139,250,0.2)', color: '#ddd6fe', fontWeight: 700, textTransform: 'uppercase', letterSpacing: '0.05em', border: '1px solid rgba(167,139,250,0.25)' }}>WC</span>
-        <button
-          onClick={copyAddress}
-          title="Click to copy"
-          style={{
-            fontSize: '0.75rem',
-            fontWeight: 700,
-            color: '#fafafa',
-            fontFamily: "'JetBrains Mono', 'Fira Code', monospace",
-            cursor: 'pointer',
-            transition: 'color 0.2s',
-            background: 'none',
-            border: 'none',
-            padding: 0,
-          }}
-          onMouseEnter={(e) => { e.currentTarget.style.color = '#fcd34d'; }}
-          onMouseLeave={(e) => { e.currentTarget.style.color = '#fafafa'; }}
-        >
-          {displayAddr}
-        </button>
-      </div>
-      <button
-        onClick={() => disconnect()}
-        className="wc-disconnect"
-        aria-label="Disconnect wallet"
-        style={{
-          padding: '0.25rem 0.625rem',
-          borderRadius: '0.5rem',
-          background: 'transparent',
-          border: '1px solid rgba(255,255,255,0.08)',
-          color: 'rgba(255,255,255,0.4)',
-          fontSize: '0.6875rem',
-          fontWeight: 600,
-          cursor: 'pointer',
-          fontFamily: 'inherit',
-          transition: 'all 0.2s',
-        }}
-        onMouseEnter={(e) => {
-          e.currentTarget.style.color = '#fca5a5';
-          e.currentTarget.style.borderColor = 'rgba(252,165,165,0.3)';
-          e.currentTarget.style.background = 'rgba(239,68,68,0.08)';
-        }}
-        onMouseLeave={(e) => {
-          e.currentTarget.style.color = 'rgba(255,255,255,0.4)';
-          e.currentTarget.style.borderColor = 'rgba(255,255,255,0.08)';
-          e.currentTarget.style.background = 'transparent';
-        }}
-      >
-        <span className="wc-dc-full">Disconnect</span>
-        <span className="wc-dc-min" aria-hidden="true">✕</span>
+    <div className="wc-pill wc-connected" ref={menuRef}>
+      <button type="button" className="btn btn-secondary wc-trigger" aria-haspopup="menu" aria-expanded={menuOpen} onClick={() => setMenuOpen((o) => !o)}
+              style={wrongNetwork ? { borderColor: 'var(--amber-35)' } : undefined}>
+        <span className={`wc-dot${wrongNetwork ? ' is-warn' : ''}`} aria-hidden={wrongNetwork ? undefined : 'true'}
+              title={wrongNetwork ? `Wallet is on the wrong network — switch to ${targetChain.name}` : undefined}
+              aria-label={wrongNetwork ? `Wallet is on the wrong network — switch to ${targetChain.name}` : undefined} />
+        <span className="mono wc-addr">{short(addr)}</span>
+        <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round" aria-hidden="true"><path d="m6 9 6 6 6-6"/></svg>
       </button>
+      {menuOpen && (
+        <div className="wc-menu" role="menu" aria-label="Wallet">
+          <button type="button" role="menuitem" className="wc-item" onClick={copyAddress}>Copy address</button>
+          <a role="menuitem" className="wc-item" href={`/profile/${addr}`} onClick={() => setMenuOpen(false)}>View profile</a>
+          <a role="menuitem" className="wc-item" href={explorerAddr(addr)} target="_blank" rel="noopener" onClick={() => setMenuOpen(false)}>Explorer ↗</a>
+          <button type="button" role="menuitem" className="wc-item wc-item-danger wc-disconnect" onClick={() => { setMenuOpen(false); disconnect(); }}>Disconnect</button>
+        </div>
+      )}
     </div>
   );
 }
 
+// ── AppKit init (after the libs load) ────────────────────────────────────────
 // eslint-disable-next-line @typescript-eslint/no-explicit-any -- holds wagmi Config from adapter; type varies by adapter/version
 let _wagmiConfig: any = null;
 let _appKitReady = false;
 let _initFailed = false;
+// eslint-disable-next-line @typescript-eslint/no-explicit-any -- QueryClient type comes from the lazily loaded module
+let _queryClient: any = null;
 
 async function initAppKit(): Promise<void> {
   if (typeof window === 'undefined') return;
@@ -331,33 +207,32 @@ async function initAppKit(): Promise<void> {
   const projectId = getProjectId();
   if (!projectId) { console.warn('[mw-wc] No Reown project ID'); _initFailed = true; return; }
   try {
-    const adapter = new WagmiAdapter({ networks: chains, projectId, transports });
+    const m = await loadMods();
+    const transports = { [targetChain.id]: m.wagmi.http(targetChain.rpcUrls.default.http[0]) };
+    const adapter = new m.adapter.WagmiAdapter({ networks: chains, projectId, transports });
     _wagmiConfig = adapter.wagmiConfig;
-    createAppKit({
+    _queryClient = _queryClient || new m.rq.QueryClient();
+    m.appkit.createAppKit({
       // eslint-disable-next-line @typescript-eslint/no-explicit-any -- chains matches AppKitNetwork structurally but type defs differ
       adapters: [adapter], networks: chains as any, defaultNetwork: targetAppKitNetwork, projectId,
       // Reown validates metadata.url against the requesting origin, so it must
-      // be derived, not hardcoded: each network is a separate deployment on its
-      // own host, and announcing magicwebb.fly.dev from the Songbird or Flare
-      // app is exactly the origin mismatch the relay rejects (see the init
-      // failure path in frontend/static/wallet.js). icons must be absolute for
-      // the same reason. Same rule the legacy wallet.js followed.
+      // be derived: each network is its own host.
       metadata: {
         name: 'MagicWebb',
         description: 'Non-custodial NFT marketplace on ' + targetChain.name,
         url: window.location.origin,
         icons: [window.location.origin + '/favicon.ico'],
       },
-      features: { analytics: false, email: false, socials: false },
+      // Self-custody wallets only: no email/social login, no Coinbase SDK, no
+      // analytics beacon, no onramp/swaps widgets.
+      features: { analytics: false, email: false, socials: false, onramp: false, swaps: false },
+      enableCoinbase: false,
       themeMode: 'dark',
     });
     _appKitReady = true;
     // Publish for the non-React world (Astro page scripts, Svelte islands):
-    // app/src/lib/tx/client.ts reads window.__MW_WAGMI_CONFIG__ and waits on
-    // the mw-wagmi-ready event. One wagmi config == one wallet session.
-    // Published only AFTER createAppKit() succeeds — a config without a live
-    // AppKit has no __MW_APPKIT_OPEN__ modal, so requireWallet() would sit in
-    // its 120s account-change wait with no way for the user to connect.
+    // lib/tx/client.ts reads window.__MW_WAGMI_CONFIG__ and waits on the
+    // mw-wagmi-ready event. Published only AFTER createAppKit() succeeds.
     window.__MW_WAGMI_CONFIG__ = adapter.wagmiConfig;
     window.dispatchEvent(new CustomEvent('mw-wagmi-ready'));
   } catch (e) {
@@ -368,40 +243,66 @@ async function initAppKit(): Promise<void> {
   }
 }
 
-const queryClient = new QueryClient();
+function pageNeedsWallet(): boolean {
+  return typeof document !== 'undefined' && !!document.querySelector('main[data-mw-needs-wallet]');
+}
+
+type Phase = 'idle' | 'loading' | 'ready' | 'failed';
 
 export default function WalletConnect() {
-  const [ready, setReady] = useState(false);
-  const [retryCount, setRetryCount] = useState(0);
-  useEffect(() => { initAppKit().then(() => setReady(true)); }, [retryCount]);
+  const [phase, setPhase] = useState<Phase>(() => (pageNeedsWallet() ? 'loading' : 'idle'));
+  const [storedAddr, setStoredAddr] = useState<string | null>(() => (typeof window !== 'undefined' ? readStoredAddr() : null));
+  const wantOpen = useRef(false);
+  const started = useRef(false);
 
-  if (_initFailed) {
+  const start = useCallback((openAfter: boolean) => {
+    if (openAfter) wantOpen.current = true;
+    if (started.current) return;
+    started.current = true;
+    setPhase('loading');
+    initAppKit().then(() => setPhase(_initFailed || !_wagmiConfig ? 'failed' : 'ready'));
+  }, []);
+
+  useEffect(() => {
+    if (phase === 'loading' && !started.current) start(false);
+  }, [phase, start]);
+
+  // Shim so page chrome can request the wallet before the stack exists; the
+  // real WalletButton replaces it once mounted.
+  useEffect(() => {
+    if (phase === 'ready') return;
+    window.__MW_APPKIT_OPEN__ = () => start(true);
+    const onLoad = () => start(false);
+    window.addEventListener('mw-wallet-load', onLoad);
+    return () => {
+      window.removeEventListener('mw-wallet-load', onLoad);
+      if (window.__MW_APPKIT_OPEN__ && !window.__MW_APPKIT_READY__) delete window.__MW_APPKIT_OPEN__;
+    };
+  }, [phase, start]);
+
+  if (phase === 'failed') {
     return (
-      <div style={{ display: 'inline-flex', alignItems: 'center', gap: '0.5rem', padding: '0.625rem 1.25rem', borderRadius: '0.75rem', background: 'linear-gradient(135deg, rgba(239,68,68,0.1), rgba(220,38,38,0.05))', border: '1px solid rgba(239,68,68,0.2)', color: '#fca5a5', fontWeight: 600, fontSize: '0.75rem', fontFamily: 'inherit' }}>
-        <span>⚠ Wallet unavailable</span>
-        <button
-          onClick={() => { _initFailed = false; _appKitReady = false; setRetryCount(c => c + 1); }}
-          style={{ padding: '0.25rem 0.625rem', borderRadius: '0.5rem', background: 'rgba(239,68,68,0.15)', border: '1px solid rgba(239,68,68,0.3)', color: '#fca5a5', fontWeight: 700, fontSize: '0.6875rem', cursor: 'pointer', fontFamily: 'inherit' }}
-        >
-          Retry
-        </button>
+      <div className="wc-failed" role="status">
+        <span>Wallet unavailable</span>
+        <button type="button" className="btn btn-secondary btn-sm"
+                onClick={() => { _initFailed = false; _appKitReady = false; started.current = false; start(false); }}>Retry</button>
       </div>
     );
   }
-
-  if (!ready || !_wagmiConfig) {
+  if (phase === 'ready' && _wagmiConfig && _mods) {
+    const { WagmiProvider } = _mods.wagmi;
+    const { QueryClientProvider } = _mods.rq;
     return (
-      <button disabled style={{ padding: '0.625rem 1.25rem', borderRadius: '0.75rem', background: 'linear-gradient(135deg, rgba(167,139,250,0.15), rgba(124,58,237,0.1))', border: '1px solid rgba(255,255,255,0.05)', color: 'rgba(255,255,255,0.2)', fontWeight: 800, fontSize: '0.8125rem', cursor: 'default', display: 'inline-flex', alignItems: 'center', gap: '0.5rem', fontFamily: 'inherit', animation: 'shimmer-placeholder 1.5s ease-in-out infinite' }}>
-        <span style={{ fontSize: '1rem', opacity: 0.3 }}>⌬</span><span>Loading…</span>
-      </button>
+      <WagmiProvider config={_wagmiConfig}>
+        <QueryClientProvider client={_queryClient}>
+          <WalletButton wantOpen={wantOpen} />
+        </QueryClientProvider>
+      </WagmiProvider>
     );
   }
-
-  return (
-    <WagmiProvider config={_wagmiConfig}>
-      <QueryClientProvider client={queryClient}>
-        <WalletButton />
-      </QueryClientProvider>
-    </WagmiProvider>
-  );
+  const busy = phase === 'loading';
+  if (storedAddr) {
+    return <ReconnectPill addr={storedAddr} busy={busy} onReconnect={() => start(false)} onForget={() => { forgetStoredAddr(); setStoredAddr(null); }} />;
+  }
+  return <ConnectButton busy={busy} onClick={() => start(true)} />;
 }

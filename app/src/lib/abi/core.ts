@@ -469,11 +469,6 @@ export const coreAbi = [
   },
   {
     "type": "error",
-    "name": "NoManager",
-    "inputs": []
-  },
-  {
-    "type": "error",
     "name": "NotAdmin",
     "inputs": []
   },

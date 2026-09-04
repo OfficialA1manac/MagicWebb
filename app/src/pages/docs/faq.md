@@ -192,7 +192,7 @@ the wallet address — the same wallet always gets the same name. It carries no 
 meaning, no privileges, and no judgement; it just makes owners easier to recognise.
 
 ### Why did my listing, auction or offer need a duration instead of a date?
-The contracts accept fifteen fixed durations (1 min – 24 h) and compute
+The contracts accept fourteen fixed durations (1 min – 24 h) and compute
 the expiry on-chain from the block that mines your transaction. Picking a duration is the
 only way a wallet can satisfy that rule; the exact expiry is shown once the transaction
 confirms.

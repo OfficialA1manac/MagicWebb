@@ -6,65 +6,63 @@ export interface Props {
 }
 
 import MwRuntime from '../components/MwRuntime.svelte';
+import { iconSvg } from '../lib/icons';
+// Self-hosted fonts (fontsource, latin subset, font-display: swap). Replaces
+// the Google Fonts <link>: no third-party connection, no FOIT.
+import '@fontsource/inter/latin-400.css';
+import '@fontsource/inter/latin-500.css';
+import '@fontsource/inter/latin-600.css';
+import '@fontsource/inter/latin-700.css';
+import '@fontsource/inter/latin-800.css';
+import '@fontsource/jetbrains-mono/latin-400.css';
+import '@fontsource/jetbrains-mono/latin-500.css';
+import '@fontsource/jetbrains-mono/latin-600.css';
+import '@fontsource/jetbrains-mono/latin-700.css';
+import '../styles/tokens.css';
 import '../styles/base.css';
 import '../styles/badges.css';
 
 const { title, description, activeNav } = Astro.props;
 const desc = description || 'Decentralized NFT marketplace on Flare Network — buy, sell, and auction NFTs';
-const currentPath = Astro.url?.pathname || '/';
-const isActive = (path: string) => currentPath === path ? 'active' : '';
+const currentPath = (Astro.url?.pathname || '/').replace(/\/+$/, '') || '/';
 
-// Network switcher — mirrors config.buildNetworks in the Go backend.
-//
-// Each network is a separate origin with its own API, database and websocket
-// (the backend validates exactly one CHAIN_ID per process), so switching is a
-// navigation to another host, never a client-side chain change.
-//
-// PUBLIC_NETWORK_URLS is a comma-separated list of `chainID=origin` pairs, the
-// same format the backend reads from NETWORK_URLS. A chain that is absent has
-// no deployment and renders disabled rather than linking to an app that does
-// not exist — which is the honest default today, since only Coston2 has
-// contracts deployed.
-const KNOWN_NETWORKS = [
-  { chainId: 114, name: 'Coston2' },
-  { chainId: 19, name: 'Songbird' },
-  { chainId: 14, name: 'Flare' },
+// Nav items (spec B1). `key` matches the activeNav prop DocLayout passes.
+const NAV = [
+  { href: '/listings', label: 'Listings', key: 'listings' },
+  { href: '/auctions', label: 'Auctions', key: 'auctions' },
+  { href: '/offers', label: 'Offers', key: 'offers' },
+  { href: '/search', label: 'Search', key: 'search' },
+  { href: '/docs', label: 'Docs', key: 'docs' },
 ];
-const currentChainId = Number(import.meta.env.PUBLIC_CHAIN_ID ?? 114);
-const networkUrls = new Map<number, string>();
-for (const pair of (import.meta.env.PUBLIC_NETWORK_URLS ?? '').split(',')) {
-  const [id, ...rest] = pair.split('=');
-  const origin = rest.join('=').trim().replace(/\/+$/, '');
-  const chainId = Number(id.trim());
-  if (Number.isFinite(chainId) && origin) networkUrls.set(chainId, origin);
-}
-// The current network stays available even when the list omits it: the user is
-// already on it, so a missing self-entry is a config typo rather than a reason
-// to grey out the page being viewed.
-const networks = KNOWN_NETWORKS.map((n) => {
-  const url = networkUrls.get(n.chainId) ?? '';
-  const current = n.chainId === currentChainId;
-  return { ...n, url, current, available: url !== '' || current };
-});
+const isActive = (href: string, key?: string) =>
+  currentPath === href || (key !== undefined && activeNav === key) || (href !== '/' && currentPath.startsWith(href + '/'));
+const TABS = [
+  { href: '/', label: 'Home', icon: 'home' },
+  { href: '/listings', label: 'Listings', icon: 'tag' },
+  { href: '/auctions', label: 'Auctions', icon: 'gavel' },
+  { href: '/offers', label: 'Offers', icon: 'inbox' },
+  { href: '/profile', label: 'Profile', icon: 'user' },
+] as const;
 ---
 
 <!doctype html>
 <html lang="en">
   <head>
     <meta charset="utf-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{title} — MagicWebb</title>
     <meta name="description" content={desc} />
     <meta name="theme-color" content="#09090b" />
     <meta property="og:title" content={`${title} — MagicWebb NFT Marketplace`} />
     <meta property="og:description" content={desc} />
     <meta property="og:type" content="website" />
-    <link rel="preconnect" href="https://fonts.googleapis.com" />
-    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
-    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700;800;900&family=JetBrains+Mono:wght@400;500;600;700&display=swap" rel="stylesheet" />
-    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' color='%237dd3fc'/><stop offset='50%' color='%23fcd34d'/><stop offset='100%' color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
+    <link rel="icon" type="image/svg+xml" href="data:image/svg+xml;utf8,<svg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'><defs><linearGradient id='g' x1='0%' y1='0%' x2='100%' y2='100%'><stop offset='0%' stop-color='%237dd3fc'/><stop offset='50%' stop-color='%23fcd34d'/><stop offset='100%' stop-color='%23a78bfa'/></linearGradient></defs><circle cx='16' cy='16' r='14' fill='url(%23g)'/><text x='16' y='23' font-size='22' font-family='sans-serif' font-weight='900' text-anchor='middle' fill='%2309090b'>✦</text></svg>">
 
     <script is:inline>
+      // Runtime network globals. cmd/server/ui.go injects window.MW_* before
+      // this script; these are the dev-mode fallbacks (Coston2). MW_TRADING,
+      // MW_FAUCET_URL and MW_NETWORK_STATUS_JSON arrive with A2.8 — until
+      // then they are derived from the older globals.
       window.MW_CHAIN_ID = window.MW_CHAIN_ID || '114';
       window.MW_RPC_URL = window.MW_RPC_URL || 'https://coston2-api.flare.network/ext/C/rpc';
       window.MW_NETWORK_NAME = window.MW_NETWORK_NAME || 'Flare Coston2';
@@ -74,224 +72,138 @@ const networks = KNOWN_NETWORKS.map((n) => {
       window.MW_AUCTION = window.MW_AUCTION || '';
       window.MW_OFFERBOOK = window.MW_OFFERBOOK || '';
       window.MW_WC_PROJECT_ID = window.MW_WC_PROJECT_ID || '';
-      window.MW_NETWORK_URLS = window.MW_NETWORK_URLS || "";
+      window.MW_NETWORK_URLS = window.MW_NETWORK_URLS || '';
+      window.MW_TRADING = window.MW_TRADING || ((window.MW_MARKETPLACE && window.MW_AUCTION && window.MW_OFFERBOOK) ? 'live' : 'browse-only');
+      if (String(window.MW_CHAIN_ID) === '114') window.MW_FAUCET_URL = window.MW_FAUCET_URL || 'https://faucet.flare.network/coston2';
     </script>
     <style>
-      :root {
-        --ink-950: #09090b; --ink-900: #0f0f13; --ink-800: #1a1a24;
-        --sky-300: #7dd3fc; --sky-500: #0ea5e9;
-        --gold-300: #fcd34d; --gold-500: #f59e0b;
-        --violet-300: #a78bfa; --violet-500: #7c3aed;
-        --white: #fafafa; --white-10: rgba(255,255,255,0.1); --white-20: rgba(255,255,255,0.2);
-        --white-40: rgba(255,255,255,0.4); --white-60: rgba(255,255,255,0.6); --white-80: rgba(255,255,255,0.8);
+      /* ── Shell (header, drawer, footer). Tokens from tokens.css. ────────── */
+      header.topnav { position: sticky; top: 0; z-index: var(--z-header); height: var(--header-h); display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); padding: 0 var(--sp-6); border-bottom: 1px solid var(--line); background: color-mix(in srgb, var(--bg) 88%, transparent); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); }
+      .nav-brand { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); flex-shrink: 0; }
+      .nav-logo-icon { width: 28px; height: 28px; border-radius: 8px; background: linear-gradient(135deg, var(--sky), var(--violet)); flex-shrink: 0; }
+      .nav-logo-text { font-size: 18px; font-weight: 700; letter-spacing: -0.02em; color: var(--text); }
+      .nav-links { display: none; align-items: center; gap: var(--sp-1); }
+      @media (min-width: 768px) { .nav-links { display: flex; } }
+      .nav-links a { position: relative; display: inline-flex; align-items: center; min-height: var(--hit); padding: 0 var(--sp-3); font-size: 14px; font-weight: 600; color: var(--text-2); border-radius: var(--r-control); transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+      .nav-links a:hover { color: var(--text); background: rgba(255,255,255,0.05); }
+      .nav-links a.active { color: var(--text); }
+      .nav-links a.active::after { content: ''; position: absolute; left: var(--sp-3); right: var(--sp-3); bottom: 6px; height: 2px; border-radius: 2px; background: var(--sky); }
+      .nav-right { display: flex; align-items: center; gap: var(--sp-1); min-width: 0; }
+      @media (max-width: 480px) {
+        header.topnav { padding: 0 var(--sp-3); }
+        .nav-logo-text { display: none; }
       }
-      *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
-      html { font-family: 'Inter', system-ui, -apple-system, sans-serif; background: var(--ink-950); color: var(--white); -webkit-font-smoothing: antialiased; scroll-behavior: smooth; }
-      /* Belt-and-braces on both roots: body's overflow-x propagates to the
-         viewport (leaving body itself visible), so clip the html element too —
-         otherwise an unbroken string (e.g. a full 0x… address) widens the
-         layout viewport and pinch-zoom-out shows dead space on the right. */
-      html { overflow-x: hidden; }
-      body { min-height: 100vh; overflow-x: hidden; }
-      a { color: inherit; text-decoration: none; }
-      button { font-family: inherit; cursor: pointer; border: none; }
-      .font-mono { font-family: 'JetBrains Mono', ui-monospace, SFMono-Regular, Menlo, monospace; }
 
-      ::-webkit-scrollbar { width: 10px; height: 10px; }
-      ::-webkit-scrollbar-track { background: rgba(255,255,255,0.04); }
-      ::-webkit-scrollbar-thumb { background: linear-gradient(135deg, var(--sky-300), var(--violet-300)); border-radius: 999px; border: 2px solid transparent; background-clip: padding-box; }
-      ::-webkit-scrollbar-thumb:hover { background: linear-gradient(135deg, var(--sky-500), var(--violet-500)); background-clip: padding-box; }
-      * { scrollbar-width: thin; scrollbar-color: var(--sky-300) rgba(255,255,255,0.05); }
+      /* Network pill + menu */
+      .net-switcher { position: relative; }
+      .net-btn { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-pill); background: transparent; border: 1px solid var(--line); color: var(--text-2); font-size: 13px; font-weight: 600; transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
+      .net-btn:hover, .net-btn[aria-expanded="true"] { color: var(--text); background: rgba(255,255,255,0.06); }
+      .net-dot { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--text-3); flex-shrink: 0; }
+      .net-dot.is-live { background: var(--green); box-shadow: 0 0 0 3px var(--green-12); }
+      .net-kind { color: var(--text-3); font-weight: 500; }
+      @media (max-width: 480px) { .net-kind, .net-sep { display: none; } .net-btn { padding: 0 var(--sp-2); } }
+      .net-menu { display: none; position: absolute; top: calc(100% + 6px); right: 0; min-width: 16rem; padding: var(--sp-1); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-card); z-index: var(--z-modal); box-shadow: var(--shadow); }
+      .net-menu.open { display: block; }
+      .net-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 14px; font-weight: 600; color: var(--text-2); background: transparent; border: 0; text-align: left; cursor: pointer; font-family: inherit; }
+      .net-item:hover, .net-item:focus-visible { color: var(--text); background: rgba(255,255,255,0.06); }
+      .net-item[aria-checked="true"] { color: var(--text); cursor: default; }
+      .net-item[aria-checked="true"]:hover { background: transparent; }
+      .net-item .net-dot { margin-right: 2px; }
+      .net-item .net-check { margin-left: auto; color: var(--sky); display: inline-flex; }
+      .net-item small { color: var(--text-3); font-weight: 500; }
 
+      /* Bell */
+      .notif-btn { position: relative; }
+      .notif-badge { position: absolute; top: 6px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--r-pill); background: var(--gold); color: var(--text-on-accent); font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
+      .notif-dropdown { display: none; position: absolute; top: calc(100% + 6px); right: 0; width: 22rem; max-width: 90vw; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-card); overflow: hidden; z-index: var(--z-modal); box-shadow: var(--shadow); }
+      .notif-dropdown.open { display: block; }
+      @media (max-width: 640px) {
+        #notif-bell-container { position: static; }
+        .net-switcher { position: static; }
+        .notif-dropdown, .net-menu { left: var(--sp-3); right: var(--sp-3); width: auto; max-width: none; min-width: 0; }
+      }
+      .notif-header { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
+      .notif-list { max-height: 20rem; overflow-y: auto; }
+      .notif-list a { display: block; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+      .notif-list a:hover { background: rgba(255,255,255,0.04); }
+      .notif-title { font-size: 14px; font-weight: 600; color: var(--text); }
+      .notif-body { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+      .notif-empty { padding: var(--sp-8) var(--sp-4); text-align: center; color: var(--text-2); font-size: 14px; }
+
+      /* Hamburger + drawer */
+      .hamburger { display: inline-flex; }
+      @media (min-width: 768px) { .hamburger { display: none; } }
+      .mobile-menu { display: none; position: fixed; left: 0; right: 0; top: var(--header-h); bottom: 0; z-index: var(--z-drawer); background: var(--bg); padding: var(--sp-3) var(--sp-4) calc(var(--sp-6) + env(safe-area-inset-bottom)); flex-direction: column; gap: var(--sp-1); overflow-y: auto; }
+      .mobile-menu.open { display: flex; }
+      .mobile-menu-head { display: flex; align-items: center; justify-content: space-between; min-height: var(--hit); margin-bottom: var(--sp-2); }
+      .mobile-menu-title { font-size: 17px; font-weight: 600; color: var(--text); }
+      .mobile-menu a.mm-link { display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 16px; font-weight: 600; color: var(--text-2); }
+      .mobile-menu a.mm-link:hover, .mobile-menu a.mm-link.active { color: var(--text); background: rgba(255,255,255,0.06); }
+      .mobile-wallet-section { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-2); }
+      .mobile-section-label { font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 var(--sp-3); }
+      .mobile-wallet-info { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); padding: 0 var(--sp-3); color: var(--text-2); font-size: 14px; }
+      .mobile-wallet-dot { width: 8px; height: 8px; border-radius: 50%; background: var(--green); }
+
+      /* Footer */
+      footer.main-footer { border-top: 1px solid var(--line); margin-top: var(--sp-16); padding: var(--sp-6) var(--sp-6) calc(var(--sp-6) + env(safe-area-inset-bottom)); display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: var(--sp-2) var(--sp-4); color: var(--text-3); font-size: 14px; }
+      footer.main-footer a { display: inline-flex; align-items: center; gap: 4px; min-height: var(--hit); padding: 0 var(--sp-2); color: var(--text-2); border-radius: var(--r-control); }
+      footer.main-footer a:hover { color: var(--text); }
+      footer.main-footer .foot-brand { font-weight: 700; color: var(--text); }
+      @media (max-width: 767px) { footer.main-footer { margin-bottom: 0; } }
+
+      /* ── Legacy page helpers (index/listings/… still reference these) ──── */
       .glass-dark  { background: rgba(10,10,13,0.85); backdrop-filter: blur(16px); -webkit-backdrop-filter: blur(16px); }
       .glass-soft  { background: rgba(15,15,20,0.55); backdrop-filter: blur(10px); -webkit-backdrop-filter: blur(10px); }
       .glow-sky    { box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); }
       .glow-gold   { box-shadow: 0 0 22px -6px rgba(251,191,36,0.50); }
       .glow-violet { box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
       .glow-white  { box-shadow: 0 0 18px -4px rgba(255,255,255,0.55); }
-      .btn-sky     { background-image: linear-gradient(135deg, var(--sky-300), var(--sky-500)); }
-      .btn-gold    { background-image: linear-gradient(135deg, var(--gold-300), var(--gold-500)); }
-      .btn-violet  { background-image: linear-gradient(135deg, var(--violet-300), var(--violet-500)); }
-      .btn-disabled { background-image: linear-gradient(135deg, rgba(125,211,252,0.25), rgba(14,165,233,0.25)) !important; cursor: not-allowed; }
-
-      .brand-text {
-        background-image: linear-gradient(90deg, var(--sky-300), var(--gold-300), var(--violet-300), var(--sky-300));
-        background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent;
-        animation: brand-shift 5s ease infinite;
-      }
-      @keyframes brand-shift { 0%,100% { background-position: 0% 50%; } 50% { background-position: 100% 50%; } }
-      .shimmer { background: linear-gradient(90deg, transparent 0%, rgba(125,211,252,0.08) 50%, transparent 100%); background-size: 200% 100%; animation: shimmer 2s infinite; }
-      @keyframes shimmer { 0%{background-position:200% 0} 100%{background-position:-200% 0} }
-
-      nav.topnav { position: sticky; top: 0; z-index: 50; display: flex; align-items: center; justify-content: space-between; padding: 0 1.5rem; height: 4rem; border-bottom: 1px solid rgba(255,255,255,0.08); backdrop-filter: blur(20px); -webkit-backdrop-filter: blur(20px); background: rgba(9,9,11,0.85); }
-      .nav-brand { display: flex; align-items: center; gap: 0.625rem; flex-shrink: 0; }
-      .nav-logo-icon { width: 2.25rem; height: 2.25rem; border-radius: 0.75rem; background: linear-gradient(135deg, var(--sky-300), var(--sky-500)); display: flex; align-items: center; justify-content: center; font-size: 1.25rem; color: var(--ink-950); box-shadow: 0 0 22px -6px rgba(56,189,248,0.45); transition: transform 0.2s; flex-shrink: 0; }
-      .nav-brand:hover .nav-logo-icon { transform: scale(1.08); }
-      .nav-logo-text { font-size: 1.25rem; font-weight: 800; letter-spacing: -0.025em; color: var(--white); }
-      .nav-logo-text .brand-text { font-weight: 900; }
-
-      .nav-links { display: none; align-items: center; gap: 0.25rem; }
-      @media (min-width: 768px) { .nav-links { display: flex; } }
-      .nav-links a { padding: 0.375rem 0.75rem; border-radius: 0.5rem; font-size: 0.8125rem; font-weight: 600; color: var(--white-60); transition: all 0.2s; }
-      .nav-links a:hover { color: var(--white); background: rgba(255,255,255,0.05); }
-      .nav-links a.active { color: var(--sky-300); }
-      .nav-links a.nav-listings { color: #bae6fd; } .nav-links a.nav-listings:hover { color: var(--white); background: rgba(14,165,233,0.15); }
-      .nav-links a.nav-auctions { color: #ddd6fe; } .nav-links a.nav-auctions:hover { color: var(--white); background: rgba(167,139,250,0.15); }
-      .nav-links a.nav-offers { color: #fde68a; } .nav-links a.nav-offers:hover { color: var(--white); background: rgba(252,211,77,0.15); }
-      .nav-right { display: flex; align-items: center; gap: 0.5rem; min-width: 0; }
-      /* Phone-width nav: the row holds logo + bell + network switcher +
-         connect + hamburger. At ≤480px drop the wordmark and tighten
-         padding/gaps so nothing overflows a 360px screen; every control
-         keeps a ≥40px touch target. */
-      @media (max-width: 480px) {
-        nav.topnav { padding: 0 0.75rem; }
-        .nav-logo-text { display: none; }
-        .nav-right { gap: 0.375rem; }
-        .net-btn { padding: 0.375rem 0.5rem; }
-      }
-
-      .notif-btn { position: relative; width: 2.25rem; height: 2.25rem; border-radius: 0.5rem; background: transparent; color: var(--white-60); font-size: 1.125rem; display: flex; align-items: center; justify-content: center; transition: all 0.2s; }
-      .notif-btn:hover { color: var(--white); background: rgba(255,255,255,0.08); }
-      .notif-badge { position: absolute; top: -2px; right: -2px; min-width: 18px; height: 18px; padding: 0 4px; border-radius: 999px; background: linear-gradient(135deg, var(--gold-300), var(--gold-500)); color: var(--ink-950); font-size: 10px; font-weight: 800; display: flex; align-items: center; justify-content: center; box-shadow: 0 0 18px -4px rgba(251,191,36,0.50); }
-      /* Network switcher — mirrors the HTMX layout's dropdown. Disabled
-         entries are rendered as text, never as links: a network with no
-         contracts deployed has no app to navigate to. */
-      .net-switcher { position: relative; }
-      .net-btn { display: flex; align-items: center; gap: 0.375rem; padding: 0.375rem 0.625rem; border-radius: 0.5rem; background: rgba(255,255,255,0.03); border: 1px solid var(--white-10); color: var(--white-60); font-size: 0.75rem; font-weight: 700; transition: all 0.2s; }
-      .net-btn:hover { color: var(--white); background: rgba(255,255,255,0.08); }
-      .net-dot { width: 0.375rem; height: 0.375rem; border-radius: 999px; background: var(--sky-300); }
-      .net-menu { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 14rem; padding: 0.375rem; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 0.75rem; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
-      .net-menu.open { display: block; }
-      .net-item { display: flex; align-items: center; justify-content: space-between; gap: 0.5rem; padding: 0.5rem 0.75rem; border-radius: 0.5rem; font-size: 0.75rem; font-weight: 700; color: var(--white-60); transition: all 0.2s; }
-      a.net-item:hover { color: var(--white); background: rgba(255,255,255,0.08); }
-      .net-item-current { background: rgba(56,189,248,0.15); color: var(--sky-300); }
-      .net-item-off { color: rgba(255,255,255,0.25); cursor: not-allowed; }
-      .net-tag { font-size: 0.5625rem; text-transform: uppercase; letter-spacing: 0.08em; opacity: 0.7; }
-      .notif-dropdown { display: none; position: absolute; top: 100%; right: 0; margin-top: 0.5rem; width: 20rem; max-width: 90vw; background: rgba(15,15,19,0.95); border: 1px solid var(--white-10); border-radius: 1rem; overflow: hidden; z-index: 60; backdrop-filter: blur(16px); box-shadow: 0 20px 60px rgba(0,0,0,0.5); }
-      .notif-dropdown.open { display: block; }
-      /* Phones: the panel is right-anchored to a MID-ROW bell, so a 20rem
-         panel's left edge lands ~75px off-screen at 390px. Re-anchor the
-         containing block to the sticky nav and inset both dropdowns to the
-         nav's mobile padding — full-width sheets, nothing clipped. */
-      @media (max-width: 640px) {
-        #notif-bell-container { position: static; }
-        .net-switcher { position: static; }
-        .notif-dropdown { left: 0.75rem; right: 0.75rem; width: auto; max-width: none; }
-        .net-menu { left: 0.75rem; right: 0.75rem; width: auto; }
-      }
-      .notif-header { padding: 0.75rem 1rem; border-bottom: 1px solid var(--white-10); font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; }
-      .notif-list { max-height: 20rem; overflow-y: auto; }
-      .notif-list a { display: block; padding: 0.75rem 1rem; border-bottom: 1px solid rgba(255,255,255,0.04); transition: background 0.15s; }
-      .notif-list a:hover { background: rgba(255,255,255,0.04); }
-      .notif-title { font-size: 0.8125rem; font-weight: 600; color: var(--white); }
-      .notif-body { font-size: 0.6875rem; color: var(--white-40); margin-top: 0.125rem; }
-      .notif-empty { padding: 2rem 1rem; text-align: center; color: var(--white-40); font-size: 0.8125rem; }
-
-      .hamburger { display: flex; align-items: center; justify-content: center; width: 2.5rem; height: 2.5rem; border-radius: 0.5rem; background: transparent; color: var(--white-60); font-size: 1.25rem; transition: all 0.2s; }
-      .hamburger:hover { color: var(--white); background: rgba(255,255,255,0.08); }
-      @media (min-width: 768px) { .hamburger { display: none; } }
-
-      .mobile-menu { display: none; position: fixed; inset: 0; z-index: 49; background: rgba(9,9,11,0.95); backdrop-filter: blur(20px); padding: 5rem 1.5rem 2rem; flex-direction: column; gap: 0.375rem; }
-      .mobile-menu.open { display: flex; }
-      .mobile-menu a { display: block; padding: 0.75rem 1rem; border-radius: 0.75rem; font-size: 0.9375rem; font-weight: 600; color: var(--white-60); transition: all 0.15s; }
-      .mobile-menu a:hover { color: var(--white); background: rgba(255,255,255,0.06); }
-      .mobile-wallet-section { margin-top: 1rem; padding-top: 1rem; border-top: 1px solid var(--white-10); }
-      .mobile-wallet-section .mobile-section-label { font-size: 0.625rem; font-weight: 700; color: var(--white-40); text-transform: uppercase; letter-spacing: 0.1em; padding: 0 1rem; margin-bottom: 0.5rem; }
-      .mobile-wallet-btn { display: block; width: 100%; text-align: left; padding: 0.875rem 1rem; border-radius: 0.75rem; font-size: 0.9375rem; font-weight: 700; transition: all 0.15s; margin-bottom: 0.375rem; }
-      .mobile-connect-btn { background: linear-gradient(135deg, var(--violet-300), var(--violet-500)); color: var(--white); box-shadow: 0 0 22px -6px rgba(167,139,250,0.45); }
-      .mobile-connect-btn:hover { opacity: 0.92; }
-      .mobile-disconnect-btn { background: transparent; border: 1px solid rgba(252,165,165,0.3); color: #fca5a5; }
-      .mobile-disconnect-btn:hover { background: rgba(239,68,68,0.08); }
-      .mobile-wallet-info { display: flex; align-items: center; gap: 0.5rem; padding: 0.5rem 1rem; color: var(--white-60); font-size: 0.8125rem; }
-      .mobile-wallet-dot { width: 0.5rem; height: 0.5rem; border-radius: 50%; background: #7dd3fc; box-shadow: 0 0 8px rgba(125,211,252,0.5); }
-
-      footer.main-footer { border-top: 1px solid rgba(255,255,255,0.08); margin-top: 4rem; padding: 2rem 1.5rem; text-align: center; color: var(--white-40); font-size: 0.8125rem; }
-      footer.main-footer a { color: var(--sky-300); transition: color 0.2s; } footer.main-footer a:hover { color: var(--violet-300); }
-      footer.main-footer .brand-text { font-weight: 800; }
-
-      .reveal { opacity: 0; transform: translateY(24px); transition: opacity 0.7s cubic-bezier(0.16, 1, 0.3, 1), transform 0.7s cubic-bezier(0.16, 1, 0.3, 1); }
-      .reveal.visible { opacity: 1; transform: translateY(0); }
-      @keyframes fade-in { from { opacity: 0; transform: translateY(12px); } to { opacity: 1; transform: translateY(0); } }
-      .anim-fade-in { animation: fade-in 0.6s cubic-bezier(0.16, 1, 0.3, 1) both; }
+      .brand-text { background-image: linear-gradient(90deg, var(--sky), var(--gold), var(--violet), var(--sky)); background-size: 200% auto; -webkit-background-clip: text; background-clip: text; color: transparent; }
+      .shimmer { background: linear-gradient(90deg, var(--surface-2) 0%, rgba(255,255,255,0.08) 50%, var(--surface-2) 100%); background-size: 200% 100%; animation: sk-sweep 1.2s linear infinite; }
       @keyframes pulse { 0%,100% { opacity: 1; } 50% { opacity: 0.3; } }
       @keyframes shimmer-placeholder { 0% { opacity: 0.3; } 50% { opacity: 0.7; } 100% { opacity: 0.3; } }
-      @keyframes spin { to { transform: rotate(360deg); } }
       @keyframes pulse-ring { 0% { transform: scale(0.6); opacity: 0.7; } 100% { transform: scale(1.4); opacity: 0; } }
-
       .bg-mesh-hero { background: radial-gradient(ellipse 80% 50% at 50% -20%, rgba(125,211,252,0.12), transparent), radial-gradient(ellipse 60% 35% at 80% 70%, rgba(167,139,250,0.08), transparent), radial-gradient(ellipse 40% 40% at 20% 30%, rgba(252,211,77,0.05), transparent); }
-      .tilt-card { transform-style: preserve-3d; perspective: 1000px; transition: transform 0.1s ease-out; }
-      @keyframes count-pop { 0% { transform: scale(1); } 50% { transform: scale(1.08); } 100% { transform: scale(1); } }
-      .count-pop { animation: count-pop 0.4s cubic-bezier(0.34, 1.56, 0.64, 1); }
-      @keyframes float { 0%, 100% { transform: translateY(0px); } 50% { transform: translateY(-10px); } }
-      .float { animation: float 4s ease-in-out infinite; } .float-delayed { animation: float 4s ease-in-out 1s infinite; } .float-slow { animation: float 6s ease-in-out infinite; }
-
-      @media (prefers-reduced-motion: reduce) {
-        .brand-text, .shimmer, .float, .float-delayed, .float-slow, .count-pop { animation: none; }
-        .reveal { opacity: 1; transform: none; transition: none; }
-        .anim-fade-in { animation: none; }
-        html { scroll-behavior: auto; }
-      }
+      .tilt-card { transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+      .tilt-card:hover { transform: translateY(-2px); }
+      @keyframes count-pop { 0% { transform: scale(1); } 50% { transform: scale(1.04); } 100% { transform: scale(1); } }
+      .count-pop { animation: count-pop var(--dur) var(--ease); }
+      .float, .float-delayed, .float-slow { animation: none; }
+      @media (prefers-reduced-motion: reduce) { .brand-text, .shimmer, .count-pop { animation: none; } }
+      @media (prefers-color-scheme: light) { .bg-mesh-hero { opacity: 0.5; } .glass-dark, .glass-soft { background: rgba(255,255,255,0.8); } }
     </style>
   </head>
   <body>
-    <!-- Testnet banner: static (not sticky) so it never fights the sticky nav for the top edge.
-         Always rendered at build time; the inline script below removes it synchronously
-         (before paint) when the server-injected runtime chain is a mainnet, so one build
-         serves every network with the correct banner state. -->
-    <div class="mw-devbanner" id="mw-devbanner" role="note">
-      Test network — <span class="mw-net-name">Flare Coston2</span>. Assets and <span class="mw-cur">C2FLR</span> here have no real-world value.
-    </div>
-    <script is:inline>
-      (function(){
-        var id = Number(window.MW_CHAIN_ID || '114');
-        if (id === 14 || id === 19) { var el = document.getElementById('mw-devbanner'); if (el) el.remove(); }
-      })();
-    </script>
-    <!-- Installs window.MW, opens /ws, hosts the transaction modal + wrong-network banner. -->
+    <a class="skip-link" href="#main">Skip to content</a>
+    <!-- Installs window.MW, opens /ws, hosts the transaction modal, wrong-network banner and toasts. -->
     <MwRuntime client:load />
     <div class="bg-mesh-hero" style="position:fixed;inset:0;z-index:-1;pointer-events:none;"></div>
 
-    <nav class="topnav">
-      <a href="/" class="nav-brand">
-        <div class="nav-logo-icon" aria-hidden="true">✦</div>
-        <span class="nav-logo-text">Magic<span class="brand-text">Webb</span></span>
+    <header class="topnav">
+      <a href="/" class="nav-brand" aria-label="MagicWebb home">
+        <span class="nav-logo-icon" aria-hidden="true"></span>
+        <span class="nav-logo-text">MagicWebb</span>
       </a>
-      <div class="nav-links">
-        <a href="/" class={isActive('/') ? 'active' : ''}>Home</a>
-        <a href="/listings" class={`nav-listings ${isActive('/listings')}`}>Listings</a>
-        <a href="/auctions" class={`nav-auctions ${isActive('/auctions')}`}>Auctions</a>
-        <a href="/offers" class={`nav-offers ${isActive('/offers')}`}>Offers</a>
-        <a href="/search" class={isActive('/search') ? 'active' : ''}>Search</a>
-        <a href="/metrics" class={isActive('/metrics') ? 'active' : ''}>Metrics</a>
-        <a href="/profile" class={isActive('/profile') ? 'active' : ''}>Profile</a>
-        <a href="/docs" class={isActive('/docs') ? 'active' : ''}>Docs</a>
-      </div>
+      <nav class="nav-links" aria-label="Primary">
+        {NAV.map((n) => (
+          <a href={n.href} class={isActive(n.href, n.key) ? 'active' : ''} aria-current={isActive(n.href, n.key) ? 'page' : undefined}>{n.label}</a>
+        ))}
+      </nav>
       <div class="nav-right">
         <div class="net-switcher">
-          <button type="button" id="net-switcher-btn" class="net-btn" aria-haspopup="true" aria-expanded="false"
-                  title="Switch network — each network is a separate deployment">
-            <span class="net-dot" aria-hidden="true"></span>
-            <span id="net-current-name">{networks.find((n) => n.current)?.name ?? 'Network'}</span>
-            <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.5" aria-hidden="true"><path stroke-linecap="round" stroke-linejoin="round" d="M19 9l-7 7-7-7"/></svg>
+          <button type="button" id="net-switcher-btn" class="net-btn" aria-haspopup="menu" aria-expanded="false" aria-controls="net-switcher-menu"
+                  aria-label="Network: Coston2. Switch network">
+            <span id="net-dot" class="net-dot" aria-hidden="true"></span>
+            <span id="net-current-name">Coston2</span>
+            <span class="net-sep net-kind" aria-hidden="true">·</span><span id="net-current-kind" class="net-kind">testnet</span>
+            <Fragment set:html={iconSvg('chevron-down', 16)} />
           </button>
-          <div id="net-switcher-menu" class="net-menu">
-            {networks.map((n) => (
-              n.current ? (
-                <span class="net-item net-item-current" data-chain-id={n.chainId}>{n.name}<span class="net-tag">Current</span></span>
-              ) : n.available ? (
-                <a href={n.url} class="net-item" data-chain-id={n.chainId}>{n.name}<span class="net-tag">Chain {n.chainId}</span></a>
-              ) : (
-                <span class="net-item net-item-off" data-chain-id={n.chainId} title={`No contracts are deployed on ${n.name} yet`}>
-                  {n.name}<span class="net-tag">Unavailable</span>
-                </span>
-              )
-            ))}
-          </div>
+          <div id="net-switcher-menu" class="net-menu" role="menu" aria-labelledby="net-switcher-btn"></div>
         </div>
         <div id="notif-bell-container" style="position:relative;">
-          <button id="notif-bell-btn" class="notif-btn" aria-label="Notifications" title="Notifications">
-            <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><path stroke-linecap="round" stroke-linejoin="round" d="M15 17h5l-1.4-1.4A2 2 0 0118 14.2V11a6 6 0 10-12 0v3.2c0 .5-.2 1-.6 1.4L4 17h5m6 0v1a3 3 0 11-6 0v-1m6 0H9"/></svg>
-            <span id="notif-badge" class="notif-badge" style="display:none;">0</span>
+          <button id="notif-bell-btn" class="icon-btn notif-btn" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
+            <Fragment set:html={iconSvg('bell', 20)} />
+            <span id="notif-badge" class="notif-badge" hidden>0</span>
           </button>
           <div id="notif-dropdown" class="notif-dropdown">
             <div class="notif-header">Notifications</div>
@@ -299,200 +211,215 @@ const networks = KNOWN_NETWORKS.map((n) => {
           </div>
         </div>
         <slot name="wallet" />
-        <button id="mobile-menu-btn" class="hamburger" aria-label="Menu" aria-expanded="false">☰</button>
+        <button id="mobile-menu-btn" class="icon-btn hamburger" aria-label="Menu" aria-expanded="false" aria-controls="mobile-menu">
+          <Fragment set:html={iconSvg('menu', 22)} />
+        </button>
       </div>
-    </nav>
+    </header>
 
-    <div id="mobile-menu" class="mobile-menu">
-      <a href="/">Home</a><a href="/listings">Listings</a><a href="/auctions">Auctions</a>
-      <a href="/offers">Offers</a><a href="/search">Search</a><a href="/metrics">Metrics</a><a href="/profile">Profile</a><a href="/docs">Docs</a>
+    <div id="mobile-menu" class="mobile-menu" role="dialog" aria-modal="true" aria-label="Menu" hidden>
+      <div class="mobile-menu-head">
+        <span class="mobile-menu-title">Menu</span>
+        <button type="button" id="mobile-menu-close" class="icon-btn" aria-label="Close menu"><Fragment set:html={iconSvg('x', 22)} /></button>
+      </div>
+      <a href="/" class={`mm-link ${currentPath === '/' ? 'active' : ''}`}><Fragment set:html={iconSvg('home')} />Home</a>
+      {NAV.map((n) => (
+        <a href={n.href} class={`mm-link ${isActive(n.href, n.key) ? 'active' : ''}`}>
+          <Fragment set:html={iconSvg(n.key === 'listings' ? 'tag' : n.key === 'auctions' ? 'gavel' : n.key === 'offers' ? 'inbox' : n.key === 'search' ? 'search' : 'book')} />{n.label}
+        </a>
+      ))}
+      <a href="/profile" class={`mm-link ${isActive('/profile') ? 'active' : ''}`}><Fragment set:html={iconSvg('user')} />Profile</a>
+      <a href="/metrics" class={`mm-link ${isActive('/metrics') ? 'active' : ''}`}><Fragment set:html={iconSvg('chart')} />Metrics</a>
       <div class="mobile-wallet-section">
         <div class="mobile-section-label">Wallet</div>
-        <div id="mobile-wallet-disconnected" style="display:none;">
-          <button id="mobile-connect-wallet" class="mobile-wallet-btn mobile-connect-btn">⌬ Connect Wallet</button>
+        <div id="mobile-wallet-disconnected" hidden>
+          <button id="mobile-connect-wallet" class="btn btn-primary btn-lg btn-block">Connect wallet</button>
         </div>
-        <div id="mobile-wallet-connected" style="display:none;">
-          <div class="mobile-wallet-info"><span class="mobile-wallet-dot"></span><span id="mobile-wallet-addr" class="font-mono" style="font-size:0.75rem;"></span></div>
-          <button id="mobile-disconnect-wallet" class="mobile-wallet-btn mobile-disconnect-btn">Disconnect Wallet</button>
+        <div id="mobile-wallet-connected" hidden>
+          <div class="mobile-wallet-info"><span class="mobile-wallet-dot" aria-hidden="true"></span><span id="mobile-wallet-addr" class="mono"></span></div>
+          <button id="mobile-disconnect-wallet" class="btn btn-danger btn-block">Disconnect wallet</button>
         </div>
       </div>
     </div>
 
-    <!-- Read-only network banner: shown when this deployment has no contracts
-         (window.MW_MARKETPLACE empty). One line, dismissible per session. -->
-    <div id="ro-banner" role="status" hidden style="position:relative;z-index:2;display:flex;align-items:center;justify-content:center;gap:0.5rem;flex-wrap:wrap;padding:0.5rem 3rem 0.5rem 1rem;background:rgba(125,211,252,0.08);border-bottom:1px solid rgba(125,211,252,0.2);font-size:0.8125rem;color:rgba(255,255,255,0.7);">
+    <!-- Testnet banner (chain 114). Dismissible per session; removed
+         synchronously on mainnets so one build serves every network. -->
+    <div class="mw-banner mw-devbanner" id="mw-devbanner" role="note" hidden>
+      <span>Test network — tokens have no value.</span>
+      <a id="mw-faucet-link" href="https://faucet.flare.network/coston2" target="_blank" rel="noopener">Get free test FLR ↗</a>
+      <button type="button" id="mw-devbanner-x" class="icon-btn mw-banner-x" aria-label="Dismiss"><Fragment set:html={iconSvg('x', 18)} /></button>
+    </div>
+    <!-- Browse-only banner (no contracts on this deployment). -->
+    <div id="ro-banner" class="mw-banner" role="status" hidden>
       <span id="ro-banner-text"></span>
-      <a id="ro-banner-cta" href="#" hidden style="color:#7dd3fc;font-weight:700;"></a>
-      <button id="ro-banner-x" aria-label="Dismiss" style="position:absolute;right:0.25rem;top:50%;transform:translateY(-50%);min-width:44px;min-height:44px;background:none;border:none;color:rgba(255,255,255,0.5);font-size:1rem;cursor:pointer;">✕</button>
+      <a id="ro-banner-cta" class="btn btn-primary btn-sm" href="#" hidden></a>
+      <a id="ro-banner-why" class="btn btn-ghost btn-sm" href="/docs/faq#networks">Why?</a>
+      <button type="button" id="ro-banner-x" class="icon-btn mw-banner-x" aria-label="Dismiss"><Fragment set:html={iconSvg('x', 18)} /></button>
     </div>
     <script is:inline>
       (function(){
         try {
-          if (window.MW_MARKETPLACE || sessionStorage.getItem('mw_ro_dismissed')) return;
+          var id = Number(window.MW_CHAIN_ID || '114');
+          var dev = document.getElementById('mw-devbanner');
+          if (dev) {
+            if (id !== 114 || sessionStorage.getItem('mw_dev_dismissed')) { dev.remove(); }
+            else {
+              var f = document.getElementById('mw-faucet-link'); if (f && window.MW_FAUCET_URL) f.href = window.MW_FAUCET_URL;
+              dev.hidden = false;
+              document.getElementById('mw-devbanner-x').addEventListener('click', function(){ dev.hidden = true; try { sessionStorage.setItem('mw_dev_dismissed', '1'); } catch (_) {} });
+            }
+          }
+          if (window.MW_TRADING === 'live' || sessionStorage.getItem('mw_ro_dismissed')) return;
           var el = document.getElementById('ro-banner'); if (!el) return;
-          var name = window.MW_NETWORK_NAME || 'this network';
-          document.getElementById('ro-banner-text').textContent = 'Browsing ' + name + ' in read-only mode — trading opens after the security audit.';
+          var names = {114:'Coston2', 14:'Flare', 19:'Songbird'};
+          var name = names[id] || window.MW_NETWORK_NAME || 'This network';
           // Preferred sibling trading origin: 114 > 14 > 19, never ourselves.
           var urls = {};
-          (window.MW_NETWORK_URLS || '').split(',').forEach(function(p){ var i = p.indexOf('='); if (i > 0) urls[p.slice(0, i).trim()] = p.slice(i + 1).trim(); });
-          var names = {114:'Coston2', 14:'Flare', 19:'Songbird'};
-          var self = String(window.MW_CHAIN_ID || '');
-          var origin = '', oname = '';
-          ['114','14','19'].some(function(idc){ if (idc !== self && urls[idc]) { origin = urls[idc]; oname = names[idc]; return true; } return false; });
+          String(window.MW_NETWORK_URLS || '').split(',').forEach(function(p){ var i = p.indexOf('='); if (i > 0) urls[p.slice(0, i).trim()] = p.slice(i + 1).trim().replace(/\/+$/, ''); });
+          try { var st = JSON.parse(window.MW_NETWORK_STATUS_JSON || 'null'); if (Array.isArray(st)) st.forEach(function(n){ var cid = String(n.chainId != null ? n.chainId : (n.chain_id != null ? n.chain_id : n.id)); var o = n.origin || n.url; if (o && !urls[cid]) urls[cid] = String(o).replace(/\/+$/, ''); }); } catch (_) {}
+          var self = String(id), origin = '', oname = '';
+          ['114','14','19'].some(function(c){ if (c !== self && urls[c]) { origin = urls[c]; oname = names[c]; return true; } return false; });
+          document.getElementById('ro-banner-text').textContent = name + ' is view-only until the audit finishes.' + (oname === 'Coston2' ? ' Practise with free test tokens on Coston2 →' : '');
           var cta = document.getElementById('ro-banner-cta');
-          if (origin) { cta.href = origin; cta.textContent = 'Trade now on ' + oname + ' →'; cta.hidden = false; }
+          if (origin) { cta.href = origin + location.pathname + location.search; cta.textContent = 'Try ' + oname; cta.hidden = false; }
           el.hidden = false;
-          document.getElementById('ro-banner-x').addEventListener('click', function(){
-            el.hidden = true;
-            try { sessionStorage.setItem('mw_ro_dismissed', '1'); } catch (_) {}
-          });
+          document.getElementById('ro-banner-x').addEventListener('click', function(){ el.hidden = true; try { sessionStorage.setItem('mw_ro_dismissed', '1'); } catch (_) {} });
         } catch (_) {}
       })();
     </script>
 
-    <main style="position:relative;z-index:1;"><slot /></main>
+    <main id="main" tabindex="-1">
+      <script is:inline>
+        // Pages whose islands need the wallet immediately: WalletConnect.tsx
+        // loads AppKit/wagmi at mount when this attribute is present, and on
+        // first Connect click everywhere else (home/docs/search stay light).
+        (function(){ try { if (/^\/(token|auction|offers|profile)/.test(location.pathname)) document.currentScript.parentNode.setAttribute('data-mw-needs-wallet', ''); } catch (_) {} })();
+      </script>
+      <slot />
+    </main>
 
-    <nav class="mw-tabbar" aria-label="Primary">
-      <a href="/" class={isActive('/') ? 'active' : ''}><span aria-hidden="true">⌂</span>Home</a>
-      <a href="/listings" class={isActive('/listings') ? 'active' : ''}><span aria-hidden="true">▦</span>Listings</a>
-      <a href="/auctions" class={isActive('/auctions') ? 'active' : ''}><span aria-hidden="true">♕</span>Auctions</a>
-      <a href="/search" class={isActive('/search') ? 'active' : ''}><span aria-hidden="true">⌕</span>Search</a>
-      <a href="/profile" class={isActive('/profile') ? 'active' : ''}><span aria-hidden="true">◯</span>Me</a>
+    <nav class="mw-tabbar" aria-label="Primary (mobile)">
+      {TABS.map((t) => (
+        <a href={t.href} class={(t.href === '/' ? currentPath === '/' : isActive(t.href)) ? 'active' : ''} aria-current={(t.href === '/' ? currentPath === '/' : isActive(t.href)) ? 'page' : undefined}>
+          <Fragment set:html={iconSvg(t.icon, 22)} />{t.label}
+        </a>
+      ))}
     </nav>
 
     <footer class="main-footer">
-      <span class="brand-text" style="font-weight:800;">MagicWebb</span> · Non-custodial NFT marketplace on <a href="https://flare.network">Flare Network</a> · <a href="https://github.com/OfficialA1manac/MagicWebb">GitHub</a> · <a href="/docs">Docs</a>
+      <span class="foot-brand">MagicWebb</span>
+      <a href="/docs">Docs</a>
+      <a href="https://github.com/OfficialA1manac/MagicWebb" target="_blank" rel="noopener">GitHub <Fragment set:html={iconSvg('external', 14)} /></a>
+      <a href="/metrics/gas">Status</a>
     </footer>
 
     <script>
-      // Ambient particle canvas + cursor glow removed (design review D2):
-      // both were continuous rAF paints on every page — cost without
-      // communication. Scroll-reveal, skeletons and card stagger remain.
+      // ── Scroll reveal ──
       (function(){if(typeof window==='undefined')return;const o=new IntersectionObserver(function(e){e.forEach(function(en){if(en.isIntersecting){en.target.classList.add('visible');o.unobserve(en.target);}});},{threshold:0.15,rootMargin:'0px 0px -40px 0px'});document.addEventListener('DOMContentLoaded',function(){document.querySelectorAll('.reveal').forEach(function(el){o.observe(el);});});setTimeout(function(){document.querySelectorAll('.reveal:not(.visible)').forEach(function(el){o.observe(el);});},300);})();
-      (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){const b=document.getElementById('mobile-menu-btn'),m=document.getElementById('mobile-menu');if(b&&m){b.addEventListener('click',function(){const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');});m.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){m.classList.remove('open');});});}});})();
-      (function(){if(typeof window==='undefined')return;let t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){const h=document.querySelector('.hero-parallax');if(h){const s=window.pageYOffset;h.style.transform='translateY('+(s*0.3)+'px)';h.style.opacity=Math.max(0,1-s/600);}t=false;});t=true;}},{passive:true});})();
 
-      // ── Network switcher dropdown ──
-      (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){const b=document.getElementById('net-switcher-btn'),m=document.getElementById('net-switcher-menu');if(!b||!m)return;b.addEventListener('click',function(e){e.stopPropagation();const o=m.classList.toggle('open');b.setAttribute('aria-expanded',o?'true':'false');});document.addEventListener('click',function(e){if(!b.parentNode.contains(e.target)){m.classList.remove('open');b.setAttribute('aria-expanded','false');}});document.addEventListener('keydown',function(e){if(e.key==='Escape'){m.classList.remove('open');b.setAttribute('aria-expanded','false');}});});})();
+      // ── Hero parallax: home only (spec B0 removes the listener elsewhere) ──
+      (function(){if(typeof window==='undefined'||location.pathname!=='/')return;if(matchMedia('(prefers-reduced-motion: reduce)').matches)return;let t=false;window.addEventListener('scroll',function(){if(!t){requestAnimationFrame(function(){const h=document.querySelector('.hero-parallax') as HTMLElement|null;if(h){const s=window.pageYOffset;h.style.transform='translateY('+(s*0.3)+'px)';h.style.opacity=String(Math.max(0,1-s/600));}t=false;});t=true;}},{passive:true});})();
+
+      // ── Toast bridge for inline scripts ──
+      function toast(message: string, variant = 'info', duration?: number) {
+        window.dispatchEvent(new CustomEvent('mw-toast', { detail: { message, variant, duration } }));
+      }
+
+      // ── Mobile drawer: covers the tab bar, ✕ 44px, focus trap, Escape ──
+      (function(){if(typeof window==='undefined')return;document.addEventListener('DOMContentLoaded',function(){
+        const b=document.getElementById('mobile-menu-btn'),m=document.getElementById('mobile-menu'),x=document.getElementById('mobile-menu-close');if(!b||!m)return;
+        const focusables=()=>Array.from(m.querySelectorAll<HTMLElement>('a[href],button:not([disabled])')).filter(el=>el.offsetParent!==null);
+        function setOpen(o:boolean){m.hidden=!o;m.classList.toggle('open',o);b!.setAttribute('aria-expanded',o?'true':'false');document.body.style.overflow=o?'hidden':'';if(o){(x||focusables()[0])?.focus();}else{b!.focus();}}
+        b.addEventListener('click',function(){setOpen(m.hidden);});
+        x?.addEventListener('click',function(){setOpen(false);});
+        m.querySelectorAll('a').forEach(function(a){a.addEventListener('click',function(){setOpen(false);});});
+        m.addEventListener('keydown',function(e){
+          if(e.key==='Escape'){e.preventDefault();setOpen(false);return;}
+          if(e.key!=='Tab')return;const f=focusables();if(!f.length)return;const first=f[0],last=f[f.length-1];
+          if(e.shiftKey&&document.activeElement===first){e.preventDefault();last.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first.focus();}
+        });
+        matchMedia('(min-width: 768px)').addEventListener('change',function(ev){if(ev.matches&&!m.hidden)setOpen(false);});
+      });})();
+
+      // ── Network pill + menu (runtime-built from MW_NETWORK_STATUS_JSON) ──
+      (function(){if(typeof window==='undefined')return;
+        const SHORT:Record<number,string>={114:'Coston2',19:'Songbird',14:'Flare'};
+        type Net={chainId:number;name:string;origin:string;trading:boolean;testnet:boolean};
+        function nets():Net[]{
+          const self=Number(window.MW_CHAIN_ID||'114');const out:Net[]=[];
+          try{const p=JSON.parse(window.MW_NETWORK_STATUS_JSON||'null');
+            const list:Record<string,unknown>[]=Array.isArray(p)?p:(p&&typeof p==='object'?Object.entries(p as Record<string,Record<string,unknown>>).map(([k,v])=>({chainId:Number(k),...v})):[]);
+            for(const n of list){const id=Number(n.chainId??n.chain_id??n.id);if(!isFinite(id))continue;const st=n.status??n.trading;
+              out.push({chainId:id,name:String(n.name??SHORT[id]??('Chain '+id)),origin:String(n.origin??n.url??'').replace(/\/+$/,''),trading:st===true||st==='trading'||st==='live',testnet:typeof n.testnet==='boolean'?n.testnet:id===114});}
+          }catch(_){}
+          if(!out.length){const urls:Record<number,string>={};String(window.MW_NETWORK_URLS||'').split(',').forEach(p=>{const i=p.indexOf('=');if(i<1)return;const id=Number(p.slice(0,i).trim());const o=p.slice(i+1).trim().replace(/\/+$/,'');if(isFinite(id)&&o)urls[id]=o;});
+            for(const id of [114,19,14]){if(!urls[id]&&id!==self)continue;out.push({chainId:id,name:SHORT[id],origin:urls[id]||'',trading:id===self?window.MW_TRADING==='live':id===114,testnet:id===114});}}
+          return out;
+        }
+        const CHECK='<svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><path d="M20 6 9 17l-5-5"/></svg>';
+        document.addEventListener('DOMContentLoaded',function(){
+          const b=document.getElementById('net-switcher-btn'),m=document.getElementById('net-switcher-menu'),dot=document.getElementById('net-dot'),nm=document.getElementById('net-current-name'),kind=document.getElementById('net-current-kind');if(!b||!m)return;
+          const self=Number(window.MW_CHAIN_ID||'114');const list=nets();const live=window.MW_TRADING==='live';
+          const cur=list.find(n=>n.chainId===self);const curName=cur?cur.name:(SHORT[self]||('Chain '+self));const curTest=cur?cur.testnet:self===114;
+          if(nm)nm.textContent=curName;if(kind)kind.textContent=curTest?'testnet':(live?'live':'browse only');
+          if(dot)dot.classList.toggle('is-live',live);
+          b.setAttribute('aria-label','Network: '+curName+(live?', trading live':', browse only')+'. Switch network');
+          m.innerHTML='';
+          for(const n of list){const isCur=n.chainId===self;const el=document.createElement('button');el.type='button';el.className='net-item';el.setAttribute('role',isCur?'menuitemcheckbox':'menuitem');el.tabIndex=-1;
+            if(isCur){el.setAttribute('aria-checked','true');el.disabled=true;}
+            const d=document.createElement('span');d.className='net-dot'+(n.trading?' is-live':'');d.setAttribute('aria-hidden','true');el.appendChild(d);
+            const label=document.createElement('span');label.textContent=n.name+' — ';const small=document.createElement('small');small.textContent=(n.testnet?'testnet · ':'')+(n.trading?'trading live':'browse only');label.appendChild(small);el.appendChild(label);
+            if(isCur){const c=document.createElement('span');c.className='net-check';c.innerHTML=CHECK;el.appendChild(c);}
+            else if(!n.origin){el.disabled=true;el.setAttribute('aria-disabled','true');el.title='Not deployed yet';}
+            else{el.addEventListener('click',function(){toast('Switching to '+n.name+'…');setTimeout(function(){location.href=n.origin+location.pathname+location.search;},300);});}
+            m.appendChild(el);}
+          const items=()=>Array.from(m.querySelectorAll<HTMLButtonElement>('.net-item'));
+          function open(o:boolean){m.classList.toggle('open',o);b!.setAttribute('aria-expanded',o?'true':'false');if(o){const f=items().find(i=>!i.disabled)||items()[0];f?.focus();}}
+          b.addEventListener('click',function(e){e.stopPropagation();open(!m.classList.contains('open'));});
+          document.addEventListener('click',function(e){if(!b.parentNode!.contains(e.target as Node))open(false);});
+          m.addEventListener('keydown',function(e){const f=items().filter(i=>!i.disabled);const i=f.indexOf(document.activeElement as HTMLButtonElement);
+            if(e.key==='Escape'){e.preventDefault();open(false);b!.focus();}
+            else if(e.key==='ArrowDown'){e.preventDefault();f[(i+1)%f.length]?.focus();}
+            else if(e.key==='ArrowUp'){e.preventDefault();f[(i-1+f.length)%f.length]?.focus();}
+            else if(e.key==='Home'){e.preventDefault();f[0]?.focus();}else if(e.key==='End'){e.preventDefault();f[f.length-1]?.focus();}
+            else if(e.key==='Tab'){open(false);}});
+          b.addEventListener('keydown',function(e){if(e.key==='ArrowDown'){e.preventDefault();open(true);}});
+        });
+      })();
 
       // ── Notification bell ──
       (function(){if(typeof window==='undefined')return;let unread=0;
-        // v35: esc() helper applied consistently at every dynamic render point
-        // where API-sourced data reaches innerHTML. Escapes & < > " to prevent
-        // XSS via malicious notification titles, links, or profile data.
-        function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-        function updBadge(){const b=document.getElementById('notif-badge');if(!b)return;if(unread>0){b.style.display='flex';b.textContent=unread>99?'99+':unread;}else{b.style.display='none';}}
-        async function load(){const l=document.getElementById('notif-list');if(!l)return;let a='';try{a=(window.MW&&window.MW.address&&window.MW.address())||localStorage.getItem('mw_addr')||'';}catch(_){}if(!a||a.length<10){unread=0;updBadge();l.innerHTML='<div class=\"notif-empty\">Connect your wallet for notifications</div>';return;}if(window.MW&&!window.MW.session()){unread=0;updBadge();l.innerHTML='<div class=\"notif-empty\"><button id=\"notif-signin\" class=\"notif-signin\">Sign in to see notifications</button><p id=\"notif-signin-err\" style=\"display:none;color:#fca5a5;font-size:0.6875rem;margin-top:0.5rem;\"></p></div>';const sb=document.getElementById('notif-signin');if(sb)sb.addEventListener('click',function(){sb.disabled=true;sb.textContent='Signing in…';window.MW.signIn().then(load).catch(function(err){sb.disabled=false;sb.textContent='Sign in to see notifications';const ep=document.getElementById('notif-signin-err');if(ep){ep.style.display='block';ep.textContent=(err&&err.message)?String(err.message):'Sign-in failed — please try again';}});});return;}try{const r=await (window.MW?window.MW.authFetch('/api/v1/notifications?limit=20'):fetch('/api/v1/notifications?limit=20',{credentials:'include'}));if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();const items=d.notifications||[];unread=d.unread||0;updBadge();var signout=(window.MW&&typeof window.MW.signOut==='function')?'<button id=\"notif-signout\" style=\"display:block;width:100%;padding:0.5rem 1rem;background:transparent;border:0;border-top:1px solid rgba(255,255,255,0.06);color:rgba(255,255,255,0.35);font-size:0.6875rem;font-weight:600;cursor:pointer;font-family:inherit;text-align:center;\">Turn off notifications (sign out)</button>':'';if(!items.length){l.innerHTML='<div class=\"notif-empty\">All caught up</div>'+signout;}else{l.innerHTML=items.map(function(n){let h=n.link||'#';if(!/^(https?:\/\/|\/|#)/.test(h))h='#';return '<a href=\"'+esc(h)+'\" rel=\"noopener\"><div class=\"notif-title\">'+esc(n.title)+'</div><div class=\"notif-body\">'+esc(n.body)+'</div></a>';}).join('')+signout;}var so=document.getElementById('notif-signout');if(so)so.addEventListener('click',function(){window.MW.signOut().then(load).catch(function(){load();});});}catch(_){l.innerHTML='<div class=\"notif-empty\">Could not load notifications</div>';}}
+        function esc(s: unknown){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
+        function updBadge(){const b=document.getElementById('notif-badge');if(!b)return;if(unread>0){b.hidden=false;b.textContent=unread>99?'99+':String(unread);}else{b.hidden=true;}}
+        async function load(){const l=document.getElementById('notif-list');if(!l)return;let a='';try{a=(window.MW&&window.MW.address&&window.MW.address())||localStorage.getItem('mw_addr')||'';}catch(_){}if(!a||a.length<10){unread=0;updBadge();l.innerHTML='<div class="notif-empty">Connect your wallet for notifications</div>';return;}if(window.MW&&!window.MW.session()){unread=0;updBadge();l.innerHTML='<div class="notif-empty"><button id="notif-signin" class="notif-signin">Sign in to see notifications</button><p id="notif-signin-err" hidden style="color:var(--red);font-size:13px;margin-top:0.5rem;"></p></div>';const sb=document.getElementById('notif-signin') as HTMLButtonElement|null;if(sb)sb.addEventListener('click',function(){sb.disabled=true;sb.textContent='Signing in…';window.MW!.signIn().then(load).catch(function(err: unknown){sb.disabled=false;sb.textContent='Sign in to see notifications';const ep=document.getElementById('notif-signin-err');if(ep){ep.hidden=false;ep.textContent=(err&&(err as Error).message)?String((err as Error).message):'Sign-in failed — please try again';}});});return;}try{const r=await (window.MW?window.MW.authFetch('/api/v1/notifications?limit=20'):fetch('/api/v1/notifications?limit=20',{credentials:'include'}));if(!r.ok)throw new Error('HTTP '+r.status);const d=await r.json();const items=d.notifications||[];unread=d.unread||0;updBadge();const signout=(window.MW&&typeof window.MW.signOut==='function')?'<button id="notif-signout" class="btn btn-ghost btn-sm" style="width:100%;border-radius:0;border-top:1px solid var(--line);">Turn off notifications (sign out)</button>':'';if(!items.length){l.innerHTML='<div class="notif-empty">All caught up</div>'+signout;}else{l.innerHTML=items.map(function(n: {link?: string; title?: string; body?: string}){let h=n.link||'#';if(!/^(https?:\/\/|\/|#)/.test(h))h='#';return '<a href="'+esc(h)+'" rel="noopener"><div class="notif-title">'+esc(n.title)+'</div><div class="notif-body">'+esc(n.body)+'</div></a>';}).join('')+signout;}const so=document.getElementById('notif-signout');if(so)so.addEventListener('click',function(){window.MW!.signOut().then(load).catch(function(){load();});});}catch(_){l.innerHTML='<div class="notif-empty">Could not load notifications</div>';}}
         async function mark(){if(unread<=0)return;let a='';try{a=localStorage.getItem('mw_addr')||'';}catch(_){}if(!a)return;try{const r=await fetch('/api/v1/notifications/read',{method:'POST',credentials:'include'});if(r.ok){unread=0;updBadge();}}catch(_){}}
-        document.addEventListener('DOMContentLoaded',function(){const btn=document.getElementById('notif-bell-btn'),dd=document.getElementById('notif-dropdown'),bc=document.getElementById('notif-bell-container');if(btn&&dd){btn.addEventListener('click',function(e){e.stopPropagation();const was=dd.classList.contains('open');dd.classList.toggle('open');if(!was){load().then(function(){if(unread>0)mark();});}});document.addEventListener('click',function(e){if(bc&&!bc.contains(e.target))dd.classList.remove('open');});}load();});
-        // Re-load notifications on every WebSocket push event
-        // (bid, listing, offer, auction, activity, notification).
-        // The MW_WS client auto-connects on page load and dispatches
-        // CustomEvents for each push message received from /ws.
-        // Debounced: every WS push used to fire a /api/v1/notifications
-        // fetch immediately — on a busy chain this alone drained the
-        // per-IP rate budget and starved the profile page (2026-09-01).
-        var _notifT = null;
-        window.addEventListener('mw-ws-event', function () {
-          if (_notifT) return;
-          _notifT = setTimeout(function () { _notifT = null; load(); }, 3000);
-        });
-        window.addEventListener('mw-ws-open', function () { load(); });
-        // Also refresh on wallet-related custom events
-        window.addEventListener('mw-wallet-changed', function () { load(); });
-        window.addEventListener('mw-auth-changed', function () { load(); });
-        window.addEventListener('mw-ready', function () { if (window.MW) { window.MW.onAccountChange(function(a){ load(); if (a.address) window.MW.ws.subscribe(window.MW.ch.user(a.address)); }); } });
+        document.addEventListener('DOMContentLoaded',function(){const btn=document.getElementById('notif-bell-btn'),dd=document.getElementById('notif-dropdown'),bc=document.getElementById('notif-bell-container');if(btn&&dd){btn.addEventListener('click',function(e){e.stopPropagation();const was=dd.classList.contains('open');dd.classList.toggle('open');btn.setAttribute('aria-expanded',was?'false':'true');if(!was){load().then(function(){if(unread>0)mark();});}});document.addEventListener('click',function(e){if(bc&&!bc.contains(e.target as Node)){dd.classList.remove('open');btn.setAttribute('aria-expanded','false');}});document.addEventListener('keydown',function(e){if(e.key==='Escape'&&dd.classList.contains('open')){dd.classList.remove('open');btn.setAttribute('aria-expanded','false');btn.focus();}});}load();});
+        // Debounced reload on WS pushes (a busy chain used to drain the per-IP rate budget).
+        let _notifT: ReturnType<typeof setTimeout>|null=null;
+        window.addEventListener('mw-ws-event',function(){if(_notifT)return;_notifT=setTimeout(function(){_notifT=null;load();},3000);});
+        window.addEventListener('mw-ws-open',function(){load();});
+        window.addEventListener('mw-wallet-changed',function(){load();});
+        window.addEventListener('mw-auth-changed',function(){load();});
+        window.addEventListener('mw-ready',function(){if(window.MW){window.MW.onAccountChange(function(a){load();if(a.address)window.MW!.ws.subscribe(window.MW!.ch.user(a.address));});}});
       })();
 
-      // ── Mobile wallet controls ──
+      // ── Mobile wallet controls (drawer) ──
       (function(){if(typeof window==='undefined')return;
-        function check(){const a=localStorage.getItem('mw_addr');const d=document.getElementById('mobile-wallet-disconnected');const c=document.getElementById('mobile-wallet-connected');const ae=document.getElementById('mobile-wallet-addr');if(a&&a.length>10){if(d)d.style.display='none';if(c)c.style.display='block';if(ae)ae.textContent=a.slice(0,6)+'...'+a.slice(-4);}else{if(d)d.style.display='block';if(c)c.style.display='none';}}
+        function check(){let a='';try{a=localStorage.getItem('mw_addr')||'';}catch(_){}const d=document.getElementById('mobile-wallet-disconnected');const c=document.getElementById('mobile-wallet-connected');const ae=document.getElementById('mobile-wallet-addr');if(a&&a.length>10){if(d)d.hidden=true;if(c)c.hidden=false;if(ae)ae.textContent=a.slice(0,6)+'…'+a.slice(-4);}else{if(d)d.hidden=false;if(c)c.hidden=true;}}
         document.addEventListener('DOMContentLoaded',function(){check();
-          const mc=document.getElementById('mobile-connect-wallet');if(mc)mc.addEventListener('click',function(){document.getElementById('mobile-menu').classList.remove('open');if(typeof window.__MW_APPKIT_OPEN__==='function'){window.__MW_APPKIT_OPEN__();}else if(typeof window.MW_CONNECT_WALLET==='function'){window.MW_CONNECT_WALLET();}});
-          const md=document.getElementById('mobile-disconnect-wallet');if(md)md.addEventListener('click',function(){if(typeof window.__MW_APPKIT_DISCONNECT__==='function'){window.__MW_APPKIT_DISCONNECT__();}else{try{localStorage.removeItem('mw_addr');localStorage.removeItem('mw_kind');localStorage.removeItem('mw_jwt');}catch(_){}location.reload();}});
+          const mc=document.getElementById('mobile-connect-wallet');if(mc)mc.addEventListener('click',function(){const m=document.getElementById('mobile-menu');if(m){m.hidden=true;m.classList.remove('open');document.body.style.overflow='';}if(typeof window.__MW_APPKIT_OPEN__==='function'){window.__MW_APPKIT_OPEN__();}});
+          const md=document.getElementById('mobile-disconnect-wallet');if(md)md.addEventListener('click',function(){if(typeof window.__MW_APPKIT_DISCONNECT__==='function'){window.__MW_APPKIT_DISCONNECT__();}else{try{localStorage.removeItem('mw_addr');localStorage.removeItem('mw_kind');localStorage.removeItem('mw_jwt');}catch(_){}window.dispatchEvent(new CustomEvent('mw-wallet-changed'));}check();});
         });
-        // Drive mobile wallet display via events instead of polling every 3s.
-        // The setInterval(check,3000) legacy poller was a recurring timer that
-        // read localStorage on every tick — it couldn't keep pace with wagmi
-        // React hydration (AppKit reconnects after the inline script ran) so
-        // the mobile drawer showed "Connect Wallet" until the next 3s window.
-        // Now we listen for the same mw-wallet-changed event that the profile
-        // page uses, plus a one-time deferred check at t+2s to catch the case
-        // where no event fires (missing AppKit, air-gapped page, etc.).
-        window.addEventListener('mw-wallet-changed', function(){check();});
-        // One-time deferred check: fires once at page-boot time after AppKit
-        // has had time to hydrate. Clears itself so there's no recurring timer.
-        setTimeout(function _bootCheck(){
-          try { var a = localStorage.getItem('mw_addr'); } catch(_) { a = ''; }
-          // Only update if React hasn't already signaled a change via the event.
-          // If AppKit dispatched mw-wallet-changed, the listener above already
-          // ran check(), so _bootCheck is a no-op — but if AppKit is absent or
-          // slow, the 2s fallback ensures the drawer isn't stuck on "Connect".
-          if (a && a.length > 10) check();
-        }, 2000);
+        // Event-driven (no polling) + one deferred check after AppKit hydrates.
+        window.addEventListener('mw-wallet-changed',function(){check();});
+        setTimeout(function(){let a='';try{a=localStorage.getItem('mw_addr')||'';}catch(_){}if(a&&a.length>10)check();},2000);
       })();
 
-      // ── Dynamic currency + network name labels ──
-      // Replaces every .mw-cur span with the server-injected native currency
-      // symbol (window.MW_NATIVE_CURRENCY) and every .mw-net-name span with
-      // the network name (window.MW_NETWORK_NAME). The Go backend injects
-      // these globals into Astro HTML responses via sendHTMLWithConfig() in
-      // ui.go; the defaults above (Coston2) are the fallback for dev mode.
+      // ── Dynamic currency + network name labels (.mw-cur / .mw-net-name) ──
       (function(){if(typeof window==='undefined')return;
-        var cur=window.MW_NATIVE_CURRENCY||'C2FLR';
-        var net=window.MW_NETWORK_NAME||'Flare Coston2';
-        function updateLabels(){
-          document.querySelectorAll('.mw-cur').forEach(function(el){el.textContent=cur;});
-          document.querySelectorAll('.mw-net-name').forEach(function(el){el.textContent=net;});
-        }
-        if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',updateLabels);}
-        else{updateLabels();}
-      })();
-
-      // ── Runtime network switcher correction ──
-      // The switcher's "Current" entry is resolved at build time from
-      // PUBLIC_CHAIN_ID, but one build serves every network (the Go server
-      // injects window.MW_CHAIN_ID / MW_NETWORK_URLS at runtime). When the
-      // runtime chain differs from the build-time one, rebuild the menu and
-      // button label from the runtime globals so the page never shows a
-      // contradictory network identity.
-      (function(){if(typeof window==='undefined')return;
-        var rid=Number(window.MW_CHAIN_ID||'114');
-        var menu=document.getElementById('net-switcher-menu');
-        if(!menu)return;
-        var cur=menu.querySelector('.net-item-current');
-        // Rebuild when the runtime chain differs from the build-time one, OR
-        // when the runtime injected sibling origins (MW_NETWORK_URLS) that the
-        // build didn't know about -- the build has no PUBLIC_NETWORK_URLS, so
-        // without this the menu keeps its build-time "Unavailable" entries
-        // even though the origins are live. Rebuilding is idempotent.
-        var runtimeUrls=String(window.MW_NETWORK_URLS||'').trim();
-        if(cur&&Number(cur.getAttribute('data-chain-id'))===rid&&!runtimeUrls)return;
-        // Astro scopes the menu's CSS via a data-astro-cid-* attribute on each
-        // element; innerHTML-generated items must carry it or they render
-        // unstyled (the run-together text bug).
-        var cid='';
-        for(var ai=0;ai<menu.attributes.length;ai++){
-          if(menu.attributes[ai].name.indexOf('data-astro-cid-')===0){cid=' '+menu.attributes[ai].name;break;}
-        }
-        var names={114:'Coston2',19:'Songbird',14:'Flare'};
-        var urls={};
-        String(window.MW_NETWORK_URLS||'').split(',').forEach(function(p){
-          var i=p.indexOf('=');if(i<1)return;
-          var id=Number(p.slice(0,i).trim());var o=p.slice(i+1).trim().replace(/\/+$/,'');
-          if(isFinite(id)&&o)urls[id]=o;
-        });
-        function escA(s){return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-        var html='';
-        [114,19,14].forEach(function(id){
-          var nm=names[id];
-          if(id===rid)html+='<span class="net-item net-item-current"'+cid+' data-chain-id="'+id+'">'+nm+'<span class="net-tag"'+cid+'>Current</span></span>';
-          else if(urls[id])html+='<a href="'+escA(urls[id])+'" class="net-item"'+cid+' data-chain-id="'+id+'">'+nm+'<span class="net-tag"'+cid+'>Chain '+id+'</span></a>';
-          else html+='<span class="net-item net-item-off"'+cid+' data-chain-id="'+id+'" title="No contracts are deployed on '+nm+' yet">'+nm+'<span class="net-tag"'+cid+'>Unavailable</span></span>';
-        });
-        menu.innerHTML=html;
-        var label=document.getElementById('net-current-name');
-        if(label)label.textContent=names[rid]||('Chain '+rid);
+        const cur=window.MW_NATIVE_CURRENCY||'C2FLR';const net=window.MW_NETWORK_NAME||'Flare Coston2';
+        function updateLabels(){document.querySelectorAll('.mw-cur').forEach(function(el){el.textContent=cur;});document.querySelectorAll('.mw-net-name').forEach(function(el){el.textContent=net;});}
+        if(document.readyState==='loading'){document.addEventListener('DOMContentLoaded',updateLabels);}else{updateLabels();}
       })();
     </script>
   </body>

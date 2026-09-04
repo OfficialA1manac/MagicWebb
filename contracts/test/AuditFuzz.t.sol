@@ -23,6 +23,7 @@ import {
 } from "../src/OfferBook.sol";
 import {BelowMinPrice, NothingToWithdraw, WithdrawFailed, TokenStandard, InvalidDuration} from "../src/MarketplaceCore.sol";
 import {Marketplace} from "../src/Marketplace.sol";
+import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {MockERC721}  from "./MockERC721.sol";
 import {MockERC1155} from "./MockERC1155.sol";
 import {TestHelpers} from "./TestHelpers.sol";
@@ -98,9 +99,12 @@ contract AuditFuzzTest is Test, TestHelpers {
     address alice        = address(0xA11CE);
     address bob          = address(0xB0B);
 
+    MarketplaceManager mgr;
+
     function setUp() public {
-        ah = _deployAuctionHouse(feeRecipient, address(0));
-        ob = _deployOfferBook(feeRecipient, address(0));
+        mgr = _deployMarketplaceManager();
+        ah = _deployAuctionHouse(feeRecipient, address(mgr));
+        ob = _deployOfferBook(feeRecipient, address(mgr));
         nft   = new MockERC721();
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);
@@ -428,7 +432,7 @@ contract AuditFuzzTest is Test, TestHelpers {
     function test_withdrawRefundGasHeavyReceiverCanWithdraw() public {
         GasGriefingReceiver griefer = new GasGriefingReceiver();
         vm.deal(address(griefer), 10 ether);
-        AuctionHouse ah2 = _deployAuctionHouse(feeRecipient, address(0));
+        AuctionHouse ah2 = _deployAuctionHouse(feeRecipient, address(mgr));
         MockERC721 nft2 = new MockERC721();
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
@@ -482,7 +486,7 @@ contract AuditFuzzTest is Test, TestHelpers {
 
     function test_settle_feePushFallback_emitsPushFailed() public {
         RejectEtherNoReceive badFee = new RejectEtherNoReceive();
-        AuctionHouse ah2 = _deployAuctionHouse(address(badFee), address(0));
+        AuctionHouse ah2 = _deployAuctionHouse(address(badFee), address(mgr));
         MockERC721 nft2 = new MockERC721();
         vm.startPrank(seller);
         uint256 tid2 = nft2.mint(seller);
@@ -492,13 +496,15 @@ contract AuditFuzzTest is Test, TestHelpers {
         vm.prank(alice);
         ah2.bid{value: 2 ether}(id2);
         vm.warp(block.timestamp + 2 days);
-        uint256 fee = uint256(2 ether) * 200 / 10_000; // manager == 0: whole 2% to feeRecipient
+        uint256 platformCut = _platformCut(2 ether); // 1.5% leg to badFee; 0.5% to the sentinel keeper
+        uint256 kBefore = TEST_SENTINEL_KEEPER.balance;
         vm.expectEmit(true, false, false, true, address(ah2));
-        emit PushFailed(address(badFee), fee);
+        emit PushFailed(address(badFee), platformCut);
         vm.prank(seller);
         ah2.settle(id2);
         assertTrue(ah2.getAuction(id2).settled, "settled");
-        assertEq(ah2.pendingReturns(address(badFee)), fee, "fee credited to badFee");
+        assertEq(ah2.pendingReturns(address(badFee)), platformCut, "platform cut credited to badFee");
+        assertEq(TEST_SENTINEL_KEEPER.balance - kBefore, _keeperCut(2 ether), "keeper cut pushed");
         assertEq(nft2.ownerOf(tid2), alice, "winner received NFT");
     }
 
@@ -605,7 +611,7 @@ contract AuditFuzzTest is Test, TestHelpers {
     // ── L-09 / L-10 regression tests ──────────────────────────────────────────
 
     function test_batchList_listsAllItemsAtomically() public {
-        Marketplace mp = _deployMarketplace(feeRecipient, address(0));
+        Marketplace mp = _deployMarketplace(feeRecipient, address(mgr));
         MockERC721 coll = new MockERC721();
         vm.startPrank(seller);
         uint256 t1 = coll.mint(seller);
@@ -632,7 +638,7 @@ contract AuditFuzzTest is Test, TestHelpers {
     }
 
     function test_batchList_protectedByNonReentrant() public {
-        Marketplace mp = _deployMarketplace(feeRecipient, address(0));
+        Marketplace mp = _deployMarketplace(feeRecipient, address(mgr));
         MockERC721 coll = new MockERC721();
         vm.startPrank(seller);
         uint256 t1 = coll.mint(seller);

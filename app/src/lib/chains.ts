@@ -7,6 +7,19 @@
 // network. Build-time PUBLIC_* env is the dev fallback.
 import type { Address } from 'viem';
 
+// Runtime globals injected by cmd/server/ui.go (A2.8). Declared here so every
+// consumer shares one type; env.d.ts carries the older MW_* set.
+declare global {
+  interface Window {
+    /** 'live' | 'browse-only' — trading status of THIS deployment. */
+    MW_TRADING?: string;
+    /** Faucet URL (testnets only). */
+    MW_FAUCET_URL?: string;
+    /** JSON array of { chainId, name, origin, status: 'trading'|'browse-only', testnet } for every network. */
+    MW_NETWORK_STATUS_JSON?: string;
+  }
+}
+
 export type ChainKey = 'coston2' | 'songbird' | 'flare';
 
 export interface ChainProfile {
@@ -100,8 +113,76 @@ export function chainName(id: number): string { return STATIC[id]?.name ?? `chai
  * that would then throw in the tx layer.
  */
 export function tradingLive(): boolean {
+  if (typeof window !== 'undefined' && window.MW_TRADING === 'browse-only') return false;
   const c = currentChain().contracts;
   return c.marketplace !== null && c.auctionHouse !== null && c.offerBook !== null;
+}
+
+/** Short display name for the header pill / switcher (never "Flare Coston2"). */
+export function shortChainName(id: number): string {
+  return ({ 114: 'Coston2', 19: 'Songbird', 14: 'Flare' } as Record<number, string>)[id] ?? `Chain ${id}`;
+}
+
+export function isTestnet(id: number): boolean { return id === 114; }
+
+/** Faucet for the current testnet; null on mainnets. */
+export function faucetUrl(): string | null {
+  const id = currentChain().id;
+  if (!isTestnet(id)) return null;
+  const w = typeof window !== 'undefined' ? window : ({} as Window);
+  return w.MW_FAUCET_URL || 'https://faucet.flare.network/coston2';
+}
+
+export interface NetworkStatus {
+  chainId: number;
+  name: string;
+  origin: string;
+  trading: boolean;
+  testnet: boolean;
+  current: boolean;
+}
+
+/**
+ * Every network with its trading status, from MW_NETWORK_STATUS_JSON; falls
+ * back to MW_NETWORK_URLS + static names (status = live only for ourselves
+ * when tradingLive()). Tolerant of field aliases while the backend contract
+ * settles: chainId|chain_id|id, origin|url, status|trading.
+ */
+export function networkStatuses(): NetworkStatus[] {
+  const self = currentChain().id;
+  const raw = typeof window !== 'undefined' ? window.MW_NETWORK_STATUS_JSON : undefined;
+  const out: NetworkStatus[] = [];
+  if (raw) {
+    try {
+      const parsed = JSON.parse(raw) as unknown;
+      const list: Record<string, unknown>[] = Array.isArray(parsed)
+        ? (parsed as Record<string, unknown>[])
+        : Object.entries(parsed as Record<string, Record<string, unknown>>).map(([k, v]) => ({ chainId: Number(k), ...v }));
+      for (const n of list) {
+        const id = Number(n.chainId ?? n.chain_id ?? n.id);
+        if (!Number.isFinite(id)) continue;
+        const st = n.status ?? n.trading;
+        const trading = st === true || st === 'trading' || st === 'live';
+        out.push({
+          chainId: id,
+          name: String(n.name ?? shortChainName(id)),
+          origin: String(n.origin ?? n.url ?? '').replace(/\/+$/, ''),
+          trading,
+          testnet: typeof n.testnet === 'boolean' ? n.testnet : isTestnet(id),
+          current: id === self,
+        });
+      }
+    } catch { /* fall through to URL fallback */ }
+  }
+  if (out.length === 0) {
+    const m = networkOrigins();
+    for (const id of [114, 19, 14]) {
+      const origin = m.get(id) ?? '';
+      if (!origin && id !== self) continue;
+      out.push({ chainId: id, name: shortChainName(id), origin, trading: id === self ? tradingLive() : id === 114, testnet: isTestnet(id), current: id === self });
+    }
+  }
+  return out;
 }
 
 /**

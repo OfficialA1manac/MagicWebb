@@ -70,7 +70,7 @@ contract OfferBook is MarketplaceCore {
     struct Position {
         uint128       principal; // escrowed ETH (fees already removed)
         uint80        units;     // ERC-1155 units desired (1 for ERC-721)
-        uint40        expiresAt; // set on creation or edit; validated against 15 fixed durations
+        uint40        expiresAt; // set on creation or edit; validated against 14 fixed durations
         TokenStandard standard;  // token kind this offer targets
     }
 
@@ -159,7 +159,7 @@ contract OfferBook is MarketplaceCore {
         // caller has DEFAULT_ADMIN_ROLE via the MarketplaceManager.
         // OpenZeppelin AccessControl defines DEFAULT_ADMIN_ROLE as
         // bytes32(0), NOT keccak256("DEFAULT_ADMIN_ROLE").
-        if (!authorized && manager != address(0)) {
+        if (!authorized) {
             (bool adminOk, bytes memory adminData) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", bytes32(0), msg.sender)
             );
@@ -180,7 +180,7 @@ contract OfferBook is MarketplaceCore {
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
-    /// @param duration   One of the fifteen shared durations (1m–24h). Ignored when topping up an existing position.
+    /// @param duration   One of the fourteen shared durations (1m–24h). Ignored when topping up an existing position.
     function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 duration) external payable nonReentrant {
         if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, duration);
@@ -323,20 +323,20 @@ contract OfferBook is MarketplaceCore {
     /// @notice Refund an expired offer's FULL principal. Callable only by addresses
     ///         with KEEPER_ROLE (via the MarketplaceManager) after the offer expires.
     ///         The keeper bot auto-refunds expired offers instantly without requiring
-    ///         user interaction. If no MarketplaceManager is deployed (manager == address(0)),
-    ///         this stays permissionless as a safety fallback — funds are never trapped.
+    ///         user interaction. The bidder can always reclaim their own expired
+    ///         escrow — funds are never trapped.
     /// @param coll    Collection address.
     /// @param tokenId Token ID.
     /// @param bidder  The original offerer to refund.
     function refundExpiredOffer(address coll, uint256 tokenId, address bidder) external nonReentrant {
         // The bidder can ALWAYS reclaim their own expired escrow, regardless of
-        // manager configuration. Without this the exit was keeper-only: an idle
+        // keeper availability. Without this the exit was keeper-only: an idle
         // keeper (bot down, key lost, role revoked) left the principal locked
         // forever, since cancelOffer() reverts once expiresAt has passed. That
         // contradicted the "unstoppable exits" guarantee in MarketplaceManager.
         // Third parties still need KEEPER_ROLE, so the sweeper stays the only
         // address that can move someone else's funds.
-        if (manager != address(0) && msg.sender != bidder) {
+        if (msg.sender != bidder) {
             (bool ok, bytes memory data) = manager.staticcall(
                 abi.encodeWithSignature("hasRole(bytes32,address)", keccak256("KEEPER_ROLE"), msg.sender)
             );

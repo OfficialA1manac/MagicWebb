@@ -112,7 +112,7 @@ contract TransientGuardTest is Test, TestHelpers {
         // TLOAD then revert, well inside the 50k push cap), so the outer
         // buy still completes AND its payout push succeeds -- the seller
         // receives proceeds directly, nothing lands in pendingReturns.
-        Marketplace mp = _deployMarketplace(address(0xFEE), address(0));
+        Marketplace mp = _deployMarketplace(address(0xFEE), address(_deployMarketplaceManager()));
         MockERC721 nft = new MockERC721();
         ReentrantSeller seller = new ReentrantSeller(mp);
 

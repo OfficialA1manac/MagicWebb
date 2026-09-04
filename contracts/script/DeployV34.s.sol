@@ -24,6 +24,8 @@ import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 ///
 /// v3.2 authority model retained:
 ///   - Exactly ONE keeper per network (MarketplaceManager.keeper); no grants.
+///     The keeper is MANDATORY — the fee split depends on it
+///     (MarketplaceCore._payFee reverts NoKeeper otherwise).
 ///   - Exactly ONE admin until `renounceAdmin()` — which is now a LATER,
 ///     explicit per-network action on the owner's go-immutable order, NOT a
 ///     deploy-time default for mainnets.
@@ -147,6 +149,8 @@ contract DeployV34 is Script {
         // Authority invariants.
         require(address(manager).code.length > 0, "manager has no code");
         require(manager.keeper() == keeper_, "keeper mismatch");
+        // keeper is mandatory -- fee split depends on it (MarketplaceCore._payFee reverts NoKeeper otherwise)
+        require(manager.keeper() != address(0), "keeper is mandatory -- fee split depends on it");
         require(manager.hasRole(manager.KEEPER_ROLE(), keeper_), "keeper shim answers false");
         require(marketplace.upgradeDelay() == 0, "upgrade delay must be 0 (instant upgrades)");
         // Nothing may be queued at birth, and no admin hand-off in flight.

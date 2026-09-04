@@ -1,16 +1,17 @@
 <script lang="ts">
-  let { message = 'Could not load this right now.', retry }: { message?: string; retry?: () => void } = $props();
+  import Icon from './Icon.svelte';
+  let { title = 'Something went wrong', message = 'Could not load this right now.', retry, retryLabel = 'Retry' }: { title?: string; message?: string; retry?: () => void; retryLabel?: string } = $props();
 </script>
 
 <div class="err" role="alert">
-  <div class="err-title">Something went wrong</div>
+  <div class="err-head"><Icon name="alert" size={20} /><span class="err-title">{title}</span></div>
   <p>{message}</p>
-  {#if retry}<button class="err-btn" onclick={retry}>Try again</button>{/if}
+  {#if retry}<button class="btn btn-secondary" onclick={retry}><Icon name="refresh" size={18} />{retryLabel}</button>{/if}
 </div>
 
 <style>
-  .err { background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.3); border-radius: 14px; padding: 16px; font-size: 14px; color: rgba(255,255,255,.8); }
-  .err-title { font-weight: 700; color: #fca5a5; margin-bottom: 4px; }
-  .err p { margin: 0 0 10px; line-height: 1.5; }
-  .err-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; background: rgba(255,255,255,.08); color: #fafafa; border: 1px solid rgba(255,255,255,.14); cursor: pointer; font-family: inherit; font-weight: 700; }
+  .err { background: var(--red-12); border: 1px solid var(--red-35); border-radius: var(--r-card); padding: var(--sp-4); font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-2); }
+  .err-head { display: flex; align-items: center; gap: var(--sp-2); color: var(--red); margin-bottom: var(--sp-1); }
+  .err-title { font-weight: 700; color: var(--text); }
+  .err p { margin: 0 0 var(--sp-3); }
 </style>

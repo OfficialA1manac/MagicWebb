@@ -1,10 +1,9 @@
-// The fifteen durations every time-bound action accepts (MarketplaceCore.sol).
+// The fourteen durations every time-bound action accepts (MarketplaceCore.sol).
 // Contracts take the DURATION and compute expiry on-chain.
 export const DURATIONS = [
   { seconds: 1 * 60, label: '1 minute' },
   { seconds: 3 * 60, label: '3 minutes' },
   { seconds: 5 * 60, label: '5 minutes' },
-  { seconds: 10 * 60, label: '10 minutes' },
   { seconds: 15 * 60, label: '15 minutes' },
   { seconds: 30 * 60, label: '30 minutes' },
   { seconds: 45 * 60, label: '45 minutes' },

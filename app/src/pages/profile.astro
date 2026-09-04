@@ -356,7 +356,7 @@ import RefundsPanel from '../components/RefundsPanel.svelte';
 
           // Batch listing: one price+duration for every selected NFT -> one tx (MW.batchList, max 50).
           function renderBatchBar(){
-            var durOpts = [[60,'1m'],[180,'3m'],[300,'5m'],[600,'10m'],[900,'15m'],[1800,'30m'],[2700,'45m'],[3600,'1h'],[7200,'2h'],[14400,'4h'],[28800,'8h'],[43200,'12h'],[57600,'16h'],[72000,'20h'],[86400,'24h']];
+            var durOpts = [[60,'1m'],[180,'3m'],[300,'5m'],[900,'15m'],[1800,'30m'],[2700,'45m'],[3600,'1h'],[7200,'2h'],[14400,'4h'],[28800,'8h'],[43200,'12h'],[57600,'16h'],[72000,'20h'],[86400,'24h']];
             return '<div id="batch-bar" style="display:none;align-items:center;gap:0.625rem;flex-wrap:wrap;margin-bottom:1rem;padding:0.75rem 1rem;border-radius:0.875rem;background:rgba(125,211,252,0.06);border:1px solid rgba(125,211,252,0.25);">'+
               '<span id="batch-count" style="font-size:0.8125rem;font-weight:700;color:#7dd3fc;">0 selected</span>'+
               '<input id="batch-price" inputmode="decimal" placeholder="Price each ('+cur()+', min 1)" style="width:11rem;padding:0.45rem 0.75rem;border-radius:0.625rem;background:rgba(9,9,11,0.6);border:1px solid rgba(255,255,255,0.12);color:#fafafa;font-family:JetBrains Mono,monospace;font-size:0.8125rem;">'+

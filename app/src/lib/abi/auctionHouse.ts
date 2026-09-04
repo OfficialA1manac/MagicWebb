@@ -1212,7 +1212,7 @@ export const auctionHouseAbi = [
   },
   {
     "type": "error",
-    "name": "NoManager",
+    "name": "NoKeeper",
     "inputs": []
   },
   {

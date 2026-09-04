@@ -1,14 +1,14 @@
 # deployments/ — the single source of truth for contract addresses
 
 One JSON per network. **Every other file that needs an address reads or copies from here**:
-`backend/.env.example`, `fly.*.toml.example` (CI fills `CHANGE_ME_*` from GitHub repository
-variables, which must match these files), `contracts/script/e2e_*.sh`, the docs.
+`backend/.env.example`, `fly.*.toml.example` (CI fills `CHANGE_ME_*` directly from these
+JSON files; the only repository variables are `<NETWORK>_ENABLED`), `contracts/script/e2e_*.sh`, the docs.
 
 | File | Status |
 |---|---|
 | `coston2.json` | deployed — live at https://magicwebb.fly.dev |
-| `songbird.json` | not deployed — config-flip ready |
-| `flare.json` | not deployed — config-flip ready (mainnet: audit + multisig gate) |
+| `songbird.json` | read-only — app live at https://magicwebb-songbird.fly.dev, contracts not deployed |
+| `flare.json` | read-only — app live at https://magicwebb-flare.fly.dev, contracts not deployed |
 
 Rules
 - Never edit an address anywhere else first. Change it here, then propagate.

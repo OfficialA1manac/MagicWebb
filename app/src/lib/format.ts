@@ -13,8 +13,8 @@ export function shortAddr(a: string | null | undefined, head = 6, tail = 4): str
   return a.length <= head + tail + 2 ? a : `${a.slice(0, head)}…${a.slice(-tail)}`;
 }
 
-/** Wei (string|bigint) → human string with up to `maxFrac` decimals, trailing zeros trimmed. */
-export function fmtPrice(wei: string | bigint | null | undefined, maxFrac = 4): string {
+/** Wei (string|bigint) → human string with up to `maxFrac` decimals (spec: 2), trailing zeros trimmed. */
+export function fmtPrice(wei: string | bigint | null | undefined, maxFrac = 2): string {
   if (wei === null || wei === undefined || wei === '') return '—';
   let n: bigint;
   try { n = typeof wei === 'bigint' ? wei : BigInt(wei); } catch { return '—'; }
@@ -50,4 +50,36 @@ export function fmtCountdown(endsAtSec: number, nowMs = Date.now()): string {
   const p = (n: number) => String(n).padStart(2, '0');
   if (h >= 48) return `${Math.floor(h / 24)}d ${h % 24}h`;
   return h > 0 ? `${h}h ${p(m)}m ${p(s)}s` : `${m}m ${p(s)}s`;
+}
+
+/** `12.5 C2FLR` — price + currency in one string (2 dp max, zeros trimmed). */
+export function fmtAmount(wei: string | bigint | null | undefined, currency: string, maxFrac = 2): string {
+  const p = fmtPrice(wei, maxFrac);
+  return p === '—' ? p : `${p} ${currency}`;
+}
+
+/**
+ * Spec B0 countdown: `1d 03h` (≥1h shows `1d 03h` / `5h 12m`), `02:14:09`
+ * under one hour, `Ended` at zero. Pair with `countdownUrgent()` for the
+ * red-under-3-minutes colour.
+ */
+export function fmtCountdownShort(endsAtSec: number, nowMs = Date.now()): string {
+  const left = Math.floor(endsAtSec - nowMs / 1000);
+  if (left <= 0) return 'Ended';
+  const p = (n: number) => String(n).padStart(2, '0');
+  const h = Math.floor(left / 3600), m = Math.floor((left % 3600) / 60), s = left % 60;
+  if (h >= 24) return `${Math.floor(h / 24)}d ${p(h % 24)}h`;
+  if (h >= 1) return `${h}h ${p(m)}m`;
+  return `${p(h)}:${p(m)}:${p(s)}`;
+}
+
+/** True when under 3 minutes remain (countdown turns red). */
+export function countdownUrgent(endsAtSec: number, nowMs = Date.now()): boolean {
+  const left = endsAtSec - nowMs / 1000;
+  return left > 0 && left < 180;
+}
+
+/** Copy text to the clipboard; resolves false in non-secure contexts. */
+export async function copyText(text: string): Promise<boolean> {
+  try { await navigator.clipboard?.writeText(text); return !!navigator.clipboard; } catch { return false; }
 }

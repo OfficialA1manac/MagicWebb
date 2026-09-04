@@ -18,23 +18,26 @@ contract MarketplaceHandler is Test {
     address public owner = address(0xA0);
     address public buyer = address(0xB0B);
     address public feeRecipient;
+    address public keeper;
 
     uint256 public constant N_TOKENS = 5;
     uint256[N_TOKENS] public tokenIds;
 
     /// @notice Gross ETH paid by buyers across every settled sale.
     uint256 public ghostGross;
-    /// @notice Sum of the 2% platform fees those sales should have produced. The harness
-    ///         deploys with manager == address(0), so no keeper share is carved out and
-    ///         the full fee accrues at feeRecipient (split covered in FeeSplit.t.sol).
-    uint256 public ghostFees;
+    /// @notice Platform leg of the 2% fee across every sale: per sale
+    ///         `fee - fee*50/200` (exactly MarketplaceCore._payFee's truncation).
+    uint256 public ghostPlatform;
+    /// @notice Keeper leg of the 2% fee across every sale: per sale `fee*50/200`.
+    uint256 public ghostKeeper;
     /// @notice block.timestamp at which each token's current listing was written.
     mapping(uint256 => uint64) public ghostListedAt;
 
-    constructor(Marketplace _mp, MockERC721 _nft, address _feeRecipient) {
+    constructor(Marketplace _mp, MockERC721 _nft, address _feeRecipient, address _keeper) {
         mp = _mp;
         nft = _nft;
         feeRecipient = _feeRecipient;
+        keeper = _keeper;
         vm.startPrank(owner);
         for (uint256 i; i < N_TOKENS; ++i) {
             tokenIds[i] = nft.mint(owner);
@@ -43,11 +46,11 @@ contract MarketplaceHandler is Test {
         vm.stopPrank();
     }
 
-    /// @dev The fifteen durations MarketplaceCore._expiryFor accepts.
-    function _durations() internal pure returns (uint64[15] memory d) {
+    /// @dev The fourteen durations MarketplaceCore._expiryFor accepts.
+    function _durations() internal pure returns (uint64[14] memory d) {
         d = [
             uint64(1 minutes), uint64(3 minutes), uint64(5 minutes),
-            uint64(10 minutes), uint64(15 minutes), uint64(30 minutes),
+            uint64(15 minutes), uint64(30 minutes),
             uint64(45 minutes), uint64(1 hours), uint64(2 hours),
             uint64(4 hours), uint64(8 hours), uint64(12 hours),
             uint64(16 hours), uint64(20 hours), uint64(24 hours)
@@ -59,7 +62,7 @@ contract MarketplaceHandler is Test {
     function list(uint256 tSeed, uint128 price, uint256 dSeed) external {
         uint256 tid = tokenIds[tSeed % N_TOKENS];
         uint128 p = uint128(bound(price, mp.MIN_PRICE(), 100 ether));
-        uint64 dur = _durations()[dSeed % 15];
+        uint64 dur = _durations()[dSeed % 14];
         vm.prank(owner);
         try mp.list(address(nft), tid, p, dur) {
             ghostListedAt[tid] = uint64(block.timestamp);
@@ -68,7 +71,7 @@ contract MarketplaceHandler is Test {
 
     function batchList(uint256 tSeed, uint128 price, uint256 dSeed) external {
         uint128 p = uint128(bound(price, mp.MIN_PRICE(), 100 ether));
-        uint64 dur = _durations()[dSeed % 15];
+        uint64 dur = _durations()[dSeed % 14];
         Marketplace.BatchItem[] memory items = new Marketplace.BatchItem[](3);
         uint256[3] memory ids;
         uint256 base = tSeed % N_TOKENS; // reduce first: tSeed + i can overflow
@@ -102,7 +105,10 @@ contract MarketplaceHandler is Test {
         vm.prank(buyer);
         try mp.buy{value: uint256(price)}(address(nft), tid, owner) {
             ghostGross += uint256(price);
-            ghostFees += (uint256(price) * mp.PLATFORM_FEE_BPS()) / 10_000;
+            uint256 fee = (uint256(price) * mp.PLATFORM_FEE_BPS()) / 10_000;
+            uint256 kCut = (fee * mp.KEEPER_SHARE_BPS()) / mp.PLATFORM_FEE_BPS();
+            ghostKeeper += kCut;
+            ghostPlatform += fee - kCut;
             ghostListedAt[tid] = 0;
             // Harness recycling: hand the NFT back so the listing paths stay
             // reachable for the rest of the run instead of draining after five
@@ -128,10 +134,11 @@ contract MarketplaceHandler is Test {
         vm.warp(block.timestamp + (seed % 6 hours) + 1);
     }
 
-    /// @notice Permissionless when manager == address(0), which is how this
-    ///         suite deploys the Marketplace.
+    /// @notice Keeper-gated (the manager is mandatory), so the handler acts as
+    ///         the manager's keeper to keep the expired-cleanup branch reachable.
     function cleanExpired(uint256 tSeed) external {
         uint256 tid = tokenIds[tSeed % N_TOKENS];
+        vm.prank(keeper);
         try mp.cleanExpired(address(nft), tid, owner) {
             ghostListedAt[tid] = 0;
         } catch {}
@@ -145,9 +152,9 @@ contract MarketplaceInvariantTest is Test, TestHelpers {
     address feeRecipient = address(0xFEE);
 
     function setUp() public {
-        mp = _deployMarketplace(feeRecipient, address(0));
+        mp = _deployMarketplace(feeRecipient, address(_deployMarketplaceManager()));
         nft = new MockERC721();
-        handler = new MarketplaceHandler(mp, nft, feeRecipient);
+        handler = new MarketplaceHandler(mp, nft, feeRecipient, TEST_SENTINEL_KEEPER);
         targetContract(address(handler));
     }
 
@@ -196,17 +203,22 @@ contract MarketplaceInvariantTest is Test, TestHelpers {
         assertEq(address(mp).balance, 0, "Marketplace must never hold ETH");
         assertEq(mp.pendingReturns(handler.owner()), 0, "seller push failed");
         assertEq(mp.pendingReturns(feeRecipient), 0, "fee push failed");
+        assertEq(mp.pendingReturns(TEST_SENTINEL_KEEPER), 0, "keeper push failed");
         assertEq(mp.pendingReturns(handler.buyer()), 0, "buyer credited unexpectedly");
     }
 
     /// @notice Value conservation across every settled sale: the fee wallet
-    ///         holds exactly the accrued 2% (no manager → no keeper share), and the seller holds exactly the
-    ///         remainder. Both actors start at zero balance and are never
-    ///         dealt ETH, so these are absolute, not relative, checks.
+    ///         holds exactly the accrued 1.5% platform leg, the sentinel keeper
+    ///         exactly the 0.5% keeper leg (each truncated per sale exactly as
+    ///         _payFee does), and the seller exactly the remainder. All three
+    ///         actors start at zero balance and are never dealt ETH, so these
+    ///         are absolute, not relative, checks.
     function invariant_salesConserveValue() public view {
         uint256 gross = handler.ghostGross();
-        uint256 fees = handler.ghostFees();
-        assertEq(feeRecipient.balance, fees, "fee recipient balance != accrued platform fees");
-        assertEq(handler.owner().balance, gross - fees, "seller balance != gross minus fees");
+        uint256 platform = handler.ghostPlatform();
+        uint256 keeperShare = handler.ghostKeeper();
+        assertEq(feeRecipient.balance, platform, "fee recipient balance != accrued platform leg");
+        assertEq(TEST_SENTINEL_KEEPER.balance, keeperShare, "keeper balance != accrued keeper leg");
+        assertEq(handler.owner().balance, gross - platform - keeperShare, "seller balance != gross minus fees");
     }
 }

@@ -867,7 +867,7 @@ export const marketplaceAbi = [
   },
   {
     "type": "error",
-    "name": "NoManager",
+    "name": "NoKeeper",
     "inputs": []
   },
   {

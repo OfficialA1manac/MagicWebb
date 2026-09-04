@@ -24,15 +24,14 @@
 #                WalletConnect project id. CI fills these from GitHub
 #                repository variables; a local deploy fills them by hand.
 #
-# To set up CI deployment (GitHub Actions):
-#   1. Add repository variables (Settings → Secrets and variables → Actions):
-#      - NETWORK (coston2 | songbird | flare — selects this template)
-#      - MARKETPLACE_ADDR, AUCTION_ADDR, OFFERBOOK_ADDR, NFT_ADDR, MARKETPLACE_MANAGER_ADDR
-#      - TRACKED_COLLECTIONS, INDEX_FROM_BLOCK
-#   2. Add repository secrets:
-#      - FLY_API_TOKEN (Fly deploy token)
-#      - REOWN_PROJECT_ID (WalletConnect project ID from cloud.reown.com)
-#   3. Push to main — CI generates fly.toml and deploys automatically.
+# CI deployment (GitHub Actions, .github/workflows/deploy.yml):
+#   1. Addresses, tracked collections and INDEX_FROM_BLOCK come from
+#      deployments/<network>.json — never from repository variables.
+#   2. Repository variables: COSTON2_ENABLED / SONGBIRD_ENABLED / FLARE_ENABLED
+#      select which networks deploy. Secrets: FLY_API_TOKEN, REOWN_PROJECT_ID,
+#      WC_PROJECT_ID (and EXPLORER_API_KEY for tag-gated verification).
+#   3. Push to main — CI builds one image, generates fly.toml per network from
+#      this template and deploys every enabled network.
 #
 # Secrets set via `fly secrets set` (NOT in this file). A Fly secret overrides
 # the matching [env] key at runtime, which is also how you point this app at a

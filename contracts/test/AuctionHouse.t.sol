@@ -35,7 +35,7 @@ contract AuctionHouseTest is Test, TestHelpers {
     address carol = address(0xCab01);
 
     function setUp() public {
-        ah = _deployAuctionHouse(feeRecipient, address(0));
+        ah = _deployAuctionHouse(feeRecipient, address(_deployMarketplaceManager()));
         nft = new MockERC721();
         multi = new MockERC1155();
         vm.deal(alice, 100 ether);
@@ -43,8 +43,8 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.deal(carol, 100 ether);
     }
 
-    // 2% total fee. This suite deploys with manager == address(0), so no keeper is
-    // resolvable and the WHOLE fee lands at feeRecipient (see FeeSplit.t.sol for the split).
+    // 2% total fee = 1.5% feeRecipient + 0.5% sentinel keeper (TEST_SENTINEL_KEEPER).
+    // _fee is the seller-side deduction; feeRecipient receives _platformCut, keeper _keeperCut.
     function _fee(uint128 v) internal pure returns (uint256) { return uint256(v) * 200 / 10_000; }
 
     function _create() internal returns (uint256 id, uint256 tid) {
@@ -203,16 +203,18 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.warp(block.timestamp + 30 hours);
         uint256 sellerBefore = seller.balance;
         uint256 vaultBefore = feeRecipient.balance;
+        uint256 kBefore = TEST_SENTINEL_KEEPER.balance;
         vm.prank(seller);
         ah.settle(id);
         assertEq(nft.ownerOf(tid), bob);
-        assertEq(feeRecipient.balance, vaultBefore + _fee(3 ether));
+        assertEq(feeRecipient.balance, vaultBefore + _platformCut(3 ether));
+        assertEq(TEST_SENTINEL_KEEPER.balance - kBefore, _keeperCut(3 ether));
         assertEq(seller.balance, sellerBefore + 3 ether - _fee(3 ether));
         assertEq(ah.cumulative(id, bob), 0, "winner escrow consumed");
         assertEq(ah.cumulative(id, alice), 1 ether, "loser escrow awaits refund");
     }
 
-    function test_settle_noManager_thirdPartyReverts() public {
+    function test_settle_thirdPartyReverts() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + 30 hours);
@@ -223,21 +225,21 @@ contract AuctionHouseTest is Test, TestHelpers {
         assertFalse(settled);
     }
 
-    function test_settle_noManager_winnerAllowed() public {
+    function test_settle_winnerAllowed() public {
         (uint256 id,) = _create();
         _bid(id, alice, 1 ether);
         vm.warp(block.timestamp + 30 hours);
-        vm.prank(alice); // winner settles with no manager configured
+        vm.prank(alice); // winner settles: parties never need the keeper
         ah.settle(id);
         bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
     }
 
-    function test_settle_noManager_sellerAllowed() public {
+    function test_settle_sellerAllowed() public {
         (uint256 id,) = _create();
         _bid(id, bob, 1 ether);
         vm.warp(block.timestamp + 30 hours);
-        vm.prank(seller); // seller settles with no manager configured
+        vm.prank(seller); // seller settles: parties never need the keeper
         ah.settle(id);
         bool settled = ah.getAuction(id).settled;
         assertTrue(settled);
@@ -370,10 +372,11 @@ contract AuctionHouseTest is Test, TestHelpers {
         vm.stopPrank();
         _bid(id, alice, amt);
         vm.warp(block.timestamp + 30 hours);
-        uint256 sb = seller.balance; uint256 vb = feeRecipient.balance;
+        uint256 sb = seller.balance; uint256 vb = feeRecipient.balance; uint256 kb = TEST_SENTINEL_KEEPER.balance;
         vm.prank(seller);
         ah.settle(id);
-        assertEq(feeRecipient.balance - vb, _fee(amt));
+        assertEq(feeRecipient.balance - vb, _platformCut(amt));
+        assertEq(TEST_SENTINEL_KEEPER.balance - kb, _keeperCut(amt));
         assertEq(seller.balance - sb, uint256(amt) - _fee(amt));
     }
 
