@@ -2163,8 +2163,8 @@ type StalledAuctionRow struct {
 	CreateTx        string    `json:"create_tx"`
 }
 
-// ListStalledAuctions returns detailed stalled auction rows for admin
-// inspection. Newest-ended first, limited to `limit` rows.
+// ListStalledAuctions returns detailed stalled auction rows for the metrics
+// page (there is no admin surface). Newest-ended first, limited to `limit` rows.
 func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctionRow, error) {
 	if limit <= 0 || limit > 200 {
 		limit = 50

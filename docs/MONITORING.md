@@ -7,9 +7,32 @@ Every network app exposes the same surface.
 | `GET /healthz` | liveness (200 = process up) |
 | `GET /readyz` | readiness: DB reachable |
 | `GET /api/v1/indexer/slo` | Prometheus `head_lag_blocks` gauge (indexer vs chain head) |
-| `GET /internal/metrics` | full Prometheus scrape: HTTP, RPC pool failovers, WS clients, keeper gas, cache hit-rate |
+| `GET /internal/metrics` | full Prometheus scrape: HTTP, RPC pool failovers, WS clients, keeper gas, cache hit-rate (optionally token-gated, below) |
 | `GET /metrics` | human HTML dashboard of the same numbers |
 | `GET /metrics/gas` | keeper gas spend over time |
+
+## Gating `/internal/metrics` (optional `METRICS_TOKEN`)
+
+By default the scrape endpoint is public — all three Fly apps run without a
+token today and their scrapers keep working unchanged. To restrict it:
+
+```
+fly secrets set METRICS_TOKEN=$(openssl rand -hex 32)
+```
+
+With the secret set, a scrape must present the token via either header:
+
+```
+Authorization: Bearer <token>
+# or
+X-Metrics-Token: <token>
+```
+
+Anything else — wrong token, missing header — gets a plain `404`, making the
+endpoint indistinguishable from an unknown path to probers. Prometheus:
+`authorization: { type: Bearer, credentials: <token> }` on the scrape config.
+Unset the secret to return to public scraping. `/healthz`, `/readyz` and
+`/api/v1/indexer/slo` stay public regardless (health checks need them).
 
 Alerts the binary sends itself (all optional env):
 - `DISCORD_WEBHOOK_URL` / `PROMETHEUS_WEBHOOK_URL` — keeper balance below

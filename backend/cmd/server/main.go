@@ -5,6 +5,7 @@ package main
 import (
 	"context"
 	"crypto/rand"
+	"crypto/subtle"
 	"encoding/hex"
 	"encoding/json"
 	"errors"
@@ -127,7 +128,7 @@ func run() error {
 	}
 
 	// DB
-	if err := db.Migrate(config.C.PostgresURL); err != nil {
+	if err := db.Migrate(ctx, config.C.PostgresURL, config.C.MigrateTimeout); err != nil {
 		return fatal(err, "db migration failed")
 	}
 	pool, err := db.Connect(ctx, config.C.PostgresURL)
@@ -552,8 +553,11 @@ func run() error {
 // The endpoint is NOT rate-limited — Prometheus scrapes typically run every
 // 15-60s and a rate limit would silently drop scrape intervals, creating gaps
 // in dashboards.
+//
+// Access: public by default (every Fly app scrapes it unauthenticated today).
+// Setting METRICS_TOKEN gates it — see metricsAuth below.
 func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth *rpcpool.Pool, wsStats api.WSStatsProvider) {
-	app.Get("/internal/metrics", func(c *fiber.Ctx) error {
+	app.Get("/internal/metrics", metricsAuth, func(c *fiber.Ctx) error {
 		c.Set("Content-Type", "text/plain; charset=utf-8")
 
 		// SSE saturation metrics from the broadcaster.
@@ -750,6 +754,32 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 
 		return c.SendString(b.String())
 	})
+}
+
+// metricsAuth optionally gates /internal/metrics behind METRICS_TOKEN.
+//
+// When config.C.MetricsToken is EMPTY (the default, and the current state of
+// all three Fly apps) the endpoint stays public — existing scrapers keep
+// working with zero configuration. When set, the request must present the
+// token via `Authorization: Bearer <token>` or `X-Metrics-Token: <token>`;
+// anything else gets a bare 404 so the endpoint is indistinguishable from an
+// unknown path (no auth-challenge oracle for probers). Comparison is
+// constant-time.
+func metricsAuth(c *fiber.Ctx) error {
+	token := config.C.MetricsToken
+	if token == "" {
+		return c.Next() // no token configured — public (current behaviour)
+	}
+	presented := c.Get("X-Metrics-Token")
+	if presented == "" {
+		if h := c.Get(fiber.HeaderAuthorization); strings.HasPrefix(h, "Bearer ") {
+			presented = strings.TrimPrefix(h, "Bearer ")
+		}
+	}
+	if presented != "" && subtle.ConstantTimeCompare([]byte(presented), []byte(token)) == 1 {
+		return c.Next()
+	}
+	return c.SendStatus(fiber.StatusNotFound)
 }
 
 // ── OTEL tracing middleware ──────────────────────────────────────────────

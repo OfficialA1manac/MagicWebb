@@ -17,3 +17,14 @@ configMapGenerator:
       # ~80% of the container memory limit: GC works harder near the cap
       # instead of the kubelet OOM-killing the process.
       - GOMEMLIMIT=400MiB
+
+# Image pinning: CI mirrors every green build to
+# ghcr.io/officiala1manac/magicwebb:sha-<sha> (deploy.yml "Mirror image to
+# GHCR"). Pin a rollout to an exact build with:
+#   cd k8s/base && kustomize edit set image ghcr.io/officiala1manac/magicwebb:sha-<sha>
+# (or override per-overlay with the same `images:` stanza there).
+# "latest" here is only a placeholder so the manifest renders out of the box —
+# never run production on :latest.
+images:
+  - name: ghcr.io/officiala1manac/magicwebb
+    newTag: latest

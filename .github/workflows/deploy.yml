@@ -112,6 +112,8 @@ jobs:
         run: |
           sudo apt-get update -qq && sudo apt-get install -y -qq xz-utils
           curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz
+          # Supply-chain pin: official sha256 from https://ziglang.org/download/
+          echo "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea  /tmp/zig.tar.xz" | sha256sum -c -
           sudo tar -xJf /tmp/zig.tar.xz -C /usr/local
           sudo ln -sf /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig
           zig version
@@ -287,6 +289,12 @@ jobs:
     name: Build image (once, for all networks)
     needs: [plan]
     runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # packages:write is only for the non-fatal GHCR mirror step below —
+      # Fly's own registry push authenticates with FLY_API_TOKEN, not
+      # GITHUB_TOKEN, so this grant cannot affect the Fly deploy path.
+      packages: write
     # 3 bounded build attempts plus checkout/install overhead.
     timeout-minutes: 45
     outputs:
@@ -359,6 +367,31 @@ jobs:
           done
           echo "::error title=fly build failed after 3 attempts::$(tail -c 3000 /tmp/fly-build.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
           exit 1
+      - name: Mirror image to GHCR (non-fatal)
+        # k8s/base/deployment.yaml pulls ghcr.io/officiala1manac/magicwebb, so
+        # every green build is mirrored from registry.fly.io to GHCR under the
+        # same sha-<sha> tag (plus :latest as a moving pointer). continue-on-error:
+        # a GHCR outage or auth hiccup must NEVER block the Fly deploy legs —
+        # the mirror is a convenience for the optional k8s path, not part of
+        # the deploy critical path.
+        if: success()
+        continue-on-error: true
+        env:
+          FLY_API_TOKEN: ${{ secrets.FLY_API_TOKEN }}
+          FLY_IMAGE: ${{ steps.fly_build.outputs.image }}
+          GHCR_IMAGE: ghcr.io/officiala1manac/magicwebb
+        run: |
+          set -euo pipefail
+          # flyctl auth docker writes registry.fly.io credentials into the
+          # local docker config so `docker pull` can fetch the built image.
+          flyctl auth docker
+          docker pull "$FLY_IMAGE"
+          echo "${{ secrets.GITHUB_TOKEN }}" | docker login ghcr.io -u "${{ github.actor }}" --password-stdin
+          docker tag "$FLY_IMAGE" "${GHCR_IMAGE}:sha-${GITHUB_SHA}"
+          docker tag "$FLY_IMAGE" "${GHCR_IMAGE}:latest"
+          docker push "${GHCR_IMAGE}:sha-${GITHUB_SHA}"
+          docker push "${GHCR_IMAGE}:latest"
+          echo "mirrored ${FLY_IMAGE} -> ${GHCR_IMAGE}:{sha-${GITHUB_SHA},latest}"
 
   deploy:
     name: fly deploy (${{ matrix.network }})

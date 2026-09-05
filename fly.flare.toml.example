@@ -40,6 +40,10 @@
 #   WC_PROJECT_ID, READ_POOL_URL, SAFE_ADDR, PERSONAL_WALLET_ADDR
 #   DISCORD_WEBHOOK_URL, PROMETHEUS_WEBHOOK_URL, SMTP_*
 #   SENTRY_DSN, OTEL_EXPORTER_OTLP_ENDPOINT
+#   METRICS_TOKEN (optional) — gates GET /internal/metrics. Unset (current
+#     state) keeps the endpoint public for existing scrapers; when set, the
+#     scraper must send `Authorization: Bearer <token>` or
+#     `X-Metrics-Token: <token>` and everything else gets a 404.
 #   (See backend/.env.example for the full list)
 # ───────────────────────────────────────────────────────────────────────────────
 

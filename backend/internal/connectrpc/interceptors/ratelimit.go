@@ -21,12 +21,11 @@ type RateLimitTier struct {
 // DefaultRateLimits returns the standard tiered rate limits for all
 // MarketplaceService procedures. List endpoints (120/min) are more generous
 // than search (30/min); low-volume endpoints (GetListing, GetAuction, etc.)
-// get the standard 60/min. Admin/expensive endpoints get 10/min.
+// get the standard 60/min.
 //
 // Per the Full Stack Optimization Matrix RL-1:
 //   - /api/v1/listings = 120/min (list-heavy pages load 48 cards each)
 //   - /api/v1/search    = 30/min  (expensive full-text queries)
-//   - /api/v1/admin/*   = 10/min  (privileged operations)
 func DefaultRateLimits() map[string]RateLimitTier {
 	return map[string]RateLimitTier{
 		// List endpoints — generous limits for page loads.

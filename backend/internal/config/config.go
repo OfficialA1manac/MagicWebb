@@ -197,6 +197,19 @@ type Config struct {
 	// The DSN is a secret — set via fly secrets, not fly.toml [env].
 	SentryDSN string
 
+	// MetricsToken optionally gates GET /internal/metrics. Empty (the default,
+	// and the current state of every Fly app) keeps the endpoint public so
+	// existing scrapers are unaffected. When set, requests must present
+	// `Authorization: Bearer <token>` or `X-Metrics-Token: <token>`; anything
+	// else gets a 404 (indistinguishable from an unknown path). Set via
+	// `fly secrets set METRICS_TOKEN=...`.
+	MetricsToken string
+
+	// MigrateTimeout bounds the Goose migration run at boot (MIGRATE_TIMEOUT,
+	// default 5m). A migration that cannot finish inside the window fails the
+	// boot with a clear error instead of hanging the deploy indefinitely.
+	MigrateTimeout time.Duration
+
 	// OTELExporterOTLPEndpoint is the OTLP/gRPC collector endpoint for distributed
 	// tracing (e.g. Honeycomb, Grafana Tempo, Jaeger). Empty = tracing disabled.
 	// When set, the OpenTelemetry SDK is initialised at startup with a batch
@@ -294,6 +307,9 @@ func Load() {
 
 		FrontendURL: envOrDefault("FRONTEND_URL", "http://localhost:3000"),
 		WCProjectID: envOrDefault("WC_PROJECT_ID", ""),
+
+		MetricsToken:   envOrDefault("METRICS_TOKEN", ""),
+		MigrateTimeout: optDuration("MIGRATE_TIMEOUT", 5*time.Minute),
 
 		SentryDSN:                envOrDefault("SENTRY_DSN", ""),
 		OTELExporterOTLPEndpoint: envOrDefault("OTEL_EXPORTER_OTLP_ENDPOINT", ""),

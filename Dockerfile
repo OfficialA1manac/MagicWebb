@@ -57,6 +57,10 @@ RUN apt-get update && \
     apt-get install -y --no-install-recommends curl xz-utils && \
     rm -rf /var/lib/apt/lists/* && \
     curl -fsSL https://ziglang.org/download/0.13.0/zig-linux-x86_64-0.13.0.tar.xz -o /tmp/zig.tar.xz && \
+    # Supply-chain pin: official sha256 from https://ziglang.org/download/
+    # (zig-linux-x86_64-0.13.0.tar.xz). A tampered or truncated tarball
+    # fails the build here instead of producing a compromised toolchain.
+    echo "d45312e61ebcc48032b77bc4cf7fd6915c11fa16e4aad116b66c9468211230ea  /tmp/zig.tar.xz" | sha256sum -c - && \
     tar -xJf /tmp/zig.tar.xz -C /usr/local && \
     ln -sf /usr/local/zig-linux-x86_64-0.13.0/zig /usr/local/bin/zig && \
     zig version && \

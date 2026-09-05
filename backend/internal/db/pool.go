@@ -121,8 +121,18 @@ func Connect(ctx context.Context, dsn string) (*pgxpool.Pool, error) {
 	return pool, nil
 }
 
-// Migrate runs all pending Goose migrations from the embedded FS.
-func Migrate(dsn string) error {
+// Migrate runs all pending Goose migrations from the embedded FS, bounded by
+// timeout (MIGRATE_TIMEOUT, default 5m via config). A hung migration — a lock
+// held by another instance, an unreachable database, a long-running backfill —
+// previously stalled boot forever, wedging the rolling deploy; now it fails
+// with a clear, actionable error instead.
+func Migrate(ctx context.Context, dsn string, timeout time.Duration) error {
+	if timeout <= 0 {
+		timeout = 5 * time.Minute
+	}
+	ctx, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+
 	goose.SetBaseFS(migrations)
 
 	db, err := sql.Open("pgx/v5", dsn)
@@ -134,7 +144,13 @@ func Migrate(dsn string) error {
 	if err := goose.SetDialect("postgres"); err != nil {
 		return err
 	}
-	if err := goose.Up(db, "migrations"); err != nil {
+	if err := goose.UpContext(ctx, db, "migrations"); err != nil {
+		if ctx.Err() != nil {
+			return fmt.Errorf("db: migrations did not finish within %s — "+
+				"another instance may hold the migration lock, the database may be "+
+				"unreachable, or a migration is genuinely slow; raise MIGRATE_TIMEOUT "+
+				"if the migration needs more time: %w", timeout, err)
+		}
 		return fmt.Errorf("db: migrate up: %w", err)
 	}
 	log.Info().Msg("db migrations up to date")

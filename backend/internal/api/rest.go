@@ -370,7 +370,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// registers its own path segments (e.g. SearchService registers /search).
 	// Non-overlapping path sets prevent Fiber route conflicts.
 	//
-	// Key prefixes ("search", "admin", "api") scoped per-tier prevent
+	// Key prefixes ("search", "api") scoped per-tier prevent
 	// cross-tier bucket interference — a search at 30/min uses a different
 	// bucket from a listing at 60/min even for the same client IP.
 	// Scoped to /api/v1/search ONLY. This group previously used the bare
