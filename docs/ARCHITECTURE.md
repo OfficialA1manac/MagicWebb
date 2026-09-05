@@ -184,3 +184,31 @@ deliberately **unwired**: listings are non-custodial, so an expired listing hold
 on-chain state that needs cleanup — `buy` simply reverts `Expired`. Off-chain, the
 indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decision
 2026-08-28: keep the function as a dormant escape hatch, do not call it from the keeper.
+
+## 8. Capability matrix (v3.5 — mirrored in app/src/pages/docs/capabilities.md)
+
+| Action | Viewer | Buyer (wallet) | Seller/Owner |
+|---|---|---|---|
+| Browse, search, view token/collection/profile/activity | ✓ | ✓ | ✓ |
+| Buy a listing | connect prompt | ✓ | hidden on own |
+| List (721 / 1155 units), 14 durations, min 1 | — | — | ✓ owner |
+| Batch list up to 50 | — | — | ✓ 721 only |
+| Change price / cancel listing | — | — | ✓ seller |
+| Start auction (721 / 1155) | — | — | ✓ owner |
+| Bid (+1 token over lead, cumulative) | connect prompt | ✓ (not seller) | — |
+| Withdraw when outbid | — | ✓ | — |
+| Cancel auction | — | — | ✓ only with no bids |
+| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s) |
+| Cancel & refund everyone (3d after end) | — | ✓ winner | ✓ seller (+ keeper auto) |
+| Make offer (if collection allows) | connect prompt | ✓ | — |
+| Raise / withdraw own offer (full refund) | — | ✓ | — |
+| Accept / decline / return expired | — | — | ✓ owner |
+| Enable offers for a collection | — | — | ✓ ERC-173 owner |
+| Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
+| Edit own profile (SIWE) | — | ✓ | ✓ |
+| Switch network (keeps path) | ✓ | ✓ | ✓ |
+| Anything admin | none exists | none | none |
+
+No admin page, no login form, no roles. The only privileged key is the
+per-network on-chain admin wallet (upgrades + keeper rotation), rotatable via
+transferAdmin/acceptAdmin and eventually burned per network with renounceAdmin().
