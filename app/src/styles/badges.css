@@ -7,15 +7,15 @@
  * Tiers (lib/badge.ts): .is-tracked grey "Listed collection", .is-ok sky
  * "Verified", .is-authentic gold "Authentic".
  */
-.vb { display: inline-flex; align-items: center; gap: .3rem; border-radius: 999px; font-weight: 700; text-decoration: none; line-height: 1; white-space: nowrap; min-height: 24px; padding: 0 .55rem; font-size: .6875rem; }
+.vb { display: inline-flex; align-items: center; gap: .3rem; border-radius: 999px; font-weight: 700; text-decoration: none; line-height: 1; white-space: nowrap; min-height: 24px; padding: 0 .6rem; font-size: .75rem; }
 .vb.md { min-height: 28px; padding: 0 .7rem; font-size: .75rem; }
 .vb.is-ok { color: #bae6fd; background: rgba(125,211,252,.12); border: 1px solid rgba(125,211,252,.35); }
-.vb.is-tracked { color: rgba(255,255,255,.7); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16); font-weight: 600; }
+.vb.is-tracked { color: rgba(255,255,255,.78); background: rgba(255,255,255,.06); border: 1px solid rgba(255,255,255,.16); font-weight: 600; }
 .vb.is-tracked .vb-dot { background: rgba(255,255,255,.45); color: #09090b; }
-.vb.is-authentic { color: #fde68a; background: rgba(252,211,77,.12); border: 1px solid rgba(252,211,77,.35); }
+.vb.is-authentic { color: #fef3c7; background: rgba(252,211,77,.12); border: 1px solid rgba(252,211,77,.35); }
 .vb.is-authentic .vb-dot { background: #fcd34d; }
-.vb.is-no { color: rgba(255,255,255,.55); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); font-weight: 600; }
-.vb.is-creator { color: #fde68a; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); }
+.vb.is-no { color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); font-weight: 600; }
+.vb.is-creator { color: #fef3c7; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); }
 .vb.is-holder { color: #ddd6fe; background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); font-weight: 600; }
 .vb-dot { width: 14px; height: 14px; border-radius: 50%; background: #7dd3fc; color: #09090b; font-size: 10px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; }
 .vb-star { color: #fbbf24; font-size: 11px; line-height: 1; }
@@ -24,3 +24,15 @@
 .vb.is-authentic:focus-visible { outline-color: #fcd34d; }
 .vb.is-tracked:focus-visible { outline-color: rgba(255,255,255,.6); }
 .vb.is-holder:focus-visible { outline-color: #a78bfa; }
+
+/* Light scheme: the pill palettes above are dark-ground literals — restate
+   them dark-on-light so contrast holds (axe-gated in e2e/smoke.spec.ts). */
+@media (prefers-color-scheme: light) {
+  .vb.is-ok { color: #075985; }
+  .vb.is-authentic { color: #92400e; }
+  .vb.is-creator { color: #92400e; }
+  .vb.is-tracked { color: rgba(0,0,0,.62); }
+  .vb.is-tracked .vb-dot { background: rgba(0,0,0,.45); color: #fff; }
+  .vb.is-no { color: rgba(0,0,0,.6); }
+  .vb.is-holder { color: #5b21b6; }
+}

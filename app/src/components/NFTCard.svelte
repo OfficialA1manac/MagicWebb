@@ -228,7 +228,7 @@
     border-radius: 0.375rem;
     background: rgba(255, 255, 255, 0.08);
     border: 1px solid rgba(255, 255, 255, 0.12);
-    font-size: 0.5625rem;
+    font-size: 0.75rem;
     font-weight: 800;
     letter-spacing: 0.02em;
     color: rgba(255, 255, 255, 0.6);
@@ -254,7 +254,7 @@
   }
 
   .price-symbol {
-    font-size: 0.5625rem;
+    font-size: 0.75rem;
     color: rgba(253, 224, 138, 0.7);
     font-weight: 700;
     text-transform: uppercase;
@@ -269,7 +269,7 @@
     background: rgba(9, 9, 11, 0.7);
     border-radius: 0.375rem;
     color: rgba(255, 255, 255, 0.7);
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 700;
     backdrop-filter: blur(4px);
   }
@@ -281,8 +281,8 @@
   }
 
   .collection-addr {
-    font-size: 0.5625rem;
-    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.62);
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -307,8 +307,8 @@
   }
 
   .supply-text {
-    font-size: 0.625rem;
-    color: rgba(255, 255, 255, 0.25);
+    font-size: 0.75rem;
+    color: rgba(255, 255, 255, 0.62);
     font-weight: 600;
   }
 
@@ -318,7 +318,7 @@
     border-radius: 0.5rem;
     background: linear-gradient(135deg, #7dd3fc, #0ea5e9);
     color: #09090b;
-    font-size: 0.6875rem;
+    font-size: 0.75rem;
     font-weight: 800;
     box-shadow: 0 0 16px -3px rgba(56, 189, 248, 0.4), 0 4px 8px -2px rgba(14, 165, 233, 0.25);
     transition: transform 0.15s, box-shadow 0.15s;

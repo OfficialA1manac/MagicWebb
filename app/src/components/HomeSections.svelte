@@ -314,7 +314,7 @@
   .hs-line-empty { color: var(--text-3); }
   .hs-rowhead { display: flex; align-items: baseline; justify-content: space-between; gap: var(--sp-3); margin-bottom: var(--sp-4); }
   .hs-rowhead h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); font-weight: 800; margin: 0; letter-spacing: -0.02em; }
-  .hs-more { font-size: var(--fs-small); color: var(--sky-300); font-weight: 700; min-height: var(--hit); display: inline-flex; align-items: center; }
+  .hs-more { font-size: var(--fs-small); color: var(--link-strong, #0369a1); font-weight: 700; min-height: var(--hit); display: inline-flex; align-items: center; }
   .hs-grid { display: grid; grid-template-columns: repeat(1, 1fr); gap: var(--sp-4); }
   @media (min-width: 640px) { .hs-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (min-width: 960px) { .hs-grid { grid-template-columns: repeat(3, 1fr); } }

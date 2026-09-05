@@ -373,7 +373,7 @@
   .lf-head { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-4); }
   .lf-title { display: flex; align-items: center; gap: var(--sp-3); }
   .lf-title h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); font-weight: 800; margin: 0; letter-spacing: -0.02em; }
-  .lf-pill { padding: 4px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--sky-300); font-size: var(--fs-small); font-weight: 700; white-space: nowrap; }
+  .lf-pill { padding: 4px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--ink); font-size: var(--fs-small); font-weight: 700; white-space: nowrap; }
   .lf-bar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
   .lf-bar input, .lf-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }
   .lf-price { width: 130px; }
@@ -395,7 +395,7 @@
   .lf-savedname:hover { background: rgba(255,255,255,.06); }
   .lf-dim { color: var(--text-3); font-size: var(--fs-small); margin: 0; }
   .lf-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
-  .lf-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--sky-300); font-size: var(--fs-small); font-weight: 700; }
+  .lf-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--ink); font-size: var(--fs-small); font-weight: 700; }
   .lf-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
   .lf-chip-x:hover { background: rgba(255,255,255,.1); }
   .lf-chip-toggle { background: rgba(255,255,255,.05); border-color: var(--line-strong); color: var(--text-2); cursor: pointer; font-family: inherit; min-height: 36px; }

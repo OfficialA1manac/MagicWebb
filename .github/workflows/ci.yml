@@ -179,6 +179,33 @@ jobs:
           echo "::error title=Vitest failed::$(tail -c 3000 /tmp/vitest.log | sed 's/%/%25/g; s/\r/%0D/g' | awk '{printf "%s%%0A", $0}')"
           exit 1
 
+  frontend-e2e:
+    name: Frontend e2e (Playwright)
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4.2.0
+      - uses: actions/setup-node@v4.3.0
+        with:
+          node-version: "22"
+          cache: npm
+          cache-dependency-path: app/package-lock.json
+      - name: Install dependencies
+        working-directory: app
+        run: npm ci --legacy-peer-deps
+      - name: Install Playwright chromium
+        working-directory: app
+        run: npx playwright install --with-deps chromium
+      - name: Build (astro)
+        working-directory: app
+        run: npm run build
+      # Wallet-less smoke suite (plan B6): playwright.config.ts starts
+      # `astro preview` on :4321 against dist/ and every /api/v1/** call is
+      # mocked via page.route — no backend, no chain, no secrets.
+      - name: Playwright smoke
+        working-directory: app
+        run: npm run test:e2e
+
   k8s:
     name: k8s (kustomize)
     runs-on: ubuntu-latest
