@@ -1,0 +1,195 @@
+---
+// /status (spec B4 "Metrics"): the old /metrics/gas dashboard renamed
+// "Automation costs", plus indexer lag (from /api/v1/indexer/slo, Prometheus
+// text format) and the running build SHA (X-MW-Build-SHA on /healthz).
+// Linked from the footer only; /metrics/gas meta-refreshes here.
+import BaseLayout from '../layouts/BaseLayout.astro';
+import WalletConnect from '../components/WalletConnect';
+---
+
+<BaseLayout title="Status" description="MagicWebb service status — automation costs, indexer lag, and the running build." activeNav="metrics">
+  <WalletConnect slot="wallet" client:only="react" />
+
+  <section class="gas">
+    <header class="gas-head">
+      <h1>Status</h1>
+      <p>What the automation costs to run, how far the indexer is behind, and which build is live.</p>
+    </header>
+
+    <h2>Service</h2>
+    <div class="gas-tiles">
+      <div class="tile"><span class="k">Indexer lag</span><span class="v" id="s-lag">—</span></div>
+      <div class="tile"><span class="k">Build</span><span class="v" id="s-build">—</span></div>
+    </div>
+
+    <div id="gas-alerts" class="gas-alerts" hidden></div>
+
+    <h2>Automation costs</h2>
+    <div class="gas-tiles">
+      <div class="tile"><span class="k">Transactions</span><span class="v" id="g-count">—</span></div>
+      <div class="tile"><span class="k">Total spent</span><span class="v" id="g-total">—</span></div>
+      <div class="tile"><span class="k">Avg per tx</span><span class="v" id="g-avg">—</span></div>
+      <div class="tile"><span class="k">Avg gas price</span><span class="v" id="g-price">—</span></div>
+      <div class="tile"><span class="k">Avg gas used</span><span class="v" id="g-used">—</span></div>
+    </div>
+
+    <h2>Where the gas goes</h2>
+    <div id="gas-breakdown" class="gas-breakdown"><p class="muted">Loading…</p></div>
+
+    <h2>Recent keeper transactions</h2>
+    <div class="tablewrap">
+      <table>
+        <thead>
+          <tr><th>Type</th><th>Tx</th><th>Gas used</th><th>Gas price</th><th>Cost</th></tr>
+        </thead>
+        <tbody id="gas-rows">
+          <tr><td colspan="5" class="muted">Loading…</td></tr>
+        </tbody>
+      </table>
+    </div>
+  </section>
+</BaseLayout>
+
+<script>
+  const CUR = (window as any).MW_NATIVE_CURRENCY || 'C2FLR';
+  const EXPLORER = (window as any).MW_EXPLORER || '';
+
+  // Wei values arrive as decimal strings and can exceed Number.MAX_SAFE_INTEGER,
+  // so the conversion goes through BigInt rather than parseFloat.
+  function fmtWei(wei: string | number | null | undefined, dp = 4): string {
+    try {
+      const v = BigInt(String(wei ?? '0'));
+      const whole = v / 10n ** 18n;
+      const frac = (v % 10n ** 18n).toString().padStart(18, '0').slice(0, dp);
+      return `${whole.toString()}.${frac} ${CUR}`;
+    } catch {
+      return `0 ${CUR}`;
+    }
+  }
+  const esc = (s: unknown) =>
+    String(s ?? '').replace(/[&<>"]/g, (c) => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;' })[c] as string);
+
+  // ── Service tiles: indexer lag (Prometheus gauge) + build SHA ────────────
+  async function loadService() {
+    try {
+      const r = await fetch('/api/v1/indexer/slo');
+      const body = r.ok ? await r.text() : '';
+      const m = body.match(/^head_lag_blocks\s+(\d+)/m);
+      const el = document.getElementById('s-lag')!;
+      el.textContent = m ? `${m[1]} block${m[1] === '1' ? '' : 's'}` : '—';
+    } catch { /* tile keeps the dash */ }
+    try {
+      const r = await fetch('/healthz');
+      const sha = r.headers.get('X-MW-Build-SHA') || '';
+      document.getElementById('s-build')!.textContent = sha ? sha.slice(0, 12) : '—';
+    } catch { /* tile keeps the dash */ }
+  }
+
+  async function load() {
+    let data: any = null;
+    try {
+      const r = await fetch('/api/v1/metrics/gas');
+      if (!r.ok) throw new Error(`HTTP ${r.status}`);
+      data = await r.json();
+    } catch {
+      document.getElementById('gas-breakdown')!.innerHTML =
+        '<p class="muted">Gas metrics are unavailable right now.</p>';
+      document.getElementById('gas-rows')!.innerHTML =
+        '<tr><td colspan="5" class="muted">Gas metrics are unavailable right now.</td></tr>';
+      return;
+    }
+
+    const s = data.summary ?? {};
+    const set = (id: string, v: string) => (document.getElementById(id)!.textContent = v);
+    set('g-count', String(s.totalTxCount ?? 0));
+    set('g-total', fmtWei(s.totalGasCostWei));
+    set('g-avg', fmtWei(s.avgGasCostWei, 6));
+    set('g-price', `${(s.avgGasPriceGwei ?? 0).toFixed(1)} gwei`);
+    set('g-used', String(s.avgGasUsed ?? 0));
+
+    const total = Number(s.totalTxCount ?? 0);
+    const parts = [
+      { label: 'Auction settlement', n: s.settleCount, wei: s.settleTotalCostWei, c: '#a78bfa' },
+      { label: 'Loser refunds', n: s.refundLosersCount, wei: s.refundLosersTotalCostWei, c: '#7dd3fc' },
+      { label: 'Fee sweeps', n: s.feeSweepCount, wei: s.feeSweepTotalCostWei, c: '#fcd34d' },
+      { label: 'Offer refunds', n: s.refundOfferCount, wei: s.refundOfferTotalCostWei, c: '#34d399' },
+    ];
+    document.getElementById('gas-breakdown')!.innerHTML = total === 0
+      ? '<p class="muted">No keeper transactions yet. Nothing has needed settling.</p>'
+      : parts.map((p) => {
+          const pct = total > 0 ? (Number(p.n ?? 0) / total) * 100 : 0;
+          return `<div class="bar-row">
+            <span class="bar-label">${esc(p.label)}</span>
+            <span class="bar-track"><span class="bar-fill" style="width:${pct.toFixed(1)}%;background:${p.c}"></span></span>
+            <span class="bar-val">${esc(p.n ?? 0)} · ${esc(fmtWei(p.wei))}</span>
+          </div>`;
+        }).join('');
+
+    const logs = data.recentLogs ?? [];
+    document.getElementById('gas-rows')!.innerHTML = logs.length === 0
+      ? '<tr><td colspan="5" class="muted">No keeper transactions recorded.</td></tr>'
+      : logs.map((l: any) => {
+          const tx = esc(l.txHash ?? l.tx_hash ?? '');
+          const short = tx ? `${tx.slice(0, 10)}…${tx.slice(-6)}` : '—';
+          const link = tx && EXPLORER ? `<a href="${esc(EXPLORER)}/tx/${tx}" rel="noopener">${short}</a>` : short;
+          return `<tr>
+            <td>${esc(l.txType ?? l.tx_type ?? '')}</td>
+            <td class="mono">${link}</td>
+            <td class="mono">${esc(l.gasUsed ?? l.gas_used ?? 0)}</td>
+            <td class="mono">${esc(l.effectiveGasPriceWei ?? l.effective_gas_price_wei ?? 0)}</td>
+            <td class="mono">${esc(fmtWei(l.effectiveGasCostWei ?? l.effective_gas_cost_wei))}</td>
+          </tr>`;
+        }).join('');
+
+    try {
+      const ar = await fetch('/api/v1/metrics/gas/alerts');
+      const alerts = ar.ok ? ((await ar.json()).alerts ?? []) : [];
+      const box = document.getElementById('gas-alerts')!;
+      if (alerts.length) {
+        box.innerHTML = alerts.map((a: string) => `<p>⚠ ${esc(a)}</p>`).join('');
+        box.hidden = false;
+      } else {
+        // Resolved alerts must clear on the next poll, not linger stale.
+        box.innerHTML = '';
+        box.hidden = true;
+      }
+    } catch { /* alerts are advisory; their absence is not an error */ }
+  }
+
+  loadService();
+  load();
+  setInterval(() => { loadService(); load(); }, 30000);
+</script>
+
+<style>
+  .gas { max-width: 68rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
+  .gas-head h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 900; letter-spacing: -0.025em; color: #fafafa; margin: 0 0 0.5rem; }
+  .gas-head p { color: rgba(255,255,255,0.5); margin: 0 0 2rem; }
+  h2 { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.4); margin: 2.5rem 0 1rem; }
+
+  .gas-alerts { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); border-radius: 0.75rem; padding: 0.875rem 1rem; margin: 1.5rem 0 0; color: #fcd34d; font-size: 0.875rem; }
+  .gas-alerts p { margin: 0 0 0.375rem; }
+  .gas-alerts p:last-child { margin: 0; }
+
+  .gas-tiles { display: grid; gap: 1px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.875rem; overflow: hidden; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .tile { background: #0f0f13; padding: 1rem 1.125rem; }
+  .tile .k { display: block; font-size: 0.625rem; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.4); margin-bottom: 0.5rem; }
+  .tile .v { display: block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.125rem; font-weight: 700; color: #fafafa; font-variant-numeric: tabular-nums; }
+
+  .bar-row { display: grid; grid-template-columns: 10rem 1fr auto; gap: 0.875rem; align-items: center; margin-bottom: 0.625rem; font-size: 0.8125rem; }
+  .bar-label { color: rgba(255,255,255,0.7); }
+  .bar-track { height: 0.5rem; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; }
+  .bar-fill { display: block; height: 100%; border-radius: 999px; }
+  .bar-val { font-family: 'JetBrains Mono', ui-monospace, monospace; color: rgba(255,255,255,0.5); font-size: 0.75rem; white-space: nowrap; }
+
+  .tablewrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.875rem; }
+  table { width: 100%; min-width: 40rem; border-collapse: collapse; font-size: 0.8125rem; }
+  th, td { text-align: left; padding: 0.625rem 0.875rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
+  th { font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.02); }
+  tbody tr:last-child td { border-bottom: none; }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  .mono a { color: #7dd3fc; }
+  .muted { color: rgba(255,255,255,0.4); }
+
+  @media (max-width: 640px) { .bar-row { grid-template-columns: 1fr; gap: 0.25rem; } }
+</style>

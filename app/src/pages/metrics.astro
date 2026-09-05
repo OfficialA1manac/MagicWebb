@@ -1,4 +1,8 @@
 ---
+// Market metrics (spec B4 "Metrics"): tile captions 12px via tokens, charts
+// hidden until there is data ("Charts appear after the first sale"), and an
+// activity feed with relative time, a status chip and a token link, filtered
+// client-side by a [24h · 7d · 30d] segmented control (pages/metrics/_range.ts).
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
 ---
@@ -6,326 +10,353 @@ import WalletConnect from '../components/WalletConnect';
 <BaseLayout title="Market Metrics" description="Real-time MagicWebb marketplace statistics — listings, sales, auctions, volume" activeNav="/metrics">
   <WalletConnect slot="wallet" client:only="react" />
 
-  <section style="max-width:80rem;margin:0 auto;padding:2rem 1.5rem;">
-    <!-- Header -->
-    <div class="reveal" style="margin-bottom:2rem;">
-      <h1 style="font-size:2rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.75rem;letter-spacing:-0.02em;">
-        <span style="width:2.75rem;height:2.75rem;border-radius:0.875rem;background:linear-gradient(135deg,#7dd3fc,#0ea5e9);display:flex;align-items:center;justify-content:center;color:#09090b;font-size:1.25rem;box-shadow:0 0 22px -6px rgba(56,189,248,0.45);">▦</span>
-        Market Metrics
-      </h1>
-      <p style="color:rgba(255,255,255,0.35);font-size:0.8125rem;margin-top:0.25rem;">Real-time marketplace statistics and activity.</p>
+  <section class="mx">
+    <header class="mx-head">
+      <h1>Market Metrics</h1>
+      <p>Real-time marketplace statistics and activity.</p>
+    </header>
+
+    <!-- Loading skeleton for the tiles -->
+    <div id="metrics-loading" class="mx-tiles" aria-hidden="true">
+      <div class="mx-tile mx-skel"></div>
+      <div class="mx-tile mx-skel"></div>
+      <div class="mx-tile mx-skel"></div>
+      <div class="mx-tile mx-skel"></div>
     </div>
 
-    <!-- Loading -->
-    <div id="metrics-loading" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(200px,1fr));gap:1rem;margin-bottom:2rem;">
-      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
-      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
-      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
-      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);"><div class="skel-line w-60" style="height:0.75rem;margin-bottom:0.75rem;"></div><div class="skel-line w-40" style="height:2rem;"></div></div>
-    </div>
-
-    <!-- Metrics grid (populated by JS) -->
+    <!-- Metric tiles (populated by the script) -->
     <div id="metrics-grid"></div>
 
-    <!-- Visual charts section -->
-    <div id="chart-section" style="margin-bottom:2rem;">
-      <div class="reveal" style="display:grid;grid-template-columns:1fr 1fr;gap:1rem;">
-        <div id="bar-chart-container" style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);">
-          <h3 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;">
-            <span style="display:inline-block;width:0.5rem;height:0.5rem;border-radius:0.125rem;background:#7dd3fc;"></span> Marketplace Overview
-          </h3>
-          <canvas id="bar-chart" width="400" height="240" style="width:100%;height:auto;max-height:240px;"></canvas>
+    <!-- Charts: hidden until the first sale exists. -->
+    <div id="chart-note" class="mx-note" hidden>Charts appear after the first sale.</div>
+    <div id="chart-section" hidden>
+      <div class="mx-charts">
+        <div class="mx-chartbox">
+          <h3 class="mx-cap"><span class="mx-dot" style="background:var(--sky)"></span> Marketplace Overview</h3>
+          <canvas id="bar-chart" width="400" height="240"></canvas>
         </div>
-        <div id="donut-chart-container" style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.06);backdrop-filter:blur(8px);">
-          <h3 style="font-size:0.75rem;font-weight:700;color:rgba(255,255,255,0.3);text-transform:uppercase;letter-spacing:0.05em;margin-bottom:1rem;display:flex;align-items:center;gap:0.5rem;">
-            <span style="display:inline-block;width:0.5rem;height:0.5rem;border-radius:0.125rem;background:#fcd34d;"></span> Distribution
-          </h3>
-          <canvas id="donut-chart" width="200" height="200" style="width:100%;height:auto;max-height:200px;"></canvas>
+        <div class="mx-chartbox">
+          <h3 class="mx-cap"><span class="mx-dot" style="background:var(--gold)"></span> Distribution</h3>
+          <canvas id="donut-chart" width="200" height="200"></canvas>
         </div>
       </div>
     </div>
 
-    <!-- Recent activity -->
-    <h2 class="reveal" style="font-size:1.25rem;font-weight:800;color:#fafafa;display:flex;align-items:center;gap:0.5rem;margin-bottom:1rem;">
-      <span style="width:2rem;height:2rem;border-radius:0.625rem;background:linear-gradient(135deg,#a78bfa,#7c3aed);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.875rem;box-shadow:0 0 14px -3px rgba(167,139,250,0.4);">↗</span>
-      Recent Activity
-    </h2>
-    <div id="activity-feed" class="reveal">
-      <div class="shimmer" style="padding:1.5rem;border-radius:1rem;background:rgba(15,15,19,0.4);border:1px solid rgba(255,255,255,0.05);text-align:center;color:rgba(255,255,255,0.2);">Loading activity…</div>
+    <!-- Recent activity + time range -->
+    <div class="mx-actbar">
+      <h2>Recent Activity</h2>
+      <div id="range-seg" class="mx-seg" role="group" aria-label="Time range">
+        <button type="button" data-range="24h" aria-pressed="true">24h</button>
+        <button type="button" data-range="7d" aria-pressed="false">7d</button>
+        <button type="button" data-range="30d" aria-pressed="false">30d</button>
+      </div>
+    </div>
+    <div id="activity-feed">
+      <div class="mx-note">Loading activity…</div>
     </div>
   </section>
-
-  <style>
-    .skel-line{background:rgba(255,255,255,0.04);border-radius:0.25rem;}
-    .w-60{width:60%;}.w-40{width:40%;}
-    .shimmer{animation:shimmer-placeholder 1.5s ease-in-out infinite;}
-    @keyframes shimmer-placeholder{0%{opacity:0.3;}50%{opacity:0.7;}100%{opacity:0.3;}}
-    .bar-animate{transition:height 0.8s cubic-bezier(0.34,1.56,0.64,1);}
-    .count-pop{animation:count-pop 0.5s cubic-bezier(0.34,1.56,0.64,1);}
-    @keyframes count-pop{0%{transform:scale(1);}50%{transform:scale(1.12);}100%{transform:scale(1);}}
-  </style>
-
-  <script is:inline>
-    (function(){if(typeof window==='undefined')return;
-      function esc(s){return String(s||'').replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');}
-      function weiToFLR(w){try{return(Number(BigInt(w||'0'))/1e18).toFixed(2);}catch(_){return'0.00';}}
-      function shortAddr(a){if(!a||a.length<10)return a;return a.slice(0,6)+'...'+a.slice(-4);}
-      function cur(){return (typeof window!=='undefined'&&window.MW_NATIVE_CURRENCY)||'C2FLR';}
-
-      (async function(){
-        const loadingEl = document.getElementById('metrics-loading');
-        const metricsGrid = document.getElementById('metrics-grid');
-        const chartSection = document.getElementById('chart-section');
-        const activityFeed = document.getElementById('activity-feed');
-
-        try {
-          // Fetch metrics
-          const mRes = await fetch('/api/v1/metrics');
-          if (!mRes.ok) throw new Error('HTTP '+mRes.status);
-          const m = await mRes.json();
-
-          // Hide loading
-          if (loadingEl) loadingEl.style.display = 'none';
-
-          // Stat cards
-          let listings = m.listing_count || m.totalActiveListings || 0;
-          let sales = m.sales_count || m.totalSales || 0;
-          let auctions = m.auction_count || m.totalAuctions || 0;
-          let bids = m.totalBids || 0;
-          let offers = m.totalOffers || 0;
-          let volume = m.grossVolumeWei || m.volume_all || '0';
-          let volFLR = weiToFLR(volume);
-
-          if (metricsGrid) {
-            metricsGrid.innerHTML =
-              '<div class="reveal" style="display:grid;grid-template-columns:repeat(auto-fit,minmax(180px,1fr));gap:1rem;margin-bottom:2rem;">' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(56,189,248,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(14,165,233,0.15);display:flex;align-items:center;justify-content:center;color:#7dd3fc;font-size:0.875rem;">✦</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Active Listings</span></div>' +
-                  '<span id="val-listings" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fafafa;line-height:1;">'+listings+'</span>' +
-                '</div>' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;color:#fcd34d;font-size:0.875rem;">⚐</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Sales</span></div>' +
-                  '<span id="val-sales" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fcd34d;line-height:1;">'+sales+'</span>' +
-                '</div>' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(167,139,250,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(124,58,237,0.15);display:flex;align-items:center;justify-content:center;color:#a78bfa;font-size:0.875rem;">♕</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Auctions</span></div>' +
-                  '<span id="val-auctions" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#a78bfa;line-height:1;">'+auctions+'</span>' +
-                '</div>' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(255,255,255,0.12);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(255,255,255,0.06);display:flex;align-items:center;justify-content:center;color:#fafafa;font-size:0.875rem;">⬡</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Gross Volume</span></div>' +
-                  '<span id="val-volume" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fafafa;line-height:1;">'+esc(volFLR)+' <span style="font-size:0.875rem;font-weight:600;opacity:0.4;">'+cur()+'</span></span>' +
-                '</div>' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(56,189,248,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(14,165,233,0.15);display:flex;align-items:center;justify-content:center;color:#7dd3fc;font-size:0.875rem;">⇧</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Bids</span></div>' +
-                  '<span id="val-bids" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#7dd3fc;line-height:1;">'+bids+'</span>' +
-                '</div>' +
-                '<div style="padding:1.5rem;border-radius:1.125rem;background:rgba(15,15,19,0.7);border:1px solid rgba(252,211,77,0.25);transition:all 0.3s;backdrop-filter:blur(8px);">' +
-                  '<div style="display:flex;align-items:center;gap:0.5rem;margin-bottom:0.75rem;"><span style="width:2rem;height:2rem;border-radius:0.625rem;background:rgba(245,158,11,0.15);display:flex;align-items:center;justify-content:center;color:#fcd34d;font-size:0.875rem;">↗</span><span style="font-size:0.625rem;color:rgba(255,255,255,0.3);text-transform:uppercase;font-weight:700;letter-spacing:0.05em;">Total Offers</span></div>' +
-                  '<span id="val-offers" class="count-pop" style="font-size:2.5rem;font-weight:900;color:#fcd34d;line-height:1;">'+offers+'</span>' +
-                '</div>' +
-              '</div>';
-          }
-
-          // Draw Canvas-based bar chart
-          function drawBarChart(){
-            const canvas = document.getElementById('bar-chart');
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const w = canvas.width, h = canvas.height;
-            const pad = {t:20,b:30,l:40,r:20};
-            const cw = w - pad.l - pad.r;
-            const ch = h - pad.t - pad.b;
-
-            const data = [
-          {label:'Listings', value:listings, color:'#7dd3fc'},
-          {label:'Sales',    value:sales,    color:'#fcd34d'},
-          {label:'Auctions', value:auctions, color:'#a78bfa'},
-          {label:'Bids',     value:bids,     color:'#67e8f9'},
-          {label:'Offers',   value:offers,   color:'#fbbf24'},
-          {label:'Volume',   value:parseFloat(volFLR)||0, color:'rgba(255,255,255,0.5)'}
-        ];
-            const maxV = Math.max.apply(null, data.map(function(d){return d.value;})) || 1;
-            const barW = cw / data.length * 0.6;
-            const gap = cw / data.length;
-
-            ctx.clearRect(0,0,w,h);
-
-            data.forEach(function(d,i){
-              const x = pad.l + i * gap + (gap - barW)/2;
-              const bh = (d.value / maxV) * ch * 0.85;
-              const y = pad.t + ch - bh;
-
-              // Bar gradient
-              const grad = ctx.createLinearGradient(x, y, x, pad.t+ch);
-              grad.addColorStop(0, d.color);
-              grad.addColorStop(1, d.color.replace(')',',0.3)').replace('rgb','rgba'));
-
-              // Rounded top bar
-              const r = 4;
-              ctx.beginPath();
-              ctx.moveTo(x+r, y);
-              ctx.lineTo(x+barW-r, y);
-              ctx.arcTo(x+barW, y, x+barW, y+r, r);
-              ctx.lineTo(x+barW, pad.t+ch);
-              ctx.lineTo(x, pad.t+ch);
-              ctx.lineTo(x, y+r);
-              ctx.arcTo(x, y, x+r, y, r);
-              ctx.fillStyle = d.color;
-              ctx.globalAlpha = 0.8;
-              ctx.fill();
-              ctx.globalAlpha = 1;
-
-              // Value label on top
-              ctx.fillStyle = '#fafafa';
-              ctx.font = 'bold 12px Inter, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText(d.value.toLocaleString(), x+barW/2, y-6);
-
-              // Bar label at bottom
-              ctx.fillStyle = 'rgba(255,255,255,0.3)';
-              ctx.font = '10px Inter, sans-serif';
-              ctx.fillText(d.label, x+barW/2, pad.t+ch+16);
-            });
-          }
-
-          // Draw Canvas-based donut chart
-          function drawDonutChart(){
-            const canvas = document.getElementById('donut-chart');
-            if (!canvas) return;
-            const ctx = canvas.getContext('2d');
-            const cx = canvas.width/2, cy = canvas.height/2, r = 70, ir = 40;
-
-            // Event counts only: native-token volume has a different unit and
-            // must not be summed into the slices or the center total.
-            const total = listings + sales + auctions + bids + offers;
-            if (total === 0) {
-              ctx.fillStyle = 'rgba(255,255,255,0.1)';
-              ctx.font = '14px Inter, sans-serif';
-              ctx.textAlign = 'center';
-              ctx.fillText('No data', cx, cy+5);
-              return;
-            }
-
-            const segments = [
-          {value:listings, color:'#7dd3fc', label:'Listings'},
-          {value:sales, color:'#fcd34d', label:'Sales'},
-          {value:auctions, color:'#a78bfa', label:'Auctions'},
-          {value:bids, color:'#67e8f9', label:'Bids'},
-          {value:offers, color:'#fbbf24', label:'Offers'}
-        ];
-
-            let startAngle = -Math.PI/2;
-            segments.forEach(function(seg){
-              const sweepAngle = (seg.value / total) * 2 * Math.PI;
-              ctx.beginPath();
-              ctx.moveTo(cx + ir * Math.cos(startAngle), cy + ir * Math.sin(startAngle));
-              ctx.arc(cx, cy, r, startAngle, startAngle + sweepAngle);
-              ctx.arc(cx, cy, ir, startAngle + sweepAngle, startAngle, true);
-              ctx.closePath();
-              ctx.fillStyle = seg.color;
-              ctx.globalAlpha = 0.85;
-              ctx.fill();
-              ctx.globalAlpha = 1;
-              startAngle += sweepAngle;
-            });
-
-            // Label in center: total
-            ctx.fillStyle = '#fafafa';
-            ctx.font = 'bold 18px Inter, sans-serif';
-            ctx.textAlign = 'center';
-            ctx.textBaseline = 'middle';
-            ctx.fillText(total.toLocaleString(), cx, cy-6);
-            ctx.fillStyle = 'rgba(255,255,255,0.3)';
-            ctx.font = '9px Inter, sans-serif';
-            ctx.fillText('total', cx, cy+14);
-
-            // Legend below — two rows of 3 to fit inside 200px canvas
-            const legendStartY = canvas.height - 24;
-            const legendX = 4;
-            const perCol = 62; // per-item horizontal spacing
-            segments.forEach(function(seg, i){
-              const col = i % 3;
-              const row = Math.floor(i / 3);
-              const lx = legendX + col * perCol;
-              const ly = legendStartY + row * 12;
-              ctx.fillStyle = seg.color;
-              ctx.fillRect(lx, ly-4, 6, 6);
-              ctx.fillStyle = 'rgba(255,255,255,0.4)';
-              ctx.font = '8px Inter, sans-serif';
-              ctx.textAlign = 'left';
-              ctx.fillText(seg.label, lx+8, ly+1);
-            });
-          }
-
-          if (chartSection) {
-            chartSection.style.display = 'block';
-            setTimeout(function(){drawBarChart();drawDonutChart();}, 100);
-          }
-
-          // Recent activity — a named loader so the WS-driven refresh can
-          // update the feed too, not just the metric tiles and charts.
-          async function loadActivity(){
-          try {
-            const aRes = await fetch('/api/v1/activity?limit=15');
-            if (!aRes.ok) {
-              if (activityFeed) activityFeed.innerHTML = '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);">Activity unavailable</div>';
-            } else if (activityFeed) {
-              const activity = await aRes.json();
-              if (!Array.isArray(activity) || !activity.length) {
-                activityFeed.innerHTML = '<div style="padding:3rem;text-align:center;color:rgba(255,255,255,0.2);">No activity yet</div>';
-              } else {
-                activityFeed.innerHTML = '<div style="display:flex;flex-direction:column;gap:0.5rem;">'+activity.map(function(a){const tc2={Sold:'#fcd34d',Listed:'#7dd3fc',BidPlaced:'#a78bfa',AuctionCreated:'#a78bfa'}[a.type]||'rgba(255,255,255,0.4)';return'<div style="display:flex;align-items:center;justify-content:space-between;padding:0.875rem 1rem;border-radius:0.75rem;background:rgba(15,15,19,0.6);border:1px solid rgba(255,255,255,0.05);transition:border-color 0.2s;"><div style="display:flex;align-items:center;gap:0.75rem;"><span style="padding:0.125rem 0.5rem;border-radius:0.375rem;background:rgba(255,255,255,0.04);font-size:0.625rem;font-weight:700;text-transform:uppercase;color:'+tc2+';">'+esc(a.type)+'</span><span style="font-size:0.75rem;color:rgba(255,255,255,0.45);font-family:JetBrains Mono,monospace;">'+esc(shortAddr(a.collection||''))+(a.tokenId?' #'+a.tokenId:'')+'</span></div><span style="font-size:0.8125rem;font-weight:700;color:#fcd34d;">'+weiToFLR(a.amountWei||'0')+' <span style="font-size:0.625rem;opacity:0.5;">'+cur()+'</span></span></div>';}).join('')+'</div>';
-              }
-            }
-          } catch(_) {}
-          }
-          await loadActivity();
-
-          // WebSocket live refresh — re-fetch metrics data in-place instead of full page reload
-          (function(){
-            if (typeof window.MW_WS !== 'undefined') {
-              window.addEventListener('mw-ws-event', function(e) {
-                if (e.detail && (e.detail.type === 'listing-updated' || e.detail.type === 'auction-updated' || e.detail.type === 'activity')) {
-                  window.__MW_REFRESH_METRICS__();
-                }
-              });
-            }
-          })();
-
-          // Expose refresh function so SSE events can re-fetch without full reload
-          window.__MW_REFRESH_METRICS__ = (async function(){
-            try {
-              const mRes = await fetch('/api/v1/metrics');
-              if(!mRes.ok) return;
-              const m2 = await mRes.json();
-              // Update closure variables so chart functions use fresh data
-              listings = m2.listing_count || m2.totalActiveListings || 0;
-              sales = m2.sales_count || m2.totalSales || 0;
-              auctions = m2.auction_count || m2.totalAuctions || 0;
-              bids = m2.totalBids || 0;
-              offers = m2.totalOffers || 0;
-              volume = m2.grossVolumeWei || m2.volume_all || '0';
-              volFLR = weiToFLR(volume);
-              // Update stat card DOM values
-              const valListings = document.getElementById('val-listings'); if(valListings) valListings.textContent = String(listings);
-              const valSales = document.getElementById('val-sales'); if(valSales) valSales.textContent = String(sales);
-              const valAuc = document.getElementById('val-auctions'); if(valAuc) valAuc.textContent = String(auctions);
-              const valBids = document.getElementById('val-bids'); if(valBids) valBids.textContent = String(bids);
-              const valOffers = document.getElementById('val-offers'); if(valOffers) valOffers.textContent = String(offers);
-              const valVol = document.getElementById('val-volume'); if(valVol) valVol.innerHTML = esc(volFLR)+' <span style="font-size:0.875rem;font-weight:600;opacity:0.4;">'+cur()+'</span>';
-              // Redraw charts with fresh data
-              drawBarChart();
-              drawDonutChart();
-              // Keep the recent-activity feed live too
-              await loadActivity();
-            } catch(_) {}
-          });
-
-        } catch(e) {
-          if (loadingEl) loadingEl.style.display = 'none';
-          if (metricsGrid) metricsGrid.innerHTML = '<div style="padding:2rem;text-align:center;color:#fca5a5;">⚠ Could not load metrics — '+esc(e.message)+'</div>';
-        }
-      })();
-    })();
-  </script>
 </BaseLayout>
+
+<script>
+  import { esc, shortAddr, timeAgo, fmtPrice } from '../lib/format';
+  import { filterByRange, rowTimeMs, type RangeKey } from './metrics/_range';
+
+  const cur = () => (window as any).MW_NATIVE_CURRENCY || 'C2FLR';
+
+  type ActivityRow = {
+    type?: string; status?: string; token_url?: string;
+    collection?: string; tokenId?: string; token_id?: string;
+    amountWei?: string; ts?: string | number; timestamp?: string;
+  };
+
+  let range: RangeKey = '24h';
+  let allActivity: ActivityRow[] = [];
+
+  // Closure state the chart redraws read.
+  let listings = 0, sales = 0, auctions = 0, bids = 0, offers = 0, volFLR = '0';
+
+  const $ = (id: string) => document.getElementById(id);
+
+  function tile(caption: string, valueHtml: string, accent: string): string {
+    return `<div class="mx-tile" style="border-color:${accent}40">
+      <span class="mx-tilecap">${esc(caption)}</span>
+      <span class="mx-tileval" style="color:${accent}">${valueHtml}</span>
+    </div>`;
+  }
+
+  function renderTiles() {
+    const g = $('metrics-grid');
+    if (!g) return;
+    g.innerHTML = `<div class="mx-tiles">
+      ${tile('Active listings', String(listings), 'var(--sky)')}
+      ${tile('Total sales', String(sales), 'var(--gold)')}
+      ${tile('Total auctions', String(auctions), 'var(--violet)')}
+      ${tile('Gross volume', `${esc(volFLR)} <span class="mx-unit">${esc(cur())}</span>`, 'var(--text)')}
+      ${tile('Total bids', String(bids), 'var(--sky)')}
+      ${tile('Total offers', String(offers), 'var(--gold)')}
+    </div>`;
+  }
+
+  // ── Canvas charts (drawn only once there is at least one sale) ──────────
+  function drawBarChart() {
+    const canvas = $('bar-chart') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const w = canvas.width, h = canvas.height;
+    const pad = { t: 20, b: 30, l: 40, r: 20 };
+    const cw = w - pad.l - pad.r;
+    const ch = h - pad.t - pad.b;
+    const data = [
+      { label: 'Listings', value: listings, color: '#7dd3fc' },
+      { label: 'Sales', value: sales, color: '#fcd34d' },
+      { label: 'Auctions', value: auctions, color: '#a78bfa' },
+      { label: 'Bids', value: bids, color: '#67e8f9' },
+      { label: 'Offers', value: offers, color: '#fbbf24' },
+      { label: 'Volume', value: parseFloat(volFLR) || 0, color: 'rgba(255,255,255,0.5)' },
+    ];
+    const maxV = Math.max(...data.map((d) => d.value)) || 1;
+    const gap = cw / data.length;
+    const barW = gap * 0.6;
+    ctx.clearRect(0, 0, w, h);
+    data.forEach((d, i) => {
+      const x = pad.l + i * gap + (gap - barW) / 2;
+      const bh = (d.value / maxV) * ch * 0.85;
+      const y = pad.t + ch - bh;
+      const r = 4;
+      ctx.beginPath();
+      ctx.moveTo(x + r, y);
+      ctx.lineTo(x + barW - r, y);
+      ctx.arcTo(x + barW, y, x + barW, y + r, r);
+      ctx.lineTo(x + barW, pad.t + ch);
+      ctx.lineTo(x, pad.t + ch);
+      ctx.lineTo(x, y + r);
+      ctx.arcTo(x, y, x + r, y, r);
+      ctx.fillStyle = d.color;
+      ctx.globalAlpha = 0.8;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = '#fafafa';
+      ctx.font = 'bold 12px Inter, sans-serif';
+      ctx.textAlign = 'center';
+      ctx.fillText(d.value.toLocaleString(), x + barW / 2, y - 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.font = '10px Inter, sans-serif';
+      ctx.fillText(d.label, x + barW / 2, pad.t + ch + 16);
+    });
+  }
+
+  function drawDonutChart() {
+    const canvas = $('donut-chart') as HTMLCanvasElement | null;
+    if (!canvas) return;
+    const ctx = canvas.getContext('2d')!;
+    const cx = canvas.width / 2, cy = canvas.height / 2, r = 70, ir = 40;
+    // Event counts only: native-token volume has a different unit and must
+    // not be summed into the slices or the center total.
+    const total = listings + sales + auctions + bids + offers;
+    ctx.clearRect(0, 0, canvas.width, canvas.height);
+    if (total === 0) return;
+    const segments = [
+      { value: listings, color: '#7dd3fc', label: 'Listings' },
+      { value: sales, color: '#fcd34d', label: 'Sales' },
+      { value: auctions, color: '#a78bfa', label: 'Auctions' },
+      { value: bids, color: '#67e8f9', label: 'Bids' },
+      { value: offers, color: '#fbbf24', label: 'Offers' },
+    ];
+    let start = -Math.PI / 2;
+    segments.forEach((seg) => {
+      const sweep = (seg.value / total) * 2 * Math.PI;
+      ctx.beginPath();
+      ctx.moveTo(cx + ir * Math.cos(start), cy + ir * Math.sin(start));
+      ctx.arc(cx, cy, r, start, start + sweep);
+      ctx.arc(cx, cy, ir, start + sweep, start, true);
+      ctx.closePath();
+      ctx.fillStyle = seg.color;
+      ctx.globalAlpha = 0.85;
+      ctx.fill();
+      ctx.globalAlpha = 1;
+      start += sweep;
+    });
+    ctx.fillStyle = '#fafafa';
+    ctx.font = 'bold 18px Inter, sans-serif';
+    ctx.textAlign = 'center';
+    ctx.textBaseline = 'middle';
+    ctx.fillText(total.toLocaleString(), cx, cy - 6);
+    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.font = '9px Inter, sans-serif';
+    ctx.fillText('total', cx, cy + 14);
+    const legendStartY = canvas.height - 24;
+    segments.forEach((seg, i) => {
+      const lx = 4 + (i % 3) * 62;
+      const ly = legendStartY + Math.floor(i / 3) * 12;
+      ctx.fillStyle = seg.color;
+      ctx.fillRect(lx, ly - 4, 6, 6);
+      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.font = '8px Inter, sans-serif';
+      ctx.textAlign = 'left';
+      ctx.fillText(seg.label, lx + 8, ly + 1);
+    });
+  }
+
+  /** Charts only once real data exists (spec: "Charts appear after the first sale"). */
+  function renderCharts() {
+    const section = $('chart-section');
+    const note = $('chart-note');
+    const hasData = sales > 0;
+    if (section) section.hidden = !hasData;
+    if (note) note.hidden = hasData;
+    if (hasData) setTimeout(() => { drawBarChart(); drawDonutChart(); }, 50);
+  }
+
+  // ── Activity feed ────────────────────────────────────────────────────────
+  const STATUS_CLASS: Record<string, string> = {
+    active: 'is-active', sold: 'is-sold', expired: 'is-expired', cancelled: 'is-cancelled',
+  };
+
+  function tokenHref(a: ActivityRow): string {
+    if (a.token_url) return a.token_url;
+    const tid = a.tokenId ?? a.token_id;
+    if (a.collection && tid !== undefined && tid !== null && tid !== '') {
+      return `/token/${encodeURIComponent(a.collection)}/${encodeURIComponent(String(tid))}`;
+    }
+    return '';
+  }
+
+  function renderActivity() {
+    const feed = $('activity-feed');
+    if (!feed) return;
+    const rows = filterByRange(allActivity, range);
+    if (!rows.length) {
+      feed.innerHTML = `<div class="mx-note">No activity in the last ${esc(range)}.</div>`;
+      return;
+    }
+    feed.innerHTML = `<div class="mx-list">` + rows.map((a) => {
+      const status = String(a.status || '').toLowerCase();
+      const chip = status
+        ? `<span class="mx-chip ${STATUS_CLASS[status] ?? ''}">${esc(status)}</span>`
+        : '';
+      const href = tokenHref(a);
+      const tid = a.tokenId ?? a.token_id;
+      const tokenLabel = `${esc(shortAddr(a.collection || ''))}${tid ? ' #' + esc(String(tid)) : ''}`;
+      const token = href
+        ? `<a class="mx-token mono" href="${esc(href)}">${tokenLabel}</a>`
+        : `<span class="mx-token mono">${tokenLabel}</span>`;
+      const t = rowTimeMs(a);
+      const when = t === null ? '' : `<span class="mx-when">${esc(timeAgo(t))}</span>`;
+      const amt = a.amountWei && a.amountWei !== '0'
+        ? `<span class="mx-amt mono">${esc(fmtPrice(a.amountWei))} <span class="mx-unit">${esc(cur())}</span></span>`
+        : '';
+      return `<div class="mx-row">
+        <span class="mx-type">${esc(a.type || '')}</span>
+        ${chip}
+        ${token}
+        <span class="mx-spacer"></span>
+        ${amt}
+        ${when}
+      </div>`;
+    }).join('') + `</div>`;
+  }
+
+  async function loadActivity() {
+    try {
+      const r = await fetch('/api/v1/activity?limit=100');
+      if (!r.ok) { $('activity-feed')!.innerHTML = '<div class="mx-note">Activity unavailable</div>'; return; }
+      const rows = await r.json();
+      allActivity = Array.isArray(rows) ? rows : [];
+      renderActivity();
+    } catch { /* keep whatever is on screen */ }
+  }
+
+  async function loadMetrics() {
+    const m = await fetch('/api/v1/metrics').then((r) => (r.ok ? r.json() : null)).catch(() => null);
+    const loadingEl = $('metrics-loading');
+    if (loadingEl) loadingEl.style.display = 'none';
+    if (!m) {
+      const g = $('metrics-grid');
+      if (g && !g.innerHTML) g.innerHTML = '<div class="mx-note">Could not load metrics — retrying shortly.</div>';
+      return;
+    }
+    listings = m.listing_count || m.totalActiveListings || 0;
+    sales = m.sales_count || m.totalSales || 0;
+    auctions = m.auction_count || m.totalAuctions || 0;
+    bids = m.totalBids || 0;
+    offers = m.totalOffers || 0;
+    volFLR = fmtPrice(m.grossVolumeWei || m.volume_all || '0');
+    renderTiles();
+    renderCharts();
+  }
+
+  // Segmented control
+  $('range-seg')?.addEventListener('click', (e) => {
+    const btn = (e.target as HTMLElement).closest('button[data-range]') as HTMLButtonElement | null;
+    if (!btn) return;
+    range = btn.dataset.range as RangeKey;
+    document.querySelectorAll('#range-seg button').forEach((b) =>
+      b.setAttribute('aria-pressed', b === btn ? 'true' : 'false'));
+    renderActivity();
+  });
+
+  // WebSocket live refresh — re-fetch in place, never a reload.
+  window.addEventListener('mw-ws-event', (e: Event) => {
+    const d = (e as CustomEvent).detail;
+    if (d && (d.type === 'listing-updated' || d.type === 'auction-updated' || d.type === 'activity')) {
+      void loadMetrics();
+      void loadActivity();
+    }
+  });
+
+  void loadMetrics();
+  void loadActivity();
+</script>
+
+<!-- Global (unscoped): most of these classes land on JS-generated innerHTML,
+     which never carries Astro's scoping attribute — a scoped block would not
+     match them. Prefixed `mx-` to avoid collisions. -->
+<style is:global>
+  .mx { max-width: 80rem; margin: 0 auto; padding: var(--sp-8) var(--sp-6) var(--sp-12); }
+  .mx-head { margin-bottom: var(--sp-6); }
+  .mx-head h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); font-weight: 800; letter-spacing: -0.02em; color: var(--text); margin: 0 0 var(--sp-1); }
+  .mx-head p { color: var(--text-3); font-size: var(--fs-small); margin: 0; }
+
+  .mx-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-6); }
+  .mx-tile { padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); }
+  .mx-skel { min-height: 84px; animation: mx-pulse 1.2s ease-in-out infinite; }
+  @keyframes mx-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
+  @media (prefers-reduced-motion: reduce) { .mx-skel { animation: none; } }
+  /* Spec: tile captions 12px (--fs-caption) at --text-3. */
+  .mx-tilecap { display: block; font-size: var(--fs-caption); line-height: var(--lh-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; font-weight: 700; color: var(--text-3); margin-bottom: var(--sp-2); }
+  .mx-tileval { display: block; font-size: 32px; font-weight: 900; line-height: 1; }
+  .mx-unit { font-size: var(--fs-caption); font-weight: 600; color: var(--text-3); }
+
+  .mx-note { padding: var(--sp-6); border-radius: var(--r-card); background: var(--surface); border: 1px dashed var(--line-strong); color: var(--text-2); font-size: var(--fs-body); text-align: center; margin-bottom: var(--sp-6); }
+
+  .mx-charts { display: grid; grid-template-columns: 1fr 1fr; gap: var(--sp-4); margin-bottom: var(--sp-6); }
+  @media (max-width: 767px) { .mx-charts { grid-template-columns: 1fr; } }
+  .mx-chartbox { padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); }
+  .mx-chartbox canvas { width: 100%; height: auto; max-height: 240px; }
+  .mx-cap { display: flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-caption); line-height: var(--lh-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; font-weight: 700; color: var(--text-3); margin: 0 0 var(--sp-3); }
+  .mx-dot { display: inline-block; width: 8px; height: 8px; border-radius: 2px; }
+
+  .mx-actbar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin: var(--sp-6) 0 var(--sp-4); }
+  .mx-actbar h2 { font-size: var(--fs-h2); line-height: var(--lh-h2); font-weight: 800; color: var(--text); margin: 0; }
+  .mx-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-control); overflow: hidden; }
+  .mx-seg button { min-height: 40px; min-width: 56px; padding: 0 var(--sp-3); background: transparent; border: 0; color: var(--text-2); font-family: inherit; font-size: var(--fs-small); font-weight: 700; cursor: pointer; }
+  .mx-seg button + button { border-left: 1px solid var(--line); }
+  .mx-seg button[aria-pressed='true'] { background: var(--sky-12); color: var(--sky-300); }
+  @media (max-width: 767px) { .mx-seg button { min-height: var(--hit); } }
+
+  .mx-list { display: flex; flex-direction: column; gap: var(--sp-2); }
+  .mx-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); min-height: 52px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); font-size: var(--fs-small); }
+  .mx-type { font-weight: 700; color: var(--text); text-transform: uppercase; font-size: var(--fs-caption); letter-spacing: var(--ls-caption); }
+  .mx-chip { padding: 2px 10px; border-radius: var(--r-pill); font-size: var(--fs-caption); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-caption); background: rgba(255,255,255,0.06); color: var(--text-2); }
+  .mx-chip.is-active { background: var(--green-12); color: var(--green); }
+  .mx-chip.is-sold { background: var(--gold-12); color: var(--gold-300); }
+  .mx-chip.is-expired { background: rgba(255,255,255,0.06); color: var(--text-3); }
+  .mx-chip.is-cancelled { background: var(--red-12); color: var(--red); }
+  .mx-token { color: var(--text-2); }
+  a.mx-token { text-decoration: underline; text-underline-offset: 2px; }
+  a.mx-token:hover { color: var(--text); }
+  .mx-spacer { flex: 1; }
+  .mx-amt { color: var(--gold-300); font-weight: 700; }
+  .mx-when { color: var(--text-3); font-size: var(--fs-caption); }
+  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+</style>

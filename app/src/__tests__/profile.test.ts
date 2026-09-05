@@ -1,1210 +1,457 @@
-// ── Module declaration for ?raw imports ────────────────────────────────────
-declare module '*?raw' {
-  const content: string;
-  export default content;
-}
-
+// Profile page tests (spec B4 "Profile"), rewritten against the ProfilePage
+// island + its pure helpers (the old file re-implemented profile.astro's
+// inline script; that script is gone). Coverage kept equivalent: address
+// resolution, debounce/overlap guards, tab labels, batch eligibility,
+// snapshot cache, the refunds-at-zero card, and the edit-profile modal.
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import { mount, unmount, flushSync } from 'svelte';
+import { waitFor } from '@testing-library/dom';
 
-// Import profile.astro as raw text so we can extract + evaluate
-// the <script is:inline> block in a jsdom environment.
-import profileAstroRaw from '../pages/profile.astro?raw';
+import {
+  isEthAddr, pathAddr, resolveProfileAddr, tabsFor, emptyFor,
+  mergeInventory, itemKey, isErc1155, batchEligible, batchBarLabel,
+  validateBatch, initialsFor, snapshotKey, saveSnapshot, loadSnapshot,
+  createWalletGuard, installFirstTradeDone, markFirstTradeDone,
+  FIRST_TRADE_KEY, HINT_1155, SNAP_PREFIX,
+  type InventoryItem,
+} from '../components/ProfilePage.helpers';
 
-// ── Extract the inline script from raw astro source ────────────────────────
-function extractInlineScript(raw: string): string {
-  // The profile.astro has: <script is:inline> ... (function(){ ... })(); ... </script>
-  const match = raw.match(/<script is:inline>([\s\S]*?)<\/script>/);
-  if (!match) throw new Error('Could not extract inline script from profile.astro');
-  return match[1].trim();
-}
+// ── Module mocks so mounting ProfilePage (→ RefundsPanel) never pulls the
+//    wallet/tx stack into jsdom ────────────────────────────────────────────
+vi.mock('../lib/mw', () => ({
+  MW: {
+    pendingReturns: vi.fn(async () => [] as unknown[]),
+    withdrawRefundFrom: vi.fn(async () => ({})),
+    ws: { on: () => () => {} },
+  },
+  whenMW: () => new Promise(() => {}),
+  installMW: () => ({}),
+}));
+vi.mock('../lib/tx/client', () => ({
+  onAccountChange: (cb: (a: { address: string | null }) => void) => {
+    cb({ address: localStorage.getItem('mw_addr') });
+    return () => {};
+  },
+}));
+vi.mock('../lib/tx/core', () => ({
+  CORE_LABEL: { marketplace: 'Marketplace', auctionHouse: 'Auction house', offerBook: 'Offer book' },
+  pendingReturns: vi.fn(async () => [] as unknown[]),
+  withdrawRefundFrom: vi.fn(async () => ({})),
+}));
 
-const PROFILE_SCRIPT = extractInlineScript(profileAstroRaw);
+import ProfilePage from '../components/ProfilePage.svelte';
 
-// ── Test addresses ─────────────────────────────────────────────────────────
 const ADDR_A = '0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa';
 const ADDR_B = '0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb';
 
-// ── Default fetch response factory ─────────────────────────────────────────
-function okJson(body: any) {
-  return Promise.resolve({
-    ok: true,
-    json: () => Promise.resolve(body),
-  } as Response);
-}
-
-// The /api/v1/profile-page composite shape. The profile page fetches this
-// once for all its lists; override individual sections as a test needs.
-function composite(overrides: Record<string, any> = {}) {
+// ── Helper: fetch mock for the three profile endpoints ─────────────────────
+function composite(overrides: Record<string, unknown> = {}) {
   return {
-    listings: [],
-    auctions: [],
-    offersSent: [],
-    offersReceived: [],
-    metrics: {},
-    activity: [],
-    createdCollections: [],
-    ...overrides,
-  };
-}
-function okComposite(overrides: Record<string, any> = {}) {
-  return okJson(composite(overrides));
-}
-
-function emptyProfileData() {
-  return {
-    profile: okJson({ display_name: 'Test User', bio: '', avatar_uri: '', verified: false }),
-    nfts: okJson([]),
-    listings: okJson([]),
-    auctions: okJson([]),
-    offersSent: okJson([]),
-    offersRecv: okJson([]),
-    metrics: okJson({ totalActiveListings: 0, totalSales: 0, totalAuctions: 0, grossVolumeWei: '0' }),
-    activity: okJson([]),
+    listings: [], auctions: [], offersSent: [], offersReceived: [],
+    activity: [], createdCollections: [], ...overrides,
   };
 }
 
-// ── Track event listeners so we can clean them up between tests ────────────
-// Each setupProfilePage() evaluates the profile IIFE which registers a
-// new 'mw-wallet-changed' listener. Without cleanup, listeners accumulate
-// and their shared globals (_lastRenderedAddr, _loading, etc.) interfere.
-const _registeredListeners: Array<{ type: string; fn: EventListener }> = [];
-const _originalAddEventListener = window.addEventListener.bind(window);
-const _originalRemoveEventListener = window.removeEventListener.bind(window);
-
-function _setupListenerTracking() {
-  window.addEventListener = function(type: string, fn: EventListener, opts?: any) {
-    _registeredListeners.push({ type, fn });
-    return _originalAddEventListener(type, fn, opts);
-  } as typeof window.addEventListener;
-  window.removeEventListener = _originalRemoveEventListener;
-}
-
-function _cleanupListeners() {
-  // Remove all tracked listeners
-  for (const { type, fn } of _registeredListeners) {
-    _originalRemoveEventListener(type, fn);
-  }
-  _registeredListeners.length = 0;
-  // Restore original addEventListener
-  window.addEventListener = _originalAddEventListener;
-}
-
-// ── Helper: set up the DOM and mocks, then evaluate the profile script ─────
-function setupProfilePage(opts: {
-  pathname?: string;
-  localStorageAddr?: string | null;
+function fetchMock(overrides: {
+  profile?: unknown; nfts?: unknown; pp?: Record<string, unknown>;
+  putSpy?: ReturnType<typeof vi.fn>;
 } = {}) {
-  // 1. Clean up listeners from previous test runs
-  _cleanupListeners();
-  _setupListenerTracking();
-
-  // 2. Create root element (profile script reads #profile-root)
-  document.body.innerHTML = '<div id="profile-root"></div>';
-
-  // 3. Mock location.pathname
-  Object.defineProperty(window, 'location', {
-    value: {
-      pathname: opts.pathname ?? '/profile',
-      origin: 'http://localhost:4321',
-    },
-    writable: true,
-    configurable: true,
+  return vi.fn(async (input: RequestInfo | URL, init?: RequestInit) => {
+    const url = String(input);
+    const hit = (body: unknown, status = 200) => ({
+      ok: status < 400, status,
+      headers: { get: () => null },
+      json: async () => body,
+    }) as unknown as Response;
+    if (init?.method === 'PUT' && url.includes('/api/v1/profile/')) {
+      overrides.putSpy?.(url, init);
+      return hit({ ok: true });
+    }
+    if (url.includes('/api/v1/profile-page/')) return hit(composite(overrides.pp ?? {}));
+    if (url.includes('/api/v1/profile/')) return hit(overrides.profile ?? { display_name: 'Test User' });
+    if (url.includes('/nfts')) return hit(overrides.nfts ?? []);
+    // JSON-RPC balance probe and anything else.
+    return hit({ result: '0x0' });
   });
-
-  // 4. Clear global state from previous evaluations (IIFEs share global scope)
-  (window as any)._lastRenderedAddr = undefined;
-  (window as any)._wcDebounceTimer = null;
-  (window as any)._loading = false;
-
-  // 5. Seed localStorage
-  if (opts.localStorageAddr !== undefined) {
-    if (opts.localStorageAddr) localStorage.setItem('mw_addr', opts.localStorageAddr);
-    else localStorage.removeItem('mw_addr');
-  }
-
-  // 6. Evaluate the profile script (it's an IIFE)
-  const fn = new Function(PROFILE_SCRIPT);
-  fn();
 }
 
-// ── Helper: advance fake timers past the 500ms debounce ────────────────────
-async function flushDebounce(ms = 600) {
-  vi.advanceTimersByTime(ms);
-  // Multiple passes: the first runAllTimersAsync flushes microtasks from
-  // the debounce callback's loadProfileData call, which may schedule more
-  // microtasks (e.g. nested Promise.all resolutions).
-  await vi.runAllTimersAsync();
-  await vi.runAllTimersAsync();
-}
+// ── Pure helpers ───────────────────────────────────────────────────────────
 
-// The profile page now persists a last-known-good snapshot in sessionStorage.
-// Isolate every test from snapshots left by earlier tests (a successful load
-// in one suite would otherwise instant-paint in the next, masking the loader).
-// Runs BETWEEN tests only, so tests that setup twice keep their own snapshot.
-beforeEach(() => {
-  try { sessionStorage.clear(); } catch { /* jsdom */ }
+describe('address resolution', () => {
+  it('accepts only well-formed 0x addresses', () => {
+    expect(isEthAddr(ADDR_A)).toBe(true);
+    expect(isEthAddr(ADDR_A.toUpperCase().replace('0X', '0x'))).toBe(true);
+    expect(isEthAddr('0x123')).toBe(false);
+    expect(isEthAddr(ADDR_A.slice(0, 41) + 'g')).toBe(false);
+    expect(isEthAddr(null)).toBe(false);
+    expect(isEthAddr(42)).toBe(false);
+  });
+
+  it('pathAddr extracts and lowercases /profile/:addr', () => {
+    expect(pathAddr(`/profile/${ADDR_A.toUpperCase().replace('0X', '0x')}`)).toBe(ADDR_A);
+    expect(pathAddr(`/profile/${ADDR_A}/`)).toBe(ADDR_A);
+    expect(pathAddr('/profile')).toBe('');
+    expect(pathAddr('/profile/not-an-address')).toBe('');
+    expect(pathAddr('/')).toBe('');
+  });
+
+  it('URL address wins over the stored wallet', () => {
+    expect(resolveProfileAddr(`/profile/${ADDR_B}`, ADDR_A)).toEqual({ target: ADDR_B, fromPath: true });
+  });
+
+  it('falls back to the stored wallet (lowercased), then to nothing', () => {
+    expect(resolveProfileAddr('/profile', ADDR_A.toUpperCase().replace('0X', '0x'))).toEqual({ target: ADDR_A, fromPath: false });
+    expect(resolveProfileAddr('/profile', 'garbage')).toEqual({ target: '', fromPath: false });
+    expect(resolveProfileAddr('/profile', null)).toEqual({ target: '', fromPath: false });
+  });
 });
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 1: Address Resolution (URL path vs localStorage)
-// ═══════════════════════════════════════════════════════════════════════════════
+describe('tabs (spec labels)', () => {
+  it('own profile says "Your items"', () => {
+    expect(tabsFor(true).map((t) => t.label)).toEqual(['Your items', 'For sale', 'Auctions', 'Offers', 'Activity']);
+  });
+  it('someone else\'s profile says "Items"', () => {
+    expect(tabsFor(false).map((t) => t.label)).toEqual(['Items', 'For sale', 'Auctions', 'Offers', 'Activity']);
+  });
+  it('tab ids are stable regardless of ownership', () => {
+    expect(tabsFor(true).map((t) => t.id)).toEqual(tabsFor(false).map((t) => t.id));
+  });
+  it('per-tab empty copy matches the spec, with one action where sensible', () => {
+    expect(emptyFor('items', true).title).toBe('No items yet');
+    expect(emptyFor('sale', true).title).toBe('Nothing for sale');
+    expect(emptyFor('auctions', true).title).toBe('No auctions');
+    expect(emptyFor('offers', true).title).toBe('No offers');
+    expect(emptyFor('activity', true).title).toBe('No activity yet');
+    expect(emptyFor('sale', true).cta?.label).toBe('List an NFT');
+    expect(emptyFor('sale', false).cta).toBeUndefined();
+  });
+});
 
-describe('Profile address resolution', () => {
+describe('batch eligibility (ERC-721 only)', () => {
+  const base: InventoryItem = { collection: '0xc0ffee', token_id: '1', standard: 'erc721' };
+  it('unlisted own ERC-721 is selectable', () => {
+    expect(batchEligible(base, true)).toBe(true);
+  });
+  it('missing standard is treated as ERC-721', () => {
+    expect(batchEligible({ collection: '0xc0ffee', token_id: '2' }, true)).toBe(true);
+  });
+  it('ERC-1155 never (spec: hint instead)', () => {
+    expect(batchEligible({ ...base, standard: 'erc1155' }, true)).toBe(false);
+    expect(isErc1155({ standard: 'ERC1155' })).toBe(true);
+    expect(HINT_1155).toBe('List multi-edition items one at a time');
+  });
+  it('already-listed and auction-escrowed items never', () => {
+    expect(batchEligible({ ...base, price_wei: '1000000000000000000' }, true)).toBe(false);
+    expect(batchEligible({ ...base, _escrowed: true }, true)).toBe(false);
+  });
+  it('nothing is selectable on someone else\'s profile', () => {
+    expect(batchEligible(base, false)).toBe(false);
+  });
+  it('sticky bar label matches the spec', () => {
+    expect(batchBarLabel(3)).toBe('List 3 selected — one price, one duration');
+  });
+});
+
+describe('batch validation', () => {
+  it('rejects an empty selection and more than 50', () => {
+    expect(validateBatch(0, '2')).toEqual({ ok: false, error: 'Select at least one NFT.' });
+    expect(validateBatch(51, '2')).toEqual({ ok: false, error: 'Pick at most 50.' });
+  });
+  it('rejects garbage and sub-minimum prices', () => {
+    expect(validateBatch(2, 'abc').ok).toBe(false);
+    expect(validateBatch(2, '')).toEqual({ ok: false, error: 'Enter a price like 12.5' });
+    expect(validateBatch(2, '0.5', 'C2FLR')).toEqual({ ok: false, error: 'Minimum price is 1 C2FLR.' });
+  });
+  it('accepts a decimal price and returns wei', () => {
+    const v = validateBatch(2, '12.5');
+    expect(v.ok).toBe(true);
+    if (v.ok) expect(v.wei).toBe(12_500_000_000_000_000_000n);
+  });
+});
+
+describe('inventory merge', () => {
+  it('dedupes by collection:token with wallet > listing > auction priority', () => {
+    const nfts = [{ collection: '0xC1', token_id: '1', name: 'wallet' }];
+    const listings = [{ collection: '0xc1', token_id: '1', name: 'listing' }, { collection: '0xc1', token_id: '2', name: 'listed2' }];
+    const auctions = [{ collection: '0xc1', token_id: '2', name: 'auc2' }, { collection: '0xc1', token_id: '3', name: 'auc3' }];
+    const out = mergeInventory(nfts, listings, auctions);
+    expect(out.map((i) => i.name)).toEqual(['wallet', 'listed2', 'auc3']);
+  });
+  it('marks auction rows as escrowed (never batch-listable)', () => {
+    const out = mergeInventory([], [], [{ collection: '0xc1', token_id: '3' }]);
+    expect(out[0]._escrowed).toBe(true);
+    expect(batchEligible(out[0], true)).toBe(false);
+  });
+  it('itemKey is case-insensitive on the collection', () => {
+    expect(itemKey({ collection: '0xAB', token_id: '7' })).toBe(itemKey({ collection: '0xab', token_id: '7' }));
+  });
+});
+
+describe('last-known-good snapshot (JSON, per address)', () => {
+  it('round-trips through a storage', () => {
+    const store: Record<string, string> = {};
+    const storage = { getItem: (k: string) => store[k] ?? null, setItem: (k: string, v: string) => { store[k] = v; } };
+    saveSnapshot(ADDR_A, { hello: 1 }, storage);
+    expect(Object.keys(store)).toEqual([snapshotKey(ADDR_A)]);
+    expect(snapshotKey(ADDR_A)).toBe(SNAP_PREFIX + ADDR_A);
+    expect(loadSnapshot(ADDR_A, storage)).toEqual({ hello: 1 });
+    expect(loadSnapshot(ADDR_B, storage)).toBeNull();
+  });
+  it('is address-scoped and survives corrupted JSON', () => {
+    const store: Record<string, string> = { [snapshotKey(ADDR_A)]: '{not json' };
+    const storage = { getItem: (k: string) => store[k] ?? null, setItem: () => {} };
+    expect(loadSnapshot(ADDR_A, storage)).toBeNull();
+  });
+  it('swallows quota errors on save', () => {
+    const storage = { setItem: () => { throw new Error('quota'); } };
+    expect(() => saveSnapshot(ADDR_A, { x: 1 }, storage)).not.toThrow();
+  });
+});
+
+describe('wallet-change guard (debounce + overlap)', () => {
+  beforeEach(() => vi.useFakeTimers());
+  afterEach(() => vi.useRealTimers());
+
+  it('debounces rapid events into one onChange', () => {
+    const spy = vi.fn();
+    const g = createWalletGuard(spy, 500);
+    g.notify(ADDR_A);
+    g.notify(ADDR_B);
+    g.notify(ADDR_A);
+    vi.advanceTimersByTime(499);
+    expect(spy).not.toHaveBeenCalled();
+    vi.advanceTimersByTime(1);
+    expect(spy).toHaveBeenCalledTimes(1);
+    expect(spy).toHaveBeenCalledWith(ADDR_A);
+  });
+
+  it('skips a re-fire for the address already rendered', () => {
+    const spy = vi.fn();
+    const g = createWalletGuard(spy, 500);
+    g.beginLoad(ADDR_A);
+    g.endLoad();
+    g.notify(ADDR_A);
+    vi.advanceTimersByTime(500);
+    expect(spy).not.toHaveBeenCalled();
+  });
+
+  it('defers a change that lands mid-load and hands it back at endLoad', () => {
+    const spy = vi.fn();
+    const g = createWalletGuard(spy, 500);
+    expect(g.beginLoad(ADDR_A)).toBe(true);
+    g.notify(ADDR_B);
+    vi.advanceTimersByTime(500);
+    expect(spy).not.toHaveBeenCalled(); // deferred, not dropped
+    expect(g.endLoad()).toBe(ADDR_B);
+    expect(g.lastAddr).toBe(ADDR_B);
+  });
+
+  it('blocks overlapping loads', () => {
+    const g = createWalletGuard(() => {}, 500);
+    expect(g.beginLoad(ADDR_A)).toBe(true);
+    expect(g.beginLoad(ADDR_A)).toBe(false);
+    g.endLoad();
+    expect(g.beginLoad(ADDR_A)).toBe(true);
+  });
+
+  it('reset() lets the same address load again after a failure', () => {
+    const spy = vi.fn();
+    const g = createWalletGuard(spy, 500);
+    g.beginLoad(ADDR_A);
+    g.endLoad();
+    g.reset();
+    g.notify(ADDR_A);
+    vi.advanceTimersByTime(500);
+    expect(spy).toHaveBeenCalledWith(ADDR_A);
+  });
+});
+
+describe('misc helpers', () => {
+  it('initials come from the name or the address sans 0x', () => {
+    expect(initialsFor('Magic Webb')).toBe('MA');
+    expect(initialsFor(ADDR_A)).toBe('AA');
+    expect(initialsFor('')).toBe('?');
+  });
+  it('installFirstTradeDone wires the shared window setter to the home-strip key', () => {
+    installFirstTradeDone();
+    expect(typeof window.mwSetFirstTradeDone).toBe('function');
+    markFirstTradeDone();
+    expect(localStorage.getItem(FIRST_TRADE_KEY)).toBe('1');
+  });
+});
+
+// ── Component behaviour ────────────────────────────────────────────────────
+
+describe('<ProfilePage>', () => {
+  let host: HTMLDivElement;
+  let app: ReturnType<typeof mount> | undefined;
+
   beforeEach(() => {
-    vi.useFakeTimers();
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: '', bio: '', avatar_uri: '', verified: false });
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL: ' + url));
-    });
+    host = document.createElement('div');
+    document.body.appendChild(host);
+    sessionStorage.clear();
+  });
+  afterEach(async () => {
+    if (app) unmount(app);
+    app = undefined;
+    host.remove();
+    vi.unstubAllGlobals();
+    const w = window as unknown as Record<string, unknown>;
+    delete w.MW;
+    delete w.MW_MARKETPLACE;
+    delete w.MW_AUCTION;
+    delete w.MW_OFFERBOOK;
+    (await import('../lib/chains'))._resetChainCache();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
+  it('no wallet & no address → the exact connect empty state with an h1', async () => {
+    vi.stubGlobal('fetch', fetchMock());
+    app = mount(ProfilePage, { target: host });
+    flushSync();
+    await waitFor(() => expect(host.textContent).toContain('Connect your wallet to see your NFTs'));
+    expect(host.querySelector('h1')?.textContent).toBe('Profile');
+    expect(host.textContent).toContain('Looking for someone? Paste their address in Search');
+    const search = Array.from(host.querySelectorAll('a')).find((a) => a.getAttribute('href') === '/search');
+    expect(search).toBeTruthy();
   });
 
-  it('uses address from URL path when /profile/0x... is visited', async () => {
-    setupProfilePage({ pathname: '/profile/' + ADDR_A, localStorageAddr: null });
-    await flushDebounce();
-
-    const fetchCalls = (window.fetch as any).mock.calls;
-    const profileCall = fetchCalls.find(([url]: [string]) => url.includes('/api/v1/profile/'));
-    expect(profileCall[0]).toContain(ADDR_A.toLowerCase());
-  });
-
-  it('falls back to localStorage when URL path is just /profile', async () => {
-    setupProfilePage({ pathname: '/profile', localStorageAddr: ADDR_A });
-    await flushDebounce();
-
-    const fetchCalls = (window.fetch as any).mock.calls;
-    const profileCall = fetchCalls.find(([url]: [string]) => url.includes('/api/v1/profile/'));
-    expect(profileCall[0]).toContain(ADDR_A.toLowerCase());
-  });
-
-  it('shows connect screen when no address in URL or localStorage', () => {
-    setupProfilePage({ pathname: '/profile', localStorageAddr: null });
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Connect your wallet');
-  });
-
-  it('uses URL path address when wallet is connected as a different address', async () => {
-    // Wallet connected as ADDR_A, but visiting /profile/ADDR_B.
-    // The URL path should take priority over localStorage.
+  it('own profile: "This is you" chip, "Your items" tab, balance, refunds card at 0', async () => {
     localStorage.setItem('mw_addr', ADDR_A);
-
-    setupProfilePage({ pathname: '/profile/' + ADDR_B });
-    await flushDebounce();
-
-    // Verify the profile API was called with ADDR_B (from URL), not ADDR_A
-    const fetchCalls = (window.fetch as any).mock.calls;
-    const profileCall = fetchCalls.find(([url]: [string]) => String(url).includes('/api/v1/profile/'));
-    expect(profileCall[0]).toContain(ADDR_B.toLowerCase());
-    expect(profileCall[0]).not.toContain(ADDR_A.toLowerCase());
-
-    // Edit button should NOT be visible (viewing someone else's profile)
-    const editBtn = document.getElementById('edit-profile-btn');
-    expect(editBtn).toBeNull();
+    vi.stubGlobal('fetch', fetchMock({ profile: { display_name: 'Alice' } }));
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_A } });
+    flushSync();
+    await waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Alice'));
+    expect(host.textContent).toContain('This is you');
+    const tabs = Array.from(host.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.trim());
+    expect(tabs).toEqual(['Your items', 'For sale', 'Auctions', 'Offers', 'Activity']);
+    expect(host.textContent).toContain('Balance:');
+    // Refunds card is ALWAYS visible on the own profile, even at zero.
+    await waitFor(() => expect(host.textContent).toContain('Refunds:'));
+    expect(host.textContent).toContain('Outbid or declined? Funds come back here, never lost.');
+    // No withdraw button at zero.
+    expect(Array.from(host.querySelectorAll('button')).some((b) => b.textContent?.trim() === 'Withdraw')).toBe(false);
   });
-});
 
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 2: _lastRenderedAddr guard — prevents no-op re-renders
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('_lastRenderedAddr guard', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    // Seed wallet address so profile loads on boot
+  it("someone else's profile: no chip, no balance, no batch tools, plain Items tab", async () => {
     localStorage.setItem('mw_addr', ADDR_A);
-
-    let profileCallCount = 0;
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) {
-        profileCallCount++;
-        return okJson({ display_name: 'User' + profileCallCount, bio: '', avatar_uri: '', verified: false });
-      }
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL'));
-    });
+    vi.stubGlobal('fetch', fetchMock({
+      profile: { display_name: 'Bob' },
+      nfts: [{ collection: '0x3333333333333333333333333333333333333333', token_id: '1', name: 'Animi #1', standard: 'erc721' }],
+    }));
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_B } });
+    flushSync();
+    await waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Bob'));
+    expect(host.textContent).not.toContain('This is you');
+    expect(host.textContent).not.toContain('Balance:');
+    expect(host.textContent).not.toContain('Refunds:');
+    const tabs = Array.from(host.querySelectorAll('[role="tab"]')).map((t) => t.textContent?.trim());
+    expect(tabs[0]).toBe('Items');
+    // The 721 card renders but carries no batch checkbox on a foreign profile.
+    await waitFor(() => expect(host.textContent).toContain('Animi #1'));
+    expect(host.querySelector('input[type="checkbox"]')).toBeNull();
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('does NOT re-render when mw-wallet-changed fires with same address', async () => {
-    setupProfilePage({ pathname: '/profile' });
-
-    // Wait for initial load to complete
-    await flushDebounce();
-
-    // Count profile API calls after initial load
-    const afterInitCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-
-    // Dispatch wallet-changed with the SAME address
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    // Advance past the 500ms debounce
-    await flushDebounce();
-
-    // No additional profile fetches should have happened (guard skipped re-render)
-    const afterEventCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(afterEventCount).toBe(afterInitCount);
-  });
-
-  it('DOES re-render when mw-wallet-changed fires with a DIFFERENT address', async () => {
-    setupProfilePage({ pathname: '/profile' });
-
-    // Wait for initial load
-    await flushDebounce();
-
-    const afterInitCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-
-    // Change localStorage to a new address, then fire event
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    await flushDebounce();
-
-    // Additional profile fetch should have happened
-    const afterEventCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(afterEventCount).toBe(afterInitCount + 1);
-
-    // Verify the new address is in the rendered DOM
-    const rootAfterEvent = document.getElementById('profile-root')!.innerHTML;
-    expect(rootAfterEvent).toContain(ADDR_B.toLowerCase());
-  });
-
-  it('shows connect screen when wallet disconnects (mw_addr cleared)', async () => {
-    setupProfilePage({ pathname: '/profile' });
-
-    await flushDebounce();
-
-    // Simulate disconnect: clear localStorage and fire event
-    localStorage.removeItem('mw_addr');
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Connect your wallet');
-  });
-
-  it('re-renders after disconnect then reconnect (different address cycle)', async () => {
-    setupProfilePage({ pathname: '/profile' });
-
-    await flushDebounce();
-
-    // Step 1: disconnect
-    localStorage.removeItem('mw_addr');
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-    await flushDebounce();
-    expect(document.getElementById('profile-root')!.innerHTML).toContain('Connect your wallet');
-
-    // Step 2: reconnect with different address
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-    await flushDebounce();
-    expect(document.getElementById('profile-root')!.innerHTML).toContain(ADDR_B.toLowerCase());
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 3: _loading flag — prevents overlapping loadProfileData calls
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('_loading flag — prevents overlapping calls', () => {
-  let resolveFirstFetch: () => void;
-
-  beforeEach(() => {
-    vi.useFakeTimers();
+  it('per-tab empty copy renders with its action', async () => {
     localStorage.setItem('mw_addr', ADDR_A);
-
-    // Set up a fetch that hangs until we manually resolve it
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) {
-        // Return a promise that blocks until we release it
-        return new Promise<Response>((resolve) => {
-          resolveFirstFetch = () => resolve({
-            ok: true,
-            json: () => Promise.resolve({ display_name: 'User', bio: '', avatar_uri: '', verified: false }),
-          } as Response);
-        });
-      }
-      return okJson([]);
-    });
+    vi.stubGlobal('fetch', fetchMock());
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_A } });
+    flushSync();
+    await waitFor(() => expect(host.textContent).toContain('No items yet'));
+    (Array.from(host.querySelectorAll('[role="tab"]'))[1] as HTMLButtonElement).click();
+    flushSync();
+    expect(host.textContent).toContain('Nothing for sale');
+    (Array.from(host.querySelectorAll('[role="tab"]'))[4] as HTMLButtonElement).click();
+    flushSync();
+    expect(host.textContent).toContain('No activity yet');
   });
 
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('blocks a second loadProfileData call while one is in-flight, then applies it after', async () => {
-    setupProfilePage({ pathname: '/profile' });
-
-    // The initial load is now hanging (waiting for resolveFirstFetch)
-    // The root should show "Loading profile…"
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Loading profile');
-
-    // Now dispatch wallet-changed which would trigger another loadProfileData call
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    // Advance past debounce — the second call is blocked by _loading=true and
-    // deferred (no overlapping load starts).
-    await flushDebounce();
-
-    // The loading indicator should still be the original one — NOT re-entered
-    expect(root.innerHTML).toContain('Loading profile');
-
-    // Resolve the first fetch: the ADDR_A load completes and saves its
-    // snapshot, and the deferred wallet change immediately starts a follow-up
-    // load for ADDR_B (which hangs on its own profile fetch). ADDR_B has no
-    // snapshot, so the loader shows for B rather than leaving A's (a different
-    // wallet's) data on screen — the render must stay in sync with the wallet.
-    resolveFirstFetch();
-    await vi.runAllTimersAsync();
-    await vi.runAllTimersAsync();
-    expect(root.innerHTML).toContain('Loading profile');
-    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toBeTruthy();
-
-    // Resolve the follow-up fetch: the page now shows the new wallet.
-    resolveFirstFetch();
-    await vi.runAllTimersAsync();
-    await vi.runAllTimersAsync();
-    expect(root.innerHTML).toContain(ADDR_B.toLowerCase());
-  });
-
-  it('_loading is reset after successful load, allowing subsequent calls', async () => {
-    // Use a fetch that resolves immediately but we still use fake timers
-    vi.restoreAllMocks();
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) {
-        return okJson({ display_name: 'User', bio: '', avatar_uri: '', verified: false });
-      }
-      return okJson([]);
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    // First load completed. Now dispatch another wallet change.
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-    await flushDebounce();
-
-    // The second load should have happened — rendered address should be ADDR_B
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain(ADDR_B.toLowerCase());
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 4: _lastRenderedAddr reset on API failure
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('_lastRenderedAddr reset on error', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
+  it('edit-profile modal: opens, Escape closes, save PUTs via MW.authFetch (SIWE path)', async () => {
     localStorage.setItem('mw_addr', ADDR_A);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('resets _lastRenderedAddr so retry works after a transient failure', async () => {
-    // The profile.astro code wraps each fetch in .catch(function(){return null;}),
-    // so Promise.reject won't reach the outer catch block. We must throw
-    // synchronously from the mock to bypass the individual catch handlers
-    // and trigger the outer try/catch.
-    let callCount = 0;
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) {
-        callCount++;
-        if (callCount === 1) {
-          // Synchronous throw — bypasses the .catch() on the fetch promise
-          throw new Error('Network error');
-        }
-        // Second call: succeed
-        return okJson({ display_name: 'User', bio: '', avatar_uri: '', verified: false });
-      }
-      return okJson([]);
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    // After first failure, error screen should show
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Could not load profile');
-
-    // Now dispatch wallet-changed AGAIN with the same address.
-    // The catch block reset _lastRenderedAddr to null, so the guard
-    // won't skip this retry.
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-    await flushDebounce();
-
-    // Second attempt should succeed — profile should render
-    expect(root.innerHTML).not.toContain('Could not load profile');
-    expect(root.innerHTML).toContain('User');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 5: Debounce — rapid events coalesce
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('Debounce behavior', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    localStorage.setItem('mw_addr', ADDR_A);
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'User', bio: '', avatar_uri: '', verified: false });
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL'));
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('coalesces multiple rapid mw-wallet-changed events into a single render', async () => {
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    // Count how many times the profile endpoint is called after the initial load
-    const initialCallCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-
-    // Fire THREE rapid wallet-changed events
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    localStorage.setItem('mw_addr', ADDR_A); // back to A
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    localStorage.setItem('mw_addr', ADDR_B); // back to B
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    // Only advance 100ms — NOT past the 500ms debounce
-    vi.advanceTimersByTime(100);
-
-    // No additional fetches should have fired yet
-    const midCallCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(midCallCount).toBe(initialCallCount);
-
-    // Now advance past the debounce
-    await flushDebounce();
-
-    // Only ONE additional profile fetch should have happened
-    const finalCallCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(finalCallCount).toBe(initialCallCount + 1);
-  });
-
-  it('honors the 500ms debounce — fires after the delay, not before', async () => {
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    const initialCount = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-
-    // Fire event at t=0 (relative to current fake time)
-    localStorage.setItem('mw_addr', ADDR_B);
-    window.dispatchEvent(new CustomEvent('mw-wallet-changed'));
-
-    // Advance 400ms — NOT past 500ms debounce.
-    // IMPORTANT: use vi.runAllTicks() (microtasks only) instead of
-    // vi.runAllTimersAsync() which would run ALL pending timers including
-    // the future 500ms debounce, causing a false-positive fetch.
-    vi.advanceTimersByTime(400);
-    await vi.runAllTicks();
-
-    let count = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(count).toBe(initialCount); // Not yet fired
-
-    // Advance past the remaining 100ms+ to cross the 500ms threshold
-    vi.advanceTimersByTime(200);
-    await vi.runAllTimersAsync();
-
-    count = (window.fetch as any).mock.calls.filter(
-      ([url]: [string]) => String(url).includes('/api/v1/profile/')
-    ).length;
-    expect(count).toBe(initialCount + 1); // Now fired
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 6: isEthAddr validation
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('isEthAddr validation', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: '', bio: '', avatar_uri: '', verified: false });
-      return okJson([]);
-    });
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('rejects non-eth-address strings from localStorage', async () => {
-    // Invalid address — should not be used
-    setupProfilePage({ pathname: '/profile', localStorageAddr: 'not-an-address' });
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    // Should show connect screen because the address is invalid
-    expect(root.innerHTML).toContain('Connect your wallet');
-  });
-
-  it('rejects address strings that are too short', async () => {
-    setupProfilePage({ pathname: '/profile', localStorageAddr: '0xabc' });
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Connect your wallet');
-  });
-
-  it('accepts a valid 0x-prefixed 42-char address', async () => {
-    setupProfilePage({ pathname: '/profile', localStorageAddr: ADDR_A });
-    await flushDebounce();
-
-    const fetchCalls = (window.fetch as any).mock.calls;
-    const profileCall = fetchCalls.find(([url]: [string]) => String(url).includes('/api/v1/profile/'));
-    expect(profileCall[0]).toContain(ADDR_A.toLowerCase());
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 7: emptyWalletNotice
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('emptyWalletNotice', () => {
-  beforeEach(() => {
-    vi.useFakeTimers();
-    localStorage.setItem('mw_addr', ADDR_A);
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  it('shows notice when NFTs are empty but listings/auctions exist', async () => {
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'Seller', bio: '', avatar_uri: '', verified: false });
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      // Has listings but no NFTs
-      if (url.includes('/api/v1/profile-page')) return okComposite({ listings: [{ collection: ADDR_A, token_id: '1', price_wei: '1000000000000000000' }] });
-      return Promise.reject(new Error('unexpected URL'));
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('no NFTs have been recorded');
-  });
-
-  it('does NOT show notice when NFTs are non-empty', async () => {
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'Holder', bio: '', avatar_uri: '', verified: false });
-      if (url.includes('/api/v1/wallet/')) return okJson([
-        { collection: ADDR_A, token_id: '1', name: 'Test NFT', image_uri: '/api/v1/img/abc123', units: '1', standard: 'erc721' }
-      ]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL'));
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).not.toContain('no NFTs have been recorded');
-    expect(root.innerHTML).toContain('Test NFT');
-  });
-
-  it('does NOT show notice when both NFTs and listings are empty', async () => {
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return okJson({ display_name: 'NewUser', bio: '', avatar_uri: '', verified: false });
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL'));
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).not.toContain('no NFTs have been recorded');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 8: Edit Profile Modal — open, close, form, save, error handling
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('Edit Profile Modal', () => {
-  // Shared profile data used for pre-filling form fields
-  const profileData = {
-    display_name: 'Alice',
-    bio: 'NFT collector & builder',
-    avatar_uri: 'https://example.com/alice.png',
-    twitter: '@alice_nft',
-    website: 'https://alice.xyz',
-    verified: false,
-  };
-
-  // ── Shared helpers for PUT behavior overrides ────────────────────────
-  type PutBehavior =
-    | { type: 'success' }
-    | { type: 'serverError'; status: number; error: string }
-    | { type: 'networkError'; message: string };
-
-  interface LoadOwnProfileOpts {
-    putBehavior?: PutBehavior;
-    /** Called each time the profile GET endpoint is hit (for tracking call count) */
-    onProfileGet?: () => void;
-    /** If set, pathname is /profile/{viewingAddr} instead of /profile */
-    viewingAddr?: string;
-    /** Override the localStorage mw_addr (defaults to ADDR_A) */
-    ownAddr?: string;
-  }
-
-  // Helper: set up a fully-rendered own profile with edit button visible.
-  // Accepts PUT behavior overrides so all Suite 8 tests share a single
-  // fetch mock instead of duplicating it.
-  async function loadOwnProfileWithPut(opts: LoadOwnProfileOpts = {}) {
-    const addr = opts.ownAddr ?? ADDR_A;
-    localStorage.setItem('mw_addr', addr);
-
-    const putCalls: Array<{ url: string; body: any }> = [];
-    const putBehavior = opts.putBehavior ?? { type: 'success' as const };
-
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any, fetchOpts?: any) => {
-      const url = String(_url);
-      const method = (fetchOpts && fetchOpts.method) || 'GET';
-
-      // PUT to profile endpoint — honors putBehavior override
-      if (url.includes('/api/v1/profile/') && method === 'PUT') {
-        putCalls.push({ url, body: fetchOpts ? JSON.parse(fetchOpts.body) : {} });
-        if (putBehavior.type === 'networkError') {
-          return Promise.reject(new Error(putBehavior.message));
-        }
-        if (putBehavior.type === 'serverError') {
-          return Promise.resolve({
-            ok: false,
-            status: putBehavior.status,
-            json: () => Promise.resolve({ error: putBehavior.error }),
-          } as Response);
-        }
-        return okJson({ ok: true });
-      }
-
-      // GET profile
-      if (url.includes('/api/v1/profile/') && !url.includes('metrics')) {
-        if (opts.onProfileGet) opts.onProfileGet();
-        return okJson(profileData);
-      }
-
-      // All other endpoints: return empty
-      if (url.includes('/api/v1/wallet/')) return okJson([]);
-      if (url.includes('/api/v1/profile-page')) return okComposite();
-      return Promise.reject(new Error('unexpected URL: ' + url));
-    });
-
-    const pathname = opts.viewingAddr ? `/profile/${opts.viewingAddr}` : '/profile';
-    setupProfilePage({ pathname });
-    await flushDebounce();
-
-    return { putCalls };
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers();
-  });
-
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-  });
-
-  // ── Open / Close ──────────────────────────────────────────────────────────
-
-  it('opens the modal when Edit Profile button is clicked', async () => {
-    await loadOwnProfileWithPut();
-
-    const editBtn = document.getElementById('edit-profile-btn')!;
-    expect(editBtn).not.toBeNull();
-
+    const putSpy = vi.fn();
+    const mockFetch = fetchMock({ profile: { display_name: 'Alice' }, putSpy });
+    vi.stubGlobal('fetch', mockFetch);
+    const authFetch = vi.fn(async (url: string, init?: RequestInit) => mockFetch(url, init));
+    (window as unknown as { MW: { address: () => string; authFetch: typeof authFetch } }).MW = {
+      address: () => ADDR_A,
+      authFetch,
+    };
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_A } });
+    flushSync();
+    await waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Alice'));
+
+    const editBtn = Array.from(host.querySelectorAll('button')).find((b) => b.textContent?.trim() === 'Edit profile')!;
+    expect(editBtn).toBeTruthy();
     editBtn.click();
+    flushSync();
+    const dialog = host.querySelector('[role="dialog"]')!;
+    expect(dialog).toBeTruthy();
+    expect(dialog.getAttribute('aria-modal')).toBe('true');
 
-    // Overlay should now be in the DOM
-    const overlay = document.getElementById('edit-profile-overlay');
-    expect(overlay).not.toBeNull();
-    expect(overlay!.querySelector('#edit-profile-form')).not.toBeNull();
-  });
+    // Escape closes without saving.
+    dialog.closest('.pp-overlay')!.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+    flushSync();
+    expect(host.querySelector('[role="dialog"]')).toBeNull();
+    expect(authFetch).not.toHaveBeenCalled();
 
-  it('edit button is NOT rendered when viewing someone else\'s profile', async () => {
-    // Wallet is connected as ADDR_A but profile URL is /profile/ADDR_B
-    await loadOwnProfileWithPut({ ownAddr: ADDR_A, viewingAddr: ADDR_B });
-
-    const editBtn = document.getElementById('edit-profile-btn');
-    expect(editBtn).toBeNull();
-  });
-
-  it('closes modal when X close button is clicked', async () => {
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-    expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
-
-    document.getElementById('edit-profile-close')!.click();
-
-    // Overlay should be removed from DOM
-    expect(document.getElementById('edit-profile-overlay')).toBeNull();
-  });
-
-  it('closes modal when Cancel button is clicked', async () => {
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-    expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
-
-    document.getElementById('edit-profile-cancel')!.click();
-
-    expect(document.getElementById('edit-profile-overlay')).toBeNull();
-  });
-
-  it('closes modal when overlay background is clicked', async () => {
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-    const overlay = document.getElementById('edit-profile-overlay')!;
-    expect(overlay).not.toBeNull();
-
-    // Click the overlay itself (not the modal child)
-    overlay.dispatchEvent(new MouseEvent('click', { bubbles: true }));
-
-    expect(document.getElementById('edit-profile-overlay')).toBeNull();
-  });
-
-  it('closes modal when Escape key is pressed', async () => {
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-    expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
-
-    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
-
-    expect(document.getElementById('edit-profile-overlay')).toBeNull();
-  });
-
-  // ── Form Pre-fill ────────────────────────────────────────────────────────
-
-  it('pre-fills form fields with current profile data', async () => {
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-
-    const nameInput = document.querySelector('input[name="display_name"]') as HTMLInputElement;
-    const bioInput = document.querySelector('textarea[name="bio"]') as HTMLTextAreaElement;
-    const avatarInput = document.querySelector('input[name="avatar_uri"]') as HTMLInputElement;
-    const twitterInput = document.querySelector('input[name="twitter"]') as HTMLInputElement;
-    const websiteInput = document.querySelector('input[name="website"]') as HTMLInputElement;
-
-    expect(nameInput).not.toBeNull();
-    expect(nameInput.value).toBe(profileData.display_name);
-    expect(bioInput.value).toBe(profileData.bio);
-    expect(avatarInput.value).toBe(profileData.avatar_uri);
-    expect(twitterInput.value).toBe(profileData.twitter);
-    expect(websiteInput.value).toBe(profileData.website);
-  });
-
-  // ── JWT Requirement (removed — now uses HttpOnly cookie via credentials:'include') ──
-
-  it('submits form without pre-flight JWT check (cookie auth)', async () => {
-    // No JWT in localStorage — auth relies on HttpOnly cookie now
-    await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-
-    const nameInput = document.querySelector('input[name="display_name"]') as HTMLInputElement;
-    nameInput.value = 'No JWT Check';
+    // Reopen, edit, save → PUT through the SIWE-gated authFetch.
+    editBtn.click();
+    flushSync();
+    const nameInput = host.querySelector<HTMLInputElement>('input[name="display_name"]')!;
+    nameInput.value = 'Alice Prime';
     nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    // Submit the form — no pre-flight JWT check anymore
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks — the PUT should have been called (backend auth handles 401)
-    await vi.runAllTicks();
-
-    const statusEl = document.getElementById('edit-profile-status')!;
-    // Should NOT show JWT error — form submitted with credentials:'include'
-    expect(statusEl.innerHTML).not.toContain('reconnect your wallet');
+    flushSync();
+    host.querySelector('form')!.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
+    await waitFor(() => expect(authFetch).toHaveBeenCalledTimes(1));
+    const [url, init] = authFetch.mock.calls[0];
+    expect(url).toBe(`/api/v1/profile/${ADDR_A}`);
+    expect(init?.method).toBe('PUT');
+    expect(JSON.parse(String(init?.body)).display_name).toBe('Alice Prime');
+    await waitFor(() => expect(host.querySelector('[role="dialog"]')).toBeNull());
   });
 
-  // ── Successful Save ──────────────────────────────────────────────────────
-
-  it('saves successfully and shows success message', async () => {
-    const { putCalls } = await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-
-    // Fill in new values
-    const nameInput = document.querySelector('input[name="display_name"]') as HTMLInputElement;
-    nameInput.value = 'Bob Updated';
-    // Trigger input event so FormData picks up the new value
-    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const bioInput = document.querySelector('textarea[name="bio"]') as HTMLTextAreaElement;
-    bioInput.value = 'Updated bio';
-    bioInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    // Submit the form
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks only (not timers!) so the async fetch + response
-    // pipeline completes without firing the 800ms closeModal setTimeout.
-    await vi.runAllTicks();
-
-    // Verify PUT was called with the correct body
-    expect(putCalls.length).toBe(1);
-    expect(putCalls[0].body.display_name).toBe('Bob Updated');
-    expect(putCalls[0].body.bio).toBe('Updated bio');
-    expect(putCalls[0].body.avatar_uri).toBe(profileData.avatar_uri);
-
-    // Save button should be disabled during save
-    const saveBtn = document.getElementById('edit-profile-save') as HTMLButtonElement;
-    expect(saveBtn.disabled).toBe(true);
-    expect(saveBtn.textContent).toBe('Saving…');
-
-    // Success message should appear
-    const statusEl = document.getElementById('edit-profile-status')!;
-    expect(statusEl.style.display).toBe('block');
-    expect(statusEl.innerHTML).toContain('Profile saved');
-  });
-
-  // ── Form Field Trimming ─────────────────────────────────────────────────
-
-  it('trims leading/trailing whitespace from form fields in PUT payload', async () => {
-    const { putCalls } = await loadOwnProfileWithPut();
-
-    document.getElementById('edit-profile-btn')!.click();
-
-    // Fill in values with leading/trailing whitespace
-    const nameInput = document.querySelector('input[name="display_name"]') as HTMLInputElement;
-    nameInput.value = '  Bob Updated  ';
-    nameInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const bioInput = document.querySelector('textarea[name="bio"]') as HTMLTextAreaElement;
-    bioInput.value = '\t  Updated bio\n\n  ';
-    bioInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const twitterInput = document.querySelector('input[name="twitter"]') as HTMLInputElement;
-    twitterInput.value = '  @new_handle  ';
-    twitterInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    const websiteInput = document.querySelector('input[name="website"]') as HTMLInputElement;
-    websiteInput.value = '  https://new-site.com  ';
-    websiteInput.dispatchEvent(new Event('input', { bubbles: true }));
-
-    // Submit the form
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks so the async fetch + response pipeline completes
-    await vi.runAllTicks();
-
-    // Verify PUT payload has trimmed values
-    expect(putCalls.length).toBe(1);
-    expect(putCalls[0].body.display_name).toBe('Bob Updated');
-    expect(putCalls[0].body.bio).toBe('Updated bio');
-    expect(putCalls[0].body.twitter).toBe('@new_handle');
-    expect(putCalls[0].body.website).toBe('https://new-site.com');
-  });
-
-  // ── In-place Re-render after Save ─────────────────────────────────────────
-
-  it('closes modal and re-renders profile in-place after successful save', async () => {
-    // Track how many profile GET calls happen
-    let profileGetCount = 0;
-    await loadOwnProfileWithPut({ onProfileGet: () => { profileGetCount++; } });
-    const initialGetCount = profileGetCount;
-
-    // Open modal and submit
-    document.getElementById('edit-profile-btn')!.click();
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks only (not timers!) so the async fetch resolves
-    // but the 800ms closeModal setTimeout remains pending.
-    await vi.runAllTicks();
-
-    // The 800ms setTimeout hasn't fired yet
-    expect(document.getElementById('edit-profile-overlay')).not.toBeNull();
-
-    // Advance past the 800ms delay
-    vi.advanceTimersByTime(900);
-    await vi.runAllTimersAsync();
-
-    // Modal should be closed
-    expect(document.getElementById('edit-profile-overlay')).toBeNull();
-
-    // Profile should have re-fetched (loadProfileData was called again)
-    expect(profileGetCount).toBeGreaterThan(initialGetCount);
-  });
-
-  // ── Server Error ─────────────────────────────────────────────────────────
-
-  it('shows server error message when PUT returns non-OK', async () => {
-    await loadOwnProfileWithPut({
-      putBehavior: { type: 'serverError', status: 400, error: 'Display name too long' },
-    });
-
-    document.getElementById('edit-profile-btn')!.click();
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks for the async fetch + error response pipeline.
-    // The error path calls await res.json() which creates a second
-    // microtask level — runAllTicks twice to flush both levels.
-    await vi.runAllTicks();
-    await vi.runAllTicks();
-
-    // Should show server error
-    const statusEl = document.getElementById('edit-profile-status')!;
-    expect(statusEl.style.display).toBe('block');
-    expect(statusEl.innerHTML).toContain('Display name too long');
-
-    // Save button should be re-enabled
-    const saveBtn = document.getElementById('edit-profile-save') as HTMLButtonElement;
-    expect(saveBtn.disabled).toBe(false);
-    expect(saveBtn.textContent).toBe('Save Changes');
-  });
-
-  // ── Network Error ────────────────────────────────────────────────────────
-
-  it('shows network error when PUT fetch throws', async () => {
-    await loadOwnProfileWithPut({
-      putBehavior: { type: 'networkError', message: 'Network failure' },
-    });
-
-    document.getElementById('edit-profile-btn')!.click();
-    const form = document.getElementById('edit-profile-form') as HTMLFormElement;
-    form.dispatchEvent(new Event('submit', { bubbles: true, cancelable: true }));
-
-    // Flush microtasks for the async fetch + rejection pipeline
-    await vi.runAllTicks();
-
-    // Surfaces the thrown error's actual message (a TxError from a failed
-    // sign-in reads e.g. 'Sign-in was rejected (HTTP 401).'), falling back
-    // to the generic copy only when the error carries no message.
-    const statusEl = document.getElementById('edit-profile-status')!;
-    expect(statusEl.style.display).toBe('block');
-    expect(statusEl.innerHTML).toContain('Network failure');
-
-    // Save button should be re-enabled
-    const saveBtn = document.getElementById('edit-profile-save') as HTMLButtonElement;
-    expect(saveBtn.disabled).toBe(false);
-    expect(saveBtn.textContent).toBe('Save Changes');
-  });
-});
-
-// ═══════════════════════════════════════════════════════════════════════════════
-// Suite 9: Item 0 — profile stays in sync (no zero-state, snapshot, degraded)
-// ═══════════════════════════════════════════════════════════════════════════════
-
-describe('Item 0 — sync hardening', () => {
-  // Response with readable headers + status (the base okJson has neither).
-  function resp(body: any, init: { ok?: boolean; status?: number; headers?: Record<string, string> } = {}) {
-    const { ok = true, status = 200, headers = {} } = init;
-    return Promise.resolve({
-      ok,
-      status,
-      headers: { get: (k: string) => headers[k] ?? headers[k.toLowerCase()] ?? null },
-      json: () => Promise.resolve(body),
-    } as unknown as Response);
-  }
-
-  // Flush the current load's microtasks + any 0ms timers, WITHOUT draining
-  // the retry timer (scheduled ~seconds out). Draining it while the mock is
-  // in a permanent-fail state would loop forever.
-  async function settle() {
-    await vi.advanceTimersByTimeAsync(0);
-    await vi.advanceTimersByTimeAsync(0);
-  }
-
-  beforeEach(() => {
-    vi.useFakeTimers();
+  it('paints the sessionStorage snapshot instantly for a known address', async () => {
     localStorage.setItem('mw_addr', ADDR_A);
-    try { sessionStorage.clear(); } catch { /* jsdom */ }
-  });
-  afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-    document.body.innerHTML = '';
-    localStorage.clear();
-    try { sessionStorage.clear(); } catch { /* jsdom */ }
-  });
-
-  it('first paint with all 429s shows a retry notice, never a confident zero-state', async () => {
-    let phase: 'fail' | 'ok' = 'fail';
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      if (phase === 'fail') return resp(null, { ok: false, status: 429, headers: { 'Retry-After': '1' } });
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Real Name', bio: '', avatar_uri: '' });
-      if (url.includes('/api/v1/metrics')) return resp({});
-      return resp([]);
+    saveSnapshot(ADDR_A, {
+      profile: { display_name: 'Cached Alice' },
+      nfts: [],
+      pp: composite(),
     });
-
-    setupProfilePage({ pathname: '/profile' });
-    await settle();
-
-    const root = document.getElementById('profile-root')!;
-    // Retry notice, not a zero-state header (no metric cards, not "loaded").
-    expect(root.innerHTML).toContain('retrying');
-    expect(root.dataset.mwLoaded).not.toBe('1');
-    expect(root.innerHTML).not.toContain('Offers Sent');
-
-    // The scheduled retry (Retry-After: 1s) recovers to real data.
-    phase = 'ok';
-    await vi.advanceTimersByTimeAsync(1200);
-    await settle();
-    expect(root.innerHTML).toContain('Real Name');
-    expect(root.dataset.mwLoaded).toBe('1');
+    // Fetches never resolve — only the snapshot can paint.
+    vi.stubGlobal('fetch', vi.fn(() => new Promise(() => {})));
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_A } });
+    flushSync();
+    await waitFor(() => expect(host.querySelector('h1')?.textContent).toBe('Cached Alice'));
+    expect(host.textContent).toContain('Showing your last data while we refresh…');
   });
 
-  it('paints the last-known-good snapshot instantly on the next load, before fetch resolves', async () => {
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Snap User', bio: '', avatar_uri: '' });
-      if (url.includes('/api/v1/metrics')) return resp({});
-      return resp([]);
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-    let root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Snap User');
-    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toBeTruthy();
-
-    // Re-eval with a fetch that never resolves — the snapshot must paint anyway.
-    vi.restoreAllMocks();
-    vi.spyOn(window, 'fetch').mockImplementation(() => new Promise<Response>(() => {}));
-    setupProfilePage({ pathname: '/profile' });
-    root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Snap User');
-    expect(root.dataset.mwStale).toBe('1');
-  });
-
-  it('keeps the snapshot when revalidation returns a degraded wallet inventory', async () => {
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/wallet/')) return resp([{ collection: '0xCollection', token_id: '1', name: 'Kept NFT' }]);
-      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg User', bio: '', avatar_uri: '' });
-      if (url.includes('/api/v1/metrics')) return resp({});
-      return resp([]);
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await flushDebounce();
-    expect(sessionStorage.getItem('mw_profile_lkg:' + ADDR_A)).toContain('Kept NFT');
-
-    // Next load: snapshot paints, then revalidation returns a degraded/empty
-    // wallet — which must NOT wipe the held NFT.
-    vi.restoreAllMocks();
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/wallet/')) return resp([], { headers: { 'X-MW-Degraded': 'explorer-unavailable' } });
-      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg User', bio: '', avatar_uri: '' });
-      if (url.includes('/api/v1/metrics')) return resp({});
-      return resp([]);
-    });
-    setupProfilePage({ pathname: '/profile' });
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Kept NFT'); // instant snapshot
-    await settle();                                 // degraded revalidation runs
-    expect(root.innerHTML).toContain('Kept NFT');   // degraded did not wipe it
-  });
-
-  it('renders available data on first paint even when the wallet is degraded', async () => {
-    // Explorer down (X-MW-Degraded) but profile + composite are fine, and no
-    // snapshot exists. Degraded must NOT block a first paint — the DB-side
-    // data is available and should render, not a "retrying" spinner.
-    vi.spyOn(window, 'fetch').mockImplementation((_url: any) => {
-      const url = String(_url);
-      if (url.includes('/api/v1/wallet/')) return resp([], { headers: { 'X-MW-Degraded': 'explorer-unavailable' } });
-      if (url.includes('/api/v1/profile/')) return resp({ display_name: 'Deg First', bio: '', avatar_uri: '' });
-      if (url.includes('/api/v1/profile-page')) return resp(composite({ listings: [{ collection: '0xC', token_id: '9', price_wei: '1000000000000000000' }] }));
-      return resp([]);
-    });
-
-    setupProfilePage({ pathname: '/profile' });
-    await settle();
-    const root = document.getElementById('profile-root')!;
-    expect(root.innerHTML).toContain('Deg First'); // rendered, not blocked
-    expect(root.innerHTML).not.toContain('retrying');
-    expect(root.dataset.mwLoaded).toBe('1');
+  it('1155 cards get the hint instead of a checkbox on the own profile', async () => {
+    // Batch tools require tradingLive(): all three contract addresses set.
+    const w = window as unknown as Record<string, string>;
+    w.MW_MARKETPLACE = '0x1111111111111111111111111111111111111111';
+    w.MW_AUCTION = '0x2222222222222222222222222222222222222222';
+    w.MW_OFFERBOOK = '0x4444444444444444444444444444444444444444';
+    const { _resetChainCache } = await import('../lib/chains');
+    _resetChainCache();
+    localStorage.setItem('mw_addr', ADDR_A);
+    vi.stubGlobal('fetch', fetchMock({
+      nfts: [
+        { collection: '0x3333333333333333333333333333333333333333', token_id: '1', name: 'Single', standard: 'erc721' },
+        { collection: '0x3333333333333333333333333333333333333333', token_id: '2', name: 'Multi', standard: 'erc1155' },
+      ],
+    }));
+    app = mount(ProfilePage, { target: host, props: { addr: ADDR_A } });
+    flushSync();
+    await waitFor(() => expect(host.textContent).toContain('Single'));
+    // One checkbox (the 721), one hint button (the 1155).
+    expect(host.querySelectorAll('input[type="checkbox"]').length).toBe(1);
+    const hintBtn = host.querySelector('.pp-hint1155 button');
+    expect(hintBtn).toBeTruthy();
+    // The sticky batch bar appears only once something is selected.
+    expect(host.textContent).not.toContain('selected — one price, one duration');
+    const cb = host.querySelector<HTMLInputElement>('input[type="checkbox"]')!;
+    cb.checked = true;
+    cb.dispatchEvent(new Event('change', { bubbles: true }));
+    flushSync();
+    await waitFor(() => expect(host.textContent).toContain('List 1 selected — one price, one duration'));
   });
 });

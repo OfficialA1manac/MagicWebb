@@ -33,53 +33,45 @@ Songbird and Flare are **read-only** until the contracts pass the external secur
 Trade there once it ships; until then, trade on Flare Coston2. Switching network navigates
 to a different site, so you connect your wallet again on arrival.
 
-## Listings (fixed price)
+## What each role can do
 
-| Action | Viewer | Buyer | Seller / owner |
+| Action | Viewer | Buyer (wallet) | Seller/Owner |
 |---|---|---|---|
-| Browse, filter, sort, search, see price history | ✓ | ✓ | ✓ |
-| See the Verified NFT badge and what it means | ✓ | ✓ | ✓ |
-| Buy (pays the price; receives the NFT in the same tx) | connect first | ✓ | not your own |
-| List an NFT (price ≥ 1 native, duration 1m–24h (14 fixed durations)) | — | only NFTs you own | ✓ |
-| Change price | — | — | ✓ own listing |
-| Cancel listing (NFT never left your wallet) | — | — | ✓ own listing |
-| Batch-list up to 50 | — | — | ✓ |
-| Save a search / get notifications | — | ✓ (sign-in message) | ✓ |
+| Browse, search, view token/collection/profile/activity | ✓ | ✓ | ✓ |
+| Buy a listing | connect prompt | ✓ | hidden on own |
+| List (721 / 1155 units), 14 durations, min 1 | — | — | ✓ owner |
+| Batch list up to 50 | — | — | ✓ 721 only |
+| Change price / cancel listing | — | — | ✓ seller |
+| Start auction (721 / 1155) | — | — | ✓ owner |
+| Bid (+1 C2FLR over lead, cumulative) | connect prompt | ✓ (not seller) | — |
+| Withdraw when outbid | — | ✓ | — |
+| Cancel auction | — | — | ✓ only with no bids |
+| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s) |
+| Cancel & refund everyone (3d after end) | — | ✓ winner | ✓ seller (+ keeper auto) |
+| Make offer (if collection allows) | connect prompt | ✓ | — |
+| Raise / withdraw own offer (full refund) | — | ✓ | — |
+| Accept / decline / return expired | — | — | ✓ owner |
+| Enable offers for a collection | — | — | ✓ ERC-173 owner |
+| Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
+| Edit own profile (SIWE) | — | ✓ | ✓ |
+| Switch network (keeps path) | ✓ | ✓ | ✓ |
+| Anything admin | none exists | none | none |
 
-## Auctions
-
-| Action | Viewer | Buyer | Seller / owner |
-|---|---|---|---|
-| Watch live countdown, bids, anti-snipe extensions | ✓ | ✓ | ✓ |
-| Create auction (reserve ≥ 1 native, duration 1m–24h (14 fixed durations)) | — | — | ✓ |
-| Bid — bids are cumulative; your total must beat the leader by ≥ 1 native | — | ✓ | not your own |
-| Be outbid → withdraw your total any time | — | ✓ | — |
-| Settle after it ends (NFT → winner, proceeds → seller minus 2%) | — | ✓ if you won it | ✓ |
-| Cancel early | — | — | ✓ only while there are no bids |
-| Last 3 minutes: every bid extends the end by 3 min (max 30 min total) | rule | rule | rule |
+The buttons carry the same names in the app: **Buy**, **List for sale**, **Change price**,
+**Cancel listing**, **Start auction**, **Place bid**, **Withdraw my bid**, **Cancel
+auction**, **Settle now**, **Cancel and refund everyone**, **Place offer**, **Withdraw
+offer (full refund)**, **Accept**, **Decline**, **Enable offers**.
 
 **Who can settle.** Three parties, and no one else: the marketplace's own keeper (which
 settles the moment the auction ends, so normally nobody has to do anything), the seller, and
 the winner. A passer-by cannot settle someone else's auction. This never traps money — if
 you did not win, your escrow is withdrawable at any time, and if an auction is somehow left
-unsettled for three days anyone may force-cancel it and return every bid.
+unsettled for three days, the winner, the seller, or the keeper can **Cancel and refund
+everyone**, returning every bid.
 
 **Bids must take the lead.** A bid that clears neither the reserve nor the leader's total
 plus the flat 1-native-token increment is rejected outright rather than parked as escrow — you never
 end up with money locked behind a position that cannot win.
-
-## Offers (escrowed)
-
-| Action | Viewer | Buyer | Seller / owner |
-|---|---|---|---|
-| See open offers on any NFT | ✓ | ✓ | ✓ |
-| Make an offer (amount ≥ 1 native escrowed, duration 1m–24h (14 fixed durations)) | — | ✓ if the collection allows offers | not on your own |
-| Raise / lower your offer (keeps original expiry) | — | ✓ | — |
-| Cancel your offer → full refund | — | ✓ before expiry | — |
-| Accept an offer (NFT → bidder, funds → you minus 2%) | — | — | ✓ owner |
-| Decline an offer (bidder refunded in full) | — | — | ✓ owner |
-| Refund an expired offer (your own always; keeper sweeps others) | — | ✓ | ✓ |
-| Enable offers for a collection | — | — | ✓ collection **contract** owner (ERC-173) |
 
 ## Search & discovery
 
@@ -105,12 +97,12 @@ per-network, because those live in each network's own contracts.
 ## Refunds
 
 Outbid? Offer declined? Payment could not be pushed to your wallet? The amount is held for
-you in the contract. **Profile → "Refunds waiting for you" → Withdraw.** Never expires.
+you in the contract. **Profile → the Refunds card → Withdraw.** Never expires.
 
 ## What nobody can do
 
 - Freeze, move or take your NFT or funds (non-custodial; contracts hold only what you escrow).
-- Curate or approve listings — the Verified NFT badge is computed from on-chain facts.
+- Curate or approve listings — the Verified badge is computed from on-chain facts.
 - Change the fee.
 - Pause anything administratively. There is no circuit breaker, no operator role, and no
   entry gate — no role can halt listings, bids, offers, buys, cancels, settlements, or

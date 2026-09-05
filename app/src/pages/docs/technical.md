@@ -99,6 +99,8 @@ Optional operations hardening (not required by contracts): a small **relayer** b
 2. Bidders place bids. Outbid losers receive **full** prior-bid balances in `pendingReturns` (no fee **applied** on bids). The leader may **compound** a higher bid by sending only the **increment**; other bidders send the **full** new high amount. The app prompts `withdrawRefund` when appropriate (see §3.4).
 3. After `endsAt`, `settle` may be called once by the **keeper, the seller, or the winning bidder** — no other party can settle someone else's auction (the keeper bot does it automatically the moment the auction ends). That transaction transfers the NFT to the highest bidder, **then** **applies** the immutable platform fee to the winning `highestBid` and pays the seller—**fee is applied only on this winning settlement**, not on intermediate bids. The app prompts `settle` when you view the auction (see §3.4); **on-chain**, it remains one atomic transaction, not a cron inside the contract.
 
+Entry points behind the app's buttons (the guides use the button names; the identifiers live here): **Withdraw my bid** → `withdrawLoserFunds` (a non-leading bidder pulls their cumulative escrow at any time before settlement); **Cancel and refund everyone** → `forceCancel` (winner, seller, or keeper, only 3 days after an unsettled end — releases every bidder's escrow); **Enable offers** on a collection page → `setOfferEligible` (ERC-173 collection owner only); the profile **Refunds** card reads `pendingReturns` on each core contract and withdraws via `withdrawRefund`.
+
 ## 5. Security model
 
 | Vector | Mitigation |

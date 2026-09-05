@@ -4,23 +4,8 @@
 // describes, and the whole page is static HTML after build.
 import BaseLayout from '../../layouts/BaseLayout.astro';
 import WalletConnect from '../../components/WalletConnect';
-
-const docs = [
-  { slug: 'whitepaper',  title: 'Whitepaper',           icon: '📜', accent: '#34d399',
-    blurb: 'Vision, market, and the seller-pays economic model.' },
-  { slug: 'technical',   title: 'Technical Whitepaper', icon: '⚙️', accent: '#7dd3fc',
-    blurb: 'Contracts, escrow flows, and the indexer pipeline in depth.' },
-  { slug: 'user-guide',  title: 'User Guide',           icon: '🧭', accent: '#a78bfa',
-    blurb: 'Listing, bidding, offers, and withdrawals — step by step.' },
-  { slug: 'capabilities', title: 'What You Can Do',     icon: '✅', accent: '#4ade80',
-    blurb: 'Viewer, buyer, seller: every action for listings, auctions, offers and refunds.' },
-  { slug: 'faq',         title: 'FAQ',                  icon: '💡', accent: '#fcd34d',
-    blurb: 'Quick answers: fees, refunds, wallets, and safety.' },
-  { slug: 'token-hooks', title: 'Token Architecture',   icon: '🔗', accent: '#fb7185',
-    blurb: 'Future token integration points anchored in the manager contract.' },
-  { slug: 'api',         title: 'API Reference',        icon: '🔌', accent: '#22d3ee',
-    blurb: 'Complete REST API documentation — endpoints, auth, schemas, and examples.' },
-];
+// One registry for this index and DocLayout's sidebar (start-here first).
+import { DOCS as docs } from './_registry';
 ---
 
 <BaseLayout title="Docs" description="MagicWebb documentation — whitepapers, user guide, FAQ, and the API reference." activeNav="docs">

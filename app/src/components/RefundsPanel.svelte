@@ -58,15 +58,19 @@
   </section>
 {/if}
 
-{#if me && !loading && total > 0n}
+{#if me && !loadError}
+  <!-- Always visible on the own profile, even at zero (spec B4 "Profile"):
+       the card teaches where refunds land before the user ever needs one. -->
   <section class="rp" aria-labelledby="rp-h">
-    <div class="rp-head"><h2 id="rp-h">Refunds waiting for you</h2><span class="rp-total mono">{fmtPrice(total)} {sym}</span></div>
-    <p class="rp-hint">Outbid or declined? Funds come back here, never lost. Withdraw any time — gas only.</p>
-    <ul class="rp-list">
-      {#each rows.filter((r) => r.ok && r.wei > 0n) as r (r.key)}
-        <li><span>{CORE_LABEL[r.key]}</span><span class="mono">{fmtPrice(r.wei)} {sym}</span><button class="rp-btn" onclick={() => withdraw(r)}>Withdraw</button></li>
-      {/each}
-    </ul>
+    <div class="rp-head"><h2 id="rp-h">Refunds: <span class="rp-total mono">{fmtPrice(total)} {sym}</span></h2></div>
+    <p class="rp-hint">Outbid or declined? Funds come back here, never lost.</p>
+    {#if total > 0n}
+      <ul class="rp-list">
+        {#each rows.filter((r) => r.ok && r.wei > 0n) as r (r.key)}
+          <li><span>{CORE_LABEL[r.key]}</span><span class="mono">{fmtPrice(r.wei)} {sym}</span><button class="rp-btn" onclick={() => withdraw(r)}>Withdraw</button></li>
+        {/each}
+      </ul>
+    {/if}
   </section>
 {/if}
 
