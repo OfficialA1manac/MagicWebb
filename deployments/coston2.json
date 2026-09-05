@@ -14,7 +14,8 @@
     "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
   },
   "trackedCollections": [
-    "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
+    "0x832d74Cfbb4617B50C32cD110dfe16837A359B35",
+    "0x642EB8dCa3e9e1eEc4302f0c51278c4dDA44207e"
   ],
   "rpc": {
     "primary": "https://coston2-api.flare.network/ext/C/rpc",
