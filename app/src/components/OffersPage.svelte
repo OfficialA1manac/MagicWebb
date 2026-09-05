@@ -1,45 +1,88 @@
+<script module lang="ts">
+  // Pure offers matrix (spec B4 "Offers") — exported for the component tests
+  // (same pattern as TokenPage.actionZone): tab × expired → actions, plus the
+  // sort rules ("Best offer" is the default on Received).
+  export type OffersTab = 'received' | 'sent';
+  export type OffersSort = 'best' | 'newest' | 'expiring';
+  export interface OfferActionCell { kind: string; label: string }
+
+  export function offerActions(tab: OffersTab, expired: boolean): OfferActionCell[] {
+    if (tab === 'received') {
+      return expired
+        ? [{ kind: 'return-funds', label: 'Return their funds' }]
+        : [{ kind: 'accept', label: 'Accept' }, { kind: 'decline', label: 'Decline' }];
+    }
+    return expired
+      ? [{ kind: 'get-refund', label: 'Get refund' }]
+      : [{ kind: 'raise', label: 'Raise offer' }, { kind: 'withdraw', label: 'Withdraw offer (full refund)' }];
+  }
+
+  export function defaultOffersSort(tab: OffersTab): OffersSort {
+    return tab === 'received' ? 'best' : 'newest';
+  }
+
+  export interface OfferRowLike { amount_wei: string; created_at: string; expires_at: string }
+
+  export function isOfferExpired(o: { expires_at: string }, nowMs: number): boolean {
+    return new Date(o.expires_at).getTime() <= nowMs;
+  }
+
+  export function sortOfferRows<T extends OfferRowLike>(rows: T[], sort: OffersSort): T[] {
+    const out = rows.slice();
+    const amt = (o: OfferRowLike) => { try { return BigInt(o.amount_wei || '0'); } catch { return 0n; } };
+    switch (sort) {
+      case 'best': out.sort((a, b) => (amt(b) > amt(a) ? 1 : amt(b) < amt(a) ? -1 : 0)); break;
+      case 'newest': out.sort((a, b) => new Date(b.created_at).getTime() - new Date(a.created_at).getTime()); break;
+      case 'expiring': out.sort((a, b) => new Date(a.expires_at).getTime() - new Date(b.expires_at).getTime()); break;
+    }
+    return out;
+  }
+</script>
+
 <script lang="ts">
-  // Offers: "Received" (on NFTs you own: accept / decline) and "Made"
-  // (your escrowed offers: cancel before expiry, refund after).
+  // Offers (spec B4): viewer sees a teach-first page (two disabled tabs, one
+  // explainer row each, a single Connect wallet primary); connected sees
+  // "Received (n)" / "Sent (n)" with per-row actions. Expired offers stay in
+  // the list with their refund action — never filtered out.
   import { onMount } from 'svelte';
   import VerifiedBadge from './VerifiedBadge.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
   import { MW } from '../lib/mw';
-  import { tradingLive, readOnlyCopy } from '../lib/chains';
+  import { tradingLive, readOnlyCopy, currentChain } from '../lib/chains';
+  import { ws } from '../lib/ws/client';
+  import { userChannel } from '../lib/ws/channels';
+  import { fmtPrice, shortAddr, fmtCountdownShort, timeAgo } from '../lib/format';
+  import { resolveImageUri } from '../lib/image-uri';
+  import { onAccountChange } from '../lib/tx/client';
+
+  type Offer = { offer_id: string; bidder: string; collection: string; token_id: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string; created_at: string; name?: string; image_uri?: string; collection_verified?: boolean; collection_creator?: string; collection_name?: string; collection_tracked?: boolean };
 
   const live = tradingLive();
   const ro = readOnlyCopy();
-  import { ws } from '../lib/ws/client';
-  import { userChannel } from '../lib/ws/channels';
-  import { currentChain } from '../lib/chains';
-  import { fmtPrice, shortAddr, fmtCountdown, timeAgo } from '../lib/format';
-  import { onAccountChange } from '../lib/tx/client';
-
-  type Offer = { offer_id: string; bidder: string; collection: string; token_id: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string; created_at: string; name?: string; image_uri?: string; collection_verified?: boolean; collection_creator?: string; collection_name?: string };
+  const sym = currentChain().currency;
 
   let me = $state<string | null>(null);
-  let tab = $state<'received' | 'made'>('received');
+  let tab = $state<OffersTab>('received');
+  let sort = $state<OffersSort>('best');
   let loading = $state(false);
   let error = $state('');
-  let made = $state<Offer[]>([]);
+  let sent = $state<Offer[]>([]);
   let received = $state<Offer[]>([]);
   let now = $state(Date.now());
   let syncing = $state('');
-  const sym = currentChain().currency;
 
   async function j<T>(u: string): Promise<T | null> { try { const r = await fetch(u); return r.ok ? (await r.json()) as T : null; } catch { return null; } }
   async function load() {
     if (!me) return;
-    loading = made.length === 0 && received.length === 0; error = '';
+    loading = sent.length === 0 && received.length === 0; error = '';
     const [m, r] = await Promise.all([j<Offer[]>(`/api/v1/offers?bidder=${me}&limit=100`), j<Offer[]>(`/api/v1/offers?owner=${me}&limit=100`)]);
     if (!m && !r) error = 'Could not load offers.';
-    made = m ?? []; received = r ?? []; loading = false; syncing = '';
+    sent = m ?? []; received = r ?? []; loading = false; syncing = '';
   }
+
   onMount(() => {
-    // Track the subscribed user channel so a wallet switch drops the old
-    // address's channel and unmount leaves nothing subscribed.
     let ch = '';
     const offAcct = onAccountChange((a) => {
       const changed = a.address !== me;
@@ -50,59 +93,95 @@
     });
     const offWs = ws.on('offer-updated', () => void load());
     const tick = setInterval(() => (now = Date.now()), 1000);
-    if (location.hash === '#made') tab = 'made';
+    if (location.hash === '#sent' || location.hash === '#made') setTab('sent');
     return () => { offAcct(); offWs(); clearInterval(tick); if (ch) ws.unsubscribe(ch); };
   });
-  const expired = (o: Offer) => new Date(o.expires_at).getTime() <= now;
-  const active = (o: Offer) => o.status === 'active';
-  async function act(run: () => Promise<unknown>, label: string) { try { await run(); syncing = label; setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal */ } }
+
+  function setTab(t: OffersTab) { tab = t; sort = defaultOffersSort(t); }
+
+  const expired = (o: Offer) => isOfferExpired(o, now);
+  // "active" status rows past their expiry ARE shown — with the refund action.
+  const visible = (o: Offer) => o.status === 'active';
   const label = (o: Offer) => o.name || `#${o.token_id}`;
-  let list = $derived((tab === 'received' ? received : made).filter(active));
+  const thumb = (o: Offer) => resolveImageUri(o.image_uri, o.token_id, 128);
+  let receivedN = $derived(received.filter(visible).length);
+  let sentN = $derived(sent.filter(visible).length);
+  let list = $derived(sortOfferRows((tab === 'received' ? received : sent).filter(visible), sort));
+
+  async function act(run: () => Promise<unknown>, msg: string) { try { await run(); syncing = msg; setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal showed it */ } }
+  function runAction(kind: string, o: Offer) {
+    switch (kind) {
+      case 'accept': void act(() => MW.acceptOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, principalWei: o.amount_wei, std: o.standard as 'erc721' | 'erc1155', name: label(o) }), 'Accepted · syncing'); break;
+      case 'decline': void act(() => MW.rejectOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, name: label(o) }), 'Declined · syncing'); break;
+      case 'return-funds': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Funds returned · syncing'); break;
+      case 'raise': location.href = `/token/${o.collection}/${o.token_id}#offer`; break;
+      case 'withdraw': void act(() => MW.cancelOffer({ nft: o.collection, tokenId: o.token_id, name: label(o) }), 'Withdrawn · full refund · syncing'); break;
+      case 'get-refund': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing'); break;
+    }
+  }
 </script>
 
 {#if !live}
   <EmptyState title={ro.heading} body={ro.body} cta={ro.ctaHref ? { label: ro.cta, href: ro.ctaHref } : undefined} />
 {:else if !me}
-  <EmptyState title="Connect your wallet to see offers" body="Offers you make are held in escrow and fully refundable. Offers on NFTs you own show up here for you to accept or decline." cta={{ label: 'Connect wallet', onclick: () => MW.connect().catch(() => {}) }} />
+  <!-- Viewer: teach first (spec) — disabled tabs, one explainer row each, one primary. -->
+  <div class="op-tabs" role="tablist" aria-label="Offers">
+    <button role="tab" aria-selected="true" class="is-on" disabled aria-disabled="true" data-testid="tab-received">Received</button>
+    <button role="tab" aria-selected="false" disabled aria-disabled="true" data-testid="tab-sent">Sent</button>
+  </div>
+  <ul class="op-list op-teach" data-testid="viewer-teach">
+    <li class="op-row op-explain">Offers on NFTs you own appear here</li>
+    <li class="op-row op-explain">Offers you've made appear here</li>
+  </ul>
+  <div class="op-connect">
+    <button class="btn btn-primary btn-lg" onclick={() => MW.connect().catch(() => {})}>Connect wallet</button>
+  </div>
 {:else}
-  <div class="op-tabs" role="tablist">
-    <button role="tab" aria-selected={tab === 'received'} class:is-on={tab === 'received'} onclick={() => (tab = 'received')}>Received <span class="op-n">{received.filter(active).length}</span></button>
-    <button role="tab" aria-selected={tab === 'made'} class:is-on={tab === 'made'} onclick={() => (tab = 'made')}>Made <span class="op-n">{made.filter(active).length}</span></button>
+  <div class="op-bar">
+    <div class="op-tabs" role="tablist" aria-label="Offers">
+      <button role="tab" aria-selected={tab === 'received'} class:is-on={tab === 'received'} data-testid="tab-received" onclick={() => setTab('received')}>Received <span class="op-n">{receivedN}</span></button>
+      <button role="tab" aria-selected={tab === 'sent'} class:is-on={tab === 'sent'} data-testid="tab-sent" onclick={() => setTab('sent')}>Sent <span class="op-n">{sentN}</span></button>
+    </div>
+    <label class="op-sort">
+      <span>Sort</span>
+      <select bind:value={sort} data-testid="offers-sort">
+        <option value="best">Best offer</option>
+        <option value="newest">Newest</option>
+        <option value="expiring">Expiring soon</option>
+      </select>
+    </label>
   </div>
   {#if syncing}<div class="op-sync" role="status">{syncing}</div>{/if}
   {#if loading}
-    <div class="op-list"><Skeleton h="64px" r="14px" /><Skeleton h="64px" r="14px" /><Skeleton h="64px" r="14px" /></div>
+    <div class="op-list"><Skeleton h="72px" r="14px" /><Skeleton h="72px" r="14px" /><Skeleton h="72px" r="14px" /><Skeleton h="72px" r="14px" /></div>
   {:else if error}
-    <ErrorState message={error} retry={load} />
+    <ErrorState title="Could not load offers" message="Give it a moment and try again." retry={load} />
   {:else if list.length === 0}
     {#if tab === 'received'}
-      <EmptyState title="No offers on your NFTs yet" body="When someone makes an offer on something you own, it appears here with Accept and Decline." cta={{ label: 'Browse listings', href: '/listings' }} />
+      <EmptyState title="No offers yet" body="When someone offers on your NFT it appears here." icon="inbox" />
     {:else}
-      <EmptyState title="You have not made any offers" body="Find an NFT you want and tap Make offer on its page. Your funds stay refundable until you are accepted or the offer expires." cta={{ label: 'Find an NFT', href: '/search' }} />
+      <EmptyState title="You haven't made any offers" body="Find an NFT you want and tap Make offer on its page. Your funds stay refundable until you are accepted or the offer expires." icon="tag" cta={{ label: 'Browse listings', href: '/listings' }} />
     {/if}
   {:else}
     <ul class="op-list">
       {#each list as o (o.offer_id)}
         <li class="op-row" class:is-expired={expired(o)}>
-          <a class="op-thumb" href={`/token/${o.collection}/${o.token_id}`} aria-label={label(o)}>{#if o.image_uri}<img src={o.image_uri.startsWith('/api') || o.image_uri.startsWith('data:') ? o.image_uri : `/api/v1/media?url=${encodeURIComponent(o.image_uri)}&id=${o.token_id}`} alt={label(o)} loading="lazy" decoding="async" />{/if}</a>
+          <a class="op-thumb" href={`/token/${o.collection}/${o.token_id}`} aria-label={label(o)}>{#if thumb(o)}<img src={thumb(o)} alt={label(o)} loading="lazy" decoding="async" />{/if}</a>
           <div class="op-main">
-            <div class="op-title"><a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a><VerifiedBadge verified={!!o.collection_verified} creatorAddr={o.collection_creator ?? ''} collectionName={o.collection_name ?? ''} network={currentChain().name} /></div>
-            <div class="op-dim">{tab === 'received' ? `from ${shortAddr(o.bidder)}` : `on ${shortAddr(o.collection)}`} · {expired(o) ? 'expired ' + timeAgo(o.expires_at) : 'expires in ' + fmtCountdown(new Date(o.expires_at).getTime() / 1000, now)}</div>
+            <div class="op-title">
+              <a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a>
+              <VerifiedBadge verified={!!o.collection_verified} tracked={o.collection_tracked} creatorAddr={o.collection_creator ?? ''} collectionName={o.collection_name ?? ''} hint={false} />
+            </div>
+            <div class="op-dim">
+              {tab === 'received' ? `from ${shortAddr(o.bidder)}` : `on ${o.collection_name || shortAddr(o.collection)}`}
+              · {expired(o) ? `expired ${timeAgo(o.expires_at)}` : `Expires in ${fmtCountdownShort(new Date(o.expires_at).getTime() / 1000, now)}`}
+            </div>
           </div>
           <div class="op-amt mono">{fmtPrice(o.amount_wei)} {sym}</div>
           <div class="op-acts">
-            {#if tab === 'received'}
-              {#if !expired(o)}
-                <button class="btn p" onclick={() => act(() => MW.acceptOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, principalWei: o.amount_wei, std: o.standard as 'erc721' | 'erc1155', name: label(o) }), 'Accepted · syncing')}>Accept</button>
-                <button class="btn g" onclick={() => act(() => MW.rejectOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, name: label(o) }), 'Declined · syncing')}>Decline</button>
-              {:else}
-                <button class="btn g" onclick={() => act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing')}>Refund bidder</button>
-              {/if}
-            {:else if !expired(o)}
-              <button class="btn g" onclick={() => act(() => MW.cancelOffer({ nft: o.collection, tokenId: o.token_id, name: label(o) }), 'Cancelled · syncing')}>Cancel · full refund</button>
-            {:else}
-              <button class="btn p" onclick={() => act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing')}>Get refund</button>
-            {/if}
+            {#each offerActions(tab, expired(o)) as cell (cell.kind)}
+              <button class="btn {cell.kind === 'accept' || cell.kind === 'get-refund' ? 'btn-primary' : 'btn-secondary'} btn-sm op-act" onclick={() => runAction(cell.kind, o)}>{cell.label}</button>
+            {/each}
           </div>
         </li>
       {/each}
@@ -111,22 +190,31 @@
 {/if}
 
 <style>
-  .op-tabs { display: flex; gap: 6px; margin-bottom: 14px; }
-  .op-tabs button { min-height: 44px; padding: 0 16px; border-radius: 12px; background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); color: rgba(255,255,255,.7); font-weight: 700; font-family: inherit; cursor: pointer; display: inline-flex; gap: 8px; align-items: center; }
-  .op-tabs button.is-on { background: rgba(252,211,77,.14); border-color: #fcd34d; color: #fde68a; }
-  .op-n { font-size: 11px; background: rgba(255,255,255,.1); border-radius: 999px; padding: 2px 8px; }
-  .op-sync { padding: 8px 12px; border-radius: 999px; background: rgba(74,222,128,.1); border: 1px solid rgba(74,222,128,.35); color: #bbf7d0; font-size: 13px; font-weight: 600; display: inline-block; margin-bottom: 12px; }
-  .op-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 8px; }
-  .op-row { display: grid; grid-template-columns: 56px 1fr auto; grid-template-areas: "thumb main amt" "acts acts acts"; gap: 8px 12px; align-items: center; padding: 12px; border-radius: 14px; background: rgba(15,15,19,.6); border: 1px solid rgba(255,255,255,.07); }
+  .op-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
+  .op-tabs { display: flex; gap: var(--sp-1); }
+  .op-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text-2); font-weight: 700; font-family: inherit; font-size: var(--fs-body); cursor: pointer; display: inline-flex; gap: var(--sp-2); align-items: center; }
+  .op-tabs button.is-on { background: var(--gold-12); border-color: var(--gold); color: var(--gold-300); }
+  .op-tabs button:disabled { cursor: not-allowed; opacity: .6; }
+  .op-n { font-size: var(--fs-caption); background: rgba(255,255,255,.1); border-radius: var(--r-pill); padding: 2px 8px; }
+  .op-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
+  .op-sort select { min-height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-family: inherit; font-size: var(--fs-small); }
+  .op-teach { margin-bottom: var(--sp-4); }
+  .op-explain { color: var(--text-2); font-size: var(--fs-body); min-height: var(--hit); display: flex; align-items: center; }
+  .op-connect { display: flex; }
+  .op-sync { padding: var(--sp-2) var(--sp-3); border-radius: var(--r-pill); background: var(--green-12); border: 1px solid var(--green); color: var(--green); font-size: var(--fs-small); font-weight: 600; display: inline-block; margin-bottom: var(--sp-3); }
+  .op-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
+  .op-row { display: grid; grid-template-columns: 56px 1fr auto; grid-template-areas: "thumb main amt" "acts acts acts"; gap: var(--sp-2) var(--sp-3); align-items: center; padding: var(--sp-3); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); }
   @media (min-width: 768px) { .op-row { grid-template-columns: 56px 1fr auto auto; grid-template-areas: "thumb main amt acts"; } }
   .op-row.is-expired { opacity: .75; }
-  .op-thumb { grid-area: thumb; width: 56px; height: 56px; border-radius: 10px; background: #1a1a24; overflow: hidden; display: block; } .op-thumb img { width: 100%; height: 100%; object-fit: cover; }
-  .op-main { grid-area: main; min-width: 0; } .op-title { display: flex; align-items: center; gap: 8px; flex-wrap: wrap; } .op-name { color: #fafafa; font-weight: 700; text-decoration: none; font-size: 14px; overflow-wrap: anywhere; }
-  .op-dim { font-size: 12px; color: rgba(255,255,255,.5); }
-  .op-amt { grid-area: amt; font-weight: 600; font-size: 15px; white-space: nowrap; }
-  .op-acts { grid-area: acts; display: flex; gap: 8px; flex-wrap: wrap; }
-  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-  .btn { min-height: 40px; padding: 0 14px; border-radius: 10px; font-weight: 700; font-size: 13px; border: 1px solid transparent; cursor: pointer; font-family: inherit; flex: 1 1 auto; }
-  .btn.p { background: linear-gradient(135deg,#7dd3fc,#0ea5e9); color: #09090b; } .btn.g { background: transparent; color: #fafafa; border-color: rgba(255,255,255,.16); }
-  .btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
+  .op-explain.op-row { grid-template-columns: 1fr; grid-template-areas: "main"; }
+  .op-thumb { grid-area: thumb; width: 56px; height: 56px; border-radius: var(--r-control); background: var(--surface-2); overflow: hidden; display: block; }
+  .op-thumb img { width: 100%; height: 100%; object-fit: cover; }
+  .op-main { grid-area: main; min-width: 0; }
+  .op-title { display: flex; align-items: center; gap: var(--sp-2); flex-wrap: wrap; }
+  .op-name { color: var(--text); font-weight: 700; text-decoration: none; font-size: var(--fs-body); overflow-wrap: anywhere; }
+  .op-dim { font-size: var(--fs-small); color: var(--text-3); }
+  .op-amt { grid-area: amt; font-weight: 600; font-size: var(--fs-h3); white-space: nowrap; color: var(--gold-300); }
+  .op-acts { grid-area: acts; display: flex; gap: var(--sp-2); flex-wrap: wrap; }
+  .op-act { flex: 1 1 auto; }
+  .mono { font-family: var(--font-mono); }
 </style>
