@@ -246,6 +246,11 @@
    * fetched via the media proxy (SSRF-safe) with a direct fetch as backup.
    * Returns true when the token verifiably exists on-chain.
    */
+  function withTimeout<T>(p: Promise<T>, ms: number, fallback: T): Promise<T> {
+    // A dead or blackholed RPC must never hang the page's not-found decision
+    // (found by the CI e2e run: the 404 state waited on the fallback forever).
+    return Promise.race([p, new Promise<T>((res) => setTimeout(() => res(fallback), ms))]);
+  }
   async function loadOnChainFallback(): Promise<boolean> {
     try {
       const pub = await publicClient();
@@ -323,7 +328,7 @@
       // the explorer, never the DB): fall back to on-chain reads before
       // showing the error. Skip the RPC round-trips on reloads that already
       // proved the token exists.
-      if (!onchain) onchain = await loadOnChainFallback();
+      if (!onchain) onchain = await withTimeout(loadOnChainFallback().catch(() => false), 6000, false);
       if (!onchain) error = "We don't know this NFT yet. If it was just minted or transferred, it will appear here within a few minutes.";
     } else {
       onchain = false;
@@ -333,7 +338,7 @@
     // "Token #N doesn't exist in this collection" 404 state.
     unknownToken = false;
     if (c && !l && !auction && !td) {
-      if (!onchain) onchain = await loadOnChainFallback();
+      if (!onchain) onchain = await withTimeout(loadOnChainFallback().catch(() => false), 6000, false);
       unknownToken = !onchain;
     }
     await loadOwner();
