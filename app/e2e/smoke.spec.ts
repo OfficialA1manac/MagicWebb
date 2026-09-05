@@ -67,10 +67,13 @@ test('collection page shows the Items tab by default and a badge pill', async ({
 // ── 4. Token 404 within a known collection ─────────────────────────────────
 test("unknown token id shows the doesn't-exist state", async ({ page }) => {
   desktopOnly();
+  test.slow(); // triples the test timeout for the fallback wait
   await mockApi(page); // token detail + listing 404, collection 200, RPC blocked
   await serveBuiltPage(page, 'token');
   await page.goto(`/token/${COLLECTION}/999999`);
-  await expect(page.getByText("Token #999999 doesn't exist in this collection")).toBeVisible();
+  // The 404 decision waits for the on-chain fallback to fail (several viem
+  // retry rounds against the mocked RPC) — slower on CI runners than locally.
+  await expect(page.getByText("Token #999999 doesn't exist in this collection")).toBeVisible({ timeout: 40000 });
   await expect(page.getByRole('link', { name: 'Browse the collection' })).toHaveAttribute(
     'href',
     `/collection/${COLLECTION}`,
