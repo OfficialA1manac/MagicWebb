@@ -4,13 +4,13 @@
   "script": "contracts/script/DeployV34.s.sol",
   "chainId": 114,
   "status": "deployed",
-  "deployedAt": "2026-08-28",
-  "indexFromBlock": 34729709,
+  "deployedAt": "2026-09-04",
+  "indexFromBlock": 34905078,
   "contracts": {
-    "marketplace": "0x69558deFEbBBc8b7b2e09a7572abFd05435a7D30",
-    "auctionHouse": "0x6286FA2C766D55d7c9f30493c1e94C8520D60fE9",
-    "offerBook": "0x840E412cb2DCF4454A950132E8BAd5C53a81118d",
-    "marketplaceManager": "0xA4DB12d4F41c573EcCb4EBC16f50948b0487d30f",
+    "marketplace": "0xa6fbad082Bc73515A48BFc933014757461Cf3f8e",
+    "auctionHouse": "0x0ADe5F5A4d4C836AF5a5625B678846f66bE3Dd7D",
+    "offerBook": "0x358d4504f4d1fA76e26d142d59f0369c5FD81F9f",
+    "marketplaceManager": "0x14C3b1Bae9d9224E5456FA78e527ADEA48e3CDA3",
     "nft": "0x832d74Cfbb4617B50C32cD110dfe16837A359B35"
   },
   "trackedCollections": [
@@ -94,6 +94,16 @@
         "marketplaceManager": "0x71be8838d2952e02015f594506Eeee23B7Ec90cc"
       },
       "note": "v3.0 superseded same-day by v3.1: manager gains self-replenishing keeper fleet (addKeeper/removeKeeper) so instant settlement survives full admin renunciation"
+    },
+    {
+      "contracts": {
+        "marketplace": "0x69558deFEbBBc8b7b2e09a7572abFd05435a7D30",
+        "auctionHouse": "0x6286FA2C766D55d7c9f30493c1e94C8520D60fE9",
+        "offerBook": "0x840E412cb2DCF4454A950132E8BAd5C53a81118d",
+        "marketplaceManager": "0xA4DB12d4F41c573EcCb4EBC16f50948b0487d30f"
+      },
+      "deployedAt": "2026-08-28",
+      "note": "v3.2 bytecode set (AuctionHouse upgraded to v3.3 in place) superseded 2026-09-04 by the v3.5 fresh deploy (14 durations, 2% fee split 1.5 platform / 0.5 keeper mandatory, transferAdmin, unproxied manager)"
     }
   ]
 }
