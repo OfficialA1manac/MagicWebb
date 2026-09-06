@@ -173,7 +173,7 @@
 <style>
   .nft-card {
     display: block;
-    background: rgba(15, 15, 19, 0.6);
+    background: var(--surface);
     border: 1px solid var(--white-10);
     border-radius: 1rem;
     overflow: hidden;
@@ -282,7 +282,7 @@
   .card-body {
     padding: 0.75rem;
     border-top: 1px solid var(--white-10);
-    background: rgba(15, 15, 19, 0.6);
+    background: var(--surface);
   }
 
   .collection-addr {

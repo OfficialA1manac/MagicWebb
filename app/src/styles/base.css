@@ -157,7 +157,9 @@ main { position: relative; z-index: 1; }
 .mw-devbanner { background: var(--gold-12); color: #fde68a; border-bottom-color: var(--gold-35); }
 .mw-devbanner a { color: #fde68a; }
 #ro-banner { background: var(--sky-12); border-bottom-color: var(--sky-35); }
-@media (prefers-color-scheme: light) { .mw-devbanner, .mw-devbanner a { color: var(--gold); } }
+/* Light: amber-900 on the gold tint clears 4.5:1 (var(--gold) did not once the tint was defined for light). */
+@media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .mw-devbanner, :root:not([data-theme="dark"]) .mw-devbanner a { color: #78350f; } }
+:root[data-theme="light"] .mw-devbanner, :root[data-theme="light"] .mw-devbanner a { color: #78350f; }
 
 /* ── Mobile bottom tab bar: 5 thumb-reach destinations ──────────────────── */
 .mw-tabbar {
