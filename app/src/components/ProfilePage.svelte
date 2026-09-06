@@ -12,7 +12,7 @@
   import Skeleton from './Skeleton.svelte';
   import Hint from './Hint.svelte';
   import Icon from './Icon.svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import RefundsPanel from './RefundsPanel.svelte';
   import { fmtAmount, fmtPrice, shortAddr, timeAgo, copyText } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
@@ -100,6 +100,8 @@
   let offersRecv = $derived(pp.offersReceived ?? []);
   let activity = $derived(pp.activity ?? []);
   let createdColls = $derived(pp.createdCollections ?? []);
+  // ★ on the profile header only for a verified creator (D3).
+  let verifiedCreator = $derived((profile as any)?.verified_creator === true || createdColls.some((c: any) => c?.verified === true));
   let inventory = $derived(mergeInventory(nfts, listings, auctions as InventoryItem[]));
   let tabs = $derived(tabsFor(own));
   let displayName = $derived(profile?.display_name || shortAddr(target));
@@ -420,8 +422,8 @@
           <span class="pp-tag">{holderTag}</span>
           <Hint text={profile?.tag ? 'Profile tag — set by this user.' : HOLDER_BADGE_TIP} label="About this tag" />
         {/if}
-        {#if createdColls.length}
-          <a class="pp-creator" href="/docs/faq#creator" title="Collection creator"><span aria-hidden="true">★</span> Creator</a>
+        {#if verifiedCreator}
+          <Badge variant="creator" tip={`Creator of ${createdColls.map((c: any) => c.name || shortAddr(String(c.address || ''))).join(', ') || 'a verified collection'}.`} />
         {/if}
       </div>
       <p class="pp-addr mono">
@@ -494,7 +496,7 @@
               <span class="pp-cardbody">
                 <span class="pp-cardmeta">
                   <span class="pp-coll mono">{shortAddr(String(it.collection || ''))}</span>
-                  <VerifiedBadge verified={it.collection_verified === true} creatorAddr={it.collection_creator || ''} tracked={it.collection_tracked ?? undefined} collectionName={it.collection_name || ''} link={false} hint={false} />
+                  <Badge variant="check" row={it} link={false} hint={false} />{#if it.creator_is_owner}<Badge variant="creator" link={false} hint={false} />{/if}
                 </span>
                 <span class="pp-cardname">{it.name || `#${tid}`}</span>
               </span>
@@ -519,7 +521,7 @@
               <span class="pp-cardbody">
                 <span class="pp-cardmeta">
                   <span class="pp-coll mono">{shortAddr(String(it.collection || ''))}</span>
-                  <VerifiedBadge verified={it.collection_verified === true} creatorAddr={it.collection_creator || ''} tracked={it.collection_tracked ?? undefined} collectionName={it.collection_name || ''} link={false} hint={false} />
+                  <Badge variant="check" row={it} link={false} hint={false} />{#if it.creator_is_owner}<Badge variant="creator" link={false} hint={false} />{/if}
                 </span>
                 <span class="pp-cardname">{it.name || `#${tid}`}</span>
               </span>
@@ -535,7 +537,7 @@
         <div class="pp-list">
           {#each auctions as a (String(a.auction_id))}
             <a class="pp-row" href={`/auction/${encodeURIComponent(String(a.auction_id))}`}>
-              <span class="pp-rowmain">Auction #{a.auction_id}
+              <span class="pp-rowmain">Auction #{a.auction_id} <Badge variant="check" row={a} link={false} hint={false} />
                 <span class="pp-coll mono">{shortAddr(String(a.collection || ''))} #{a.token_id}</span>
               </span>
               <span class="pp-chip">{a.status || 'active'}</span>
@@ -554,7 +556,7 @@
           <div class="pp-list">
             {#each offersRecv as o, i (String(o.collection) + String(o.token_id) + String(o.bidder ?? i))}
               <a class="pp-row" href={`/token/${encodeURIComponent(String(o.collection))}/${encodeURIComponent(String(o.token_id))}`}>
-                <span class="pp-rowmain">From {shortAddr(String(o.bidder || ''))}
+                <span class="pp-rowmain">From {shortAddr(String(o.bidder || ''))} <Badge variant="check" row={o} link={false} hint={false} />
                   <span class="pp-coll mono">{shortAddr(String(o.collection || ''))} #{o.token_id}</span>
                 </span>
                 <span class="pp-chip">{o.status || 'pending'}</span>
@@ -568,7 +570,7 @@
           <div class="pp-list">
             {#each offersSent as o, i (String(o.collection) + String(o.token_id) + String(i))}
               <a class="pp-row" href={`/token/${encodeURIComponent(String(o.collection))}/${encodeURIComponent(String(o.token_id))}`}>
-                <span class="pp-rowmain">{shortAddr(String(o.collection || ''))} #{o.token_id}</span>
+                <span class="pp-rowmain">{shortAddr(String(o.collection || ''))} #{o.token_id} <Badge variant="check" row={o} link={false} hint={false} /></span>
                 <span class="pp-chip">{o.status || 'pending'}</span>
                 <span class="pp-amt mono">{offerAmount(o)}</span>
               </a>
@@ -590,6 +592,7 @@
                 <a class="pp-coll mono pp-toklink" href={a.token_url || `/token/${encodeURIComponent(a.collection)}/${encodeURIComponent(String(a.tokenId ?? ''))}`}>
                   {shortAddr(a.collection)}{a.tokenId ? ` #${a.tokenId}` : ''}
                 </a>
+                <Badge variant="check" row={a} link={false} hint={false} />
               {/if}
               <span class="pp-spacer"></span>
               {#if a.amountWei && a.amountWei !== '0'}<span class="pp-amt mono">{fmtAmount(a.amountWei, sym)}</span>{/if}

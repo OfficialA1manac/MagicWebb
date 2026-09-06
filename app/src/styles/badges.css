@@ -17,6 +17,14 @@
 .vb.is-no { color: rgba(255,255,255,.72); background: rgba(255,255,255,.05); border: 1px solid rgba(255,255,255,.12); font-weight: 600; }
 .vb.is-creator { color: #fef3c7; background: rgba(251,191,36,.12); border: 1px solid rgba(251,191,36,.35); }
 .vb.is-holder { color: #ddd6fe; background: rgba(167,139,250,.12); border: 1px solid rgba(167,139,250,.35); font-weight: 600; }
+/* v3.6 NFT-level checkmark (D3): sky glyph, text shown on md, glyph-only on sm cards. */
+.vb.vb-check { color: #bae6fd; background: rgba(125,211,252,.14); border: 1px solid rgba(125,211,252,.4); padding: 0 .45rem; }
+.vb.vb-check.sm .vb-check-text { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+.vb.vb-check.sm { min-height: 22px; padding: 0 .3rem; }
+.vb.vb-check .vb-dot { width: 14px; height: 14px; }
+.card-hint { position: absolute; top: 6px; left: 6px; z-index: 2; opacity: 0; }
+.nft-card:hover + .card-hint, .card-hint:focus-within, .card-hint:hover { opacity: 1; }
+@media (hover: none) { .card-hint { opacity: 1; } }
 .vb-dot { width: 14px; height: 14px; border-radius: 50%; background: #7dd3fc; color: #09090b; font-size: 10px; font-weight: 900; display: inline-flex; align-items: center; justify-content: center; }
 .vb-star { color: #fbbf24; font-size: 11px; line-height: 1; }
 .vb:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
@@ -35,4 +43,5 @@
   .vb.is-tracked .vb-dot { background: rgba(0,0,0,.45); color: #fff; }
   .vb.is-no { color: rgba(0,0,0,.6); }
   .vb.is-holder { color: #5b21b6; }
+  .vb.vb-check { color: #075985; }
 }

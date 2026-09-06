@@ -37,7 +37,7 @@
   import Skeleton from './Skeleton.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import { currentChain } from '../lib/chains';
   import { jsonOrNull } from '../lib/api';
   import { fmtPrice, shortAddr } from '../lib/format';
@@ -180,7 +180,7 @@
             <span class="sp-coll-top">
               <span class="sp-coll-name">{r.name || shortAddr(r.collection)}</span>
               {#if details[r.collection.toLowerCase()]?.symbol}<span class="sp-dim">{details[r.collection.toLowerCase()].symbol}</span>{/if}
-              <VerifiedBadge verified={!!r.collection_verified} tracked={r.collection_tracked} creatorAddr={r.collection_creator ?? ''} collectionName={r.name} link={false} hint={false} />
+              <Badge variant="pill" row={{ ...r, collection_name: r.name }} link={false} hint={false} />
             </span>
             {#if collStats(r.collection)}<span class="sp-dim">{collStats(r.collection)}</span>{/if}
           </a>
@@ -195,7 +195,7 @@
           <a class="sp-card" href={`/token/${r.collection}/${r.token_id ?? ''}`}>
             <span class="sp-card-img">
               {#if img}<img src={img} alt={r.name || `#${r.token_id}`} loading="lazy" decoding="async" />{:else}<span class="sp-noimg"><Icon name="image" size={28} /></span>{/if}
-              <span class="sp-card-badge"><VerifiedBadge verified={!!r.collection_verified} tracked={r.collection_tracked} creatorAddr={r.collection_creator ?? ''} collectionName={r.collection_name ?? ''} link={false} hint={false} /></span>
+              <span class="sp-card-badge"><Badge variant="check" row={r} link={false} hint={false} /></span>
             </span>
             <span class="sp-card-body">
               <span class="sp-dim">{r.collection_name || shortAddr(r.collection)}</span>

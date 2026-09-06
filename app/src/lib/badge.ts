@@ -1,40 +1,43 @@
-// Single source for the collection badge (spec B2). Three tiers, one markup
-// contract shared by VerifiedBadge.svelte and the string-built cards on the
-// static pages (through window.mwVerifiedBadge, see mwBadgeGlobal()).
+// Single source for every badge (v3.6, owner decision D3).
 //
-//   tier        | when                                   | pill
-//   tracked     | collection_tracked, not verified       | grey  ✓ Listed collection
-//   verified    | collection_verified, no creator known  | sky   ✓ Verified
-//   authentic   | verified AND collection_creator known  | gold  ✓ Authentic
-//   null        | collection not tracked                 | (nothing)
+//   ✓ check     NFT-level: "this NFT fully works here" — verified collection,
+//               metadata present, image served from our store, holder known.
+//               The backend computes it (`verified` + `verified_reason[]` on
+//               every row); tokenCheck() reads that and falls back to the same
+//               rule client-side for rows that predate the field.
+//   pill        Collection-level tier for detail headers: Listed collection
+//               (grey) → Verified (sky) → Authentic (gold, creator known).
+//   ★ creator   Only for the creator: on their profile, on the collection
+//               header, and on an NFT when its holder is the creator AND minted
+//               it (`creator_is_owner` from the backend). Never for a mere owner.
 //
-// Styles live in src/styles/badges.css (.vb.is-tracked / .is-ok / .is-authentic).
-import { esc, shortAddr } from './format';
+// Styles live in src/styles/badges.css (.vb.is-* pills, .vb-check glyph).
+import { shortAddr } from './format';
 
 export type BadgeTier = 'authentic' | 'verified' | 'tracked' | null;
 
-/** The subset of an API row the badge needs. Every list endpoint carries it. */
+/** The subset of an API row the badges need. Every list endpoint carries it. */
 export interface BadgeRow {
   collection_verified?: boolean | null;
-  /** ERC-173 owner() of the collection; "" / null when the verifier never resolved one. */
+  /** ERC-173 owner() of the collection; "" / null when never resolved. */
   collection_creator?: string | null;
-  /** Present on rows from tracked collections. `undefined` is treated as
-   *  tracked when `collection_verified` is a boolean (only tracked rows carry it). */
   collection_tracked?: boolean | null;
-}
-
-export interface BadgeOptions {
-  size?: 'sm' | 'md';
-  /** Render an <a href="/docs/faq#verified"> (true) or a <span> (inside anchor cards). */
-  link?: boolean;
-  /** Accepted for compatibility; the B2 tooltip copy does not mention the network. */
-  network?: string;
-  collectionName?: string;
-  /** Inline style attribute (string-built cards position the pill absolutely). */
-  style?: string;
+  collection_name?: string | null;
+  /** v3.6 NFT-level checkmark from the backend (db/badge.go). */
+  verified?: boolean | null;
+  verified_reason?: string[] | null;
+  /** v3.6: holder is the creator AND minted the token. */
+  creator_is_owner?: boolean | null;
+  // Fallback inputs when `verified` is absent (older rows / on-chain fallback).
+  name?: string | null;
+  image_uri?: string | null;
+  image?: string | null;
+  owner?: string | null;
+  seller?: string | null;
 }
 
 export const BADGE_HREF = '/docs/faq#verified';
+export const CREATOR_HREF = '/docs/faq#creator';
 
 const ADDR_RE = /^0x[0-9a-fA-F]{40}$/;
 const ZERO = '0x0000000000000000000000000000000000000000';
@@ -43,6 +46,8 @@ function hasCreator(row: BadgeRow): boolean {
   const c = row.collection_creator;
   return typeof c === 'string' && ADDR_RE.test(c) && c.toLowerCase() !== ZERO;
 }
+
+// ── Collection tier (pill) ──────────────────────────────────────────────────
 
 export function badgeTier(row: BadgeRow | null | undefined): BadgeTier {
   if (!row) return null;
@@ -68,51 +73,73 @@ export const BADGE_CLASS: Record<Exclude<BadgeTier, null>, string> = {
   authentic: 'is-authentic',
 };
 
-/** Tooltip copy per tier (spec B2 table). */
+/** Tooltip copy per tier. */
 export function badgeTip(tier: BadgeTier, row: BadgeRow | null | undefined = undefined): string {
   switch (tier) {
-    case 'tracked': return 'This NFT comes from a collection MagicWebb tracks. Its details are still being checked.';
+    case 'tracked': return 'This collection is tracked by MagicWebb. Its details are still being checked.';
     case 'verified': return 'Standard NFT contract and metadata confirmed. Not a judgement of the art or the seller.';
     case 'authentic': return `Verified, and the creator is known: ${shortAddr(row?.collection_creator ?? '')}.`;
     default: return '';
   }
 }
 
-/**
- * Exact `.vb` markup used by badges.css:
- *   <a class="vb is-ok sm" href="/docs/faq#verified" title="…" aria-label="…">
- *     <span class="vb-dot" aria-hidden="true">✓</span>Verified</a>
- * Returns '' for untracked collections (no pill).
- */
-export function badgeHtml(row: BadgeRow | null | undefined, opts: BadgeOptions = {}): string {
-  const tier = badgeTier(row);
-  if (!tier) return '';
-  const size = opts.size ?? 'sm';
-  const tip = esc(badgeTip(tier, row));
-  const style = opts.style ? ` style="${esc(opts.style)}"` : '';
-  const cls = `vb ${BADGE_CLASS[tier]} ${size}`;
-  const inner = `<span class="vb-dot" aria-hidden="true">✓</span>${BADGE_LABEL[tier]}`;
-  if (opts.link) return `<a class="${cls}" href="${BADGE_HREF}"${style} title="${tip}" aria-label="${tip}">${inner}</a>`;
-  return `<span class="${cls}"${style} title="${tip}" aria-label="${tip}">${inner}</span>`;
+// ── NFT-level checkmark ─────────────────────────────────────────────────────
+
+export const REASON_COPY: Record<string, string> = {
+  unverified_collection: 'its collection has not passed verification yet',
+  no_metadata: 'its name and details could not be read',
+  image_missing: 'its image is not stored on the marketplace yet',
+  owner_unknown: 'its current owner is not known yet',
+};
+
+export const CHECK_TIP = 'Verified NFT: its collection, name, image and owner all check out on this marketplace.';
+
+function imageStored(uri: string | null | undefined): boolean {
+  const u = (uri ?? '').trim();
+  return u.startsWith('/api/v1/img/') || u.startsWith('/img/') || u.startsWith('data:');
 }
 
-declare global {
-  interface Window {
-    /** Shared badge renderer for inline page scripts (installed by mwBadgeGlobal). */
-    mwVerifiedBadge?: (verified: boolean | null | undefined, creator?: string | null, name?: string, style?: string, tracked?: boolean | null) => string;
+export interface TokenCheck {
+  ok: boolean;
+  reasons: string[];
+  /** Tooltip: what was checked, or why the check is missing. */
+  tip: string;
+}
+
+/**
+ * Reads the backend's `verified` / `verified_reason`; when absent, applies
+ * the same rule client-side so cards never disagree with the token page.
+ */
+export function tokenCheck(row: BadgeRow | null | undefined): TokenCheck {
+  if (!row) return { ok: false, reasons: [], tip: '' };
+  let ok: boolean;
+  let reasons: string[];
+  if (typeof row.verified === 'boolean') {
+    ok = row.verified;
+    reasons = Array.isArray(row.verified_reason) ? row.verified_reason : [];
+  } else {
+    reasons = [];
+    if (row.collection_verified !== true) reasons.push('unverified_collection');
+    if (!(row.name ?? '').trim()) reasons.push('no_metadata');
+    if (!imageStored(row.image_uri ?? row.image)) reasons.push('image_missing');
+    if (row.owner === '' ) reasons.push('owner_unknown');
+    ok = reasons.length === 0;
   }
+  const tip = ok
+    ? CHECK_TIP
+    : reasons.length
+      ? `Not verified yet: ${reasons.map((r) => REASON_COPY[r] ?? r).join('; ')}.`
+      : 'Not verified yet.';
+  return { ok, reasons, tip };
 }
 
-/**
- * Installs window.mwVerifiedBadge so the inline scripts on index/auctions/
- * search/profile can drop their private copies and call the shared one.
- * Signature mirrors the inline copies: (verified, creator, name, style, tracked).
- */
-export function mwBadgeGlobal(): void {
-  if (typeof window === 'undefined') return;
-  window.mwVerifiedBadge = (verified, creator, name, style, tracked) =>
-    badgeHtml(
-      { collection_verified: verified === true, collection_creator: creator ?? '', collection_tracked: tracked === undefined ? (typeof verified === 'boolean' ? undefined : false) : tracked },
-      { size: 'sm', link: false, collectionName: name ?? '', style },
-    );
+// ── ★ Creator ───────────────────────────────────────────────────────────────
+
+export const CREATOR_TIP_ITEM = 'Held and minted by the collection’s creator.';
+export const CREATOR_TIP_PROFILE = 'Creator of a verified collection on this marketplace.';
+export const CREATOR_TIP_COLLECTION = 'The wallet that created this collection.';
+
+/** ★ on an NFT row: only when the backend says holder == creator AND minted by them. */
+export function showCreatorOnItem(row: BadgeRow | null | undefined): boolean {
+  return row?.creator_is_owner === true;
 }

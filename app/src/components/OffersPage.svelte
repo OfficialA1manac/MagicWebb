@@ -45,7 +45,7 @@
   // "Received (n)" / "Sent (n)" with per-row actions. Expired offers stay in
   // the list with their refund action — never filtered out.
   import { onMount } from 'svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
   import Skeleton from './Skeleton.svelte';
@@ -170,7 +170,7 @@
           <div class="op-main">
             <div class="op-title">
               <a class="op-name" href={`/token/${o.collection}/${o.token_id}`}>{label(o)}</a>
-              <VerifiedBadge verified={!!o.collection_verified} tracked={o.collection_tracked} creatorAddr={o.collection_creator ?? ''} collectionName={o.collection_name ?? ''} hint={false} />
+              <Badge variant="check" row={o} hint={false} />
             </div>
             <div class="op-dim">
               {tab === 'received' ? `from ${shortAddr(o.bidder)}` : `on ${o.collection_name || shortAddr(o.collection)}`}

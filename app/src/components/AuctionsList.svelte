@@ -127,7 +127,7 @@
   import Skeleton from './Skeleton.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import { toast } from '../lib/toast.svelte';
   import { currentChain } from '../lib/chains';
   import { jsonOrNull, json } from '../lib/api';
@@ -392,7 +392,7 @@
           <div class="al-img">
             {#if img}<img src={img} alt={r.name || `#${r.token_id}`} loading="lazy" decoding="async" />{:else}<span class="al-noimg"><Icon name="image" size={32} /></span>{/if}
             <span class="al-badges">
-              <VerifiedBadge verified={r.collection_verified} tracked={r.collection_tracked} creatorAddr={r.collection_creator ?? ''} collectionName={r.collection_name ?? ''} link={false} hint={false} />
+              <Badge variant="check" row={r} link={false} hint={false} />{#if r.creator_is_owner}<Badge variant="creator" link={false} hint={false} />{/if}
             </span>
             {#if statusChip(r)}<span class="al-status">{statusChip(r)}</span>{/if}
           </div>

@@ -164,26 +164,35 @@ pull-withdrawal fallback.
 ## Trust & safety
 
 <a id="verified"></a>
-### What does the "Verified NFT" badge mean?
-Two on-chain facts, checked automatically by the indexer and re-checked daily — no human
-curation, no application form:
+### What does the ✓ checkmark on an NFT mean?
+"This NFT fully works on MagicWebb." Four facts, all checked automatically and re-checked
+as the indexer runs — no human curation, no application form:
 
-1. The collection contract answers ERC-165 `supportsInterface()` as a standard **ERC-721**
-   or **ERC-1155** NFT.
-2. Its token metadata (name/image) has resolved at least once.
+1. Its collection contract answers ERC-165 `supportsInterface()` as a standard **ERC-721**
+   or **ERC-1155** NFT and its metadata has resolved (the collection-level "Verified").
+2. The token has a name (its metadata could be read).
+3. Its image is stored on the marketplace itself (or is embedded in the metadata), so it
+   renders reliably.
+4. Its current owner is known.
 
-It does **not** mean MagicWebb vouches for the art, the creator, or the seller. "Unverified"
-means one of the two checks has not passed yet — often just a brand-new collection whose
-metadata has not loaded. Anyone can list from any collection either way.
+Tap the checkmark to see which checks passed. A missing checkmark names the check that
+has not passed yet — often just a brand-new collection whose metadata has not loaded.
+It does **not** mean MagicWebb vouches for the art, the creator, or the seller. Anyone can
+list from any collection either way.
+
+Collection and token headers also show the collection's own tier: **Listed collection**
+(tracked, still being checked) → **Verified** (standard contract + metadata) →
+**Authentic** (verified and the creator's address is known).
 
 <a id="creator"></a>
 ### What does the "★ Creator" badge mean?
-The address shown is the **on-chain owner of the collection contract** (ERC-173
-`owner()`), detected automatically by the verifier sweep. It appears on the collection
-page, on token pages, and on that address's profile. When a collection is Verified AND
-its creator is known, token pages upgrade the checkmark to **"✓ Authentic — {collection}
-by {creator}"** so you can tie an NFT to its collection and creator. Like the Verified
-badge, it is computed from on-chain facts — not a curation or endorsement.
+It marks the **creator**: the on-chain owner of the collection contract (ERC-173
+`owner()` — or the deployer), detected automatically. It shows in exactly three places:
+the creator's own profile ("Creator of …"), the collection page, and an NFT that the
+creator still holds **and** originally minted. A collector who bought that NFT never
+gets the star — they show their own profile tag and the NFT's ✓ instead. Every NFT also
+carries a "Created by …" link to the creator's profile. Like the checkmark, it is computed
+from on-chain facts — not a curation or endorsement.
 
 <a id="holder-badge"></a>
 ### What is the collector badge next to an owner's name?

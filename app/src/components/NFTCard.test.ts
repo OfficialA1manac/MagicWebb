@@ -44,41 +44,39 @@ function render(item: Partial<typeof base> & Record<string, unknown>) {
   return within(host);
 }
 
-describe('NFTCard badges', () => {
-  it('verified, no creator → sky "Verified" span (never a nested <a>)', () => {
-    const q = render({});
-    const vb = host.querySelector('.vb.is-ok')!;
+describe('NFTCard badges (v3.6: NFT-level ✓ + creator-held-and-minted ★)', () => {
+  it('verified NFT → ✓ span with the check tooltip (never a nested <a>)', () => {
+    const q = render({ verified: true, verified_reason: [] });
+    const vb = host.querySelector('.vb.vb-check')!;
     expect(vb.tagName).toBe('SPAN');
-    expect(vb.textContent).toContain('Verified');
+    expect(vb.getAttribute('title')).toContain('Verified NFT');
     expect(host.querySelectorAll('a').length).toBe(1); // only the card link
     expect(q.queryByText('Creator')).toBeNull();
+    // The tap-able explanation lives outside the anchor.
+    expect(host.querySelector('a .hint')).toBeNull();
+    expect(host.querySelector('.card-hint .hint-btn')).toBeTruthy();
   });
 
-  it('verified + creator → gold "Authentic"', () => {
-    render({ collection_creator: CREATOR });
-    expect(host.querySelector('.vb.is-authentic')!.textContent).toContain('Authentic');
+  it('unverified NFT → no checkmark and no hint button', () => {
+    render({ verified: false, verified_reason: ['image_missing'] });
+    expect(host.querySelector('.vb.vb-check')).toBeNull();
+    expect(host.querySelector('.card-hint')).toBeNull();
   });
 
-  it('tracked but unverified → grey "Listed collection"', () => {
-    render({ collection_verified: false, collection_tracked: true });
-    expect(host.querySelector('.vb.is-tracked')!.textContent).toContain('Listed collection');
+  it('no backend flag → client-side rule (verified collection + name + stored image)', () => {
+    render({ verified: undefined, collection_verified: true, name: 'A', image_uri: '/api/v1/img/x' });
+    expect(host.querySelector('.vb.vb-check')).toBeTruthy();
+    render({ verified: undefined, collection_verified: true, name: 'A', image_uri: 'ipfs://x' });
+    expect(host.querySelectorAll('.vb.vb-check').length).toBe(1); // only the first render's card
   });
 
-  it('untracked → no collection pill', () => {
-    render({ collection_verified: false, collection_tracked: false });
-    expect(host.querySelector('.vb:not(.is-creator)')).toBeNull();
-  });
-
-  it('seller == collection creator → ★ Creator pill with the B2 tooltip', () => {
-    render({ collection_creator: CREATOR, seller: CREATOR.toLowerCase() });
+  it('★ Creator only when the backend says creator_is_owner — seller == creator alone is not enough', () => {
+    render({ collection_creator: CREATOR, seller: CREATOR.toLowerCase(), verified: true });
+    expect(host.querySelector('.vb.is-creator')).toBeNull();
+    render({ collection_creator: CREATOR, seller: CREATOR.toLowerCase(), verified: true, creator_is_owner: true });
     const c = host.querySelector('.vb.is-creator')!;
     expect(c.textContent).toContain('Creator');
-    expect(c.getAttribute('title')).toBe("Sold by the collection's creator");
-  });
-
-  it('owner rows (wallet grid) also get the Creator pill', () => {
-    render({ collection_creator: CREATOR, seller: undefined, owner: CREATOR });
-    expect(host.querySelector('.vb.is-creator')).toBeTruthy();
+    expect(c.getAttribute('title')).toContain('creator');
   });
 });
 

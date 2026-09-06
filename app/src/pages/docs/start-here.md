@@ -38,12 +38,12 @@ card.
 
 ## The badges
 
-| Badge | Meaning |
-|---|---|
-| ✓ Listed collection | From a collection MagicWebb tracks. Its details are still being checked. |
-| ✓ Verified | Standard NFT contract and metadata confirmed. Not a judgement of the art or the seller. |
-| ✓ Authentic | Verified, and the creator's address is known. |
-| ★ Creator | Sold by the collection's creator. |
+| Badge | Where | Meaning |
+|---|---|---|
+| ✓ (checkmark on an NFT) | every card and row | This NFT fully works here: its collection passed verification, its name and image are stored on the marketplace, and its owner is known. Tap it to see what was checked. |
+| ✓ Listed collection / Verified / Authentic | collection and token headers | The collection's own status: tracked → standard contract + metadata confirmed → and the creator's address is known. |
+| ★ Creator | the creator's profile, the collection header, and an NFT the creator still holds **and** minted | Only the creator ever gets this badge. A collector who bought the NFT shows their own tag and the ✓ instead. |
+| Created by … | every NFT | Links to the creator's profile. |
 
 ## Fees, one more time
 

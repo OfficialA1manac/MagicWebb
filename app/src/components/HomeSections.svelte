@@ -69,7 +69,7 @@
   import EmptyState from './EmptyState.svelte';
   import Skeleton from './Skeleton.svelte';
   import Icon from './Icon.svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import { currentChain, tradingLive, isTestnet, faucetUrl } from '../lib/chains';
   import { jsonOrNull, json } from '../lib/api';
   import { shortAddr } from '../lib/format';
@@ -270,7 +270,7 @@
       {#each collections as c (c.address)}
         <a class="hs-col" href={`/collection/${c.address}`}>
           <span class="hs-col-name">{c.name || shortAddr(c.address)}</span>
-          <VerifiedBadge verified={!!c.verified} creatorAddr={c.creator_addr ?? ''} collectionName={c.name} link={false} hint={false} />
+          <Badge variant="pill" row={{ collection_verified: !!c.verified, collection_creator: c.creator_addr ?? '', collection_tracked: true, collection_name: c.name }} link={false} hint={false} />
           <span class="hs-col-dim">{c.listed} listed</span>
         </a>
       {/each}

@@ -3,7 +3,7 @@
   // shell; this owns header, stats, tabs (Items · Listings · Activity), the
   // owner-only offers toggle (in place, no reload) and the seller banner.
   import { onMount } from 'svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
+  import Badge from './Badge.svelte';
   import Hint from './Hint.svelte';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
@@ -203,12 +203,13 @@
       <div class="cp-titlerow">
         <h1>{col.name || shortAddr(addr)}</h1>
         {#if col.symbol}<span class="cp-sym">{col.symbol}</span>{/if}
-        <VerifiedBadge verified={col.verified} creatorAddr={col.creator_addr} tracked={true} collectionName={col.name} hint={false} />
+        <Badge variant="pill" row={{ collection_verified: col.verified, collection_creator: col.creator_addr, collection_tracked: true, collection_name: col.name }} hint={false} />
         <Hint text={reasonText} label="How this badge was decided" />
       </div>
       <div class="cp-meta">
         {#if col.creator_addr}
-          <a href={explorerAddress(col.creator_addr)} target="_blank" rel="noopener">Created by {shortAddr(col.creator_addr)} <Icon name="external" size={14} /></a>
+          <a class="cp-creator" href={`/profile/${col.creator_addr}`}>Created by {shortAddr(col.creator_addr)}</a>
+          <Badge variant="creator" link={false} hint={true} tip="The wallet that created this collection." />
           <span aria-hidden="true">·</span>
         {/if}
         <a href={explorerAddress(addr)} target="_blank" rel="noopener">Explorer <Icon name="external" size={14} /></a>
@@ -251,6 +252,8 @@
             <a class="cp-card" href={`/token/${addr}/${t.token_id}`}>
               <span class="cp-card-img">
                 {#if t.image}<img src={resolveImageUri(t.image, t.token_id, 256)} alt={t.name || `#${t.token_id}`} loading="lazy" />{:else}<span class="cp-noimg"><Icon name="image" size={32} /></span>{/if}
+                <span class="cp-card-badges"><Badge variant="check" row={{ ...t, collection_verified: col.verified, collection_creator: col.creator_addr }} link={false} hint={false} />{#if t.creator_is_owner}<Badge variant="creator" link={false} hint={false} />{/if}</span>
+                <span class="cp-card-badges"><Badge variant="check" row={{ ...t, collection_verified: col.verified, collection_creator: col.creator_addr }} link={false} hint={false} />{#if t.creator_is_owner}<Badge variant="creator" link={false} hint={false} />{/if}</span>
                 {#if t.listed}<span class="cp-listed">Listed</span>{/if}
               </span>
               <span class="cp-card-body">

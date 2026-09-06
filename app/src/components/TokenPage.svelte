@@ -66,8 +66,7 @@
   // (buy, list, cancel, edit price, create auction, bid, make/accept/reject
   // offer). Owner-aware: what you can do depends on who you are. Live via WS.
   import { onMount } from 'svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
-  import CreatorBadge from './CreatorBadge.svelte';
+  import Badge from './Badge.svelte';
   import { holderBadgeName, HOLDER_BADGE_TIP } from '../lib/holderBadge';
   import EmptyState from './EmptyState.svelte';
   import ErrorState from './ErrorState.svelte';
@@ -91,7 +90,7 @@
   type Auction = { auction_id: number; collection: string; token_id: string; seller: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps?: number; ends_at: string; status: string; name: string; image_uri: string; collection_verified: boolean };
   type Offer = { offer_id: string; bidder: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string };
   type Activity = { type: string; amountWei: string; timestamp: string; txHash: string };
-  type TokenDetail = { owner?: string; last_sale_wei?: string; indexed_at?: string };
+  type TokenDetail = { owner?: string; last_sale_wei?: string; indexed_at?: string; image_uri?: string; name?: string; verified?: boolean; verified_reason?: string[]; creator_is_owner?: boolean; minter?: string; creator?: { address: string; display_name?: string; tag?: string } | null };
 
   let coll = $state('');
   let tid = $state('');
@@ -158,6 +157,10 @@
   let img = $derived(resolveImageUri(listing?.image_uri || auction?.image_uri || ocImg, tid, 512));
   let verified = $derived(!!(collection?.verified ?? listing?.collection_verified ?? auction?.collection_verified));
   let creatorAddr = $derived(collection?.creator_addr || '');
+  // v3.6 badges: the token endpoint carries the NFT-level check; fall back to the same rule client-side.
+  let checkRow = $derived(tokenDetail ? { ...tokenDetail, collection_verified: verified, collection_creator: creatorAddr } : { collection_verified: verified, collection_creator: creatorAddr, name, image_uri: img, owner: owner ?? '' });
+  let detail = $derived(tokenDetail);
+  let creatorLabel = $derived(tokenDetail?.creator?.display_name || tokenDetail?.creator?.tag || shortAddr(creatorAddr));
   let isOwner = $derived(!!me && (std === 'erc1155' ? myBalance1155 > 0n : owner?.toLowerCase() === me.toLowerCase()));
   let isSeller = $derived(!!me && !!listing && listing.seller.toLowerCase() === me.toLowerCase());
   let isCollOwner = $derived(!!me && !!collOwner && collOwner.toLowerCase() === me.toLowerCase());
@@ -472,7 +475,8 @@
     <div class="tp-side">
       <div class="tp-coll">
         <a href={`/collection/${coll}`}>{collection?.name || shortAddr(coll)}</a>
-        <VerifiedBadge {verified} showUnverified={true} network={chain.name} collectionName={collection?.name || ''} {creatorAddr} />
+        <Badge variant="pill" row={{ collection_verified: verified, collection_creator: creatorAddr, collection_tracked: true, collection_name: collection?.name || '' }} />
+        <Badge variant="check" row={checkRow} />
         {#if live}<span class="tp-live" title="Live updates connected">● live</span>{/if}
       </div>
       <div class="tp-titlerow">
@@ -489,9 +493,9 @@
         <a href={explorerAddress(coll)} target="_blank" rel="noopener">{shortAddr(coll)}</a> · #{tid} · {std.toUpperCase()}
       </div>
       {#if creatorAddr}
-        <div class="tp-meta mono">
-          creator <a href={explorerAddress(creatorAddr)} target="_blank" rel="noopener">{shortAddr(creatorAddr)}</a>
-          <CreatorBadge name={collection?.name || ''} />
+        <div class="tp-meta">
+          Created by <a href={`/profile/${creatorAddr}`} class="mono">{creatorLabel}</a>
+          {#if detail?.creator_is_owner}<Badge variant="creator" />{/if}
         </div>
       {/if}
 

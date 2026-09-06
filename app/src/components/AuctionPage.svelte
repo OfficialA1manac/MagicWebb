@@ -65,8 +65,7 @@
   // Live countdown, cumulative-bid aware bidding, WS-driven refresh, mobile
   // sticky bid bar. Not-found → EmptyState with [See live auctions], no Retry.
   import { onMount } from 'svelte';
-  import VerifiedBadge from './VerifiedBadge.svelte';
-  import CreatorBadge from './CreatorBadge.svelte';
+  import Badge from './Badge.svelte';
   import EmptyState from './EmptyState.svelte';
   import Skeleton from './Skeleton.svelte';
   import Hint from './Hint.svelte';
@@ -105,7 +104,6 @@
   let ended = $derived(!!a && a.status === 'active' && endsMs <= now);
   let phase = $derived<AuctionPhase>(!a ? 'live' : a.status === 'settled' ? 'settled' : a.status === 'cancelled' ? 'cancelled' : ended ? 'ended' : 'live');
   let isSeller = $derived(!!me && !!a && a.seller.toLowerCase() === me.toLowerCase());
-  let sellerIsCreator = $derived(!!a && !!a.collection_creator && a.seller.toLowerCase() === a.collection_creator.toLowerCase());
   let canForceCancel = $derived(ended && !!a && forceCancelUnlocked(endsMs / 1000, now));
   let highest = $derived(BigInt(a?.highest_bid_wei || '0'));
   // Cumulative escrow comes from the CHAIN, never from summing the bids API —
@@ -217,11 +215,12 @@
     <div class="ap-side">
       <div class="ap-coll">
         <a href={`/collection/${a.collection}`}>{a.collection_name || shortAddr(a.collection)}</a>
-        <VerifiedBadge verified={a.collection_verified} tracked={a.collection_tracked} creatorAddr={a.collection_creator ?? ''} collectionName={a.collection_name ?? ''} />
+        <Badge variant="pill" row={a} />
+        <Badge variant="check" row={a} />
         <span class="ap-chip" class:is-live={statusChip === 'Live'} class:is-hot={statusChip === 'Ending soon'} data-testid="status-chip">{statusChip}</span>
       </div>
       <h1 class="ap-title">{name}</h1>
-      <div class="ap-meta mono">Auction #{a.auction_id} · seller {isSeller ? 'you' : shortAddr(a.seller)}{#if sellerIsCreator} <CreatorBadge name={a.collection_name ?? ''} />{/if} · <a href={`/token/${a.collection}/${a.token_id}`}>token #{a.token_id}</a></div>
+      <div class="ap-meta mono">Auction #{a.auction_id} · seller {isSeller ? 'you' : shortAddr(a.seller)}{#if a.creator_is_owner} <Badge variant="creator" />{/if} · <a href={`/token/${a.collection}/${a.token_id}`}>token #{a.token_id}</a></div>
       {#if syncing}<div class="ap-sync" role="status"><span class="ap-spin" aria-hidden="true"></span>{syncing}</div>{/if}
 
       {#if !canTrade}

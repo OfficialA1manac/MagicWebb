@@ -1,7 +1,8 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
-  import VerifiedBadge from './VerifiedBadge.svelte';
-  import CreatorBadge from './CreatorBadge.svelte';
+  import Badge from './Badge.svelte';
+  import Hint from './Hint.svelte';
+  import { showCreatorOnItem, tokenCheck } from '../lib/badge';
 
   interface ListingItem {
     collection: string;
@@ -27,6 +28,10 @@
     collection_tracked?: boolean;
     // Wallet-grid rows carry `owner` instead of `seller`.
     owner?: string;
+    // v3.6 badges (db/badge.go): NFT-level checkmark + creator-held-and-minted.
+    verified?: boolean;
+    verified_reason?: string[];
+    creator_is_owner?: boolean;
   }
 
   let { item }: { item: ListingItem } = $props();
@@ -55,9 +60,9 @@
     return typeof off === 'function' ? off : undefined;
   });
   let isOwnListing = $derived(!!me && item.seller?.toLowerCase() === me.toLowerCase());
-  // Seller/owner is the collection's on-chain creator (ERC-173 owner) → ★ Creator pill.
-  let holder = $derived(item.seller ?? item.owner ?? '');
-  let holderIsCreator = $derived(!!holder && !!item.collection_creator && holder.toLowerCase() === item.collection_creator.toLowerCase());
+  // ★ only when the backend says the holder is the creator AND minted it (D3).
+  let holderIsCreator = $derived(showCreatorOnItem(item));
+  let check = $derived(tokenCheck(item));
   // Edition chip (spec B2): humans read "1 of 1" / "Multi-edition", not ERC numbers.
   let edition = $derived(item.standard === 'erc1155' ? 'Multi-edition' : item.standard ? '1 of 1' : '');
 
@@ -136,8 +141,8 @@
 
     <!-- Top-left badges -->
     <div class="top-left-badges">
-      <VerifiedBadge verified={item.collection_verified} tracked={item.collection_tracked} creatorAddr={item.collection_creator ?? ''} collectionName={item.collection_name ?? ''} link={false} />
-      {#if holderIsCreator}<CreatorBadge name={item.collection_name ?? ''} link={false} />{/if}
+      <Badge variant="check" row={item} link={false} hint={false} />
+      {#if holderIsCreator}<Badge variant="creator" link={false} hint={false} />{/if}
       {#if edition}
         <span class="standard-badge" title={item.standard === 'erc1155' ? 'Several copies of this token exist' : 'Only one copy of this token exists'}>{edition}</span>
       {/if}
@@ -164,6 +169,10 @@
     </div>
   </div>
 </a>
+{#if check.ok || holderIsCreator}
+  <!-- Tap-able explanation lives OUTSIDE the anchor (no nested interactive element). -->
+  <span class="card-hint"><Hint text={holderIsCreator ? `${check.tip} Held and minted by the collection's creator.` : check.tip} label="About this NFT's badges" align="start" /></span>
+{/if}
 
 <style>
   .nft-card {

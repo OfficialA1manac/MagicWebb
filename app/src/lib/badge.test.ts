@@ -1,83 +1,64 @@
-import { describe, it, expect, afterEach } from 'vitest';
-import { badgeTier, badgeHtml, badgeTip, mwBadgeGlobal, BADGE_HREF } from './badge';
+import { describe, it, expect } from 'vitest';
+import { badgeTier, badgeTip, tokenCheck, showCreatorOnItem, REASON_COPY, CHECK_TIP, BADGE_HREF, CREATOR_HREF } from './badge';
 
 const CREATOR = '0x871f5D3C3aE1E4B2b8F0c9A7d6E5F4a3B2C1a558';
 
-describe('badgeTier', () => {
+describe('badgeTier (collection pill)', () => {
   it.each([
-    // verified, creator, tracked → tier
     [true, CREATOR, true, 'authentic'],
     [true, CREATOR, undefined, 'authentic'],
     [true, '', true, 'verified'],
     [true, undefined, undefined, 'verified'],
-    [true, '0x0000000000000000000000000000000000000000', true, 'verified'], // zero address is "no creator"
+    [true, '0x0000000000000000000000000000000000000000', true, 'verified'],
     [true, 'not-an-address', true, 'verified'],
     [false, '', true, 'tracked'],
-    [false, CREATOR, true, 'tracked'], // creator alone never upgrades an unverified collection
-    [false, '', undefined, 'tracked'], // tracked rows always carry a boolean verified flag
+    [false, CREATOR, true, 'tracked'],
+    [false, '', undefined, 'tracked'],
     [false, '', false, null],
-    [undefined, '', undefined, null], // untracked: no flag at all
+    [undefined, '', undefined, null],
     [undefined, CREATOR, false, null],
   ] as const)('verified=%s creator=%s tracked=%s → %s', (verified, creator, tracked, tier) => {
     expect(badgeTier({ collection_verified: verified, collection_creator: creator, collection_tracked: tracked })).toBe(tier);
   });
 
-  it('null/undefined row → null', () => {
+  it('null/undefined row → null; tips per tier', () => {
     expect(badgeTier(null)).toBeNull();
-    expect(badgeTier(undefined)).toBeNull();
+    expect(badgeTip('authentic', { collection_creator: CREATOR })).toContain('creator is known');
+    expect(badgeTip('tracked')).toContain('still being checked');
+    expect(badgeTip(null)).toBe('');
   });
 });
 
-describe('badgeHtml markup contract', () => {
-  it('renders the exact .vb markup for each tier (span by default)', () => {
-    expect(badgeHtml({ collection_verified: true, collection_creator: '' }))
-      .toBe('<span class="vb is-ok sm" title="Standard NFT contract and metadata confirmed. Not a judgement of the art or the seller." aria-label="Standard NFT contract and metadata confirmed. Not a judgement of the art or the seller."><span class="vb-dot" aria-hidden="true">✓</span>Verified</span>');
-    expect(badgeHtml({ collection_verified: false, collection_tracked: true }))
-      .toContain('class="vb is-tracked sm"');
-    expect(badgeHtml({ collection_verified: false, collection_tracked: true })).toContain('>Listed collection</span>');
-    expect(badgeHtml({ collection_verified: true, collection_creator: CREATOR })).toContain('class="vb is-authentic sm"');
-    expect(badgeHtml({ collection_verified: true, collection_creator: CREATOR })).toContain('>Authentic</span>');
+describe('tokenCheck (NFT-level ✓)', () => {
+  it('trusts the backend flag and reasons when present', () => {
+    expect(tokenCheck({ verified: true, verified_reason: [] })).toEqual({ ok: true, reasons: [], tip: CHECK_TIP });
+    const r = tokenCheck({ verified: false, verified_reason: ['image_missing', 'owner_unknown'] });
+    expect(r.ok).toBe(false);
+    expect(r.tip).toContain(REASON_COPY.image_missing);
+    expect(r.tip).toContain(REASON_COPY.owner_unknown);
   });
 
-  it('authentic tooltip names the short creator address', () => {
-    const tip = badgeTip('authentic', { collection_verified: true, collection_creator: CREATOR });
-    expect(tip).toBe('Verified, and the creator is known: 0x871f…a558.');
-    expect(badgeHtml({ collection_verified: true, collection_creator: CREATOR })).toContain(`title="${tip}"`);
+  it('falls back to the backend rule when the flag is absent', () => {
+    expect(tokenCheck({ collection_verified: true, name: 'A', image_uri: '/api/v1/img/x' }).ok).toBe(true);
+    expect(tokenCheck({ collection_verified: true, name: 'A', image: 'data:image/svg+xml;base64,AA' }).ok).toBe(true);
+    expect(tokenCheck({ collection_verified: true, name: 'A', image_uri: 'ipfs://x' }).reasons).toEqual(['image_missing']);
+    expect(tokenCheck({ collection_verified: false, name: '', image_uri: '' }).reasons).toEqual(['unverified_collection', 'no_metadata', 'image_missing']);
+    expect(tokenCheck({ collection_verified: true, name: 'A', image_uri: '/img/x', owner: '' }).reasons).toEqual(['owner_unknown']);
   });
 
-  it('link:true renders an <a href="/docs/faq#verified">', () => {
-    const html = badgeHtml({ collection_verified: true }, { link: true, size: 'md' });
-    expect(html.startsWith(`<a class="vb is-ok md" href="${BADGE_HREF}"`)).toBe(true);
-    expect(html.endsWith('</a>')).toBe(true);
-  });
-
-  it('untracked → empty string (no pill)', () => {
-    expect(badgeHtml({})).toBe('');
-    expect(badgeHtml({ collection_verified: false, collection_tracked: false })).toBe('');
-  });
-
-  it('escapes the inline style and tooltip', () => {
-    const html = badgeHtml({ collection_verified: true }, { style: 'top:0.5rem;"onmouseover="x' });
-    expect(html).toContain('style="top:0.5rem;&quot;onmouseover=&quot;x"');
-    expect(html).not.toContain('"onmouseover="');
+  it('null row → not ok, empty tip', () => {
+    expect(tokenCheck(null)).toEqual({ ok: false, reasons: [], tip: '' });
   });
 });
 
-describe('mwBadgeGlobal', () => {
-  afterEach(() => { delete window.mwVerifiedBadge; });
-
-  it('installs window.mwVerifiedBadge with the inline-script signature', () => {
-    mwBadgeGlobal();
-    expect(typeof window.mwVerifiedBadge).toBe('function');
-    const fn = window.mwVerifiedBadge!;
-    expect(fn(true, CREATOR, 'Animi', 'position:absolute;')).toContain('is-authentic');
-    expect(fn(true, CREATOR, 'Animi', 'position:absolute;')).toContain('style="position:absolute;"');
-    expect(fn(true, '', '', '')).toContain('is-ok');
-    expect(fn(false, '', '', '', true)).toContain('is-tracked');
-    // boolean verified with no tracked flag = tracked row (grey pill)
-    expect(fn(false, '', '', '')).toContain('is-tracked');
-    // non-boolean verified with no tracked flag = untracked (no pill)
-    expect(fn(undefined, '', '', '')).toBe('');
-    expect(fn(false, '', '', '', false)).toBe('');
+describe('★ Creator on items', () => {
+  it('only the backend creator_is_owner flag shows it — never seller == creator alone', () => {
+    expect(showCreatorOnItem({ creator_is_owner: true })).toBe(true);
+    expect(showCreatorOnItem({ collection_creator: CREATOR, seller: CREATOR })).toBe(false);
+    expect(showCreatorOnItem(null)).toBe(false);
+  });
+  it('FAQ anchors exist for both badges', () => {
+    expect(BADGE_HREF).toBe('/docs/faq#verified');
+    expect(CREATOR_HREF).toBe('/docs/faq#creator');
   });
 });
