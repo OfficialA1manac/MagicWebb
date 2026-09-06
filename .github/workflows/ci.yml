@@ -217,7 +217,7 @@ jobs:
       # when deployments/<net>.json points at a manager the chain cannot answer
       # for — i.e. the source-of-truth file and reality have drifted.
       - name: Read on-chain governance state
-        run: tools/check-governance.sh
+        run: bash tools/check-governance.sh
 
   k8s:
     name: k8s (kustomize)

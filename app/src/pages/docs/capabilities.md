@@ -39,7 +39,7 @@ to a different site, so you connect your wallet again on arrival.
 |---|---|---|---|
 | Browse, search, view token/collection/profile/activity | ✓ | ✓ | ✓ |
 | Buy a listing | connect prompt | ✓ | hidden on own |
-| List (721 / 1155 units), 14 durations, min 1 | — | — | ✓ owner |
+| List (721 / 1155 units), 15 durations, min 1 | — | — | ✓ owner |
 | Batch list up to 50 | — | — | ✓ 721 only |
 | Change price / cancel listing | — | — | ✓ seller |
 | Start auction (721 / 1155) | — | — | ✓ owner |
@@ -112,7 +112,7 @@ you in the contract. **Profile → the Refunds card → Withdraw.** Never expire
 
 ## Why durations instead of dates?
 
-The contracts accept exactly fourteen durations (1m, 3m, 5m, 15m, 30m, 45m, 1h, 2h,
-4h, 8h, 12h, 16h, 20h, 24h) and compute the expiry from the block that mines
+The contracts accept exactly fifteen durations (1m, 3m, 5m, 10m, 15m, 30m, 45m, 1h,
+2h, 4h, 8h, 12h, 16h, 20h, 24h) and compute the expiry from the block that mines
 your transaction. A date picker cannot satisfy that from a wallet (you do not know the
 mining block's timestamp), so every time-bound action asks for a duration.

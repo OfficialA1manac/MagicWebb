@@ -23,6 +23,16 @@ a hot machine longer than the minutes an upgrade takes.
 
 ## Performing an upgrade (per core, per network)
 
+**One command (v3.6):** `tools/upgrade-cores.sh <network>` does everything
+below for all three cores — deploys the implementations with the immutables
+read from the live proxies, queues + installs each with `ADMIN_KEY`, verifies
+`manager()`/`feeRecipient()` through the proxies, and records `impls` +
+`superseded_impls` in `deployments/<network>.json`. `--dry-run` signs nothing,
+`--verify` only prints the current state, `--rollback` reinstalls the recorded
+previous implementations. Afterwards run `go run ./backend/cmd/reindexgov` so
+the `UpgradeQueued`/`Upgraded` events show on `/status` (the watcher normally
+catches them live; the backfill is belt-and-braces). The manual steps:
+
 ```bash
 # 0) Build and TEST the new implementation. forge test must be green.
 cd contracts && forge build && forge test

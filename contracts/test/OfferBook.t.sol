@@ -237,14 +237,14 @@ contract OfferBookTest is Test, TestHelpers {
         ob.refundExpiredOffer(address(nft), 0, alice);
     }
 
-    /// Durations are validated on-chain; anything but the fourteen shared values reverts.
+    /// Durations are validated on-chain; anything but the fifteen shared values reverts.
     function test_makeOffer_badDuration_revertsInvalidDuration() public {
         vm.prank(alice);
         vm.expectRevert(InvalidDuration.selector);
         ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 7 minutes);
         vm.prank(alice);
         vm.expectRevert(InvalidDuration.selector);
-        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 10 minutes); // dropped from the shared set
+        ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 9 minutes); // not in the shared set (10 minutes IS, since v3.6)
         vm.prank(alice);
         vm.expectRevert(InvalidDuration.selector);
         ob.makeOffer{value: 1 ether}(address(nft), 0, 1 ether, 2 hours + 1);

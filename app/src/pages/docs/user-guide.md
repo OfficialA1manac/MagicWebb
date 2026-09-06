@@ -31,8 +31,8 @@ Browse → click listing → click **Buy** → confirm transaction. Exact price 
 1. Open any token you own → click **Start auction**
 2. Set reserve price (at least 1 native token) and end time. The bid increment is the same for every auction on every network: taking the lead costs the current leader's total + 1 native token (C2FLR/SGB/FLR) — cumulative, so what you already have escrowed counts
 3. Click **Start auction** — approve AuctionHouse if prompted
-4. Auction starts immediately. A bid in the final 3 minutes extends the end time by 3 minutes (anti-snipe).
-5. If nobody bids within 30 minutes, the auction is cancelled automatically.
+4. Auction starts immediately. A bid in the final 3 minutes extends the end time by 3 minutes (anti-snipe), never more than 30 minutes past the original end.
+5. When time runs out the keeper settles it within seconds; if it ever doesn't, you (the seller) or the winner can press **Settle now**. An auction with no bids simply ends — nothing to settle, nothing to cancel.
 6. To cancel early (only while there are no bids): click **Cancel auction** → approve the wallet transaction.
 
 ## Bid on an auction

@@ -180,7 +180,7 @@ contract OfferBook is MarketplaceCore {
     /// @param coll       NFT collection.
     /// @param tokenId    Token ID.
     /// @param principal  The escrowed offer amount (≥ MIN_PRICE). No fee at offer time.
-    /// @param duration   One of the fourteen shared durations (1m–24h). Ignored when topping up an existing position.
+    /// @param duration   One of the fifteen shared durations (1m–24h). Ignored when topping up an existing position.
     function makeOffer(address coll, uint256 tokenId, uint128 principal, uint64 duration) external payable nonReentrant {
         if (!offerEligible[coll]) revert OffersNotEligible();
         _makeOffer(TokenStandard.ERC721, coll, tokenId, principal, 1, duration);

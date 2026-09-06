@@ -230,7 +230,7 @@ contract AuctionHouse is MarketplaceCore {
     // the vestigial `active` field is gone from the struct.
 
     /// @notice Create an ERC-721 auction. Starts immediately.
-    /// @param duration One of the fourteen shared durations; endsAt is computed on-chain.
+    /// @param duration One of the fifteen shared durations; endsAt is computed on-chain.
     /// @dev v3.3: no increment parameters. The overtake step is the
     ///      marketplace-wide MIN_BID_INCREMENT (1 native token) — sellers
     ///      cannot raise or lower it.
@@ -256,7 +256,7 @@ contract AuctionHouse is MarketplaceCore {
         uint128 reserve,
         uint64  endsAt
     ) internal returns (uint256 id) {
-        // endsAt was produced by _expiryFor(): in the future, one of the fourteen durations.
+        // endsAt was produced by _expiryFor(): in the future, one of the fifteen durations.
         if (endsAt <= block.timestamp) revert InvalidWindow();
         if (reserve < MIN_PRICE) revert BelowMinPrice();
 

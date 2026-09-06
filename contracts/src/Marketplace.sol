@@ -88,7 +88,7 @@ contract Marketplace is MarketplaceCore {
     ///      still cause unexpected state reads mid-call. The modifier costs
     ///      ~2.3k gas on the first call and zero on re-entry (revert); the
     ///      invariant is cheap insurance.
-    /// @param duration One of the fourteen shared durations (1m–24h); expiry is computed on-chain.
+    /// @param duration One of the fifteen shared durations (1m–24h); expiry is computed on-chain.
     function list(address coll, uint256 id, uint128 price, uint64 duration) external nonReentrant {
         _list(TokenStandard.ERC721, coll, id, 1, price, _expiryFor(duration));
     }
@@ -108,7 +108,7 @@ contract Marketplace is MarketplaceCore {
         address coll;
         uint256 id;
         uint128 price;
-        uint64  duration; // one of the fourteen shared durations
+        uint64  duration; // one of the fifteen shared durations
     }
 
     /// @notice List up to 50 ERC-721 tokens in one transaction. FREE.
@@ -159,7 +159,7 @@ contract Marketplace is MarketplaceCore {
             revert NotOwner(); // seller must cancel first to relist at a different price
         }
         // expiresAt was produced by _expiryFor(): strictly in the future and one
-        // of the fourteen shared durations away. Kept as a cheap invariant check.
+        // of the fifteen shared durations away. Kept as a cheap invariant check.
         if (expiresAt <= block.timestamp) revert InvalidExpiry();
 
         if (standard == TokenStandard.ERC721) {

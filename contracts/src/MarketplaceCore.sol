@@ -36,7 +36,7 @@ error UpgradeExpired();
 enum TokenStandard { ERC721, ERC1155 }
 
 /// @dev Shared durations for listings, auctions, and offers across all cores.
-///      Every time-bound action must pick one of these exact fourteen values.
+///      Every time-bound action must pick one of these exact fifteen values.
 ///      Callers pass the DURATION; the contract computes the expiry from
 ///      block.timestamp (MarketplaceCore._expiryFor). Passing an absolute
 ///      expiresAt was unusable from a wallet: the caller cannot know the
@@ -44,6 +44,7 @@ enum TokenStandard { ERC721, ERC1155 }
 uint64 constant DURATION_1MIN  = 1 minutes;
 uint64 constant DURATION_3MIN  = 3 minutes;
 uint64 constant DURATION_5MIN  = 5 minutes;
+uint64 constant DURATION_10MIN = 10 minutes; // v3.6: restored (owner directive 2026-09-06)
 uint64 constant DURATION_15MIN = 15 minutes;
 uint64 constant DURATION_30MIN = 30 minutes;
 uint64 constant DURATION_45MIN = 45 minutes;
@@ -80,10 +81,11 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     uint256 public constant MIN_PRICE = 1 ether;
 
     /// @dev Validate a caller-supplied duration and turn it into an absolute expiry.
-    ///      Reverts InvalidDuration unless duration is one of the fourteen shared values.
+    ///      Reverts InvalidDuration unless duration is one of the fifteen shared values.
     function _expiryFor(uint64 duration) internal view returns (uint64) {
         bool ok = duration == DURATION_1MIN  || duration == DURATION_3MIN
-               || duration == DURATION_5MIN  || duration == DURATION_15MIN
+               || duration == DURATION_5MIN  || duration == DURATION_10MIN
+               || duration == DURATION_15MIN
                || duration == DURATION_30MIN || duration == DURATION_45MIN
                || duration == DURATION_1HR   || duration == DURATION_2HR
                || duration == DURATION_4HR   || duration == DURATION_8HR
