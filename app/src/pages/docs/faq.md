@@ -161,6 +161,14 @@ Transactions are atomic: either the whole trade completes or it reverts with no 
 taken. Escrowed bids and offer principals are always recoverable via refund or the
 pull-withdrawal fallback.
 
+<a id="networks"></a>
+### Why can I only browse on Songbird or Flare?
+Each network runs its own copy of the marketplace with its own database. On Coston2 the
+trading contracts are live; on Songbird and Flare they are not deployed yet, so those sites
+show listings, collections, profiles and your wallet but cannot trade. Switching network
+opens a different site, so you connect your wallet again there. Trading on the mainnets
+opens the moment their contracts ship — the network menu says which networks trade today.
+
 ## Trust & safety
 
 <a id="verified"></a>

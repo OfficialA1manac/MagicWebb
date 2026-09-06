@@ -123,10 +123,10 @@ export const cancelEarly = (a: { auctionId: bigint; name?: string }, hooks?: TxH
   runTx({ title: `Cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildCancelEarly(a.auctionId), summary: [['Allowed when', 'No bids yet · NFT stays with you']], success: { message: 'Auction cancelled', action: { label: 'View in your profile', href: '/profile' } } }, hooks);
 
 export const forceCancel = (a: { auctionId: bigint; name?: string }, hooks?: TxHooks) =>
-  runTx({ title: `Force-cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildForceCancel(a.auctionId), summary: [['Allowed when', 'Ended 3+ days ago and still unsettled · seller, winner, or keeper'], ['What happens', 'Auction closes without a trade — every bid becomes refundable, the NFT stays where it is']] }, hooks);
+  runTx({ title: `Force-cancel ${a.name ?? `auction #${a.auctionId}`}`, request: async () => buildForceCancel(a.auctionId), summary: [['Allowed when', 'Ended 3+ days ago and still unsettled · seller, winner, or keeper'], ['What happens', 'Auction closes without a trade — every bid becomes refundable, the NFT stays where it is']], success: { message: 'Auction cancelled — every bidder can withdraw their bid', action: { label: 'See your refunds', href: '/profile#refunds' } } }, hooks);
 
 export const withdrawLoserFunds = (a: { auctionId: bigint; amountWei?: bigint }, hooks?: TxHooks) =>
-  runTx({ title: 'Withdraw your bid', request: async () => buildWithdrawLoserFunds(a.auctionId), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Bid withdrawn to your wallet' } }, hooks);
+  runTx({ title: 'Withdraw your bid', request: async () => buildWithdrawLoserFunds(a.auctionId), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Bid withdrawn to your wallet', action: { label: 'See your refunds', href: '/profile#refunds' } } }, hooks);
 
 export const withdrawRefund = (a: { amountWei?: bigint } = {}, hooks?: TxHooks) =>
-  runTx({ title: 'Withdraw refund', request: async () => buildWithdrawRefund(), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Refund sent to your wallet' } }, hooks);
+  runTx({ title: 'Withdraw refund', request: async () => buildWithdrawRefund(), summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`]] : [], success: { message: 'Refund sent to your wallet', action: { label: 'View in your profile', href: '/profile' } } }, hooks);

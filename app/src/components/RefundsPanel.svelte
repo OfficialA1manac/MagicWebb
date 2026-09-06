@@ -79,10 +79,10 @@
   .rp-err { background: rgba(252,165,165,.06); border-color: rgba(252,165,165,.3); }
   .rp-head { display: flex; justify-content: space-between; align-items: center; gap: 8px; flex-wrap: wrap; } h2 { font-size: 15px; font-weight: 800; margin: 0; }
   .rp-total { font-weight: 700; color: #bbf7d0; }
-  .rp-hint { font-size: 12px; color: rgba(255,255,255,.55); margin: 6px 0 10px; }
+  .rp-hint { font-size: 12px; color: var(--white-60); margin: 6px 0 10px; }
   .rp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .rp-list li { display: flex; align-items: center; gap: 12px; font-size: 13px; min-height: 44px; }
   .rp-list li span:first-child { flex: 1; }
-  .rp-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; background: linear-gradient(135deg,#4ade80,#16a34a); color: #09090b; font-weight: 700; border: 0; cursor: pointer; font-family: inherit; }
+  .rp-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; background: linear-gradient(135deg,#4ade80,#16a34a); color: var(--bg); font-weight: 700; border: 0; cursor: pointer; font-family: inherit; }
   .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 </style>

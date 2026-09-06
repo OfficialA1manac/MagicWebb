@@ -192,12 +192,12 @@
 <style>
   .op-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
   .op-tabs { display: flex; gap: var(--sp-1); }
-  .op-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text-2); font-weight: 700; font-family: inherit; font-size: var(--fs-body); cursor: pointer; display: inline-flex; gap: var(--sp-2); align-items: center; }
+  .op-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text-2); font-weight: 700; font-family: inherit; font-size: var(--fs-body); cursor: pointer; display: inline-flex; gap: var(--sp-2); align-items: center; }
   .op-tabs button.is-on { background: var(--gold-12); border-color: var(--gold); color: var(--gold-300); }
   .op-tabs button:disabled { cursor: not-allowed; opacity: .6; }
-  .op-n { font-size: var(--fs-caption); background: rgba(255,255,255,.1); border-radius: var(--r-pill); padding: 2px 8px; }
+  .op-n { font-size: var(--fs-caption); background: var(--white-10); border-radius: var(--r-pill); padding: 2px 8px; }
   .op-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
-  .op-sort select { min-height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-family: inherit; font-size: var(--fs-small); }
+  .op-sort select { min-height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-family: inherit; font-size: var(--fs-small); }
   .op-teach { margin-bottom: var(--sp-4); }
   .op-explain { color: var(--text-2); font-size: var(--fs-body); min-height: var(--hit); display: flex; align-items: center; }
   .op-connect { display: flex; }

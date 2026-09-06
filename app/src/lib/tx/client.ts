@@ -85,9 +85,10 @@ export async function requireWallet(): Promise<WalletCtx> {
     window.__MW_APPKIT_OPEN__?.();
     acct = await new Promise((res) => {
       const un = watchAccount(config, { onChange(a) { if (a.isConnected && a.address) { un(); res(a); } } });
-      setTimeout(() => { un(); res(getAccount(config)); }, 120_000);
+      // 30s, not 120s: past that the modal looked frozen. The user can retry after connecting.
+      setTimeout(() => { un(); res(getAccount(config)); }, 30_000);
     });
-    if (!acct.isConnected || !acct.address) throw new TxError('WalletRequired', 'Connect a wallet to continue.');
+    if (!acct.isConnected || !acct.address) throw new TxError('WalletRequired', 'Connect a wallet to continue — open your wallet app, approve the connection, then try again.');
   }
   if (acct.chainId !== chain.id) {
     try {

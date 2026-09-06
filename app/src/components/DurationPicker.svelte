@@ -42,9 +42,9 @@
 
 <style>
   .dp { border: 0; padding: 0; margin: 0; }
-  legend { font-size: 12px; color: rgba(255,255,255,.55); font-weight: 600; margin-bottom: 6px; }
+  legend { font-size: 12px; color: var(--white-60); font-weight: 600; margin-bottom: 6px; }
   .dp-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
-  .dp-opt { min-height: 36px; padding: 0 8px; border-radius: 10px; background: rgba(255,255,255,.05); color: #fafafa; border: 1px solid rgba(255,255,255,.12); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
+  .dp-opt { min-height: 44px; padding: 0 8px; border-radius: 10px; background: var(--white-10); color: var(--text); border: 1px solid var(--white-10); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; }
   .dp-opt.is-on { background: rgba(125,211,252,.16); border-color: #7dd3fc; color: #e0f2fe; }
   .dp-opt:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
 </style>

@@ -104,56 +104,56 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
 
   .doc-nav-label {
     font-size: 0.625rem; font-weight: 800; letter-spacing: 0.12em;
-    text-transform: uppercase; color: rgba(255,255,255,0.4);
+    text-transform: uppercase; color: var(--white-40);
     margin: 0 0 0.5rem 0.75rem;
   }
   .doc-nav-link {
     display: flex; align-items: center; gap: 0.5rem;
     padding: 0.5rem 0.75rem; border-radius: 0.5rem;
     font-size: 0.8125rem; font-weight: 600;
-    color: rgba(255,255,255,0.6); transition: all 0.2s;
+    color: var(--white-60); transition: all 0.2s;
   }
-  .doc-nav-link:hover { color: #fafafa; background: rgba(255,255,255,0.06); }
+  .doc-nav-link:hover { color: var(--text); background: var(--white-10); }
   .doc-nav-link.is-current { color: #7dd3fc; background: rgba(56,189,248,0.12); }
-  .doc-nav-aux { color: rgba(255,255,255,0.35); margin-top: 0.5rem; }
+  .doc-nav-aux { color: var(--white-40); margin-top: 0.5rem; }
 
   /* Markdown body. Measure is capped so long prose stays readable. */
-  .doc-body { min-width: 0; max-width: 68ch; color: rgba(255,255,255,0.82); line-height: 1.7; }
+  .doc-body { min-width: 0; max-width: 68ch; color: var(--white-80); line-height: 1.7; }
   .doc-body :global(h1) {
     font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 900; letter-spacing: -0.025em;
-    color: #fafafa; margin: 0 0 1rem; text-wrap: balance;
+    color: var(--text); margin: 0 0 1rem; text-wrap: balance;
   }
   .doc-body :global(h2) {
-    font-size: 1.375rem; font-weight: 800; color: #fafafa;
+    font-size: 1.375rem; font-weight: 800; color: var(--text);
     margin: 2.5rem 0 0.75rem; padding-bottom: 0.5rem;
-    border-bottom: 1px solid rgba(255,255,255,0.08); text-wrap: balance;
+    border-bottom: 1px solid var(--white-10); text-wrap: balance;
   }
-  .doc-body :global(h3) { font-size: 1.0625rem; font-weight: 700; color: #fafafa; margin: 1.75rem 0 0.5rem; }
+  .doc-body :global(h3) { font-size: 1.0625rem; font-weight: 700; color: var(--text); margin: 1.75rem 0 0.5rem; }
   .doc-body :global(p) { margin: 0 0 1rem; }
   .doc-body :global(ul), .doc-body :global(ol) { margin: 0 0 1rem; padding-left: 1.35rem; }
   .doc-body :global(li) { margin: 0 0 0.4rem; }
   .doc-body :global(a) { color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px; }
-  .doc-body :global(strong) { color: #fafafa; font-weight: 700; }
-  .doc-body :global(hr) { border: none; border-top: 1px solid rgba(255,255,255,0.1); margin: 2rem 0; }
+  .doc-body :global(strong) { color: var(--text); font-weight: 700; }
+  .doc-body :global(hr) { border: none; border-top: 1px solid var(--white-10); margin: 2rem 0; }
   .doc-body :global(blockquote) {
     margin: 1.25rem 0; padding: 0.5rem 0 0.5rem 1rem;
-    border-left: 3px solid rgba(167,139,250,0.5); color: rgba(255,255,255,0.65);
+    border-left: 3px solid rgba(167,139,250,0.5); color: var(--white-60);
   }
   .doc-body :global(code) {
     font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 0.85em;
-    background: rgba(255,255,255,0.06); border: 1px solid rgba(255,255,255,0.1);
+    background: var(--white-10); border: 1px solid var(--white-10);
     border-radius: 4px; padding: 0.1em 0.35em;
   }
   /* Wide content scrolls inside its own box so the page never scrolls sideways. */
   .doc-body :global(pre) {
-    background: rgba(9,9,11,0.7); border: 1px solid rgba(255,255,255,0.1);
+    background: rgba(9,9,11,0.7); border: 1px solid var(--white-10);
     border-radius: 0.75rem; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem;
   }
   .doc-body :global(pre code) { background: none; border: none; padding: 0; }
   .doc-body :global(table) { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: 0.9375rem; display: block; overflow-x: auto; }
   .doc-body :global(th), .doc-body :global(td) {
     text-align: left; padding: 0.5rem 0.75rem;
-    border-bottom: 1px solid rgba(255,255,255,0.08); vertical-align: top;
+    border-bottom: 1px solid var(--white-10); vertical-align: top;
   }
-  .doc-body :global(th) { color: rgba(255,255,255,0.5); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
+  .doc-body :global(th) { color: var(--white-60); font-size: 0.75rem; text-transform: uppercase; letter-spacing: 0.08em; }
 </style>

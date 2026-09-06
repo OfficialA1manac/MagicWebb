@@ -36,12 +36,20 @@
 /* Light scheme: the pill palettes above are dark-ground literals — restate
    them dark-on-light so contrast holds (axe-gated in e2e/smoke.spec.ts). */
 @media (prefers-color-scheme: light) {
-  .vb.is-ok { color: #075985; }
-  .vb.is-authentic { color: #92400e; }
-  .vb.is-creator { color: #92400e; }
-  .vb.is-tracked { color: rgba(0,0,0,.62); }
-  .vb.is-tracked .vb-dot { background: rgba(0,0,0,.45); color: #fff; }
-  .vb.is-no { color: rgba(0,0,0,.6); }
-  .vb.is-holder { color: #5b21b6; }
-  .vb.vb-check { color: #075985; }
+  :root:not([data-theme=\"dark\"]) .vb.is-ok { color: #075985; }
+  :root:not([data-theme=\"dark\"]) .vb.is-authentic { color: #92400e; }
+  :root:not([data-theme=\"dark\"]) .vb.is-creator { color: #92400e; }
+  :root:not([data-theme=\"dark\"]) .vb.is-tracked { color: rgba(0,0,0,.62); }
+  :root:not([data-theme=\"dark\"]) .vb.is-tracked .vb-dot { background: rgba(0,0,0,.45); color: #fff; }
+  :root:not([data-theme=\"dark\"]) .vb.is-no { color: rgba(0,0,0,.6); }
+  :root:not([data-theme=\"dark\"]) .vb.is-holder { color: #5b21b6; }
+  :root:not([data-theme=\"dark\"]) .vb.vb-check { color: #075985; }
 }
+:root[data-theme=\"light\"] .vb.is-ok { color: #075985; }
+:root[data-theme=\"light\"] .vb.is-authentic { color: #92400e; }
+:root[data-theme=\"light\"] .vb.is-creator { color: #92400e; }
+:root[data-theme=\"light\"] .vb.is-tracked { color: rgba(0,0,0,.62); }
+:root[data-theme=\"light\"] .vb.is-tracked .vb-dot { background: rgba(0,0,0,.45); color: #fff; }
+:root[data-theme=\"light\"] .vb.is-no { color: rgba(0,0,0,.6); }
+:root[data-theme=\"light\"] .vb.is-holder { color: #5b21b6; }
+:root[data-theme=\"light\"] .vb.vb-check { color: #075985; }

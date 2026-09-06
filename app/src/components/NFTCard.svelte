@@ -1,6 +1,7 @@
 <script lang="ts">
   import { fly } from 'svelte/transition';
   import Badge from './Badge.svelte';
+  import { resolveImageUri } from '../lib/image-uri';
   import Hint from './Hint.svelte';
   import { showCreatorOnItem, tokenCheck } from '../lib/badge';
 
@@ -79,13 +80,8 @@
   // Falls back to C2FLR for dev mode (Astro dev server without Go backend).
   let currency = $state(typeof window !== 'undefined' ? (window.MW_NATIVE_CURRENCY || 'C2FLR') : 'C2FLR');
 
-  let imageSrc = $derived(
-    item.image_uri
-      ? item.image_uri.startsWith('/api/v1/img/') || item.image_uri.startsWith('data:')
-        ? item.image_uri
-        : `/api/v1/media?url=${encodeURIComponent(item.image_uri)}&id=${encodeURIComponent(item.token_id)}`
-      : ''
-  );
+  // Shared resolver: rewrites /api/v1/img → /img and requests a 256px rendition.
+  let imageSrc = $derived(resolveImageUri(item.image_uri, item.token_id, 256));
 
   // ── 3D tilt state ──
   let tiltStyle = $state('');
@@ -178,7 +174,7 @@
   .nft-card {
     display: block;
     background: rgba(15, 15, 19, 0.6);
-    border: 1px solid rgba(255, 255, 255, 0.07);
+    border: 1px solid var(--white-10);
     border-radius: 1rem;
     overflow: hidden;
     transition: box-shadow 0.3s ease, border-color 0.3s ease;
@@ -215,7 +211,7 @@
     display: flex;
     align-items: center;
     justify-content: center;
-    color: rgba(255, 255, 255, 0.08);
+    color: var(--white-10);
   }
 
   .image-placeholder svg {
@@ -235,12 +231,12 @@
   .standard-badge {
     padding: 0.125rem 0.375rem;
     border-radius: 0.375rem;
-    background: rgba(255, 255, 255, 0.08);
-    border: 1px solid rgba(255, 255, 255, 0.12);
+    background: var(--white-10);
+    border: 1px solid var(--white-10);
     font-size: 0.75rem;
     font-weight: 800;
     letter-spacing: 0.02em;
-    color: rgba(255, 255, 255, 0.6);
+    color: var(--white-60);
     backdrop-filter: blur(4px);
   }
 
@@ -277,7 +273,7 @@
     padding: 0.125rem 0.5rem;
     background: rgba(9, 9, 11, 0.7);
     border-radius: 0.375rem;
-    color: rgba(255, 255, 255, 0.7);
+    color: var(--white-80);
     font-size: 0.75rem;
     font-weight: 700;
     backdrop-filter: blur(4px);
@@ -285,13 +281,13 @@
 
   .card-body {
     padding: 0.75rem;
-    border-top: 1px solid rgba(255, 255, 255, 0.04);
+    border-top: 1px solid var(--white-10);
     background: rgba(15, 15, 19, 0.6);
   }
 
   .collection-addr {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.62);
+    color: var(--white-60);
     font-family: 'JetBrains Mono', 'Fira Code', monospace;
     text-transform: uppercase;
     letter-spacing: 0.05em;
@@ -301,7 +297,7 @@
   .token-name {
     font-size: 0.875rem;
     font-weight: 700;
-    color: #fafafa;
+    color: var(--text);
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -317,7 +313,7 @@
 
   .supply-text {
     font-size: 0.75rem;
-    color: rgba(255, 255, 255, 0.62);
+    color: var(--white-60);
     font-weight: 600;
   }
 
@@ -326,7 +322,7 @@
     padding: 0.25rem 0.875rem;
     border-radius: 0.5rem;
     background: linear-gradient(135deg, #7dd3fc, #0ea5e9);
-    color: #09090b;
+    color: var(--bg);
     font-size: 0.75rem;
     font-weight: 800;
     box-shadow: 0 0 16px -3px rgba(56, 189, 248, 0.4), 0 4px 8px -2px rgba(14, 165, 233, 0.25);

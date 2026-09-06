@@ -112,7 +112,7 @@ import WalletConnect from '../components/WalletConnect';
       { label: 'Auctions', value: auctions, color: '#a78bfa' },
       { label: 'Bids', value: bids, color: '#67e8f9' },
       { label: 'Offers', value: offers, color: '#fbbf24' },
-      { label: 'Volume', value: parseFloat(volFLR) || 0, color: 'rgba(255,255,255,0.5)' },
+      { label: 'Volume', value: parseFloat(volFLR) || 0, color: 'var(--white-60)' },
     ];
     const maxV = Math.max(...data.map((d) => d.value)) || 1;
     const gap = cw / data.length;
@@ -135,11 +135,11 @@ import WalletConnect from '../components/WalletConnect';
       ctx.globalAlpha = 0.8;
       ctx.fill();
       ctx.globalAlpha = 1;
-      ctx.fillStyle = '#fafafa';
+      ctx.fillStyle = 'var(--text)';
       ctx.font = 'bold 12px Inter, sans-serif';
       ctx.textAlign = 'center';
       ctx.fillText(d.value.toLocaleString(), x + barW / 2, y - 6);
-      ctx.fillStyle = 'rgba(255,255,255,0.3)';
+      ctx.fillStyle = 'var(--white-40)';
       ctx.font = '10px Inter, sans-serif';
       ctx.fillText(d.label, x + barW / 2, pad.t + ch + 16);
     });
@@ -176,12 +176,12 @@ import WalletConnect from '../components/WalletConnect';
       ctx.globalAlpha = 1;
       start += sweep;
     });
-    ctx.fillStyle = '#fafafa';
+    ctx.fillStyle = 'var(--text)';
     ctx.font = 'bold 18px Inter, sans-serif';
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
     ctx.fillText(total.toLocaleString(), cx, cy - 6);
-    ctx.fillStyle = 'rgba(255,255,255,0.3)';
+    ctx.fillStyle = 'var(--white-40)';
     ctx.font = '9px Inter, sans-serif';
     ctx.fillText('total', cx, cy + 14);
     const legendStartY = canvas.height - 24;
@@ -190,7 +190,7 @@ import WalletConnect from '../components/WalletConnect';
       const ly = legendStartY + Math.floor(i / 3) * 12;
       ctx.fillStyle = seg.color;
       ctx.fillRect(lx, ly - 4, 6, 6);
-      ctx.fillStyle = 'rgba(255,255,255,0.4)';
+      ctx.fillStyle = 'var(--white-40)';
       ctx.font = '8px Inter, sans-serif';
       ctx.textAlign = 'left';
       ctx.fillText(seg.label, lx + 8, ly + 1);
@@ -347,10 +347,10 @@ import WalletConnect from '../components/WalletConnect';
   .mx-list { display: flex; flex-direction: column; gap: var(--sp-2); }
   .mx-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); min-height: 52px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); font-size: var(--fs-small); }
   .mx-type { font-weight: 700; color: var(--text); text-transform: uppercase; font-size: var(--fs-caption); letter-spacing: var(--ls-caption); }
-  .mx-chip { padding: 2px 10px; border-radius: var(--r-pill); font-size: var(--fs-caption); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-caption); background: rgba(255,255,255,0.06); color: var(--text-2); }
+  .mx-chip { padding: 2px 10px; border-radius: var(--r-pill); font-size: var(--fs-caption); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-caption); background: var(--white-10); color: var(--text-2); }
   .mx-chip.is-active { background: var(--green-12); color: var(--green); }
   .mx-chip.is-sold { background: var(--gold-12); color: var(--gold-300); }
-  .mx-chip.is-expired { background: rgba(255,255,255,0.06); color: var(--text-3); }
+  .mx-chip.is-expired { background: var(--white-10); color: var(--text-3); }
   .mx-chip.is-cancelled { background: var(--red-12); color: var(--red); }
   .mx-token { color: var(--text-2); }
   a.mx-token { text-decoration: underline; text-underline-offset: 2px; }

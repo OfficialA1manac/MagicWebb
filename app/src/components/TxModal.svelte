@@ -204,46 +204,46 @@
   .mw-tx-scrim { position: fixed; inset: 0; background: rgba(0,0,0,.6); z-index: 200; backdrop-filter: blur(2px); }
   .mw-tx-sheet {
     position: fixed; left: 0; right: 0; bottom: 0; z-index: 201;
-    background: var(--ink-900, #0f0f13); color: var(--white, #fafafa);
-    border-top: 1px solid rgba(255,255,255,.1); border-radius: 24px 24px 0 0;
+    background: var(--ink-900, var(--surface)); color: var(--white, var(--text));
+    border-top: 1px solid var(--white-10); border-radius: 24px 24px 0 0;
     padding: 12px 20px calc(24px + env(safe-area-inset-bottom)); box-shadow: 0 -20px 60px rgba(0,0,0,.6);
     max-height: 92vh; overflow-y: auto; font-family: inherit;
   }
   @media (min-width: 480px) {
-    .mw-tx-sheet { left: 50%; right: auto; bottom: auto; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); border-radius: 20px; border: 1px solid rgba(255,255,255,.1); padding: 20px 24px 24px; }
+    .mw-tx-sheet { left: 50%; right: auto; bottom: auto; top: 50%; transform: translate(-50%, -50%); width: min(440px, calc(100vw - 32px)); border-radius: 20px; border: 1px solid var(--white-10); padding: 20px 24px 24px; }
     .mw-tx-grab { display: none; }
   }
-  .mw-tx-grab { width: 40px; height: 4px; border-radius: 2px; background: rgba(255,255,255,.15); margin: 0 auto 14px; }
+  .mw-tx-grab { width: 40px; height: 4px; border-radius: 2px; background: var(--white-20); margin: 0 auto 14px; }
   h2 { font-size: 17px; font-weight: 700; margin: 0 0 4px; }
   .mw-tx-rail { list-style: none; margin: 14px 0 6px; padding: 0; }
-  .mw-tx-step { display: flex; gap: 12px; align-items: center; min-height: 44px; font-size: 14px; color: rgba(255,255,255,.55); }
-  .mw-tx-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid rgba(255,255,255,.15); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
-  .is-done { color: #fafafa; } .is-done .mw-tx-dot { background: #4ade80; border-color: #4ade80; color: #09090b; font-weight: 800; }
-  .is-active { color: #fafafa; font-weight: 600; } .is-active .mw-tx-dot { border-color: #7dd3fc; border-top-color: transparent; animation: mw-spin 1s linear infinite; }
+  .mw-tx-step { display: flex; gap: 12px; align-items: center; min-height: 44px; font-size: 14px; color: var(--white-60); }
+  .mw-tx-dot { width: 24px; height: 24px; border-radius: 50%; border: 2px solid var(--white-20); display: inline-flex; align-items: center; justify-content: center; font-size: 12px; flex-shrink: 0; }
+  .is-done { color: var(--text); } .is-done .mw-tx-dot { background: #4ade80; border-color: #4ade80; color: var(--bg); font-weight: 800; }
+  .is-active { color: var(--text); font-weight: 600; } .is-active .mw-tx-dot { border-color: #7dd3fc; border-top-color: transparent; animation: mw-spin 1s linear infinite; }
   .is-error .mw-tx-dot { border-color: #f87171; }
   @keyframes mw-spin { to { transform: rotate(360deg); } }
   @media (prefers-reduced-motion: reduce) { .is-active .mw-tx-dot { animation: none; border-top-color: #7dd3fc; } }
   .mw-tx-summary { margin: 10px 0 0; }
-  .mw-tx-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 9px 0; border-bottom: 1px solid rgba(255,255,255,.08); }
-  .mw-tx-row dt { color: rgba(255,255,255,.6); } .mw-tx-row dd { margin: 0; text-align: right; }
-  .mw-tx-row.is-total { font-weight: 700; font-size: 15px; } .mw-tx-row.is-total dt { color: #fafafa; }
-  .mw-tx-fee { font-size: 13px; } .mw-tx-fee dd { color: rgba(255,255,255,.7); }
+  .mw-tx-row { display: flex; justify-content: space-between; gap: 12px; font-size: 14px; padding: 9px 0; border-bottom: 1px solid var(--white-10); }
+  .mw-tx-row dt { color: var(--white-60); } .mw-tx-row dd { margin: 0; text-align: right; }
+  .mw-tx-row.is-total { font-weight: 700; font-size: 15px; } .mw-tx-row.is-total dt { color: var(--text); }
+  .mw-tx-fee { font-size: 13px; } .mw-tx-fee dd { color: var(--white-80); }
   .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-  .mw-tx-muted { color: rgba(255,255,255,.5); }
+  .mw-tx-muted { color: var(--white-60); }
   .mw-tx-hint { font-size: 13px; text-align: center; margin: 6px 0 0; }
   .mw-tx-link { color: #7dd3fc; text-decoration: underline; }
   .mw-tx-done { display: flex; align-items: center; gap: 12px; padding: 8px 0 4px; font-size: 14px; }
   .mw-tx-done p { margin: 0; }
   .mw-tx-done-title { font-weight: 700; font-size: 15px; }
   .mw-tx-done-sub { font-size: 13px; }
-  .mw-tx-check { width: 40px; height: 40px; border-radius: 50%; background: #4ade80; color: #09090b; font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
+  .mw-tx-check { width: 40px; height: 40px; border-radius: 50%; background: #4ade80; color: var(--bg); font-weight: 800; font-size: 20px; display: flex; align-items: center; justify-content: center; flex-shrink: 0; }
   .mw-tx-error { background: rgba(248,113,113,.08); border: 1px solid rgba(248,113,113,.3); border-radius: 14px; padding: 14px; margin: 12px 0; font-size: 14px; }
   .mw-tx-error-title { font-weight: 700; color: #fca5a5; margin-bottom: 6px; }
-  .mw-tx-error p { margin: 0 0 8px; color: rgba(255,255,255,.8); line-height: 1.5; }
+  .mw-tx-error p { margin: 0 0 8px; color: var(--white-80); line-height: 1.5; }
   .mw-tx-actions { display: flex; flex-direction: column; gap: 8px; margin-top: 14px; }
   .mw-btn { min-height: 44px; border-radius: 12px; font-weight: 700; font-size: 15px; display: flex; align-items: center; justify-content: center; border: 1px solid transparent; cursor: pointer; font-family: inherit; text-decoration: none; }
   .mw-btn:focus-visible { outline: 2px solid #7dd3fc; outline-offset: 2px; }
   .mw-btn[disabled] { opacity: .6; cursor: default; }
-  .mw-btn-primary { background: linear-gradient(135deg, #7dd3fc, #0ea5e9); color: #09090b; }
-  .mw-btn-ghost { background: transparent; color: #fafafa; border-color: rgba(255,255,255,.14); }
+  .mw-btn-primary { background: linear-gradient(135deg, #7dd3fc, #0ea5e9); color: var(--bg); }
+  .mw-btn-ghost { background: transparent; color: var(--text); border-color: var(--white-10); }
 </style>

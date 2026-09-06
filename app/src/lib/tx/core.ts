@@ -36,6 +36,7 @@ export function withdrawRefundFrom(a: { core: Address; label?: string; amountWei
   return runTx({
     title: `Withdraw refund${a.label ? ` · ${a.label}` : ''}`,
     request: async () => buildWithdrawRefund(a.core),
-    summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`], ['Cost', 'Gas only']] : [],
+    summary: a.amountWei ? [['Amount', `${fmtPrice(a.amountWei)} ${currentChain().currency}`], ['Cost', 'Gas only']] : [['Cost', 'Gas only · the full held amount comes back to your wallet']],
+    success: { message: 'Refund sent to your wallet', action: { label: 'View in your profile', href: '/profile' } },
   }, hooks);
 }

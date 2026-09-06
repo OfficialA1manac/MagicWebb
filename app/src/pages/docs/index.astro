@@ -38,9 +38,9 @@ import { DOCS as docs } from './_registry';
   .docs-head { margin-bottom: 2.5rem; }
   .docs-head h1 {
     font-size: clamp(1.875rem, 5vw, 2.75rem); font-weight: 900;
-    letter-spacing: -0.025em; color: #fafafa; margin: 0 0 0.5rem;
+    letter-spacing: -0.025em; color: var(--text); margin: 0 0 0.5rem;
   }
-  .docs-head p { color: rgba(255,255,255,0.5); font-size: 1rem; margin: 0; }
+  .docs-head p { color: var(--white-60); font-size: 1rem; margin: 0; }
 
   .docs-grid {
     display: grid; gap: 1rem;
@@ -49,22 +49,22 @@ import { DOCS as docs } from './_registry';
   .doc-card {
     display: flex; flex-direction: column; gap: 0.375rem;
     padding: 1.25rem; border-radius: 1rem;
-    background: rgba(255,255,255,0.02);
-    border: 1px solid rgba(255,255,255,0.08);
+    background: var(--white-10);
+    border: 1px solid var(--white-10);
     border-top: 2px solid var(--accent);
     transition: background 0.2s, border-color 0.2s, transform 0.2s;
   }
   .doc-card:hover {
-    background: rgba(255,255,255,0.05);
-    border-color: rgba(255,255,255,0.16);
+    background: var(--white-10);
+    border-color: var(--white-20);
     border-top-color: var(--accent);
     transform: translateY(-2px);
   }
   .doc-card-icon { font-size: 1.5rem; line-height: 1; }
-  .doc-card-title { font-size: 1rem; font-weight: 800; color: #fafafa; }
-  .doc-card-blurb { font-size: 0.8125rem; color: rgba(255,255,255,0.5); line-height: 1.5; }
+  .doc-card-title { font-size: 1rem; font-weight: 800; color: var(--text); }
+  .doc-card-blurb { font-size: 0.8125rem; color: var(--white-60); line-height: 1.5; }
 
-  .docs-foot { margin-top: 2.5rem; font-size: 0.8125rem; color: rgba(255,255,255,0.4); }
+  .docs-foot { margin-top: 2.5rem; font-size: 0.8125rem; color: var(--white-40); }
   .docs-foot a { color: #7dd3fc; }
 
   @media (prefers-reduced-motion: reduce) {

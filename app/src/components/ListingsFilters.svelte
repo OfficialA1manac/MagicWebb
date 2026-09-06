@@ -375,30 +375,30 @@
   .lf-title h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); font-weight: 800; margin: 0; letter-spacing: -0.02em; }
   .lf-pill { padding: 4px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--ink); font-size: var(--fs-small); font-weight: 700; white-space: nowrap; }
   .lf-bar { display: flex; flex-wrap: wrap; align-items: end; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
-  .lf-bar input, .lf-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }
+  .lf-bar input, .lf-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }
   .lf-price { width: 130px; }
   .lf-apply { min-height: var(--hit); }
   .lf-actions { display: flex; gap: var(--sp-2); flex-wrap: wrap; align-items: center; }
   .lf-save { display: inline-flex; align-items: center; gap: var(--sp-1); }
   .lf-combo { position: relative; min-width: 230px; flex: 1 1 230px; }
-  .lf-combo-btn { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: var(--fs-body); font-family: inherit; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); cursor: pointer; width: 100%; }
+  .lf-combo-btn { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: var(--fs-body); font-family: inherit; display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); cursor: pointer; width: 100%; }
   .lf-combo-val { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
   .lf-combo-list { position: absolute; top: calc(100% + 4px); left: 0; right: 0; z-index: var(--z-drawer); max-height: 280px; overflow: auto; margin: 0; padding: var(--sp-1); list-style: none; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-control); box-shadow: var(--shadow); }
   .lf-combo-list button { display: block; width: 100%; text-align: left; min-height: var(--hit); padding: 0 var(--sp-3); border: 0; background: transparent; color: var(--text); font-family: inherit; font-size: var(--fs-body); border-radius: var(--r-control); cursor: pointer; }
-  .lf-combo-list button:hover { background: rgba(255,255,255,.07); }
+  .lf-combo-list button:hover { background: var(--white-10); }
   .lf-combo-list [aria-selected="true"] button { color: var(--sky-300); font-weight: 700; }
   .lf-savepanel { padding: var(--sp-3) var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); display: flex; flex-direction: column; gap: var(--sp-2); }
   .lf-saverow { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
-  .lf-saverow input { flex: 1 1 200px; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; }
+  .lf-saverow input { flex: 1 1 200px; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; }
   .lf-savedrow { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-2); }
   .lf-savedname { background: transparent; border: 0; color: var(--text); font-family: inherit; font-size: var(--fs-body); font-weight: 600; min-height: var(--hit); cursor: pointer; text-align: left; flex: 1; padding: 0 var(--sp-2); border-radius: var(--r-control); }
-  .lf-savedname:hover { background: rgba(255,255,255,.06); }
+  .lf-savedname:hover { background: var(--white-10); }
   .lf-dim { color: var(--text-3); font-size: var(--fs-small); margin: 0; }
   .lf-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
   .lf-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--ink); font-size: var(--fs-small); font-weight: 700; }
   .lf-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
-  .lf-chip-x:hover { background: rgba(255,255,255,.1); }
-  .lf-chip-toggle { background: rgba(255,255,255,.05); border-color: var(--line-strong); color: var(--text-2); cursor: pointer; font-family: inherit; min-height: 36px; }
+  .lf-chip-x:hover { background: var(--white-10); }
+  .lf-chip-toggle { background: var(--white-10); border-color: var(--line-strong); color: var(--text-2); cursor: pointer; font-family: inherit; min-height: 36px; }
   .lf-chip-toggle.is-on { background: var(--sky-12); border-color: var(--sky); color: var(--sky-300); }
   .lf-traits { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
   .lf-trait-group { display: flex; flex-direction: column; gap: var(--sp-1); }

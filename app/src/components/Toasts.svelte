@@ -34,6 +34,6 @@
   .toast-msg { flex: 1 1 auto; min-width: 0; }
   .toast-act { flex: 0 0 auto; min-height: 32px; padding: 0 var(--sp-2); border-radius: var(--r-control); background: transparent; border: 1px solid var(--line-strong); color: var(--text); font: inherit; font-weight: 700; cursor: pointer; text-decoration: none; display: inline-flex; align-items: center; }
   .toast-x { flex: 0 0 auto; width: 32px; height: 32px; display: inline-flex; align-items: center; justify-content: center; border-radius: var(--r-control); background: transparent; color: var(--text-3); border: 0; cursor: pointer; }
-  .toast-x:hover { color: var(--text); background: rgba(255,255,255,.08); }
+  .toast-x:hover { color: var(--text); background: var(--white-10); }
   @keyframes toast-in { from { opacity: 0; transform: translateY(8px); } to { opacity: 1; transform: none; } }
 </style>

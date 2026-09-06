@@ -100,6 +100,8 @@
   let offersRecv = $derived(pp.offersReceived ?? []);
   let activity = $derived(pp.activity ?? []);
   let createdColls = $derived(pp.createdCollections ?? []);
+  // "List an NFT" links land on /profile#nfts: select the Items tab so the batch bar is one tap away.
+  $effect(() => { if (typeof location !== 'undefined' && location.hash === '#nfts') switchTab('items'); });
   // ★ on the profile header only for a verified creator (D3).
   let verifiedCreator = $derived((profile as any)?.verified_creator === true || createdColls.some((c: any) => c?.verified === true));
   let inventory = $derived(mergeInventory(nfts, listings, auctions as InventoryItem[]));
@@ -350,7 +352,7 @@
   function emptyCta(id: ProfileTabId) {
     const em = emptyFor(id, own);
     if (!em.cta) return undefined;
-    if (em.cta.href === '#items') return { label: em.cta.label, onclick: () => switchTab('items') };
+    if (em.cta.href === '#items' || em.cta.href === '#nfts') return { label: em.cta.label, onclick: () => switchTab('items') };
     return { label: em.cta.label, href: em.cta.href };
   }
 
@@ -687,7 +689,7 @@
   .pp-creator { padding: 2px 10px; border-radius: var(--r-pill); background: var(--gold-12); border: 1px solid var(--gold-35); color: var(--gold-300); font-size: var(--fs-caption); font-weight: 800; text-decoration: none; }
   .pp-addr { display: flex; align-items: center; gap: var(--sp-2); margin: 0; color: var(--text-2); font-size: var(--fs-small); overflow-wrap: anywhere; }
   .pp-iconbtn { width: var(--hit); height: var(--hit); margin: -12px 0; display: inline-flex; align-items: center; justify-content: center; background: transparent; border: 0; border-radius: var(--r-control); color: var(--text-3); cursor: pointer; }
-  .pp-iconbtn:hover { color: var(--text); background: rgba(255,255,255,.06); }
+  .pp-iconbtn:hover { color: var(--text); background: var(--white-10); }
   .pp-explorer { display: inline-flex; align-items: center; gap: 4px; color: var(--text-2); min-height: var(--hit); }
   .pp-explorer:hover { color: var(--text); }
   .pp-bio { margin: 0; color: var(--text-2); font-size: var(--fs-body); line-height: var(--lh-body); max-width: 36rem; overflow-wrap: anywhere; }
@@ -723,7 +725,7 @@
   .pp-stretch { position: absolute; inset: 0; z-index: 1; }
   .pp-cb { position: absolute; top: var(--sp-2); left: var(--sp-2); z-index: 3; width: 20px; height: 20px; accent-color: var(--sky); cursor: pointer; }
   .pp-hint1155 { position: absolute; top: var(--sp-2); left: var(--sp-2); z-index: 3; }
-  .pp-img { position: relative; display: block; aspect-ratio: 1; background: var(--ink-950, #09090b); }
+  .pp-img { position: relative; display: block; aspect-ratio: 1; background: var(--ink-950, var(--bg)); }
   .pp-img img { width: 100%; height: 100%; object-fit: cover; display: block; }
   .pp-noimg { position: absolute; inset: 0; display: flex; align-items: center; justify-content: center; color: var(--text-3); }
   .pp-price { position: absolute; top: var(--sp-2); right: var(--sp-2); padding: 2px 10px; border-radius: var(--r-pill); background: rgba(9,9,11,.75); border: 1px solid var(--gold-35); color: var(--gold-300); font-size: var(--fs-caption); font-weight: 800; backdrop-filter: blur(4px); }
@@ -739,7 +741,7 @@
   .pp-row { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-3) var(--sp-4); min-height: 52px; border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); font-size: var(--fs-small); color: var(--text); text-decoration: none; }
   a.pp-row:hover { border-color: var(--sky-35); }
   .pp-rowmain { display: flex; flex-direction: column; gap: 2px; font-weight: 600; flex: 1; min-width: 0; }
-  .pp-chip { padding: 2px 10px; border-radius: var(--r-pill); background: rgba(255,255,255,.06); color: var(--text-2); font-size: var(--fs-caption); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-caption); }
+  .pp-chip { padding: 2px 10px; border-radius: var(--r-pill); background: var(--white-10); color: var(--text-2); font-size: var(--fs-caption); font-weight: 700; text-transform: uppercase; letter-spacing: var(--ls-caption); }
   .pp-amt { color: var(--gold-300); font-weight: 700; }
   .pp-acttype { font-weight: 800; text-transform: uppercase; font-size: var(--fs-caption); letter-spacing: var(--ls-caption); }
   .pp-toklink { text-decoration: underline; text-underline-offset: 2px; }

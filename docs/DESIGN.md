@@ -33,8 +33,11 @@ before signing) · **calm app UI** · **44px everywhere**.
 Legacy aliases (`--ink-950`, `--sky-300`, `--white-60`, …) map onto the new
 tokens so unmigrated pages keep rendering; delete them when the last page moves.
 
-**Light theme** is tokens only (`prefers-color-scheme: light` in tokens.css);
-no toggle in v1.
+**Light theme** is tokens only (`prefers-color-scheme: light` in tokens.css). v3.6
+adds a header toggle (System → Light → Dark) that sets `[data-theme]` on `<html>`;
+the attribute wins over the OS scheme in both directions. Never hardcode
+`rgba(255,255,255,…)` or `#fafafa` in components — use `--text*`, `--white-*`,
+`--surface*` so both schemes stay readable (axe-gated in both).
 
 ## Type
 

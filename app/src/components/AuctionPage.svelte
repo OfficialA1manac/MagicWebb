@@ -341,11 +341,11 @@
   .ap-label { font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
   .ap-inrow { display: flex; gap: var(--sp-2); flex-wrap: wrap; }
   .ap-inrow .ap-input { flex: 1 1 160px; }
-  .ap-input { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; width: 100%; }
+  .ap-input { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; width: 100%; }
   .ap-err { color: var(--red); font-size: var(--fs-small); }
   .ap-hint { font-size: var(--fs-small); color: var(--text-2); margin: 0; line-height: var(--lh-small); }
   .ap-numbers { display: grid; grid-template-columns: repeat(3, 1fr); gap: var(--sp-2); margin: var(--sp-1) 0 0; }
-  .ap-numbers > div { background: rgba(255,255,255,.03); border: 1px solid var(--line); border-radius: var(--r-control); padding: var(--sp-2) var(--sp-3); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
+  .ap-numbers > div { background: var(--white-10); border: 1px solid var(--line); border-radius: var(--r-control); padding: var(--sp-2) var(--sp-3); display: flex; flex-direction: column; gap: 2px; min-width: 0; }
   .ap-numbers dt { font-size: var(--fs-caption); line-height: var(--lh-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; color: var(--text-3); font-weight: 700; }
   .ap-numbers dd { margin: 0; font-size: var(--fs-body); font-weight: 600; color: var(--text); overflow-wrap: anywhere; }
   .ap-check { color: var(--green); display: inline-flex; align-items: center; gap: 4px; }
@@ -354,7 +354,7 @@
   .ap-spin { width: 12px; height: 12px; border-radius: 50%; border: 2px solid rgba(74,222,128,.4); border-top-color: var(--green); animation: sp 1s linear infinite; }
   @keyframes sp { to { transform: rotate(360deg); } }
   .ap-section h2 { font-size: var(--fs-h3); font-weight: 800; margin: 0 0 var(--sp-2); display: flex; gap: var(--sp-2); align-items: center; }
-  .ap-n { font-size: var(--fs-caption); background: rgba(255,255,255,.1); border-radius: var(--r-pill); padding: 2px 8px; }
+  .ap-n { font-size: var(--fs-caption); background: var(--white-10); border-radius: var(--r-pill); padding: 2px 8px; }
   .ap-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: var(--sp-1); }
   .ap-list li { display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; padding: var(--sp-2) var(--sp-3); border-radius: var(--r-control); background: var(--surface); border: 1px solid var(--line); font-size: var(--fs-small); min-height: var(--hit); }
   .ap-dim { color: var(--text-3); }

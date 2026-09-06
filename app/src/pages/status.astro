@@ -260,36 +260,36 @@ import WalletConnect from '../components/WalletConnect';
 
 <style>
   .gas { max-width: 68rem; margin: 0 auto; padding: 3rem 1.5rem 6rem; }
-  .gas-head h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 900; letter-spacing: -0.025em; color: #fafafa; margin: 0 0 0.5rem; }
-  .gas-head p { color: rgba(255,255,255,0.5); margin: 0 0 2rem; }
-  h2 { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.4); margin: 2.5rem 0 1rem; }
+  .gas-head h1 { font-size: clamp(1.75rem, 4vw, 2.5rem); font-weight: 900; letter-spacing: -0.025em; color: var(--text); margin: 0 0 0.5rem; }
+  .gas-head p { color: var(--white-60); margin: 0 0 2rem; }
+  h2 { font-size: 0.75rem; font-weight: 800; letter-spacing: 0.12em; text-transform: uppercase; color: var(--white-40); margin: 2.5rem 0 1rem; }
 
   .gas-alerts { background: rgba(251,191,36,0.1); border: 1px solid rgba(251,191,36,0.3); border-radius: 0.75rem; padding: 0.875rem 1rem; margin: 1.5rem 0 0; color: #fcd34d; font-size: 0.875rem; }
   .gas-alerts p { margin: 0 0 0.375rem; }
   .gas-alerts p:last-child { margin: 0; }
 
-  .gas-tiles { display: grid; gap: 1px; background: rgba(255,255,255,0.08); border: 1px solid rgba(255,255,255,0.08); border-radius: 0.875rem; overflow: hidden; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
-  .tile { background: #0f0f13; padding: 1rem 1.125rem; }
-  .tile .k { display: block; font-size: 0.625rem; letter-spacing: 0.12em; text-transform: uppercase; color: rgba(255,255,255,0.4); margin-bottom: 0.5rem; }
-  .tile .v { display: block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.125rem; font-weight: 700; color: #fafafa; font-variant-numeric: tabular-nums; }
-  .tile .sub { display: block; font-size: 0.75rem; color: rgba(255,255,255,0.5); margin-top: 0.25rem; }
-  .lead { color: rgba(255,255,255,0.6); margin: -0.5rem 0 1rem; font-size: 0.9375rem; }
+  .gas-tiles { display: grid; gap: 1px; background: var(--white-10); border: 1px solid var(--white-10); border-radius: 0.875rem; overflow: hidden; grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr)); }
+  .tile { background: var(--surface); padding: 1rem 1.125rem; }
+  .tile .k { display: block; font-size: 0.625rem; letter-spacing: 0.12em; text-transform: uppercase; color: var(--white-40); margin-bottom: 0.5rem; }
+  .tile .v { display: block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.125rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
+  .tile .sub { display: block; font-size: 0.75rem; color: var(--white-60); margin-top: 0.25rem; }
+  .lead { color: var(--white-60); margin: -0.5rem 0 1rem; font-size: 0.9375rem; }
   .tile .v a { color: #7dd3fc; text-decoration: none; }
 
   .bar-row { display: grid; grid-template-columns: 10rem 1fr auto; gap: 0.875rem; align-items: center; margin-bottom: 0.625rem; font-size: 0.8125rem; }
-  .bar-label { color: rgba(255,255,255,0.7); }
-  .bar-track { height: 0.5rem; background: rgba(255,255,255,0.06); border-radius: 999px; overflow: hidden; }
+  .bar-label { color: var(--white-80); }
+  .bar-track { height: 0.5rem; background: var(--white-10); border-radius: 999px; overflow: hidden; }
   .bar-fill { display: block; height: 100%; border-radius: 999px; }
-  .bar-val { font-family: 'JetBrains Mono', ui-monospace, monospace; color: rgba(255,255,255,0.5); font-size: 0.75rem; white-space: nowrap; }
+  .bar-val { font-family: 'JetBrains Mono', ui-monospace, monospace; color: var(--white-60); font-size: 0.75rem; white-space: nowrap; }
 
-  .tablewrap { overflow-x: auto; border: 1px solid rgba(255,255,255,0.08); border-radius: 0.875rem; }
+  .tablewrap { overflow-x: auto; border: 1px solid var(--white-10); border-radius: 0.875rem; }
   table { width: 100%; min-width: 40rem; border-collapse: collapse; font-size: 0.8125rem; }
-  th, td { text-align: left; padding: 0.625rem 0.875rem; border-bottom: 1px solid rgba(255,255,255,0.06); }
-  th { font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: rgba(255,255,255,0.4); background: rgba(255,255,255,0.02); }
+  th, td { text-align: left; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--white-10); }
+  th { font-size: 0.625rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--white-40); background: var(--white-10); }
   tbody tr:last-child td { border-bottom: none; }
   .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
   .mono a { color: #7dd3fc; }
-  .muted { color: rgba(255,255,255,0.4); }
+  .muted { color: var(--white-40); }
 
   @media (max-width: 640px) { .bar-row { grid-template-columns: 1fr; gap: 0.25rem; } }
 </style>

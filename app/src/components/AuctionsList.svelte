@@ -426,7 +426,7 @@
   .al-seg-btn.is-on { background: var(--violet-12); color: var(--violet-300); }
   .al-bar { display: flex; flex-wrap: wrap; align-items: start; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
   .al-bar .field { display: flex; flex-direction: column; gap: var(--sp-1); }
-  .al-bar input, .al-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: rgba(255,255,255,.05); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }
+  .al-bar input, .al-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }
   .al-bar label { font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
   .al-coll { min-width: 200px; flex: 1 1 200px; }
   .al-price { width: 130px; }
@@ -436,7 +436,7 @@
   .al-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
   .al-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--violet-12); border: 1px solid var(--violet-35); color: var(--violet-300); font-size: var(--fs-small); font-weight: 700; }
   .al-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
-  .al-chip-x:hover { background: rgba(255,255,255,.1); }
+  .al-chip-x:hover { background: var(--white-10); }
   .al-grid { display: grid; grid-template-columns: repeat(1, 1fr); gap: var(--sp-4); }
   @media (min-width: 640px) { .al-grid { grid-template-columns: repeat(2, 1fr); } }
   @media (min-width: 960px) { .al-grid { grid-template-columns: repeat(3, 1fr); } }
