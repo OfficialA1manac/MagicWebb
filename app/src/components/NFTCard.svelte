@@ -50,6 +50,10 @@
   });
 
   let imageError = $state(false);
+  // Fade the image in once decoded (motion set); cached images report complete synchronously.
+  let imageLoaded = $state(false);
+  let imgEl = $state<HTMLImageElement | null>(null);
+  $effect(() => { if (imgEl?.complete && imgEl.naturalWidth > 0) imageLoaded = true; });
 
   // Hide quick-buy on the caller's own listings (you cannot buy from yourself).
   let me = $state<string | null>(null);
@@ -122,6 +126,10 @@
       <img
         src={imageSrc}
         alt={item.name || `Token #${item.token_id}`}
+        class="mw-img-fade"
+        class:is-loaded={imageLoaded}
+        bind:this={imgEl}
+        onload={() => (imageLoaded = true)}
         onerror={() => (imageError = true)}
         loading="lazy"
       />
@@ -198,7 +206,7 @@
     width: 100%;
     height: 100%;
     object-fit: cover;
-    transition: transform 0.5s ease;
+    transition: transform 0.5s ease, opacity var(--dur) var(--ease);
   }
 
   .nft-card:hover .image-wrapper img {

@@ -1,5 +1,5 @@
 <script lang="ts">
-  // Toast host: bottom centre (above the tab bar on mobile), z-index toast.
+  // Toast host: bottom centre (above the tab bar + sticky action bar on mobile), z-index toast.
   import { onMount } from 'svelte';
   import { toasts, dismissToast, installToastBridge } from '../lib/toast.svelte';
   import Icon from './Icon.svelte';
@@ -24,7 +24,8 @@
 
 <style>
   .toasts { position: fixed; left: 50%; bottom: calc(var(--sp-4) + env(safe-area-inset-bottom)); transform: translateX(-50%); z-index: var(--z-toast); display: flex; flex-direction: column; gap: var(--sp-2); width: min(420px, calc(100vw - 2 * var(--sp-4))); pointer-events: none; }
-  @media (max-width: 767px) { .toasts { bottom: calc(var(--tabbar-h) + var(--sp-3) + env(safe-area-inset-bottom)); } }
+  /* Above the tab bar AND whichever sticky action bar the page shows (--sticky-bar-h, lib/stickybar.ts). */
+  @media (max-width: 767px) { .toasts { bottom: calc(var(--tabbar-h, 60px) + var(--sticky-bar-h, 0px) + var(--sp-3) + env(safe-area-inset-bottom)); } }
   .toast { pointer-events: auto; display: flex; align-items: center; gap: var(--sp-3); min-height: var(--hit); padding: var(--sp-2) var(--sp-2) var(--sp-2) var(--sp-3); border-radius: var(--r-card); background: var(--surface-2); border: 1px solid var(--line-strong); box-shadow: var(--shadow); color: var(--text); font-size: var(--fs-small); line-height: var(--lh-small); font-weight: 600; animation: toast-in var(--dur) var(--ease) both; }
   .toast-ico { display: inline-flex; flex: 0 0 auto; }
   .is-success .toast-ico { color: var(--green); }

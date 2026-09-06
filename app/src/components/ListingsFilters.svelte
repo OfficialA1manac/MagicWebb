@@ -399,6 +399,7 @@
   .lf-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
   .lf-chip-x:hover { background: var(--white-10); }
   .lf-chip-toggle { background: var(--white-10); border-color: var(--line-strong); color: var(--text-2); cursor: pointer; font-family: inherit; min-height: 36px; }
+  @media (max-width: 640px) { .lf-chip-toggle { min-height: var(--hit); } }
   .lf-chip-toggle.is-on { background: var(--sky-12); border-color: var(--sky); color: var(--sky-300); }
   .lf-traits { display: flex; flex-direction: column; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
   .lf-trait-group { display: flex; flex-direction: column; gap: var(--sp-1); }

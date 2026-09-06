@@ -68,6 +68,8 @@
   /* ── Layout ───────────────────────────────────────────────────────────── */
   --header-h: 60px;
   --tabbar-h: 60px;
+  /* Height of the mobile sticky action bar when one is on screen (lib/stickybar.ts sets it). */
+  --sticky-bar-h: 0px;
   --hit: 44px;
   --z-header: 40; --z-banner: 30; --z-drawer: 50; --z-modal: 60; --z-toast: 70;
   --bp-sm: 480px; --bp-md: 768px; --bp-lg: 1024px;

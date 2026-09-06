@@ -5,16 +5,34 @@
   import { onAccountChange, switchToSiteChain, waitForWagmi } from '../lib/tx/client';
   import { chainName, currentChain, networkOrigins } from '../lib/chains';
   import { toastError } from '../lib/toast.svelte';
+  import Icon from './Icon.svelte';
 
+  const DISMISS_KEY = 'mw_net_dismissed';
   let walletChain = $state<number | null>(null);
   let connected = $state(false);
   let switching = $state(false);
+  let dismissed = $state(false);
   const site = currentChain();
 
-  let show = $derived(connected && walletChain !== null && walletChain !== site.id);
+  let mismatch = $derived(connected && walletChain !== null && walletChain !== site.id);
+  let show = $derived(mismatch && !dismissed);
+  // Banner priority: while the wrong-network banner shows, the testnet and
+  // browse-only banners hide (base.css reads data-mw-banner on <html>).
+  $effect(() => {
+    if (typeof document === 'undefined') return;
+    if (show) document.documentElement.dataset.mwBanner = 'mismatch';
+    else if (document.documentElement.dataset.mwBanner === 'mismatch') delete document.documentElement.dataset.mwBanner;
+  });
+  function dismiss() {
+    dismissed = true;
+    try { sessionStorage.setItem(DISMISS_KEY, '1'); } catch { /* private mode */ }
+  }
   let otherOrigin = $derived(walletChain !== null ? networkOrigins().get(walletChain) ?? null : null);
 
-  onMount(() => onAccountChange((a) => { connected = !!a.address; walletChain = a.chainId; }));
+  onMount(() => {
+    try { dismissed = sessionStorage.getItem(DISMISS_KEY) === '1'; } catch { /* private mode */ }
+    return onAccountChange((a) => { connected = !!a.address; walletChain = a.chainId; });
+  });
 
   async function doSwitch() {
     switching = true;
@@ -34,6 +52,7 @@
       <button class="btn btn-primary" onclick={doSwitch} disabled={switching}>{switching ? 'Switching…' : `Switch wallet to ${site.name}`}</button>
       {#if otherOrigin}<a class="btn btn-secondary" href={otherOrigin + location.pathname + location.search}>Go to {chainName(walletChain ?? 0)}</a>{/if}
     </span>
+    <button type="button" class="icon-btn mw-banner-x" aria-label="Dismiss for this session" onclick={dismiss}><Icon name="x" size={18} /></button>
   </div>
 {/if}
 

@@ -76,15 +76,26 @@ const short = (a: string) => `${a.slice(0, 6)}…${a.slice(-4)}`;
 const explorerAddr = (a: string) => `${(typeof window !== 'undefined' && window.MW_EXPLORER) || targetChain.blockExplorers.default.url}/address/${a}`;
 
 // ── Light shell pieces (no wallet libs) ──────────────────────────────────────
+function openNoWalletSheet() {
+  // lib/firstrun.ts NOWALLET_OPEN_EVENT — dispatched by name so this light
+  // shell keeps zero imports from the Svelte side.
+  window.dispatchEvent(new CustomEvent('mw-nowallet-open'));
+}
+
 function ConnectButton({ onClick, busy, label }: { onClick: () => void; busy?: boolean; label?: string }) {
   return (
-    <button type="button" className="btn btn-primary wc-connect" onClick={onClick} disabled={busy} aria-busy={busy || undefined}>
-      {busy ? (
-        <><span className="wc-spin" aria-hidden="true" />{label || 'Loading…'}</>
-      ) : (
-        <><span className="wc-connect-full">Connect wallet</span><span className="wc-connect-short">Connect</span></>
+    <span className="wc-connect-group">
+      <button type="button" className="btn btn-primary wc-connect" onClick={onClick} disabled={busy} aria-busy={busy || undefined}>
+        {busy ? (
+          <><span className="wc-spin" aria-hidden="true" />{label || 'Loading…'}</>
+        ) : (
+          <><span className="wc-connect-full">Connect wallet</span><span className="wc-connect-short">Connect</span></>
+        )}
+      </button>
+      {!busy && (
+        <button type="button" className="btn btn-ghost btn-sm wc-nowallet" onClick={openNoWalletSheet} aria-label="I don't have a wallet">No wallet?</button>
       )}
-    </button>
+    </span>
   );
 }
 

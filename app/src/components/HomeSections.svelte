@@ -41,26 +41,7 @@
     };
   }
 
-  export interface StripStep { n: 1 | 2 | 3; label: string; done: boolean; href?: string }
-
-  /** First-run strip steps (spec B4 "Home" 2nd). Step 2 links the faucet on testnets. */
-  export function firstRunSteps(i: { connected: boolean; testnet: boolean; faucetUrl?: string | null; traded?: boolean }): StripStep[] {
-    return [
-      { n: 1, label: 'Connect your wallet', done: i.connected },
-      i.testnet
-        ? { n: 2, label: 'Get free test FLR', done: false, href: i.faucetUrl ?? undefined }
-        : { n: 2, label: 'Fund your wallet with FLR', done: false },
-      { n: 3, label: 'Buy or list your first NFT', done: !!i.traded },
-    ];
-  }
-
-  /** The strip renders until dismissed; the dismiss control appears once step 3 is done. */
-  export function stripState(i: { dismissed: boolean; traded: boolean }): { visible: boolean; dismissible: boolean } {
-    return { visible: !i.dismissed, dismissible: i.traded };
-  }
-
-  export const STRIP_DISMISSED_KEY = 'mw-firstrun-dismissed';
-  export const FIRST_TRADE_KEY = 'mw-first-trade-done';
+  // First-run strip helpers live in lib/firstrun.ts (FirstRun.svelte renders them).
 </script>
 
 <script lang="ts">
@@ -69,8 +50,10 @@
   import EmptyState from './EmptyState.svelte';
   import Skeleton from './Skeleton.svelte';
   import Icon from './Icon.svelte';
+  import FirstRun from './FirstRun.svelte';
   import Badge from './Badge.svelte';
-  import { currentChain, tradingLive, isTestnet, faucetUrl } from '../lib/chains';
+  import { currentChain, tradingLive } from '../lib/chains';
+  import { stripState, STRIP_DISMISSED_KEY, FIRST_TRADE_KEY, FIRSTRUN_CHANGED_EVENT } from '../lib/firstrun';
   import { jsonOrNull, json } from '../lib/api';
   import { shortAddr } from '../lib/format';
 
@@ -88,8 +71,6 @@
   const chain = currentChain();
   const sym = chain.currency;
   const trading = tradingLive();
-  const testnet = isTestnet(chain.id);
-  const faucet = faucetUrl();
 
   let connected = $state(false);
   let loading = $state(true);
@@ -102,8 +83,9 @@
 
   let hero = $derived(heroCopy({ trading, networkName: chain.name, connected }));
   let line = $derived(rightNowLine(stats, sym));
-  let steps = $derived(firstRunSteps({ connected, testnet, faucetUrl: faucet, traded }));
-  let strip = $derived(stripState({ dismissed, traded }));
+  // Only the hero layout needs to know whether the strip column is present;
+  // FirstRun owns the strip itself (steps, dismiss, no-wallet link).
+  let strip = $derived(stripState({ dismissed, traded, connected }));
 
   function readWallet() {
     try { connected = !!window.MW?.address?.(); } catch { connected = false; }
@@ -165,24 +147,25 @@
     location.href = '/profile#nfts';
   }
 
-  function dismissStrip() {
-    dismissed = true;
-    try { localStorage.setItem(STRIP_DISMISSED_KEY, '1'); } catch { /* private mode */ }
-  }
-
-  onMount(() => {
+  function readStrip() {
     try {
       dismissed = localStorage.getItem(STRIP_DISMISSED_KEY) === '1';
       traded = localStorage.getItem(FIRST_TRADE_KEY) === '1';
     } catch { /* private mode */ }
+  }
+
+  onMount(() => {
+    readStrip();
     readWallet();
     void load();
     const onWallet = () => readWallet();
     window.addEventListener('mw-wallet-changed', onWallet);
     window.addEventListener('mw-ready', onWallet);
+    window.addEventListener(FIRSTRUN_CHANGED_EVENT, readStrip);
     return () => {
       window.removeEventListener('mw-wallet-changed', onWallet);
       window.removeEventListener('mw-ready', onWallet);
+      window.removeEventListener(FIRSTRUN_CHANGED_EVENT, readStrip);
     };
   });
 </script>
@@ -204,21 +187,7 @@
 
 <!-- ── First-run steps: the hero's right column on desktop, below the CTAs on phones ── -->
 {#if trading && strip.visible}
-  <section class="hs-strip" aria-label="Getting started" data-testid="first-run-strip">
-    {#each steps as s (s.n)}
-      <span class="hs-step" class:is-done={s.done}>
-        <span class="hs-step-n" aria-hidden="true">{#if s.done}<Icon name="check" size={14} />{:else}{s.n}{/if}</span>
-        {#if s.href}
-          <a href={s.href} target="_blank" rel="noopener">{s.label} <Icon name="external" size={14} /></a>
-        {:else}
-          {s.label}
-        {/if}
-      </span>
-    {/each}
-    {#if strip.dismissible}
-      <button type="button" class="hs-strip-x" aria-label="Dismiss getting started" onclick={dismissStrip}><Icon name="x" size={16} /></button>
-    {/if}
-  </section>
+  <FirstRun placement="hero" />
 {/if}
 </section>
 
@@ -297,7 +266,6 @@
   /* Poster composition (design decision 4.1): headline left, first-run steps as a column on the right. */
   .hs-hero { text-align: left; padding: var(--sp-16) var(--sp-4) var(--sp-12); max-width: 72rem; margin: 0 auto; display: grid; gap: var(--sp-8); align-items: center; }
   .hs-hero.has-side { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
-  .hs-hero .hs-strip { flex-direction: column; align-items: flex-start; gap: var(--sp-3); margin: 0; }
   @media (max-width: 959px) { .hs-hero.has-side { grid-template-columns: 1fr; } }
   .hs-headline { font-size: var(--fs-display); line-height: var(--lh-display); font-weight: 900; letter-spacing: -0.03em; margin: 0 0 var(--sp-4); }
   .hs-sub { max-width: 34rem; margin: 0 0 var(--sp-6); color: var(--text-2); font-size: var(--fs-h3); line-height: var(--lh-h3); }
@@ -306,15 +274,6 @@
     .hs-headline { font-size: 2rem; line-height: 2.25rem; }
     .hs-ctas { flex-direction: column; align-items: stretch; padding: 0 var(--sp-4); }
   }
-  .hs-strip { max-width: 72rem; margin: 0 auto var(--sp-6); padding: var(--sp-3) var(--sp-4); display: flex; align-items: center; gap: var(--sp-4); flex-wrap: wrap; border: 1px solid var(--line); border-radius: var(--r-card); background: var(--surface); position: relative; }
-  .hs-step { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
-  .hs-step.is-done { color: var(--green); }
-  .hs-step a { color: var(--sky-300); display: inline-flex; align-items: center; gap: 4px; min-height: var(--hit); }
-  .hs-step-n { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: var(--r-pill); border: 1px solid var(--line-strong); font-size: var(--fs-caption); font-weight: 700; flex: 0 0 auto; }
-  .hs-step.is-done .hs-step-n { border-color: var(--green); color: var(--green); }
-  .hs-strip-x { margin-left: auto; display: inline-flex; align-items: center; justify-content: center; width: var(--hit); height: var(--hit); border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-3); cursor: pointer; }
-  .hs-strip-x:hover { color: var(--text); }
-  @media (max-width: 640px) { .hs-strip { flex-direction: column; align-items: flex-start; gap: var(--sp-2); } .hs-strip-x { position: absolute; top: var(--sp-1); right: var(--sp-1); margin: 0; } }
   .hs-block { max-width: 72rem; margin: 0 auto; padding: var(--sp-4); }
   .hs-line { margin: 0; font-size: var(--fs-body); color: var(--text-2); font-weight: 600; }
   .hs-line-empty { color: var(--text-3); }

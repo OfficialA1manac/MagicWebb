@@ -3,6 +3,7 @@
 // owner-only offers toggle and every state (skeleton / 404 / error).
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
+import FirstRun from '../components/FirstRun.svelte';
 import CollectionPage from '../components/CollectionPage.svelte';
 ---
 
@@ -10,6 +11,8 @@ import CollectionPage from '../components/CollectionPage.svelte';
   <WalletConnect slot="wallet" client:only="react" />
 
   <section id="collection-page" style="max-width:80rem;margin:0 auto;padding:1.5rem 1rem 3rem;">
+    <!-- v3.6: wallet-less visitors see the 3-step strip (hidden once connected). -->
+    <FirstRun client:load placement="page" />
     <CollectionPage client:load />
   </section>
 </BaseLayout>

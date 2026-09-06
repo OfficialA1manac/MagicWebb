@@ -8,6 +8,8 @@
   import { currentChain } from '../lib/chains';
   import { fmtPrice } from '../lib/format';
   import { CORE_LABEL, type CoreKey } from '../lib/tx/core';
+  import { applyRefund, settleAfterTx } from '../lib/optimistic';
+  import type { TxResult } from '../lib/tx/runner';
 
   let me = $state<string | null>(null);
   let rows = $state<Array<{ key: CoreKey; address: string; wei: bigint; ok: boolean }>>([]);
@@ -42,11 +44,18 @@
     // Debounce the firehose '*' subscription (matches NFTGrid): each load is
     // one on-chain read per core contract, so bursts must coalesce.
     let t: ReturnType<typeof setTimeout> | null = null;
-    const offWs = MW.ws.on('*', () => { if (t) clearTimeout(t); t = setTimeout(() => { t = null; void load(); }, 400); });
-    return () => { off(); offWs(); if (t) clearTimeout(t); };
+    // Only money-moving events matter here: bids, offers, sales — not notifications or feed rows.
+    const offWs = MW.ws.on('*', (_d, meta) => { if (meta.type === 'notification' || meta.type === 'activity') return; if (t) clearTimeout(t); t = setTimeout(() => { t = null; void load(); }, 400); });
+    return () => { off(); offWs(); if (t) clearTimeout(t); if (refetchT) clearTimeout(refetchT); };
   });
+  let refetchT: ReturnType<typeof setTimeout> | null = null;
   async function withdraw(r: { key: CoreKey; address: string; wei: bigint }) {
-    try { await MW.withdrawRefundFrom({ core: r.address, label: CORE_LABEL[r.key], amountWei: r.wei.toString() }); setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal */ }
+    try {
+      const res = (await MW.withdrawRefundFrom({ core: r.address, label: CORE_LABEL[r.key], amountWei: r.wei.toString() })) as TxResult;
+      rows = applyRefund(rows, r.key); // optimistic: this core reads 0 now
+      if (refetchT) clearTimeout(refetchT);
+      refetchT = settleAfterTx(res, load);
+    } catch { /* modal */ }
   }
 </script>
 
@@ -83,6 +92,6 @@
   .rp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .rp-list li { display: flex; align-items: center; gap: 12px; font-size: 13px; min-height: 44px; }
   .rp-list li span:first-child { flex: 1; }
-  .rp-btn { min-height: 40px; padding: 0 14px; border-radius: 10px; background: linear-gradient(135deg,#4ade80,#16a34a); color: var(--bg); font-weight: 700; border: 0; cursor: pointer; font-family: inherit; }
+  .rp-btn { min-height: var(--hit); padding: 0 14px; border-radius: 10px; background: linear-gradient(135deg,#4ade80,#16a34a); color: var(--bg); font-weight: 700; border: 0; cursor: pointer; font-family: inherit; }
   .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
 </style>

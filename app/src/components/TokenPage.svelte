@@ -59,6 +59,19 @@
       }
     }
   }
+
+  /**
+   * Does a live event concern THIS token? Payloads that name a token must
+   * match; payloads without token fields (tx-indexed) pass through.
+   */
+  export function wsEventTouchesToken(data: unknown, collection: string, tokenId: string): boolean {
+    const d = (data ?? {}) as { collection?: unknown; token_id?: unknown; tokenId?: unknown };
+    const c = typeof d.collection === 'string' ? d.collection.toLowerCase() : '';
+    const t = d.token_id ?? d.tokenId;
+    if (!c && t === undefined) return true;
+    if (c && c !== collection.toLowerCase()) return false;
+    return t === undefined || String(t) === String(tokenId);
+  }
 </script>
 
 <script lang="ts">
@@ -75,7 +88,10 @@
   import DurationPicker from './DurationPicker.svelte';
   import { MW } from '../lib/mw';
   import { ws } from '../lib/ws/client';
-  import { tokenChannel } from '../lib/ws/channels';
+  import { tokenChannel, collectionChannel } from '../lib/ws/channels';
+  import { applyListed, applyPriceChanged, applyBid, applyOfferRow, applyAuctionStatus, settleAfterTx } from '../lib/optimistic';
+  import { bindStickyBarHeight } from '../lib/stickybar';
+  import type { TxResult } from '../lib/tx/runner';
   import { currentChain, explorerAddress, tradingLive, readOnlyCopy } from '../lib/chains';
   import { fmtPrice, shortAddr, timeAgo, fmtCountdown, toWei } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
@@ -362,18 +378,38 @@
     fetch(`/api/v1/token/${coll}/${tid}/view`, { method: 'POST' }).catch(() => {});
     void load(true);
     const offAcct = onAccountChange((a) => { me = a.address; void loadOwner(); });
-    ws.subscribe(tokenChannel(coll, tid));
-    const offWs = ws.on('*', (_d, meta) => { if (meta.type !== 'notification') void load(); });
+    // This token's channel + its collection's (offer eligibility, transfers);
+    // the handler still checks the payload so a sibling token's event is a no-op.
+    ws.subscribe(tokenChannel(coll, tid), collectionChannel(coll));
+    const offWs = ws.on('*', (d, meta) => { if (meta.type === 'notification') return; if (!wsEventTouchesToken(d, coll, tid)) return; void load(); });
     const offSt = ws.onStatus((s) => (live = s === 'open'));
     const tick = setInterval(() => (now = Date.now()), 1000);
-    return () => { offAcct(); offWs(); offSt(); clearInterval(tick); ws.unsubscribe(tokenChannel(coll, tid)); };
+    return () => { offAcct(); offWs(); offSt(); clearInterval(tick); ws.unsubscribe(tokenChannel(coll, tid), collectionChannel(coll)); if (refetchT) clearTimeout(refetchT); };
   });
 
-  function afterTx(label: string) { syncing = label; panel = 'none'; formErr = ''; setTimeout(() => void load(), 1500); setTimeout(() => void load(), 6000); }
-  async function act(run: () => Promise<unknown>, label: string) {
-    formErr = '';
-    try { await run(); afterTx(label); } catch (e) { /* TxModal already showed it */ void e; }
+  // Confirmed tx → patch this page's rows now, then ONE refetch (instant lane or 2s).
+  let refetchT: ReturnType<typeof setTimeout> | null = null;
+  function afterTx(label: string, res?: TxResult, patch?: () => void) {
+    syncing = label; panel = 'none'; formErr = '';
+    patch?.();
+    if (refetchT) clearTimeout(refetchT);
+    refetchT = settleAfterTx(res, () => load());
   }
+  async function act(run: () => Promise<unknown>, label: string, patch?: () => void) {
+    formErr = '';
+    try { const res = (await run()) as TxResult | undefined; afterTx(label, res, patch); } catch (e) { /* TxModal already showed it */ void e; }
+  }
+  let stickyEl = $state<HTMLDivElement | null>(null);
+  $effect(() => { if (stickyEl) return bindStickyBarHeight(stickyEl); });
+  // Motion set: price flashes gold when it changes (listing price or auction lead).
+  let priceKey = $derived(listing ? `l:${listing.price_wei}` : auction ? `a:${auction.highest_bid_wei}:${auction.highest_bidder}` : '');
+  let flash = $state(false);
+  let lastPriceKey = '';
+  $effect(() => {
+    const k = priceKey;
+    if (lastPriceKey && k && k !== lastPriceKey) { flash = true; const t = setTimeout(() => (flash = false), 450); return () => clearTimeout(t); }
+    lastPriceKey = k;
+  });
   function parseQty(): string | null {
     if (std !== 'erc1155') return '1';
     const t = qtyIn.trim();
@@ -387,24 +423,24 @@
     try { const w = toWei(priceIn); if (w < 10n ** 18n) { formErr = `Minimum is 1 ${sym}.`; return null; } return w.toString(); } catch { formErr = 'Enter a number like 12.5'; return null; }
   }
 
-  const doBuy = () => listing && act(() => MW.buy({ nft: coll, tokenId: tid, seller: listing!.seller, priceWei: listing!.price_wei, name }), 'Just bought · syncing');
-  const doList = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.list({ nft: coll, tokenId: tid, priceWei: p, duration, std, amount: q, name }), 'Listed · syncing'); };
-  const doEdit = () => { const p = parsePrice(); if (p) act(() => MW.editPrice({ nft: coll, tokenId: tid, newPriceWei: p, name }), 'Price updated · syncing'); };
-  const doCancel = () => act(() => MW.cancelListing({ nft: coll, tokenId: tid, name }), 'Listing cancelled · syncing');
+  const doBuy = () => listing && act(() => MW.buy({ nft: coll, tokenId: tid, seller: listing!.seller, priceWei: listing!.price_wei, name }), 'Just bought · syncing', () => { listing = null; if (me) owner = me.toLowerCase(); });
+  const doList = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.list({ nft: coll, tokenId: tid, priceWei: p, duration, std, amount: q, name }), 'Listed · syncing', () => { if (me) listing = applyListed({ collection: coll, tokenId: tid, seller: me, priceWei: p, durationSec: duration, standard: std, amount: Number(q), name, imageUri: img }) as Listing; }); };
+  const doEdit = () => { const p = parsePrice(); if (p) act(() => MW.editPrice({ nft: coll, tokenId: tid, newPriceWei: p, name }), 'Price updated · syncing', () => { listing = applyPriceChanged(listing, p); }); };
+  const doCancel = () => act(() => MW.cancelListing({ nft: coll, tokenId: tid, name }), 'Listing cancelled · syncing', () => { listing = null; });
   const doAuction = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.createAuction({ nft: coll, tokenId: tid, reserveWei: p, duration, std, amount: q, name }), 'Auction created · syncing'); };
-  const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumWei.toString() }), 'Bid placed · syncing'); };
-  const doSettle = () => auction && act(() => MW.settle({ auctionId: String(auction!.auction_id), name }), 'Settled · syncing');
-  const doCancelAuction = () => auction && act(() => MW.cancelAuction({ auctionId: String(auction!.auction_id), name }), 'Auction cancelled · syncing');
-  const doForceCancel = () => auction && act(() => MW.forceCancel({ auctionId: String(auction!.auction_id), name }), 'Force-cancelled · refunds unlocked · syncing');
-  const doOffer = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.makeOffer({ nft: coll, tokenId: tid, principalWei: p, duration, std, units: q, name }), 'Offer placed · syncing'); };
-  const doAccept = (o: Offer) => act(() => MW.acceptOffer({ nft: coll, tokenId: tid, bidder: o.bidder, principalWei: o.amount_wei, std, name }), 'Offer accepted · syncing');
-  const doReject = (o: Offer) => act(() => MW.rejectOffer({ nft: coll, tokenId: tid, bidder: o.bidder, name }), 'Offer declined · syncing');
-  const doCancelOffer = () => act(() => MW.cancelOffer({ nft: coll, tokenId: tid, name }), 'Offer cancelled · syncing');
-  const doEnableOffers = () => act(() => MW.setOfferEligible({ nft: coll, eligible: true, name: collection?.name }), 'Offers enabled · syncing');
+  const doBid = () => { if (!auction) return; let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; } if (w < minBid) { formErr = `Minimum bid is ${fmtPrice(minBid)} ${sym}.`; return; } const total = (myCumWei + w).toString(); act(() => MW.bid({ auctionId: String(auction!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumWei.toString() }), 'Bid placed · syncing', () => { if (me) { auction = applyBid(auction, { bidder: me, totalWei: total }); myCumWei = BigInt(total); } }); };
+  const doSettle = () => auction && act(() => MW.settle({ auctionId: String(auction!.auction_id), name }), 'Settled · syncing', () => { auction = applyAuctionStatus(auction, 'settled'); });
+  const doCancelAuction = () => auction && act(() => MW.cancelAuction({ auctionId: String(auction!.auction_id), name }), 'Auction cancelled · syncing', () => { auction = applyAuctionStatus(auction, 'cancelled'); });
+  const doForceCancel = () => auction && act(() => MW.forceCancel({ auctionId: String(auction!.auction_id), name }), 'Force-cancelled · refunds unlocked · syncing', () => { auction = applyAuctionStatus(auction, 'cancelled'); });
+  const doOffer = () => { const p = parsePrice(); const q = p && parseQty(); if (p && q) act(() => MW.makeOffer({ nft: coll, tokenId: tid, principalWei: p, duration, std, units: q, name }), 'Offer placed · syncing', () => { if (me) offers = applyOfferRow(offers, myOffer ? 'raised' : 'made', { bidder: me, amountWei: p, durationSec: duration, extra: { units: Number(q), standard: std } }); }); };
+  const doAccept = (o: Offer) => act(() => MW.acceptOffer({ nft: coll, tokenId: tid, bidder: o.bidder, principalWei: o.amount_wei, std, name }), 'Offer accepted · syncing', () => { offers = applyOfferRow(offers, 'accepted', { bidder: o.bidder }); listing = null; owner = o.bidder.toLowerCase(); });
+  const doReject = (o: Offer) => act(() => MW.rejectOffer({ nft: coll, tokenId: tid, bidder: o.bidder, name }), 'Offer declined · syncing', () => { offers = applyOfferRow(offers, 'rejected', { bidder: o.bidder }); });
+  const doCancelOffer = () => act(() => MW.cancelOffer({ nft: coll, tokenId: tid, name }), 'Offer cancelled · syncing', () => { if (me) offers = applyOfferRow(offers, 'cancelled', { bidder: me }); });
+  const doEnableOffers = () => act(() => MW.setOfferEligible({ nft: coll, eligible: true, name: collection?.name }), 'Offers enabled · syncing', () => { offerEligible = true; });
   // Withdraw a losing/outbid escrow right here on the token page (spec).
-  const doWithdrawBid = () => auction && act(() => MW.withdrawLoserFunds({ auctionId: String(auction!.auction_id), amountWei: myCumWei.toString() }), 'Bid withdrawn · syncing');
+  const doWithdrawBid = () => auction && act(() => MW.withdrawLoserFunds({ auctionId: String(auction!.auction_id), amountWei: myCumWei.toString() }), 'Bid withdrawn · syncing', () => { myCumWei = 0n; });
   // Expired-offer refunds live on the token page too (audit item).
-  const doRefundExpired = (o: Offer) => act(() => MW.refundExpiredOffer({ nft: coll, tokenId: tid, bidder: o.bidder }), 'Refunded · syncing');
+  const doRefundExpired = (o: Offer) => act(() => MW.refundExpiredOffer({ nft: coll, tokenId: tid, bidder: o.bidder }), 'Refunded · syncing', () => { offers = applyOfferRow(offers, 'refunded', { bidder: o.bidder }); });
   const connectWallet = () => { MW.connect().catch(() => {}); };
   // "Refresh metadata": re-read on-chain metadata + the API in place.
   async function refreshMetadata() {
@@ -520,7 +556,7 @@
       {#if auction && (auctionLive || auctionEnded)}
         <section class="tp-card is-violet" aria-labelledby="au-h">
           <div class="tp-card-head"><span id="au-h">{auctionLive ? 'Live auction' : 'Auction ended — awaiting settlement'}</span><span class="mono">{fmtCountdown(new Date(auction.ends_at).getTime() / 1000, now)}</span></div>
-          <div class="tp-price mono">{fmtPrice(BigInt(auction.highest_bid_wei || '0') > 0n ? auction.highest_bid_wei : auction.reserve_price_wei)} <small>{sym}</small></div>
+          <div class="tp-price mono" class:mw-flash={flash} data-testid="token-price">{fmtPrice(BigInt(auction.highest_bid_wei || '0') > 0n ? auction.highest_bid_wei : auction.reserve_price_wei)} <small>{sym}</small></div>
           <div class="tp-sub">{BigInt(auction.highest_bid_wei || '0') > 0n ? `Highest bid by ${shortAddr(auction.highest_bidder)}` : 'No bids yet · reserve shown'} · bids in the last 3 min extend the auction</div>
           {#if canTrade && auctionLive && !isAuctionSeller}
             {#if me}
@@ -563,7 +599,7 @@
       {:else if listing}
         <section class="tp-card is-gold" aria-labelledby="ls-h">
           <div class="tp-card-head"><span id="ls-h">Listed for sale</span><span>expires {timeAgo(listing.expires_at).replace(' ago', '')} from now</span></div>
-          <div class="tp-price mono">{fmtPrice(listing.price_wei)} <small>{sym}</small></div>
+          <div class="tp-price mono" class:mw-flash={flash} data-testid="token-price">{fmtPrice(listing.price_wei)} <small>{sym}</small></div>
           <div class="tp-sub">Seller {isSeller ? 'you' : shortAddr(listing.seller)} · 2% fee paid by the seller</div>
           {#if isSeller}
             {#if canTrade}<div class="tp-btnrow"><button class="btn g" onclick={() => openPanel('edit')}>Change price</button><button class="btn g" onclick={doCancel}>Cancel listing</button></div>{/if}
@@ -711,7 +747,7 @@
   <!-- Mobile sticky action bar (spec): the matrix's primary action, 48px,
        pinned above the tab bar. Hidden on desktop. -->
   {#if canTrade && primaryCell && primaryCell.kind !== 'browse-only'}
-    <div class="tp-sticky" data-testid="sticky-bar">
+    <div class="tp-sticky" data-testid="sticky-bar" bind:this={stickyEl}>
       <button class="btn p tp-sticky-btn" disabled={primaryCell.disabled} aria-disabled={primaryCell.disabled ? 'true' : undefined}
               title={primaryCell.disabled ? primaryCell.reason : undefined} onclick={() => stickyAction()}>
         {primaryCell.label}
@@ -744,6 +780,7 @@
   .tp-btnrow { display: flex; gap: 8px; flex-wrap: wrap; }
   .btn { min-height: 44px; padding: 0 16px; border-radius: 12px; font-weight: 700; font-size: 15px; border: 1px solid transparent; cursor: pointer; font-family: inherit; display: inline-flex; align-items: center; justify-content: center; flex: 1 1 auto; }
   .btn.sm { min-height: 36px; font-size: 13px; padding: 0 12px; flex: 0 0 auto; }
+  @media (max-width: 640px) { .btn.sm { min-height: var(--hit); } }
   .btn.p { background: linear-gradient(135deg,#7dd3fc,#0ea5e9); color: var(--bg); }
   .btn.v { background: linear-gradient(135deg,#a78bfa,#7c3aed); color: var(--text); }
   .btn.gold { background: linear-gradient(135deg,#fcd34d,#f59e0b); color: var(--bg); }

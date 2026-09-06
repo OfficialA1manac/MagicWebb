@@ -13,7 +13,7 @@ vi.mock('@wagmi/core', () => wagmi);
 const wsMock = vi.hoisted(() => ({ waitFor: vi.fn(() => Promise.reject(new Error('timeout'))) }));
 vi.mock('../ws/client', () => ({ ws: wsMock }));
 
-import { runTx, estimateFee, type TxPlan } from './runner';
+import { runTx, estimateFee, isIndexedEventFor, type TxPlan } from './runner';
 import { txModal, runWithModal } from '../stores/txmodal.svelte';
 import { toasts, clearToasts } from '../toast.svelte';
 import { TxError } from './errors';
@@ -110,6 +110,27 @@ describe('runTx — summary, success card, toasts', () => {
     expect(labels.sign).toBe('Confirm in your wallet');
     expect(labels.pending).toBe('Waiting for Flare Coston2 (~3s)');
     expect(labels.confirmed).toBe('Done');
+  });
+});
+
+describe('isIndexedEventFor — instant-lane predicate', () => {
+  it('matches the backend payload key tx_hash (case-insensitive) and the legacy hash key', () => {
+    const pred = isIndexedEventFor(HASH.toUpperCase());
+    expect(pred({ tx_hash: HASH, block: 1, events: 2 })).toBe(true);
+    expect(pred({ hash: HASH })).toBe(true);
+    expect(pred({ tx_hash: '0x' + 'cd'.repeat(32) })).toBe(false);
+    expect(pred({})).toBe(false);
+    expect(pred(null)).toBe(false);
+  });
+
+  it('runTx resolves indexed:true when the tx-indexed event carries tx_hash', async () => {
+    wsMock.waitFor.mockImplementationOnce(async (_t: unknown, pred: (p: unknown) => boolean) => {
+      // The real socket only resolves when the predicate accepts the payload.
+      if (!pred({ tx_hash: HASH })) throw new Error('predicate rejected the backend payload');
+      return { tx_hash: HASH };
+    });
+    const res = await runTx(plan(), {}, { observe: true });
+    expect(res.indexed).toBe(true);
   });
 });
 

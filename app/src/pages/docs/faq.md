@@ -23,6 +23,15 @@ funds — the contracts move assets directly between buyer and seller.
 ### What network does it run on?
 Flare. The marketplace operates on **Coston2** testnet (chain ID 114).
 
+<a id="networks"></a>
+### Why is Songbird / Flare "view only"?
+MagicWebb runs one site per network: Coston2 (testnet), Songbird and Flare
+(mainnets). Trading contracts are live on Coston2 today. The Songbird and Flare
+sites let you browse collections, connect your wallet and view your profile, but
+buying, listing, bidding and offers stay switched off there until the trading
+contracts are deployed on that network. Until then, practise with free test tokens
+on Coston2 — the flows are identical.
+
 ### What wallet do I need?
 Any EVM wallet that supports Flare/Coston2 — MetaMask or WalletConnect-compatible
 wallets. You sign in with your wallet (Sign-In-with-Ethereum); there is no email or

@@ -20,6 +20,9 @@
   import { holderBadgeName, HOLDER_BADGE_TIP } from '../lib/holderBadge';
   import { DURATIONS, DEFAULT_DURATION } from '../lib/tx/durations';
   import { toastSuccess, toastError } from '../lib/toast.svelte';
+  import { applyListed, settleAfterTx } from '../lib/optimistic';
+  import { bindStickyBarHeight } from '../lib/stickybar';
+  import type { TxResult } from '../lib/tx/runner';
   import {
     isEthAddr, resolveProfileAddr, tabsFor, emptyFor, mergeInventory, itemKey,
     isErc1155, batchEligible, batchBarLabel, validateBatch, initialsFor,
@@ -238,18 +241,33 @@
     if (!items.length) return;
     batchBusy = true;
     try {
-      await mw.batchList({ items });
+      const res = (await mw.batchList({ items })) as TxResult | undefined;
       toastSuccess(`Listed ${items.length} NFT${items.length === 1 ? '' : 's'} — one price, one duration.`);
       markFirstTradeDone();
       selected = {};
       batchPrice = '';
-      // In-place refresh (never location.reload): once quickly, once after
-      // the indexer has certainly seen the events.
-      setTimeout(() => void loadAll(target), 1500);
-      setTimeout(() => void loadAll(target), 6000);
+      // Optimistic: the new listings appear under "For sale" right away, then
+      // ONE in-place refresh (instant lane or 2s) — never location.reload.
+      const fresh = items.map((i) => applyListed({ collection: i.nft, tokenId: i.tokenId, seller: target, priceWei: i.priceWei, durationSec: i.duration }));
+      pp = { ...pp, listings: [...fresh, ...(pp.listings ?? []).filter((l) => !fresh.some((f) => itemKey(f as InventoryItem) === itemKey(l)))] };
+      if (refetchT) clearTimeout(refetchT);
+      refetchT = settleAfterTx(res, () => loadAll(target));
     } catch { /* TxModal showed the error */ }
     batchBusy = false;
   }
+  let refetchT: ReturnType<typeof setTimeout> | null = null;
+  // Mobile: the batch bar publishes its height so toasts stack above it.
+  let batchBarEl = $state<HTMLDivElement | null>(null);
+  $effect(() => { if (batchBarEl) return bindStickyBarHeight(batchBarEl); });
+  // Tab underline slides between tabs (motion set): measured from the active tab.
+  let tabsEl = $state<HTMLDivElement | null>(null);
+  let ind = $state({ left: 0, width: 0 });
+  $effect(() => {
+    const active = tab; const count = tabs.length;
+    if (!tabsEl || !active || !count) return;
+    const el = tabsEl.querySelector<HTMLElement>('[aria-selected="true"]');
+    if (el) ind = { left: el.offsetLeft - tabsEl.scrollLeft, width: el.offsetWidth };
+  });
 
   // ── Header actions ───────────────────────────────────────────────────────
   async function copyAddr() {
@@ -452,7 +470,8 @@
 
   <!-- Tabs: one tab stop, arrows move inside; scroll-snap row on mobile. -->
   <div class="pp-tabswrap">
-    <div class="pp-tabs" role="tablist" aria-label="Profile sections">
+    <div class="pp-tabs" role="tablist" aria-label="Profile sections" bind:this={tabsEl}>
+      <span class="pp-tab-ind" aria-hidden="true" style:left="{ind.left}px" style:width="{ind.width}px"></span>
       {#each tabs as t, i (t.id)}
         <button role="tab" id={`pp-tab-${t.id}`} aria-selected={tab === t.id} aria-controls="pp-panel"
                 tabindex={tab === t.id ? 0 : -1} class:is-on={tab === t.id}
@@ -608,7 +627,7 @@
 
   <!-- Sticky batch bar (own profile, ERC-721 selection > 0) -->
   {#if showBatchTools && selCount > 0}
-    <div class="pp-batchbar" role="region" aria-label="Batch listing">
+    <div class="pp-batchbar" role="region" aria-label="Batch listing" bind:this={batchBarEl} data-testid="sticky-bar">
       <span class="pp-batchlabel">{batchBarLabel(selCount)}</span>
       <input class="pp-batchprice mono" inputmode="decimal" placeholder={`Price each (${sym}, min 1)`} bind:value={batchPrice} aria-label="Price for every selected NFT" />
       <select class="pp-batchdur" bind:value={batchDur} aria-label="Duration">
@@ -700,10 +719,12 @@
 
   /* Tabs — scroll-snap row with fade edges on mobile (spec). */
   .pp-tabswrap { position: relative; margin-bottom: var(--sp-4); }
-  .pp-tabs { display: flex; gap: var(--sp-2); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .pp-tabs { position: relative; display: flex; gap: var(--sp-2); border-bottom: 1px solid var(--line); overflow-x: auto; scrollbar-width: none; }
+  .pp-tab-ind { position: absolute; bottom: -1px; height: 2px; border-radius: 2px; background: var(--sky); transition: left var(--dur) var(--ease), width var(--dur) var(--ease); pointer-events: none; }
   .pp-tabs::-webkit-scrollbar { display: none; }
   .pp-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); background: transparent; border: 0; border-bottom: 2px solid transparent; color: var(--text-2); font-family: inherit; font-size: var(--fs-body); font-weight: 700; cursor: pointer; white-space: nowrap; }
-  .pp-tabs button.is-on { color: var(--text); border-bottom-color: var(--sky); }
+  .pp-tabs button { transition: color var(--dur) var(--ease); }
+  .pp-tabs button.is-on { color: var(--text); }
   @media (max-width: 767px) {
     .pp-tabs { scroll-snap-type: x proximity; }
     .pp-tabs button { scroll-snap-align: start; }
@@ -750,7 +771,7 @@
   .pp-when { color: var(--text-3); font-size: var(--fs-caption); }
 
   /* Sticky batch bar */
-  .pp-batchbar { position: sticky; bottom: calc(60px + env(safe-area-inset-bottom)); z-index: var(--z-banner); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-card); background: var(--surface-2); border: 1px solid var(--sky-35); box-shadow: var(--shadow); }
+  .pp-batchbar { position: sticky; bottom: calc(var(--tabbar-h, 60px) + env(safe-area-inset-bottom)); z-index: var(--z-banner); display: flex; align-items: center; gap: var(--sp-3); flex-wrap: wrap; margin-top: var(--sp-4); padding: var(--sp-3) var(--sp-4); border-radius: var(--r-card); background: var(--surface-2); border: 1px solid var(--sky-35); box-shadow: var(--shadow); }
   @media (min-width: 768px) { .pp-batchbar { bottom: var(--sp-4); } }
   .pp-batchlabel { font-weight: 700; color: var(--sky-300); font-size: var(--fs-small); }
   .pp-batchprice { width: 12rem; min-height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--bg); border: 1px solid var(--line-strong); color: var(--text); font-size: var(--fs-small); }

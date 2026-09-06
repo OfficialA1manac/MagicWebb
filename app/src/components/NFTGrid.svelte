@@ -1,3 +1,20 @@
+<script module lang="ts">
+  /**
+   * Which live events should refresh a listings grid. Only listing changes —
+   * Listed / Cancelled / Bought / Transfer (listing-updated) or the matching
+   * activity feed rows — not bids, offers, notifications or tx receipts.
+   */
+  export function isListingChange(type: string, data: unknown): boolean {
+    const d = (data ?? {}) as { event?: unknown; event_type?: unknown };
+    if (type === 'listing-updated') {
+      const ev = String(d.event ?? '');
+      return ev === '' || /^(Listed|Cancelled|Bought|PriceChanged|Transfer|TransferSingle|TransferBatch)$/.test(ev);
+    }
+    if (type === 'activity') return /list|sale|sold|bought|cancel/i.test(String(d.event_type ?? ''));
+    return false;
+  }
+</script>
+
 <script lang="ts">
   // Listings grid (spec B4). Receives filter state from ListingsFilters via
   // the FILTERS_EVENT window event (or a `filters` prop in tests), fetches in
@@ -74,6 +91,25 @@
     }
   }
 
+  /**
+   * Live refresh: page 1 only. Deeper pages the user scrolled through stay
+   * put (a full 1..N reload used to jump the scroll position on every event).
+   */
+  async function refreshFirstPage() {
+    const g = gen;
+    const key = (i: ListingItem) => `${i.collection}:${i.token_id}:${i.seller}`;
+    try {
+      const first = await fetchPage(1);
+      if (g !== gen) return;
+      if (page <= 1) { items = first; lastBatch = first.length; }
+      else { const seen = new Set(first.map(key)); items = [...first, ...items.slice(pageSize).filter((i) => !seen.has(key(i)))]; }
+    } catch { /* keep what we have */ }
+    if (!filtered) {
+      const m = await jsonOrNull<{ totalActiveListings?: number }>('/api/v1/metrics');
+      if (g === gen) total = typeof m?.totalActiveListings === 'number' ? m.totalActiveListings : null;
+    }
+  }
+
   async function loadMore() {
     if (loadingMore) return;
     const g = gen;
@@ -83,7 +119,11 @@
       if (g !== gen) return;
       page += 1;
       lastBatch = next.length;
-      items = [...items, ...next];
+      // A page-1 live refresh can shift rows across the page boundary; never
+      // let the same listing render twice (keyed each would throw).
+      const key = (i: ListingItem) => `${i.collection}:${i.token_id}:${i.seller}`;
+      const have = new Set(items.map(key));
+      items = [...items, ...next.filter((i) => !have.has(key(i)))];
       state.page = page;
       history.replaceState(null, '', location.pathname + toSearch());
     } catch { /* keep what we have; the button stays for another try */ }
@@ -119,12 +159,12 @@
     applyFilters(filters ?? parseListingsParams(location.search).filters);
     const onFilters = (e: Event) => applyFilters((e as CustomEvent<ListingsFilterState>).detail);
     window.addEventListener(FILTERS_EVENT, onFilters);
-    // Live: marketplace activity refreshes the grid in place, debounced.
+    // Live: only listing changes refresh the grid, debounced, page 1 only.
     let t: ReturnType<typeof setTimeout> | null = null;
-    const offWs = ws.on('*', (_d, meta) => {
-      if (meta.type === 'notification') return;
+    const offWs = ws.on('*', (d, meta) => {
+      if (!isListingChange(meta.type, d)) return;
       if (t) clearTimeout(t);
-      t = setTimeout(() => { t = null; void load(); }, 400);
+      t = setTimeout(() => { t = null; void refreshFirstPage(); }, 400);
     });
     ws.subscribe(ACTIVITY_CHANNEL);
     return () => {

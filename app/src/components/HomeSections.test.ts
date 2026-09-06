@@ -1,7 +1,7 @@
 // Home first-run strip + "Right now" zero-stats hiding + hero copy
 // (spec B4 "Home") — pure exports from the component's module script.
 import { describe, it, expect } from 'vitest';
-import { rightNowLine, heroCopy, firstRunSteps, stripState } from './HomeSections.svelte';
+import { rightNowLine, heroCopy } from './HomeSections.svelte';
 
 const WEI = (n: number) => (BigInt(n) * 10n ** 18n).toString();
 
@@ -48,30 +48,4 @@ describe('hero copy', () => {
   });
 });
 
-describe('first-run strip', () => {
-  it('three steps; step 1 checks off when connected', () => {
-    const steps = firstRunSteps({ connected: true, testnet: true, faucetUrl: 'https://faucet.flare.network/coston2' });
-    expect(steps).toHaveLength(3);
-    expect(steps[0]).toMatchObject({ n: 1, label: 'Connect your wallet', done: true });
-    expect(firstRunSteps({ connected: false, testnet: true })[0].done).toBe(false);
-  });
-
-  it('step 2 is the faucet link on testnets, funding copy on mainnets', () => {
-    const testnet = firstRunSteps({ connected: false, testnet: true, faucetUrl: 'https://faucet.flare.network/coston2' })[1];
-    expect(testnet.label).toBe('Get free test FLR');
-    expect(testnet.href).toBe('https://faucet.flare.network/coston2');
-    const mainnet = firstRunSteps({ connected: false, testnet: false })[1];
-    expect(mainnet.label).toBe('Fund your wallet with FLR');
-    expect(mainnet.href).toBeUndefined();
-  });
-
-  it('step 3 checks off after the first trade', () => {
-    expect(firstRunSteps({ connected: true, testnet: true, traded: true })[2]).toMatchObject({ n: 3, done: true });
-  });
-
-  it('dismissible only after step 3 completes; dismissed hides it', () => {
-    expect(stripState({ dismissed: false, traded: false })).toEqual({ visible: true, dismissible: false });
-    expect(stripState({ dismissed: false, traded: true })).toEqual({ visible: true, dismissible: true });
-    expect(stripState({ dismissed: true, traded: true })).toEqual({ visible: false, dismissible: true });
-  });
-});
+// First-run strip helpers: see src/lib/firstrun.test.ts (moved in v3.6 wave 5c).

@@ -4,7 +4,7 @@
   // summary <dl> → estimated network fee → step rail → success card with one
   // primary next action. Plain-language errors with the one fix each needs.
   import { onMount } from 'svelte';
-  import { fade, fly } from 'svelte/transition';
+  import { fade, scale } from 'svelte/transition';
   import { txModal, closeTxModal } from '../lib/stores/txmodal.svelte';
   import { shortAddr, copyText } from '../lib/format';
   import { currentChain, faucetUrl } from '../lib/chains';
@@ -84,7 +84,7 @@
   function onKey(e: KeyboardEvent) {
     if (e.key === 'Escape' && !busy) closeTxModal();
     if (e.key === 'Tab' && dialog) {
-      const f = dialog.querySelectorAll<HTMLElement>('button, a[href], [tabindex]:not([tabindex="-1"])');
+      const f = dialog.querySelectorAll<HTMLElement>('button:not([disabled]), a[href], [tabindex]:not([tabindex="-1"])');
       // Busy steps render no focusable element: keep focus on the dialog
       // itself so Tab cannot escape to the page behind the scrim.
       if (!f.length) { dialog.focus(); e.preventDefault(); return; }
@@ -98,7 +98,7 @@
   $effect(() => {
     if (txModal.open && dialog) {
       lastFocused ??= document.activeElement as HTMLElement | null;
-      const btn = dialog.querySelector<HTMLElement>('button');
+      const btn = dialog.querySelector<HTMLElement>('button:not([disabled])');
       const target = dialog;
       queueMicrotask(() => (btn ?? target)?.focus());
       document.body.style.overflow = 'hidden';
@@ -114,7 +114,7 @@
 
 {#if txModal.open}
   <div class="mw-tx-scrim" role="presentation" transition:fade={{ duration: 150 }} onclick={() => { if (!busy) closeTxModal(); }}></div>
-  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" tabindex="-1" bind:this={dialog} transition:fly={{ y: 24, duration: 220 }}>
+  <div class="mw-tx-sheet" role="dialog" aria-modal="true" aria-labelledby="mw-tx-title" tabindex="-1" bind:this={dialog} transition:scale={{ start: 0.98, duration: 120 }}>
     <div class="mw-tx-grab" aria-hidden="true"></div>
     <h2 id="mw-tx-title">{txModal.title}</h2>
 
@@ -205,7 +205,8 @@
           <button class="mw-btn mw-btn-primary" onclick={() => txModal.confirm?.()}>Confirm</button>
           <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Cancel</button>
         {:else if busy}
-          <p class="mw-tx-muted mw-tx-hint">{txModal.step === 'pending' ? 'You can keep this open or come back later — nothing else to sign.' : 'Open your wallet to continue. This can\'t be cancelled here — decline in your wallet instead.'}</p>
+          <button class="mw-btn mw-btn-ghost" disabled aria-disabled="true">Cancel</button>
+          <p class="mw-tx-muted mw-tx-hint" aria-live="polite">{txModal.step === 'pending' ? 'You can keep this open or come back later — nothing else to sign.' : 'Waiting for your wallet… Open it to continue; decline there to stop.'}</p>
         {:else}
           <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Cancel</button>
         {/if}

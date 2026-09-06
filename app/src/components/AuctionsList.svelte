@@ -424,6 +424,7 @@
   .al-seg { display: inline-flex; border: 1px solid var(--line-strong); border-radius: var(--r-pill); padding: 3px; background: var(--surface); }
   .al-seg-btn { min-height: 38px; padding: 0 var(--sp-4); border: 0; border-radius: var(--r-pill); background: transparent; color: var(--text-2); font-weight: 700; font-size: var(--fs-small); font-family: inherit; cursor: pointer; }
   .al-seg-btn.is-on { background: var(--violet-12); color: var(--violet-300); }
+  @media (max-width: 640px) { .al-seg-btn { min-height: var(--hit); } }
   .al-bar { display: flex; flex-wrap: wrap; align-items: start; gap: var(--sp-3); padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); margin-bottom: var(--sp-3); }
   .al-bar .field { display: flex; flex-direction: column; gap: var(--sp-1); }
   .al-bar input, .al-bar select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; width: 100%; }

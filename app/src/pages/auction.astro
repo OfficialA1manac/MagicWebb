@@ -1,12 +1,15 @@
 ---
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
+import FirstRun from '../components/FirstRun.svelte';
 import AuctionPage from '../components/AuctionPage.svelte';
 ---
 
 <BaseLayout title="Auction" description="Live auction detail on MagicWebb NFT Marketplace" activeNav="/auctions">
   <WalletConnect slot="wallet" client:only="react" />
   <section id="auction-detail" style="max-width:80rem;margin:0 auto;padding:1.5rem 1rem 3rem;">
+    <!-- v3.6: wallet-less visitors see the 3-step strip (hidden once connected). -->
+    <FirstRun client:load placement="page" />
     <AuctionPage client:load />
   </section>
 </BaseLayout>

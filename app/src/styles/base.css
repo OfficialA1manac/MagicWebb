@@ -100,7 +100,9 @@ textarea:focus-visible, [tabindex]:focus-visible, [role="menuitem"]:focus-visibl
 .btn-sky:active, .btn-gold:active, .btn-violet:active { transform: scale(0.98); }
 .btn-disabled { opacity: 0.5 !important; cursor: not-allowed; filter: none !important; }
 @media (max-width: 640px) {
-  .btn, .btn-sky, .btn-gold, .btn-violet { min-height: var(--hit); }
+  /* Every button is a thumb target on phones — including the small variant. */
+  .btn, .btn-sm, .btn-sky, .btn-gold, .btn-violet { min-height: var(--hit); }
+  .mw-banner .btn { min-height: var(--hit); }
 }
 
 /* ── Form controls ──────────────────────────────────────────────────────── */
@@ -134,6 +136,14 @@ input[aria-invalid="true"], select[aria-invalid="true"] { border-color: var(--re
 @keyframes spin { to { transform: rotate(360deg); } }
 @keyframes sk-sweep { to { background-position: -200% 0; } }
 .card-hover { transition: transform var(--dur) var(--ease), border-color var(--dur) var(--ease); }
+/* v3.6 motion set: price/leader change flash (gold tint, 400ms) + last-60s countdown pulse. */
+@keyframes mw-flash { from { background-color: var(--gold-12); box-shadow: 0 0 0 6px var(--gold-12); } to { background-color: transparent; box-shadow: 0 0 0 6px transparent; } }
+.mw-flash { animation: mw-flash 400ms var(--ease) both; border-radius: var(--r-control); }
+@keyframes mw-pulse { 0%, 100% { opacity: 1; } 50% { opacity: .55; } }
+.mw-pulse { animation: mw-pulse 1s ease-in-out infinite; }
+/* Card image fade-in once decoded (NFTCard + grids). */
+.mw-img-fade { opacity: 0; transition: opacity var(--dur) var(--ease); }
+.mw-img-fade.is-loaded { opacity: 1; }
 .card-hover:hover { transform: translateY(-2px); border-color: var(--line-strong); }
 
 /* ── Layout ─────────────────────────────────────────────────────────────── */
@@ -154,6 +164,10 @@ main { position: relative; z-index: 1; }
 .mw-banner .btn { min-height: 32px; font-size: var(--fs-small); }
 .mw-banner-x { position: absolute; right: var(--sp-1); top: 50%; transform: translateY(-50%); color: var(--text-3); }
 .mw-banner-x:hover { color: var(--text); }
+/* Banner priority (v3.6 wave 5c): at most ONE of wrong-network > browse-only > testnet.
+   NetworkMismatchBanner stamps data-mw-banner="mismatch" on <html> while it shows;
+   the inline script removes the testnet banner when the browse-only one renders. */
+:root[data-mw-banner="mismatch"] #mw-devbanner, :root[data-mw-banner="mismatch"] #ro-banner { display: none !important; }
 .mw-devbanner { background: var(--gold-12); color: #fde68a; border-bottom-color: var(--gold-35); }
 .mw-devbanner a { color: #fde68a; }
 #ro-banner { background: var(--sky-12); border-bottom-color: var(--sky-35); }
@@ -215,7 +229,10 @@ main { position: relative; z-index: 1; }
 .wc-item-danger:hover { color: var(--red); background: var(--red-12); }
 .wc-spin { display: inline-block; width: 14px; height: 14px; border: 2px solid rgba(0,0,0,0.25); border-top-color: var(--text-on-accent); border-radius: 50%; animation: spin 0.8s linear infinite; }
 .wc-failed { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); border: 1px solid var(--red-35); color: var(--red); font-size: 13px; font-weight: 600; }
-@media (max-width: 480px) { .wc-connect-full { display: none; } .wc-addr { font-size: 12px; } }
+.wc-connect-group { display: inline-flex; align-items: center; gap: var(--sp-1); }
+.wc-nowallet { min-height: var(--hit); font-weight: 600; color: var(--text-3); white-space: nowrap; }
+.wc-nowallet:hover { color: var(--text); }
+@media (max-width: 480px) { .wc-connect-full { display: none; } .wc-addr { font-size: 12px; } .wc-nowallet { display: none; } }
 @media (min-width: 481px) { .wc-connect-short { display: none; } }
 
 /* ── Notification bell sign-in button (injected by BaseLayout script) ───── */

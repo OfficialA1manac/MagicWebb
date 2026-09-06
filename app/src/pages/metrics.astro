@@ -5,6 +5,7 @@
 // client-side by a [24h · 7d · 30d] segmented control (pages/metrics/_range.ts).
 import BaseLayout from '../layouts/BaseLayout.astro';
 import WalletConnect from '../components/WalletConnect';
+import Skeleton from '../components/Skeleton.svelte';
 ---
 
 <BaseLayout title="Market Metrics" description="Real-time MagicWebb marketplace statistics — listings, sales, auctions, volume" activeNav="/metrics">
@@ -18,10 +19,10 @@ import WalletConnect from '../components/WalletConnect';
 
     <!-- Loading skeleton for the tiles -->
     <div id="metrics-loading" class="mx-tiles" aria-hidden="true">
-      <div class="mx-tile mx-skel"></div>
-      <div class="mx-tile mx-skel"></div>
-      <div class="mx-tile mx-skel"></div>
-      <div class="mx-tile mx-skel"></div>
+      <Skeleton h="84px" r="12px" />
+      <Skeleton h="84px" r="12px" />
+      <Skeleton h="84px" r="12px" />
+      <Skeleton h="84px" r="12px" />
     </div>
 
     <!-- Metric tiles (populated by the script) -->
@@ -319,9 +320,6 @@ import WalletConnect from '../components/WalletConnect';
 
   .mx-tiles { display: grid; grid-template-columns: repeat(auto-fit, minmax(180px, 1fr)); gap: var(--sp-4); margin-bottom: var(--sp-6); }
   .mx-tile { padding: var(--sp-4); border-radius: var(--r-card); background: var(--surface); border: 1px solid var(--line); }
-  .mx-skel { min-height: 84px; animation: mx-pulse 1.2s ease-in-out infinite; }
-  @keyframes mx-pulse { 0%, 100% { opacity: 0.4; } 50% { opacity: 0.8; } }
-  @media (prefers-reduced-motion: reduce) { .mx-skel { animation: none; } }
   /* Spec: tile captions 12px (--fs-caption) at --text-3. */
   .mx-tilecap { display: block; font-size: var(--fs-caption); line-height: var(--lh-caption); letter-spacing: var(--ls-caption); text-transform: uppercase; font-weight: 700; color: var(--text-3); margin-bottom: var(--sp-2); }
   .mx-tileval { display: block; font-size: 32px; font-weight: 900; line-height: 1; }

@@ -79,6 +79,21 @@ function stepLabel(s: TxStep): string {
   return s === 'pending' ? `Waiting for ${currentChain().name} (~3s)` : STEP_LABEL[s];
 }
 
+/**
+ * Predicate for the instant-lane `tx-indexed` event. The backend publishes
+ * `{tx_hash, block, events}` (indexer/observe.go); `hash` is accepted too so
+ * an older/newer bridge shape cannot silently turn `indexed` off again —
+ * before this the runner only looked at `hash` and NEVER matched.
+ */
+export function isIndexedEventFor(hash: string): (p: unknown) => boolean {
+  const want = hash.toLowerCase();
+  return (p) => {
+    const d = p as { tx_hash?: unknown; hash?: unknown } | null;
+    const got = d && (typeof d.tx_hash === 'string' ? d.tx_hash : typeof d.hash === 'string' ? d.hash : '');
+    return !!got && got.toLowerCase() === want;
+  };
+}
+
 /** Best effort: estimateGas × gasPrice → "≈ 0.02 C2FLR". Never throws. */
 export async function estimateFee(ctx: WalletCtx, req: TxRequest): Promise<string | undefined> {
   try {
@@ -160,7 +175,7 @@ export async function runTx(plan: TxPlan, hooks: TxHooks = {}, opts: RunOptions 
     // Subscribe before the receipt lands so the indexed event cannot race us.
     const indexedP = opts.observe === false
       ? Promise.resolve(false)
-      : ws.waitFor('tx-indexed', (p) => (p as { hash?: string })?.hash?.toLowerCase() === hash.toLowerCase(), opts.indexTimeoutMs ?? 8000, txChannel(hash)).then(() => true, () => false);
+      : ws.waitFor('tx-indexed', isIndexedEventFor(hash), opts.indexTimeoutMs ?? 8000, txChannel(hash)).then(() => true, () => false);
 
     const receipt = await ctx.pub.waitForTransactionReceipt({ hash, confirmations: chain.confirmations });
     if (receipt.status !== 'success') {

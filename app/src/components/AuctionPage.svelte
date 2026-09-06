@@ -79,6 +79,9 @@
   import { onAccountChange, publicClient } from '../lib/tx/client';
   import { auctionHouseAbi } from '../lib/abi';
   import { minimumTopUp, forceCancelUnlocked } from '../lib/tx/auction';
+  import { applyBid, prependBid, applyAuctionStatus, settleAfterTx } from '../lib/optimistic';
+  import { bindStickyBarHeight } from '../lib/stickybar';
+  import type { TxResult } from '../lib/tx/runner';
   import type { Address } from 'viem';
 
   type Auction = { auction_id: number; collection: string; token_id: string; seller: string; standard: string; reserve_price_wei: string; highest_bid_wei: string; highest_bidder: string; min_increment_bps: number; starts_at: string; ends_at: string; status: string; create_tx: string; name: string; image_uri: string; collection_verified: boolean; collection_creator?: string; collection_name?: string; collection_tracked?: boolean };
@@ -171,22 +174,50 @@
     const sub = setInterval(() => { if (a && !ch) { ch = tokenChannel(a.collection, a.token_id); ws.subscribe(ch); } }, 500);
     const offWs = ws.on('*', (_d, meta) => { if (meta.type === 'auction-updated' || meta.type === 'activity' || meta.type === 'tx-indexed') void load(); });
     const tick = setInterval(() => (now = Date.now()), 1000);
-    return () => { offAcct(); offWs(); clearInterval(tick); clearInterval(sub); if (ch) ws.unsubscribe(ch); };
+    return () => { offAcct(); offWs(); clearInterval(tick); clearInterval(sub); if (ch) ws.unsubscribe(ch); if (refetchT) clearTimeout(refetchT); };
   });
 
-  function after(label: string) { syncing = label; formErr = ''; bidIn = ''; setTimeout(() => void load(), 1500); setTimeout(() => void load(), 6000); }
-  async function act(run: () => Promise<unknown>, label: string) { try { await run(); after(label); } catch { /* modal showed it */ } }
+  // Confirmed tx → patch the auction now, then ONE refetch (instant lane or 2s).
+  let refetchT: ReturnType<typeof setTimeout> | null = null;
+  function after(label: string, res?: TxResult, patch?: () => void) {
+    syncing = label; formErr = ''; bidIn = '';
+    patch?.();
+    if (refetchT) clearTimeout(refetchT);
+    refetchT = settleAfterTx(res, () => load());
+  }
+  async function act(run: () => Promise<unknown>, label: string, patch?: () => void) {
+    try { const res = (await run()) as TxResult | undefined; after(label, res, patch); } catch { /* modal showed it */ }
+  }
   const doConnect = () => { MW.connect().catch(() => {}); };
   const doBid = () => {
     if (!a) return;
     let w: bigint; try { w = toWei(bidIn); } catch { formErr = 'Enter a number like 12.5'; return; }
     if (w < minTopUp) { formErr = `At least ${fmtPrice(minTopUp)} ${sym} is needed to take the lead.`; return; }
-    act(() => MW.bid({ auctionId: String(a!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumulative.toString() }), 'Bid placed · syncing');
+    const total = (myCumulative + w).toString();
+    act(() => MW.bid({ auctionId: String(a!.auction_id), amountWei: w.toString(), name, myCumulativeWei: myCumulative.toString() }), 'Bid placed · syncing', () => {
+      if (!me) return;
+      a = applyBid(a, { bidder: me, totalWei: total, antiSnipeSec: 180 });
+      bids = prependBid(bids, { bidder: me, amountWei: total, txHash: `optimistic:${Date.now()}` });
+      myCumulative = BigInt(total);
+    });
   };
-  const doSettle = () => a && act(() => MW.settle({ auctionId: String(a!.auction_id), name }), 'Settled · syncing');
-  const doCancel = () => a && act(() => MW.cancelAuction({ auctionId: String(a!.auction_id), name }), 'Auction cancelled · syncing');
-  const doForceCancel = () => a && act(() => MW.forceCancel({ auctionId: String(a!.auction_id), name }), 'Cancelled · everyone refunded · syncing');
-  const doWithdraw = () => a && act(() => MW.withdrawLoserFunds({ auctionId: String(a!.auction_id), amountWei: myCumulative.toString() }), 'Withdrawn · syncing');
+  const doSettle = () => a && act(() => MW.settle({ auctionId: String(a!.auction_id), name }), 'Settled · syncing', () => { a = applyAuctionStatus(a, 'settled'); });
+  const doCancel = () => a && act(() => MW.cancelAuction({ auctionId: String(a!.auction_id), name }), 'Auction cancelled · syncing', () => { a = applyAuctionStatus(a, 'cancelled'); });
+  const doForceCancel = () => a && act(() => MW.forceCancel({ auctionId: String(a!.auction_id), name }), 'Cancelled · everyone refunded · syncing', () => { a = applyAuctionStatus(a, 'cancelled'); });
+  const doWithdraw = () => a && act(() => MW.withdrawLoserFunds({ auctionId: String(a!.auction_id), amountWei: myCumulative.toString() }), 'Withdrawn · syncing', () => { myCumulative = 0n; });
+
+  // Motion set: the price flashes gold when the leader/amount changes; the countdown pulses in its last minute.
+  let priceKey = $derived(a ? `${a.highest_bid_wei}:${a.highest_bidder}` : '');
+  let flash = $state(false);
+  let lastPriceKey = '';
+  $effect(() => {
+    const k = priceKey;
+    if (lastPriceKey && k !== lastPriceKey) { flash = true; const t = setTimeout(() => (flash = false), 450); return () => clearTimeout(t); }
+    lastPriceKey = k;
+  });
+  let lastMinute = $derived(isLive && endsMs - now < 60_000);
+  let stickyEl = $state<HTMLDivElement | null>(null);
+  $effect(() => { if (stickyEl) return bindStickyBarHeight(stickyEl); });
 
   /** The one primary action for the mobile sticky bar. */
   let primary = $derived(panel.find((c) => !c.disabled && c.kind !== 'leading' && c.kind !== 'browse-only') ?? null);
@@ -233,14 +264,14 @@
         <section class="ap-card" class:is-hot={antiSnipe} aria-label="Bid panel">
           <div class="ap-head">
             <h2 class="ap-ends-h">{isLive ? 'Ends in' : phase === 'ended' ? 'Ended' : statusChip}</h2>
-            <span class="mono ap-count" class:is-urgent={isLive && countdownUrgent(endsMs / 1000, now)} aria-live="polite">
+            <span class="mono ap-count" class:is-urgent={isLive && countdownUrgent(endsMs / 1000, now)} class:mw-pulse={lastMinute} aria-live="polite">
               {isLive ? fmtCountdownShort(endsMs / 1000, now) : timeAgo(a.ends_at)}
             </span>
           </div>
           {#if antiSnipe}
             <div class="ap-snipe" role="status">Bids in the last 3 minutes add 3 more minutes so nobody can snipe.</div>
           {/if}
-          <div class="ap-price mono" class:is-gold={highest > 0n}>{fmtPrice(highest > 0n ? a.highest_bid_wei : a.reserve_price_wei)} <small>{sym}</small></div>
+          <div class="ap-price mono" class:is-gold={highest > 0n} class:mw-flash={flash} data-testid="auction-price">{fmtPrice(highest > 0n ? a.highest_bid_wei : a.reserve_price_wei)} <small>{sym}</small></div>
           <div class="ap-sub">{highest > 0n ? `Current bid · ${amLeader ? 'you are leading' : shortAddr(a.highest_bidder)}` : 'Starting price · no bids yet'}</div>
 
           {#each panel as cell (cell.kind)}
@@ -304,7 +335,7 @@
 
   <!-- Mobile sticky bid bar: the panel's primary action, above the tab bar. -->
   {#if canTrade && primary}
-    <div class="ap-sticky" data-testid="sticky-bar">
+    <div class="ap-sticky" data-testid="sticky-bar" bind:this={stickyEl}>
       <span class="ap-sticky-price mono">{fmtPrice(highest > 0n ? a.highest_bid_wei : a.reserve_price_wei)} {sym}</span>
       <button class="btn btn-primary btn-lg" onclick={() => runCell(primary!.kind)}>{primary.kind === 'bid' ? 'Place bid' : primary.label}</button>
     </div>

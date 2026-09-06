@@ -56,6 +56,8 @@
   import { fmtPrice, shortAddr, fmtCountdownShort, timeAgo } from '../lib/format';
   import { resolveImageUri } from '../lib/image-uri';
   import { onAccountChange } from '../lib/tx/client';
+  import { applyOfferRow, settleAfterTx } from '../lib/optimistic';
+  import type { TxResult } from '../lib/tx/runner';
 
   type Offer = { offer_id: string; bidder: string; collection: string; token_id: string; amount_wei: string; units: number; standard: string; expires_at: string; status: string; created_at: string; name?: string; image_uri?: string; collection_verified?: boolean; collection_creator?: string; collection_name?: string; collection_tracked?: boolean };
 
@@ -94,8 +96,9 @@
     const offWs = ws.on('offer-updated', () => void load());
     const tick = setInterval(() => (now = Date.now()), 1000);
     if (location.hash === '#sent' || location.hash === '#made') setTab('sent');
-    return () => { offAcct(); offWs(); clearInterval(tick); if (ch) ws.unsubscribe(ch); };
+    return () => { offAcct(); offWs(); clearInterval(tick); if (ch) ws.unsubscribe(ch); if (refetchT) clearTimeout(refetchT); };
   });
+  let refetchT: ReturnType<typeof setTimeout> | null = null;
 
   function setTab(t: OffersTab) { tab = t; sort = defaultOffersSort(t); }
 
@@ -108,15 +111,27 @@
   let sentN = $derived(sent.filter(visible).length);
   let list = $derived(sortOfferRows((tab === 'received' ? received : sent).filter(visible), sort));
 
-  async function act(run: () => Promise<unknown>, msg: string) { try { await run(); syncing = msg; setTimeout(load, 1500); setTimeout(load, 6000); } catch { /* modal showed it */ } }
+  // Confirmed tx → patch the rows now, then ONE refetch (instant lane or 2s).
+  async function act(run: () => Promise<unknown>, msg: string, patch?: () => void) {
+    try {
+      const res = (await run()) as TxResult | undefined;
+      syncing = msg;
+      patch?.();
+      if (refetchT) clearTimeout(refetchT);
+      refetchT = settleAfterTx(res, load);
+    } catch { /* modal showed it */ }
+  }
+  // One active offer per bidder per token: drop that bidder's row from the side that changed.
+  const dropReceived = (o: Offer) => () => { received = received.filter((r) => !(r.collection === o.collection && r.token_id === o.token_id && r.bidder.toLowerCase() === o.bidder.toLowerCase())); };
+  const dropSent = (o: Offer) => () => { sent = applyOfferRow(sent.filter((r) => r.collection === o.collection && r.token_id === o.token_id), 'cancelled', { bidder: o.bidder }).concat(sent.filter((r) => !(r.collection === o.collection && r.token_id === o.token_id))); };
   function runAction(kind: string, o: Offer) {
     switch (kind) {
-      case 'accept': void act(() => MW.acceptOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, principalWei: o.amount_wei, std: o.standard as 'erc721' | 'erc1155', name: label(o) }), 'Accepted · syncing'); break;
-      case 'decline': void act(() => MW.rejectOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, name: label(o) }), 'Declined · syncing'); break;
-      case 'return-funds': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Funds returned · syncing'); break;
+      case 'accept': void act(() => MW.acceptOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, principalWei: o.amount_wei, std: o.standard as 'erc721' | 'erc1155', name: label(o) }), 'Accepted · syncing', dropReceived(o)); break;
+      case 'decline': void act(() => MW.rejectOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, name: label(o) }), 'Declined · syncing', dropReceived(o)); break;
+      case 'return-funds': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Funds returned · syncing', dropReceived(o)); break;
       case 'raise': location.href = `/token/${o.collection}/${o.token_id}#offer`; break;
-      case 'withdraw': void act(() => MW.cancelOffer({ nft: o.collection, tokenId: o.token_id, name: label(o) }), 'Withdrawn · full refund · syncing'); break;
-      case 'get-refund': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing'); break;
+      case 'withdraw': void act(() => MW.cancelOffer({ nft: o.collection, tokenId: o.token_id, name: label(o) }), 'Withdrawn · full refund · syncing', dropSent(o)); break;
+      case 'get-refund': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing', dropSent(o)); break;
     }
   }
 </script>
@@ -192,12 +207,12 @@
 <style>
   .op-bar { display: flex; align-items: center; justify-content: space-between; gap: var(--sp-3); flex-wrap: wrap; margin-bottom: var(--sp-3); }
   .op-tabs { display: flex; gap: var(--sp-1); }
-  .op-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text-2); font-weight: 700; font-family: inherit; font-size: var(--fs-body); cursor: pointer; display: inline-flex; gap: var(--sp-2); align-items: center; }
+  .op-tabs button { min-height: var(--hit); padding: 0 var(--sp-4); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text-2); font-weight: 700; font-family: inherit; font-size: var(--fs-body); cursor: pointer; display: inline-flex; gap: var(--sp-2); align-items: center; transition: background-color var(--dur) var(--ease), border-color var(--dur) var(--ease), color var(--dur) var(--ease); }
   .op-tabs button.is-on { background: var(--gold-12); border-color: var(--gold); color: var(--gold-300); }
   .op-tabs button:disabled { cursor: not-allowed; opacity: .6; }
   .op-n { font-size: var(--fs-caption); background: var(--white-10); border-radius: var(--r-pill); padding: 2px 8px; }
   .op-sort { display: inline-flex; align-items: center; gap: var(--sp-2); font-size: var(--fs-small); color: var(--text-2); font-weight: 600; }
-  .op-sort select { min-height: 40px; padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-family: inherit; font-size: var(--fs-small); }
+  .op-sort select { min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-family: inherit; font-size: var(--fs-small); }
   .op-teach { margin-bottom: var(--sp-4); }
   .op-explain { color: var(--text-2); font-size: var(--fs-body); min-height: var(--hit); display: flex; align-items: center; }
   .op-connect { display: flex; }
