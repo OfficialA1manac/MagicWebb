@@ -1,6 +1,7 @@
 package api
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 	"strconv"
@@ -177,7 +178,33 @@ func (s *ListingsService) handleTokenDetail(c *fiber.Ctx) error {
 		}
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
-	return c.JSON(d)
+	return c.JSON(tokenDetailResp{TokenDetail: d, Creator: s.creatorRef(c.Context(), d.CollectionCreator)})
+}
+
+// creatorRef is the "Created by" reference every NFT carries (owner decision
+// D3): the collection creator's address plus their profile name/tag when set,
+// so the UI can link to /profile/<creator>. Best-effort: a profile read
+// failure leaves only the address.
+type creatorRef struct {
+	Address     string `json:"address"`
+	DisplayName string `json:"display_name"`
+	Tag         string `json:"tag"`
+}
+
+type tokenDetailResp struct {
+	*db.TokenDetail
+	Creator *creatorRef `json:"creator"`
+}
+
+func (s *ListingsService) creatorRef(ctx context.Context, creator string) *creatorRef {
+	if creator == "" {
+		return nil
+	}
+	ref := &creatorRef{Address: strings.ToLower(creator)}
+	if p, err := s.q.GetProfile(ctx, creator); err == nil && p != nil {
+		ref.DisplayName, ref.Tag = p.DisplayName, p.Tag
+	}
+	return ref
 }
 
 // isValidTokenID accepts a decimal uint256 (1–78 digits).

@@ -35,6 +35,34 @@ const maxSiblingProfileBody = 64 * 1024
 type profileResponse struct {
 	*db.ProfileRow
 	SourceChain uint64 `json:"source_chain"`
+	// v3.6 (D3): the collections this wallet created (ERC-173 owner /
+	// deployer). VerifiedCreator is true when at least one is a verified
+	// collection — the ★ Creator badge on the profile header keys off it.
+	CreatorOf       []creatorOfRow `json:"creator_of"`
+	VerifiedCreator bool           `json:"verified_creator"`
+}
+
+type creatorOfRow struct {
+	Address  string `json:"address"`
+	Name     string `json:"name"`
+	Symbol   string `json:"symbol"`
+	Verified bool   `json:"verified"`
+}
+
+// creatorOf lists the tracked collections created by addr. Best-effort: a
+// lookup failure yields an empty list, never a failed profile read.
+func (s *ProfilesService) creatorOf(ctx context.Context, addr string) ([]creatorOfRow, bool) {
+	out := []creatorOfRow{}
+	rows, err := s.q.ListCollectionsByCreator(ctx, strings.ToLower(addr))
+	if err != nil {
+		return out, false
+	}
+	verified := false
+	for _, r := range rows {
+		out = append(out, creatorOfRow{Address: r.Address, Name: r.Name, Symbol: r.Symbol, Verified: r.Verified})
+		verified = verified || r.Verified
+	}
+	return out, verified
 }
 
 // ProfilesService handles profile-related API operations.
@@ -151,6 +179,7 @@ func (s *ProfilesService) handleGet(c *fiber.Ctx) error {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
 	}
 	resp := profileResponse{ProfileRow: p, SourceChain: s.chainID}
+	resp.CreatorOf, resp.VerifiedCreator = s.creatorOf(c.Context(), addr)
 	if profileIsEmpty(p) {
 		log.Debug().
 			Str("address", addr).
@@ -163,6 +192,9 @@ func (s *ProfilesService) handleGet(c *fiber.Ctx) error {
 		if c.Get(profileFanoutHeader) == "" && isValidHexAddress(addr) {
 			if remote := s.fetchFromSiblings(c.Context(), addr); remote != nil {
 				resp = *remote
+				// Collections are per-network: creator status always comes
+				// from THIS chain, never from the sibling that lent the profile.
+				resp.CreatorOf, resp.VerifiedCreator = s.creatorOf(c.Context(), addr)
 			}
 		}
 	}
@@ -299,6 +331,7 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 		return c.JSON(profileResponse{ProfileRow: &p, SourceChain: s.chainID})
 	}
 	resp := profileResponse{ProfileRow: saved, SourceChain: s.chainID}
+	resp.CreatorOf, resp.VerifiedCreator = s.creatorOf(c.Context(), addr)
 	// Refresh the read cache so the edit is visible immediately on this
 	// network (writes are never proxied — editing stays local per network).
 	if body, err := json.Marshal(resp); err == nil {

@@ -380,12 +380,18 @@ func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID str
 		limit = 200
 	}
 	rows, err := q.reader().Query(ctx,
-		`SELECT offer_id::text, bidder, collection, token_id::text, principal_wei::text,
-		        fee_wei::text, units, standard::text, expires_at, status::text,
-		        COALESCE(make_tx,''), created_at
-		 FROM offers
-		 WHERE collection=$1 AND token_id=$2 AND status='pending' AND expires_at > now()
-		 ORDER BY principal_wei::numeric DESC
+		`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text, o.principal_wei::text,
+		        o.fee_wei::text, o.units, o.standard::text, o.expires_at, o.status::text,
+		        COALESCE(o.make_tx,''), o.created_at,
+		        COALESCE(c.verified,false), COALESCE(c.creator_addr,''),
+		        COALESCE(c.name,''), c.address IS NOT NULL,
+		        COALESCE(m.name, t.name, ''), COALESCE(m.image_uri, t.image_uri, '')
+		 FROM offers o
+		 LEFT JOIN collections c ON c.address=o.collection
+		 LEFT JOIN nft_metadata m ON m.collection=o.collection AND m.token_id=o.token_id
+		 LEFT JOIN nft_tokens t ON t.collection=o.collection AND t.token_id=o.token_id
+		 WHERE o.collection=$1 AND o.token_id=$2 AND o.status='pending' AND o.expires_at > now()
+		 ORDER BY o.principal_wei::numeric DESC
 		 LIMIT $3`, collection, tokenID, limit)
 	if err != nil {
 		return nil, err
@@ -395,12 +401,19 @@ func (q *Q) GetActiveOffersForToken(ctx context.Context, collection, tokenID str
 	for rows.Next() {
 		var r OfferRow
 		if err := rows.Scan(&r.OfferID, &r.Bidder, &r.Collection, &r.TokenID, &r.AmountWei,
-			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt); err != nil {
+			&r.FeeWei, &r.Units, &r.Standard, &r.ExpiresAt, &r.Status, &r.MakeTx, &r.CreatedAt,
+			&r.CollectionVerified, &r.CollectionCreator, &r.CollectionName, &r.CollectionTracked,
+			&r.Name, &r.ImageURI); err != nil {
 			return nil, err
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[OfferRow, *OfferRow](out))
+	return out, nil
 }
 
 // ── Wallet NFTs (for the picker) + preflight ───────────────────────────────

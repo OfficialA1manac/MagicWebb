@@ -682,18 +682,21 @@ func TestOffersService_HandlePosition_Success(t *testing.T) {
 		"offer_id", "bidder", "collection", "token_id",
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
+		"collection_verified", "collection_creator", "collection_name", "collection_tracked", "name", "image_uri",
 	}
 
-	// GetActiveOffersForToken with limit 200
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text`).
+	// GetActiveOffersForToken with limit 200 (v3.6: joined badge inputs)
+	mock.ExpectQuery(`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text`).
 		WithArgs("0xcol1", "1", 200).
 		WillReturnRows(pgxmock.NewRows(offerCols).
 			AddRow("1", "0xbidder1", "0xcol1", "1",
 				"3000000000000000000", "30000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmtx1", now).
+				now.Add(7*24*time.Hour), "pending", "0xmtx1", now,
+				true, "", "Col", true, "Tok", "/api/v1/img/x").
 			AddRow("2", "0xbidder2", "0xcol1", "1",
 				"1000000000000000000", "10000000000000000", int64(1), "erc721",
-				now.Add(7*24*time.Hour), "pending", "0xmtx2", now))
+				now.Add(7*24*time.Hour), "pending", "0xmtx2", now,
+				true, "", "Col", true, "Tok", "/api/v1/img/x"))
 
 	svc := NewOffersService(db.New(mock))
 	app := newAppForService(t, func(app *fiber.App) {
@@ -737,7 +740,7 @@ func TestOffersService_HandlePosition_Empty(t *testing.T) {
 		"expires_at", "status", "make_tx", "created_at",
 	}
 
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text`).
+	mock.ExpectQuery(`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text`).
 		WithArgs("0xcol1", "1", 200).
 		WillReturnRows(pgxmock.NewRows(offerCols))
 
@@ -1308,9 +1311,10 @@ func TestOffersService_HandlePosition_Truncated(t *testing.T) {
 		"offer_id", "bidder", "collection", "token_id",
 		"principal_wei", "fee_wei", "units", "standard",
 		"expires_at", "status", "make_tx", "created_at",
+		"collection_verified", "collection_creator", "collection_name", "collection_tracked", "name", "image_uri",
 	}
 
-	mock.ExpectQuery(`SELECT offer_id::text, bidder, collection, token_id::text`).
+	mock.ExpectQuery(`SELECT o.offer_id::text, o.bidder, o.collection, o.token_id::text`).
 		WithArgs("0xcol1", "1", 200).
 		// Simulate exactly 200 rows (hits the truncation boundary)
 		WillReturnRows(func() *pgxmock.Rows {
@@ -1320,6 +1324,7 @@ func TestOffersService_HandlePosition_Truncated(t *testing.T) {
 					strconv.Itoa(i), "0xbidder", "0xcol1", "1",
 					"1000000000000000000", "10000000000000000", int64(1), "erc721",
 					now.Add(7*24*time.Hour), "pending", "0xmtx", now,
+					true, "", "Col", true, "Tok", "/api/v1/img/x",
 				)
 			}
 			return r

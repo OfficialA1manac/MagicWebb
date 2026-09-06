@@ -1093,6 +1093,9 @@ components:
         collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
         collection_name:       { type: string }
         collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
 
     # ── Auctions ──────────────────────────────────────────────────────
     AuctionRow:
@@ -1117,6 +1120,9 @@ components:
         collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
         collection_name:       { type: string }
         collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
 
     BidRow:
       type: object
@@ -1148,6 +1154,9 @@ components:
         collection_creator:    { type: string, description: "Collection ERC-173 owner(); empty when unresolved. Verified + creator = Authentic badge" }
         collection_name:       { type: string }
         collection_tracked:    { type: boolean, description: "True when the indexer tracks the collection (distinguishes unknown contract from known-but-unverified)" }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
 
     # ── Collections ───────────────────────────────────────────────────
     CollectionRow:
@@ -1224,6 +1233,18 @@ components:
         collection_verified: { type: boolean }
         collection_creator:  { type: string }
         collection_tracked:  { type: boolean }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
+        minter:              { type: string, description: "`to` of the first Transfer from 0x0 (migration 044); empty until indexed" }
+        creator:
+          type: object
+          nullable: true
+          description: "Created-by reference every NFT carries; links to /profile/<address>"
+          properties:
+            address:      { type: string }
+            display_name: { type: string }
+            tag:          { type: string }
 
     TrendingScore:
       type: object
@@ -1239,6 +1260,9 @@ components:
         collection_verified: { type: boolean }
         collection_creator:  { type: string }
         collection_tracked:  { type: boolean }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
 
     # ── Wallet ────────────────────────────────────────────────────────
     OwnedNFT:
@@ -1267,6 +1291,17 @@ components:
     ProfileRow:
       type: object
       properties:
+        creator_of:
+          type: array
+          description: "v3.6: tracked collections this wallet created (ERC-173 owner / deployer)"
+          items:
+            type: object
+            properties:
+              address:  { type: string }
+              name:     { type: string }
+              symbol:   { type: string }
+              verified: { type: boolean }
+        verified_creator: { type: boolean, description: "True when at least one created collection is verified — drives the ★ Creator badge on the profile" }
         address:      { type: string }
         display_name: { type: string }
         bio:          { type: string }
@@ -1290,6 +1325,9 @@ components:
         standard:            { type: string, enum: [erc721, erc1155, ""] }
         collection_name:     { type: string }
         collection_tracked:  { type: boolean }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
 
     # ── Activity ──────────────────────────────────────────────────────
     ActivityRow:
@@ -1308,4 +1346,7 @@ components:
         collection_name:    { type: string }
         standard:           { type: string, enum: [erc721, erc1155, ""] }
         collection_tracked: { type: boolean }
+        verified:              { type: boolean, description: "v3.6 NFT-level checkmark: verified collection AND metadata present AND image served from our store AND holder known" }
+        verified_reason:       { type: array, items: { type: string, enum: [unverified_collection, no_metadata, image_missing, owner_unknown] }, description: "Unmet checks (empty when verified)" }
+        creator_is_owner:      { type: boolean, description: "★ Creator: the holder is the collection creator AND minted this token" }
         token_url:  { type: string, example: "/token/0x.../1" }

@@ -619,9 +619,13 @@ func (h *handlers) onTransfer721(ctx context.Context, l types.Log) error {
 		return nil // ERC-20 Transfer or malformed — not an NFT
 	}
 	collection := addrStr(l.Address.Bytes())
+	from := addrStr(l.Topics[1].Bytes())
 	to := addrStr(l.Topics[2].Bytes())
 	tokenID := bigStr(l.Topics[3].Bytes())
 	if err := h.q.ApplyTransfer721(ctx, collection, tokenID, to); err != nil {
+		return fmt.Errorf("onTransfer721: %w", err)
+	}
+	if err := h.recordMint(ctx, collection, tokenID, from, to); err != nil {
 		return fmt.Errorf("onTransfer721: %w", err)
 	}
 	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
@@ -641,6 +645,9 @@ func (h *handlers) onTransferSingle(ctx context.Context, l types.Log) error {
 	tokenID := bigStr(chunk(l.Data, 0))
 	value := bigInt(chunk(l.Data, 1))
 	if err := h.q.ApplyTransfer1155(ctx, collection, tokenID, from, to, value.String()); err != nil {
+		return fmt.Errorf("onTransferSingle: %w", err)
+	}
+	if err := h.recordMint(ctx, collection, tokenID, from, to); err != nil {
 		return fmt.Errorf("onTransferSingle: %w", err)
 	}
 	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
@@ -705,9 +712,23 @@ func (h *handlers) onTransferBatch(ctx context.Context, l types.Log) error {
 		if err := h.q.ApplyTransfer1155(ctx, collection, id, from, to, val); err != nil {
 			return fmt.Errorf("onTransferBatch id=%s: %w", id, err)
 		}
+		if err := h.recordMint(ctx, collection, id, from, to); err != nil {
+			return fmt.Errorf("onTransferBatch id=%s: %w", id, err)
+		}
 	}
 	h.pubTyped("listing-updated", &sse.ListingUpdatedEvent{
 		Event: "TransferBatch", Collection: collection, FromAddr: from, ToAddr: to,
 	})
 	return nil
+}
+
+// recordMint stores the token's first minter (migration 044): a Transfer whose
+// `from` is the zero address is a mint, and `to` is the minter. The write is
+// COALESCE-guarded so replays never rewrite provenance. Feeds the ★ Creator
+// badge (owner decision D3: holder == creator AND minted by creator).
+func (h *handlers) recordMint(ctx context.Context, collection, tokenID, from, to string) error {
+	if from != "0x0000000000000000000000000000000000000000" || to == "0x0000000000000000000000000000000000000000" {
+		return nil
+	}
+	return h.q.SetTokenMinter(ctx, collection, tokenID, to)
 }

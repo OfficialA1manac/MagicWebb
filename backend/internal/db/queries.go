@@ -148,6 +148,7 @@ func (q *Q) GetCollectionVerifiedReason(ctx context.Context, address string) (Ve
 // CollectionTokenRow is one indexed token of a collection for the collection
 // page grid: who holds it, how it looks, whether it is listed and at what.
 type CollectionTokenRow struct {
+	TokenBadge
 	TokenID     string `json:"token_id"`
 	Owner       string `json:"owner"`
 	Name        string `json:"name"`
@@ -213,6 +214,7 @@ func (q *Q) CountCollectionTokens(ctx context.Context, collection string) (int64
 // knows about one token. Unknown tokens are a not-found error, never a
 // fabricated empty row.
 type TokenDetail struct {
+	TokenBadge
 	Collection   string     `json:"collection"`
 	TokenID      string     `json:"token_id"`
 	Name         string     `json:"name"`
@@ -230,6 +232,8 @@ type TokenDetail struct {
 	CollectionVerified bool   `json:"collection_verified"`
 	CollectionCreator  string `json:"collection_creator"`
 	CollectionTracked  bool   `json:"collection_tracked"`
+	// Minter is the `to` of the token's first Transfer from 0x0 (migration 044); "" until indexed.
+	Minter string `json:"minter"`
 }
 
 // GetTokenDetail returns the indexed token or a not-found error when neither
@@ -252,7 +256,7 @@ func (q *Q) GetTokenDetail(ctx context.Context, collection, tokenID string) (*To
 		          WHERE s.collection=$1 AND s.token_id=$2
 		          ORDER BY s.occurred_at DESC LIMIT 1),
 		        COALESCE(c.name,''), COALESCE(c.standard::text,''), COALESCE(c.verified,false),
-		        COALESCE(c.creator_addr,''), c.address IS NOT NULL
+		        COALESCE(c.creator_addr,''), c.address IS NOT NULL, COALESCE(t.minter,'')
 		 FROM nft_tokens t
 		 FULL OUTER JOIN nft_metadata m ON m.collection=t.collection AND m.token_id=t.token_id
 		 LEFT JOIN collections c ON c.address=COALESCE(t.collection, m.collection)
@@ -260,13 +264,14 @@ func (q *Q) GetTokenDetail(ctx context.Context, collection, tokenID string) (*To
 		collection, tokenID).
 		Scan(&d.Name, &d.Description, &d.ImageURI, &d.AnimationURI, &d.MetadataURI,
 			&d.Owner, &d.IndexedAt, &d.LastSaleWei, &d.LastSaleAt,
-			&d.CollectionName, &d.Standard, &d.CollectionVerified, &d.CollectionCreator, &d.CollectionTracked)
+			&d.CollectionName, &d.Standard, &d.CollectionVerified, &d.CollectionCreator, &d.CollectionTracked, &d.Minter)
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("token not found: %s/%s", collection, tokenID)
 	}
 	if err != nil {
 		return nil, err
 	}
+	q.fillTokenBadges(ctx, []badgeRow{&d})
 	return &d, nil
 }
 
@@ -616,6 +621,7 @@ func CapWeiLimit(n, def, max int) int {
 // ── Listings ──────────────────────────────────────────────────────────────
 
 type ListingRow struct {
+	TokenBadge
 	Collection string    `json:"collection"`
 	TokenID    string    `json:"token_id"` // decimal uint256
 	Seller     string    `json:"seller"`
@@ -697,7 +703,11 @@ func (q *Q) GetListing(ctx context.Context, collection, tokenID string) (*Listin
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("listing not found")
 	}
-	return &r, err
+	if err != nil {
+		return nil, err
+	}
+	q.fillTokenBadges(ctx, []badgeRow{&r})
+	return &r, nil
 }
 
 type ListingsFilter struct {
@@ -793,12 +803,18 @@ func (q *Q) ListActiveListings(ctx context.Context, f ListingsFilter) ([]Listing
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[ListingRow, *ListingRow](out))
+	return out, nil
 }
 
 // ── Auctions ──────────────────────────────────────────────────────────────
 
 type AuctionRow struct {
+	TokenBadge
 	AuctionID       int64     `json:"auction_id"`
 	Collection      string    `json:"collection"`
 	TokenID         string    `json:"token_id"`
@@ -896,7 +912,11 @@ func (q *Q) GetAuction(ctx context.Context, auctionID int64) (*AuctionRow, error
 	if err == pgx.ErrNoRows {
 		return nil, fmt.Errorf("auction not found: %d", auctionID)
 	}
-	return &r, err
+	if err != nil {
+		return nil, err
+	}
+	q.fillTokenBadges(ctx, []badgeRow{&r})
+	return &r, nil
 }
 
 type AuctionsFilter struct {
@@ -964,7 +984,12 @@ func (q *Q) ListAuctions(ctx context.Context, f AuctionsFilter) ([]AuctionRow, e
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[AuctionRow, *AuctionRow](out))
+	return out, nil
 }
 
 func (q *Q) ListActiveAuctions(ctx context.Context, limit int) ([]AuctionRow, error) {
@@ -1530,6 +1555,7 @@ func (q *Q) GetTokenAttributes(ctx context.Context, collection, tokenID string) 
 // ── Offers ────────────────────────────────────────────────────────────────
 
 type OfferRow struct {
+	TokenBadge
 	OfferID    string    `json:"offer_id"`
 	Bidder     string    `json:"bidder"`
 	Collection string    `json:"collection"`
@@ -1644,7 +1670,12 @@ func (q *Q) ListOffers(ctx context.Context, f OffersFilter) ([]OfferRow, error) 
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[OfferRow, *OfferRow](out))
+	return out, nil
 }
 
 func (q *Q) ExpireOffers(ctx context.Context) (int64, error) {
@@ -1725,6 +1756,7 @@ func (q *Q) GetEventCounts(ctx context.Context) (total, last1h uint64, err error
 // ── Search ────────────────────────────────────────────────────────────────
 
 type SearchResult struct {
+	TokenBadge
 	Kind       string `json:"kind"` // "nft" | "collection"
 	Collection string `json:"collection"`
 	TokenID    string `json:"token_id,omitempty"`
@@ -1804,7 +1836,20 @@ func (q *Q) Search(ctx context.Context, query string, limit int) ([]SearchResult
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	// Only NFT hits carry a token badge; collection hits keep their
+	// collection_verified flag and nothing else.
+	nfts := make([]badgeRow, 0, len(out))
+	for i := range out {
+		if out[i].Kind == "nft" {
+			nfts = append(nfts, &out[i])
+		}
+	}
+	q.fillTokenBadges(ctx, nfts)
+	return out, nil
 }
 
 // ── Expired Listing Sweeper ──────────────────────────────────────────────────
@@ -2213,6 +2258,7 @@ func (q *Q) ListStalledAuctions(ctx context.Context, limit int) ([]StalledAuctio
 
 // ActivityRow is a single entry in the marketplace activity feed.
 type ActivityRow struct {
+	TokenBadge
 	Type       string    `json:"type"`
 	Collection string    `json:"collection"`
 	TokenID    string    `json:"tokenId"`
@@ -2326,7 +2372,12 @@ func (q *Q) GetRecentTransactions(ctx context.Context, limit int) ([]ActivityRow
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[ActivityRow, *ActivityRow](out))
+	return out, nil
 }
 
 // GetRecentTransactionsByAddress returns marketplace activity rows where the
@@ -2373,7 +2424,12 @@ func (q *Q) GetRecentTransactionsByAddress(ctx context.Context, address string, 
 		}
 		out = append(out, r)
 	}
-	return out, rows.Err()
+	if err := rows.Err(); err != nil {
+		return nil, err
+	}
+	rows.Close()
+	q.fillTokenBadges(ctx, asBadgeRows[ActivityRow, *ActivityRow](out))
+	return out, nil
 }
 
 // ── Keeper Gas Logs ─────────────────────────────────────────────────────────

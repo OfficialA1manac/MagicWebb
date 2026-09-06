@@ -210,5 +210,8 @@ func (s *CollectionsService) handleTokens(c *fiber.Ctx) error {
 	if rows == nil {
 		rows = []db.CollectionTokenRow{}
 	}
+	// v3.6 badges: ✓ per token from the collection's verified flag, ★ when the
+	// holder is the creator and minted the token.
+	s.q.FillCollectionTokenBadges(c.Context(), col.Address, col.Verified, col.CreatorAddr, rows)
 	return c.JSON(collectionTokensPage{Collection: *col, Tokens: rows, Page: page, Limit: limit, Total: total})
 }

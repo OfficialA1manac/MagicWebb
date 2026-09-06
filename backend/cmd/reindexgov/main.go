@@ -29,6 +29,7 @@ import (
 
 func main() {
 	from := flag.Uint64("from", 0, "first block to scan (default: INDEX_FROM_BLOCK)")
+	collections := flag.Bool("collections", false, "also replay Transfer events for every tracked collection (fills nft_tokens.minter, migration 044)")
 	flag.Parse()
 
 	env := func(k string) string { return strings.TrimSpace(os.Getenv(k)) }
@@ -83,11 +84,28 @@ func main() {
 	}
 
 	var serverTimeMs int64
-	r := indexer.New(cfg, db.New(pool), sse.New(), eth, &serverTimeMs)
+	q := db.New(pool)
+	r := indexer.New(cfg, q, sse.New(), eth, &serverTimeMs)
 	n, err := r.ReindexGovernance(ctx, *from)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "reindexgov:", err)
 		os.Exit(1)
 	}
 	fmt.Printf("governance trail replayed: %d events recorded from block %d\n", n, *from)
+
+	if *collections {
+		addrs, err := q.ListTrackedCollections(ctx)
+		if err != nil {
+			fmt.Fprintln(os.Stderr, "tracked collections:", err)
+			os.Exit(1)
+		}
+		for _, a := range addrs {
+			scanned, err := r.ReindexCollection(ctx, a, *from)
+			if err != nil {
+				fmt.Fprintf(os.Stderr, "reindex %s: %v\n", a, err)
+				os.Exit(1)
+			}
+			fmt.Printf("collection %s: %d blocks replayed (minters recorded)\n", a, scanned)
+		}
+	}
 }

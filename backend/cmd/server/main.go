@@ -333,7 +333,15 @@ func run() error {
 		go func() {
 			defer close(verifierDone)
 			log.Info().Msg("collection verifier starting")
-			verifier.New(q, eth).Run(ctx)
+			v := verifier.New(q, eth)
+			// v3.6: cadence from the per-network profile (mainnets sweep less often).
+			if d := config.C.Profile.VerifierTick; d > 0 {
+				v.Interval = d
+			}
+			if d := config.C.Profile.VerifierRecheck; d > 0 {
+				v.Recheck = d
+			}
+			v.Run(ctx)
 			log.Info().Msg("collection verifier stopped")
 		}()
 	} else {
