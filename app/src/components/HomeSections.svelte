@@ -188,7 +188,8 @@
 </script>
 
 <!-- ── Hero (parallax stays home-only via BaseLayout) ─────────────────── -->
-<section class="hs-hero hero-parallax">
+<section class="hs-hero hero-parallax" class:has-side={trading && strip.visible}>
+  <div class="hs-hero-main">
   <h1 class="hs-headline">{hero.headline}</h1>
   <p class="hs-sub">{hero.sub}</p>
   <div class="hs-ctas">
@@ -199,9 +200,9 @@
     {/if}
     <a class="btn btn-secondary btn-lg" href={hero.secondary.href}>{hero.secondary.label}</a>
   </div>
-</section>
+  </div>
 
-<!-- ── First-run strip (trading networks only) ────────────────────────── -->
+<!-- ── First-run steps: the hero's right column on desktop, below the CTAs on phones ── -->
 {#if trading && strip.visible}
   <section class="hs-strip" aria-label="Getting started" data-testid="first-run-strip">
     {#each steps as s (s.n)}
@@ -219,6 +220,7 @@
     {/if}
   </section>
 {/if}
+</section>
 
 <!-- ── Right now ──────────────────────────────────────────────────────── -->
 <section class="hs-block" aria-label="Right now">
@@ -292,10 +294,14 @@
 {/if}
 
 <style>
-  .hs-hero { text-align: center; padding: var(--sp-16) var(--sp-4) var(--sp-12); }
+  /* Poster composition (design decision 4.1): headline left, first-run steps as a column on the right. */
+  .hs-hero { text-align: left; padding: var(--sp-16) var(--sp-4) var(--sp-12); max-width: 72rem; margin: 0 auto; display: grid; gap: var(--sp-8); align-items: center; }
+  .hs-hero.has-side { grid-template-columns: minmax(0, 7fr) minmax(0, 5fr); }
+  .hs-hero .hs-strip { flex-direction: column; align-items: flex-start; gap: var(--sp-3); margin: 0; }
+  @media (max-width: 959px) { .hs-hero.has-side { grid-template-columns: 1fr; } }
   .hs-headline { font-size: var(--fs-display); line-height: var(--lh-display); font-weight: 900; letter-spacing: -0.03em; margin: 0 0 var(--sp-4); }
-  .hs-sub { max-width: 34rem; margin: 0 auto var(--sp-6); color: var(--text-2); font-size: var(--fs-h3); line-height: var(--lh-h3); }
-  .hs-ctas { display: flex; gap: var(--sp-3); justify-content: center; flex-wrap: wrap; }
+  .hs-sub { max-width: 34rem; margin: 0 0 var(--sp-6); color: var(--text-2); font-size: var(--fs-h3); line-height: var(--lh-h3); }
+  .hs-ctas { display: flex; gap: var(--sp-3); justify-content: flex-start; flex-wrap: wrap; }
   @media (max-width: 480px) {
     .hs-headline { font-size: 2rem; line-height: 2.25rem; }
     .hs-ctas { flex-direction: column; align-items: stretch; padding: 0 var(--sp-4); }

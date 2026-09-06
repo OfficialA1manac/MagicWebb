@@ -1,7 +1,7 @@
 // Global transaction-modal state (Svelte 5 runes, module-level).
 // Pages call `runWithModal(plan-runner)`; TxModal.svelte renders `txModal`.
 import type { TxStep, TxStepMeta, TxHooks, TxResult } from '../tx/runner';
-import type { TxError } from '../tx/errors';
+import { TxError } from '../tx/errors';
 
 export interface TxModalState {
   open: boolean;
@@ -21,14 +21,19 @@ export interface TxModalState {
   feeEstimate?: string;
   /** Success card copy set by the runner from `plan.success` (what changed + next action). */
   success?: { message: string; action?: { label: string; href: string } };
+  /** v3.6 Review step: the plan is shown and nothing is signed until confirm() runs. */
+  reviewing: boolean;
+  confirm?: () => void;
+  cancelReview?: () => void;
 }
 
-const initial: TxModalState = { open: false, title: '', summary: [], step: 'idle', hasApproval: false };
+const initial: TxModalState = { open: false, title: '', summary: [], step: 'idle', hasApproval: false, reviewing: false };
 
 export const txModal = $state<TxModalState>({ ...initial });
 
 export function closeTxModal(): void {
   if (txModal.step === 'sign' || txModal.step === 'pending' || txModal.step === 'approve') return; // cannot abandon a live wallet prompt
+  if (txModal.reviewing && txModal.cancelReview) { txModal.cancelReview(); return; }
   Object.assign(txModal, { ...initial });
 }
 
@@ -49,7 +54,8 @@ export async function runWithModal<T extends TxResult>(
     title: opts.title,
     summary: opts.summary ?? [],
     hasApproval: !!opts.hasApproval,
-    step: 'sign',
+    step: 'idle',
+    reviewing: true,
     successAction: opts.successAction,
   });
   const hooks: TxHooks = {
@@ -63,6 +69,19 @@ export async function runWithModal<T extends TxResult>(
   };
   // Swallow the retry rejection: the tx hooks already surface the error in
   // the modal, so a failed retry must not become an unhandled rejection.
-  txModal.retry = () => { void runWithModal(opts, run).catch(() => undefined); };
-  return run(hooks);
+  // A retry skips Review (the user already confirmed this exact plan).
+  txModal.retry = () => { txModal.reviewing = false; txModal.step = 'sign'; void run(hooks).catch(() => undefined); };
+  // Review step (v3.6): show the plan; sign only after Confirm. Cancel here
+  // rejects like a wallet rejection so callers' error paths stay identical.
+  return new Promise<T>((resolve, reject) => {
+    txModal.confirm = () => {
+      txModal.reviewing = false;
+      txModal.step = 'sign';
+      run(hooks).then(resolve, reject);
+    };
+    txModal.cancelReview = () => {
+      Object.assign(txModal, { ...initial });
+      reject(new TxError('UserRejected', 'Cancelled before signing — nothing was sent.'));
+    };
+  });
 }

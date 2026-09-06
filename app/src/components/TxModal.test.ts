@@ -56,8 +56,9 @@ describe('TxModal — summary before the rail', () => {
 
   it('rail copy follows B3 (approval row only when the plan has one)', () => {
     open({ hasApproval: true, step: 'approve' });
-    const items = [...screen.getByRole('dialog').querySelectorAll('.mw-tx-step-label')].map((l) => l.textContent?.trim());
-    expect(items).toEqual(['Allow MagicWebb to move this NFT (one time)', 'Confirm in your wallet', 'Waiting for Flare Coston2 (~3s)', 'Done']);
+    const items = [...screen.getByRole('dialog').querySelectorAll('.mw-tx-step-label')].map((l) => { const c = l.cloneNode(true) as HTMLElement; c.querySelectorAll('.hint').forEach((h) => h.remove()); return c.textContent?.trim(); });
+    // v3.6: the Review row leads the rail; the approval row carries a Hint button (label text only is compared).
+    expect(items).toEqual(['Review what will happen', 'Allow MagicWebb to move this NFT (one time)', 'Confirm in your wallet', 'Waiting for Flare Coston2 (~3s)', 'Done']);
   });
 
   it('shows the estimated network fee row while pending and hides it when done', () => {

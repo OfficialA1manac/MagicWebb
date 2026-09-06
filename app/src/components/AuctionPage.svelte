@@ -253,6 +253,7 @@
                 <div class="ap-inrow">
                   <input id="bid-in" class="ap-input mono" inputmode="decimal" placeholder={fmtPrice(minTopUp)} bind:value={bidIn} aria-describedby="bid-help" />
                   <button class="btn btn-primary" onclick={doBid}>Place bid</button>
+                  <Hint text="Your bid is held by the contract until the auction ends. If someone outbids you, you can withdraw it in full at any time." label="What happens to my bid?" />
                 </div>
                 <p class="ap-hint" id="bid-help">At least {fmtPrice(minTopUp)} — 1 {sym} above the current bid</p>
                 {#if formErr}<div class="ap-err" role="alert">{formErr}</div>{/if}

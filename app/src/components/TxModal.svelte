@@ -10,6 +10,7 @@
   import { currentChain, faucetUrl } from '../lib/chains';
   import { switchToSiteChain, waitForWagmi } from '../lib/tx/client';
   import { toastError, toastSuccess } from '../lib/toast.svelte';
+  import Hint from './Hint.svelte';
 
   let dialog: HTMLDivElement | undefined = $state();
   let chainName = $state('the network');
@@ -45,6 +46,10 @@
   function lastGoodIndex() { return txModal.hash ? 2 : txModal.approvalHash ? 1 : (txModal.hasApproval ? 0 : 1); }
 
   let busy = $derived(txModal.step === 'approve' || txModal.step === 'sign' || txModal.step === 'pending');
+  // "Step X of N": Review counts as step 1; the rail entries follow.
+  let stepTotal = $derived(1 + rail.length);
+  let stepNow = $derived(txModal.reviewing ? 1 : 1 + Math.max(1, rail.findIndex((r) => r.state === 'active' || r.state === 'error') + 1));
+  const APPROVE_TIP = 'A one-time permission so the marketplace contract can move this NFT when it sells. It stays in your wallet until then. You can revoke it any time in your wallet.';
   let done = $derived(txModal.step === 'confirmed' || txModal.step === 'indexed');
   // One primary next action: the plan's own success card wins over the page's fallback.
   let cta = $derived(txModal.success?.action ?? txModal.successAction);
@@ -159,12 +164,18 @@
         </dl>
       {/if}
 
+      <p class="mw-tx-position mw-tx-muted" aria-live="polite">Step {done ? stepTotal : stepNow} of {stepTotal}{#if txModal.reviewing} · Review{/if}</p>
       <ol class="mw-tx-rail" aria-live="polite">
+        <li class="mw-tx-step is-{txModal.reviewing ? 'active' : 'done'}">
+          <span class="mw-tx-dot" aria-hidden="true">{#if !txModal.reviewing}✓{/if}</span>
+          <span class="mw-tx-step-label">Review what will happen</span>
+        </li>
         {#each rail as r (r.key)}
           <li class="mw-tx-step is-{r.state}">
             <span class="mw-tx-dot" aria-hidden="true">{#if r.state === 'done'}✓{/if}</span>
             <span class="mw-tx-step-label">
               {r.label}
+              {#if r.key === 'approve'}<Hint text={APPROVE_TIP} label="Why do I need to allow this?" />{/if}
               {#if r.key === 'pending' && txModal.hash}
                 · <a class="mw-tx-link mono" href={txModal.explorerUrl} target="_blank" rel="noopener">{shortAddr(txModal.hash, 6, 4)}</a>
               {/if}
@@ -190,8 +201,11 @@
         {#if done}
           {#if cta}<a class="mw-btn mw-btn-primary" href={cta.href}>{cta.label}</a>{/if}
           <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Done</button>
+        {:else if txModal.reviewing}
+          <button class="mw-btn mw-btn-primary" onclick={() => txModal.confirm?.()}>Confirm</button>
+          <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Cancel</button>
         {:else if busy}
-          <p class="mw-tx-muted mw-tx-hint">{txModal.step === 'pending' ? 'You can keep this open or come back later — nothing else to sign.' : 'Open your wallet to continue.'}</p>
+          <p class="mw-tx-muted mw-tx-hint">{txModal.step === 'pending' ? 'You can keep this open or come back later — nothing else to sign.' : 'Open your wallet to continue. This can\'t be cancelled here — decline in your wallet instead.'}</p>
         {:else}
           <button class="mw-btn mw-btn-ghost" onclick={closeTxModal}>Cancel</button>
         {/if}

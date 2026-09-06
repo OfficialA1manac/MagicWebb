@@ -69,7 +69,13 @@ describe('runTx — summary, success card, toasts', () => {
   it('mw-style runWithModal + runTx: the plan rows win over the empty page fallback', async () => {
     const ctx = makeCtx(); wireWallet(ctx);
     const rows: Array<[string, string]> = [['Price', '5 C2FLR']];
-    await runWithModal({ title: 'List #1', summary: undefined, hasApproval: false }, (hooks) => runTx(plan({ title: 'List #1', summary: rows }), hooks, { observe: false }));
+    // v3.6 Review step: nothing runs until the user confirms the plan.
+    const p = runWithModal({ title: 'List #1', summary: undefined, hasApproval: false }, (hooks) => runTx(plan({ title: 'List #1', summary: rows }), hooks, { observe: false }));
+    expect(txModal.reviewing).toBe(true);
+    expect(txModal.step).toBe('idle');
+    txModal.confirm?.();
+    await p;
+    expect(txModal.reviewing).toBe(false);
     expect(txModal.summary).toEqual(rows);
     expect(txModal.step).toBe('confirmed');
   });

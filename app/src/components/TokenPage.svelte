@@ -606,6 +606,7 @@
             <Hint text="Offers are off for this collection. The collection owner can enable them." label="Why is this disabled?" />
           {:else}
             <button class="btn gold" onclick={() => openPanel('offer')}>Make offer</button>
+            <Hint text="Your offer amount is held by the marketplace contract, not the seller. If it is declined or expires, you get it back in full." label="What is an offer?" />
           {/if}
         </div>
       {/if}
