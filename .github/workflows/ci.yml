@@ -206,6 +206,19 @@ jobs:
         working-directory: app
         run: npm run test:e2e
 
+  governance:
+    name: Governance check (who controls the contracts)
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4.2.0
+      # Reads admin / pendingAdmin / keeper / upgradeDelay from every deployed
+      # network straight from the chain (curl + jq, no toolchain). Fails only
+      # when deployments/<net>.json points at a manager the chain cannot answer
+      # for — i.e. the source-of-truth file and reality have drifted.
+      - name: Read on-chain governance state
+        run: tools/check-governance.sh
+
   k8s:
     name: k8s (kustomize)
     runs-on: ubuntu-latest

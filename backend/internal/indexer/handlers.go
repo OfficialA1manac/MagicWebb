@@ -19,6 +19,9 @@ import (
 type handlers struct {
 	q     *db.Q
 	bcast *sse.Broadcaster
+	// chainID scopes governance_events rows (043); zero in unit tests that
+	// never touch governance.
+	chainID int64
 }
 
 // errMalformedLog marks a dispatch failure as PERMANENT: the on-chain log's
@@ -150,6 +153,9 @@ func (h *handlers) dispatch(ctx context.Context, l types.Log, blockTime uint64) 
 		return h.onTransferSingle(ctx, l)
 	case TopicTransferBatch:
 		return h.onTransferBatch(ctx, l)
+	case TopicKeeperSet, TopicAdminRenounced, TopicAdminTransferStarted, TopicAdminTransferCancelled,
+		TopicAdminTransferred, TopicAuditLog, TopicUpgradeQueued, TopicUpgradeCancelled, TopicUpgraded:
+		return h.onGovernance(ctx, l, blockTime)
 	}
 	return nil
 }

@@ -47,17 +47,48 @@ var (
 	TopicTransfer721    = crypto.Keccak256Hash([]byte("Transfer(address,address,uint256)"))
 	TopicTransferSingle = crypto.Keccak256Hash([]byte("TransferSingle(address,address,address,uint256,uint256)"))
 	TopicTransferBatch  = crypto.Keccak256Hash([]byte("TransferBatch(address,address,address,uint256[],uint256[])"))
+
+	// ── Governance (v3.6 wave 1) ────────────────────────────────────────────
+	// MarketplaceManager (plain, unproxied): the keeper slot and the admin
+	// lifecycle. AuditLog is emitted alongside every one of them; we index it
+	// too so the trail is complete even if a future manager adds an action.
+	TopicKeeperSet              = crypto.Keccak256Hash([]byte("KeeperSet(address,address)"))
+	TopicAdminRenounced         = crypto.Keccak256Hash([]byte("AdminRenounced(address)"))
+	TopicAdminTransferStarted   = crypto.Keccak256Hash([]byte("AdminTransferStarted(address,address)"))
+	TopicAdminTransferCancelled = crypto.Keccak256Hash([]byte("AdminTransferCancelled(address)"))
+	TopicAdminTransferred       = crypto.Keccak256Hash([]byte("AdminTransferred(address,address)"))
+	TopicAuditLog               = crypto.Keccak256Hash([]byte("AuditLog(bytes32,address,address,bytes32)"))
+	// MarketplaceCore (each UUPS proxy): the upgrade queue plus the ERC-1967
+	// Upgraded event OpenZeppelin emits when an implementation is installed
+	// (also once at proxy construction, which is how a fresh deploy's impls
+	// become known without a storage read).
+	TopicUpgradeQueued    = crypto.Keccak256Hash([]byte("UpgradeQueued(address,uint64)"))
+	TopicUpgradeCancelled = crypto.Keccak256Hash([]byte("UpgradeCancelled(address)"))
+	TopicUpgraded         = crypto.Keccak256Hash([]byte("Upgraded(address)"))
 )
 
 // coreTopics returns every marketplace selector — used in the core getLogs topics[0] filter.
+// Governance topics ride in the same filter: the core proxies emit the upgrade
+// events and the manager address is appended to the address list by the
+// watcher, so one getLogs call covers trading + governance.
 func coreTopics() [][]common.Hash {
-	return [][]common.Hash{{
+	return [][]common.Hash{append([]common.Hash{
 		TopicListed, TopicCancelled, TopicBought,
 		TopicAuctionCreated, TopicBidPlaced, TopicOutbidNotification, TopicAuctionExtended,
 		TopicAuctionSettled, TopicLoserRefunded, TopicAuctionCancelled,
 		TopicAuctionSettlementFailed, TopicAuctionForceCancelled,
 		TopicRefundPushed,
 		TopicOfferMade, TopicOfferAccepted, TopicOfferRefunded, TopicOfferEligibilitySet,
+	}, governanceTopics()[0]...)}
+}
+
+// governanceTopics returns only the manager + upgrade selectors — used by
+// cmd/reindexgov to backfill the governance trail without replaying trades.
+func governanceTopics() [][]common.Hash {
+	return [][]common.Hash{{
+		TopicKeeperSet, TopicAdminRenounced, TopicAdminTransferStarted,
+		TopicAdminTransferCancelled, TopicAdminTransferred, TopicAuditLog,
+		TopicUpgradeQueued, TopicUpgradeCancelled, TopicUpgraded,
 	}}
 }
 

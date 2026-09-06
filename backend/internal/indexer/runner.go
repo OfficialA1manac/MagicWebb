@@ -121,7 +121,7 @@ func New(cfg *config.Config, q *db.Q, bcast *sse.Broadcaster, eth EthClient, ser
 		q:            q,
 		bcast:        bcast,
 		eth:          eth,
-		h:            &handlers{q: q, bcast: bcast},
+		h:            &handlers{q: q, bcast: bcast, chainID: int64(cfg.ChainID)},
 		serverTimeMs: serverTimeMs,
 		lastNonce:    make(map[common.Address]uint64),
 		lastNonceAt:  make(map[common.Address]time.Time),
@@ -379,13 +379,85 @@ func (r *Runner) ReindexCollection(ctx context.Context, collectionAddr string, f
 	return scanned, nil
 }
 
-func (r *Runner) runWatcher(ctx context.Context) {
-	chainID := int(r.cfg.ChainID)
-	contracts := []common.Address{
+// watchedContracts is the getLogs address list: the three trading cores plus,
+// when configured, the MarketplaceManager (v3.6: its admin/keeper events are
+// indexed). Read-only networks carry an empty manager address which
+// HexToAddress would turn into the zero address — filtered out so the query
+// never asks the node for logs from 0x0.
+func (r *Runner) watchedContracts() []common.Address {
+	out := []common.Address{
 		common.HexToAddress(r.cfg.MarketplaceAddr),
 		common.HexToAddress(r.cfg.AuctionAddr),
 		common.HexToAddress(r.cfg.OfferBookAddr),
 	}
+	if m := common.HexToAddress(r.cfg.MarketplaceManagerAddr); m != (common.Address{}) {
+		out = append(out, m)
+	}
+	return out
+}
+
+// ReindexGovernance replays only the governance topics (manager + core
+// upgrade events) from fromBlock to head-headLag. Used once after the 043
+// deploy so history that predates the watcher (the deploy-time KeeperSet and
+// the proxies' construction-time Upgraded) lands in governance_events, and
+// after any upgrade the watcher may have missed. Idempotent: inserts are
+// keyed on (tx_hash, log_index).
+func (r *Runner) ReindexGovernance(ctx context.Context, fromBlock uint64) (int, error) {
+	head, err := r.eth.BlockNumber(ctx)
+	if err != nil {
+		return 0, fmt.Errorf("reindexgov: block number: %w", err)
+	}
+	if head < headLag {
+		return 0, fmt.Errorf("reindexgov: chain head %d is below head lag %d", head, headLag)
+	}
+	target := head - headLag
+	if target <= fromBlock {
+		return 0, fmt.Errorf("reindexgov: target block %d <= fromBlock %d", target, fromBlock)
+	}
+	chunk := r.cfg.GetLogsChunk
+	if chunk == 0 {
+		chunk = 30
+	}
+	addrs := r.watchedContracts()
+	var processed int
+	for start := fromBlock; start <= target; start += chunk {
+		end := start + chunk - 1
+		if end > target {
+			end = target
+		}
+		logs, err := r.eth.FilterLogs(ctx, ethereum.FilterQuery{
+			FromBlock: big.NewInt(int64(start)), ToBlock: big.NewInt(int64(end)),
+			Addresses: addrs, Topics: governanceTopics(),
+		})
+		if err != nil {
+			return processed, fmt.Errorf("reindexgov: filter logs [%d..%d]: %w", start, end, err)
+		}
+		for _, l := range logs {
+			hctx, hcancel := context.WithTimeout(ctx, 2*time.Second)
+			h, herr := r.eth.HeaderByNumber(hctx, big.NewInt(int64(l.BlockNumber)))
+			hcancel()
+			if herr != nil {
+				// A backfill that silently skips an event would report success
+				// while the trail stays incomplete — fail loudly, rerun later.
+				return processed, fmt.Errorf("reindexgov: header %d for tx %s: %w", l.BlockNumber, l.TxHash.Hex(), herr)
+			}
+			if err := r.h.onGovernance(ctx, l, h.Time); err != nil {
+				if errors.Is(err, errMalformedLog) {
+					log.Warn().Err(err).Str("tx", l.TxHash.Hex()).Msg("reindexgov: malformed log skipped (permanent)")
+					continue
+				}
+				return processed, fmt.Errorf("reindexgov: tx %s: %w", l.TxHash.Hex(), err)
+			}
+			processed++
+		}
+	}
+	log.Info().Uint64("from", fromBlock).Uint64("to", target).Int("events", processed).Msg("reindexgov: complete")
+	return processed, nil
+}
+
+func (r *Runner) runWatcher(ctx context.Context) {
+	chainID := int(r.cfg.ChainID)
+	contracts := r.watchedContracts()
 	topics := coreTopics()
 
 	fromBlock, err := r.q.GetIndexedBlock(ctx, chainID)

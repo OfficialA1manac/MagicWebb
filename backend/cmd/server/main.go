@@ -718,6 +718,15 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
 		)
 
+		// ── Governance events (v3.6) ──────────────────────────────────
+		// One counter per event label. UpgradeQueued is the alert to page on.
+		fmt.Fprintf(&b,
+			"# HELP magicwebb_governance_events_total Admin/keeper/upgrade events indexed since boot, by event.\n"+
+				"# TYPE magicwebb_governance_events_total counter\n")
+		for _, g := range indexer.GovernanceCounts() {
+			fmt.Fprintf(&b, "magicwebb_governance_events_total{event=\"%s\"} %d\n", g.Event, g.Count)
+		}
+
 		// ── gRPC per-RPC metrics ──────────────────────────────────────
 		// One counter per procedure with procedure="..." label.
 		// Prometheus uses these for rate() and irate() in dashboards.

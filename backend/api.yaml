@@ -731,6 +731,9 @@ paths:
                 banner_uri:   { type: string, format: uri, description: "http/https only" }
                 twitter:      { type: string }
                 website:      { type: string, format: uri, description: "http/https only" }
+                security_alerts:
+                  type: boolean
+                  description: "Optional. Receive in-app notifications for admin / keeper / upgrade events (default true). Omit to leave unchanged."
       responses:
         "200":
           description: Updated profile
@@ -744,6 +747,35 @@ paths:
           $ref: "#/components/responses/Unauthorized"
         "403":
           description: Cannot edit another profile
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/profile/{addr}/prefs:
+    get:
+      summary: Own notification preferences
+      description: The caller's private preferences. Owner-only; never part of the public profile.
+      tags: [Profiles]
+      security:
+        - BearerAuth: []
+      parameters:
+        - name: addr
+          in: path
+          required: true
+          schema: { type: string }
+          description: Must equal the authenticated wallet
+      responses:
+        "200":
+          description: Preferences
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  security_alerts: { type: boolean }
+        "401":
+          $ref: "#/components/responses/Unauthorized"
+        "403":
+          description: Cannot read another profile's preferences
         "500":
           $ref: "#/components/responses/InternalError"
 
@@ -867,6 +899,61 @@ paths:
                   indexed_block: { type: integer, description: "Last indexed block number" }
                   total_events:  { type: integer, description: "Total events processed" }
                   last_1h_events: { type: integer, description: "Events in last hour" }
+        "500":
+          $ref: "#/components/responses/InternalError"
+
+  /api/v1/governance:
+    get:
+      summary: Who controls the contracts
+      description: |
+        The one privileged key per network, read live from MarketplaceManager
+        (`admin`, `pendingAdmin`, `keeper`) and the marketplace core
+        (`upgradeDelay`), plus the indexed trail of admin / keeper / upgrade
+        events (KeeperSet, AdminTransfer*, AdminRenounced, UpgradeQueued,
+        UpgradeCancelled, Upgraded). On a read-only network the body is
+        `{deployed:false, events:[]}`. Live values are cached 5s; an RPC
+        failure is reported in `live.error` with the last good snapshot.
+      tags: [Indexer]
+      responses:
+        "200":
+          description: Governance state
+          content:
+            application/json:
+              schema:
+                type: object
+                properties:
+                  deployed: { type: boolean }
+                  chain_id: { type: integer }
+                  manager: { type: string, description: "MarketplaceManager address" }
+                  live:
+                    type: object
+                    properties:
+                      admin: { type: string }
+                      pending_admin: { type: string }
+                      keeper: { type: string }
+                      upgrade_delay: { type: integer, description: "seconds; 0 = instant" }
+                      admin_is_contract: { type: boolean, description: "true when the admin has code (a Safe)" }
+                      renounced: { type: boolean }
+                      read_at: { type: integer }
+                      error: { type: string }
+                  implementations:
+                    type: object
+                    additionalProperties: { type: string }
+                    description: "Latest `Upgraded` implementation per core (marketplace, auction_house, offer_book)"
+                  events:
+                    type: array
+                    items:
+                      type: object
+                      properties:
+                        block_number: { type: integer }
+                        tx_hash: { type: string }
+                        log_index: { type: integer }
+                        contract: { type: string }
+                        event: { type: string }
+                        actor: { type: string }
+                        subject: { type: string }
+                        extra: { type: string }
+                        block_time: { type: string, format: date-time }
         "500":
           $ref: "#/components/responses/InternalError"
 

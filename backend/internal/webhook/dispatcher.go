@@ -33,6 +33,11 @@ const (
 	EventOfferAccepted  MarketplaceEventType = "offer.accepted"
 	EventOfferCancelled MarketplaceEventType = "offer.cancelled"
 	EventActivity       MarketplaceEventType = "activity"
+	// EventGovernance fires for the admin/keeper/upgrade trail (v3.6):
+	// KeeperSet, AdminTransfer*, AdminRenounced, UpgradeQueued/Cancelled,
+	// Upgraded. The audit report calls UpgradeQueued the highest-signal
+	// security event in the system — subscribe to this one.
+	EventGovernance MarketplaceEventType = "governance"
 )
 
 // ValidEvents is the set of all recognised webhook event types. Used to
@@ -49,6 +54,7 @@ var ValidEvents = map[MarketplaceEventType]bool{
 	EventOfferAccepted:  true,
 	EventOfferCancelled: true,
 	EventActivity:       true,
+	EventGovernance:     true,
 }
 
 // extractEventDiscriminator pulls the "event" field from an SSE Event's Data
@@ -145,6 +151,9 @@ func sseEventToWebhookType(ev sse.Event) MarketplaceEventType {
 
 	case "activity":
 		return EventActivity
+
+	case "governance":
+		return EventGovernance
 
 	case "notification":
 		// Notifications are user-targeted (private), not marketplace-wide.

@@ -434,6 +434,8 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// ProfilePageService). Reuses the metrics service's BuildResponse.
 	NewProfilePageService(q, metricsSvc).RegisterRoutes(api)
 	NewIndexerService(q, cfg.ChainID).RegisterRoutes(api)
+	// v3.6: public window onto the admin/keeper/upgrade lifecycle (043).
+	NewGovernanceService(q, eth, cfg.ChainID, cfg.MarketplaceManagerAddr, cfg.MarketplaceAddr, cfg.AuctionAddr, cfg.OfferBookAddr).RegisterRoutes(api)
 
 	// Image-by-hash route. It serves locally-stored blobs from the database —
 	// no outbound HTTP fetch, so the SSRF / abuse surface is minimal (it can

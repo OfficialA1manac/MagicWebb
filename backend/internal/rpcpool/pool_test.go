@@ -49,6 +49,9 @@ func (f *fakeNode) TransactionReceipt(ctx context.Context, h common.Hash) (*type
 func (f *fakeNode) BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error) {
 	return big.NewInt(0), nil
 }
+func (f *fakeNode) CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
+	return nil, nil
+}
 func (f *fakeNode) Close() {}
 func (f *fakeNode) SendTransaction(ctx context.Context, tx *types.Transaction) error {
 	f.calls.Add(1)

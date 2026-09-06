@@ -36,6 +36,8 @@ type ethNode interface {
 	SendTransaction(ctx context.Context, tx *types.Transaction) error
 	TransactionReceipt(ctx context.Context, txHash common.Hash) (*types.Receipt, error)
 	BalanceAt(ctx context.Context, account common.Address, blockNumber *big.Int) (*big.Int, error)
+	// CodeAt distinguishes a contract admin (a Safe) from an EOA on /status.
+	CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error)
 	Close()
 }
 
@@ -467,6 +469,13 @@ compare:
 func (p *Pool) CallContract(ctx context.Context, msg ethereum.CallMsg, blockNumber *big.Int) ([]byte, error) {
 	return call(p, ctx, "CallContract", 0, func(c context.Context, n ethNode) ([]byte, error) {
 		return n.CallContract(c, msg, blockNumber)
+	})
+}
+
+// CodeAt returns the bytecode at account (empty for an EOA). Light call.
+func (p *Pool) CodeAt(ctx context.Context, account common.Address, blockNumber *big.Int) ([]byte, error) {
+	return call(p, ctx, "CodeAt", 0, func(c context.Context, n ethNode) ([]byte, error) {
+		return n.CodeAt(c, account, blockNumber)
 	})
 }
 

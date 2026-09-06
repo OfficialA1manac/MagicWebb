@@ -91,6 +91,24 @@ func profileSource(chainID uint64) int {
 func (s *ProfilesService) RegisterRoutes(api fiber.Router, cfg *config.Config) {
 	api.Get("/profile/:addr", s.handleGet)
 	api.Put("/profile/:addr", jwtMiddleware(cfg), s.handlePut)
+	// v3.6: the caller's own notification preferences (owner-only; the public
+	// profile never exposes them).
+	api.Get("/profile/:addr/prefs", jwtMiddleware(cfg), s.handleGetPrefs)
+}
+
+func (s *ProfilesService) handleGetPrefs(c *fiber.Ctx) error {
+	addr := caller(c)
+	if addr == "" {
+		return writeErr(c, fiber.StatusUnauthorized, "unauthorized")
+	}
+	if target := strings.ToLower(c.Params("addr")); target != "" && target != addr {
+		return writeErr(c, fiber.StatusForbidden, "cannot read another profile's preferences")
+	}
+	on, err := s.q.GetSecurityAlerts(c.Context(), addr)
+	if err != nil {
+		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	return c.JSON(fiber.Map{"security_alerts": on})
 }
 
 // profileIsEmpty reports whether the profile has none of the fields a user
@@ -238,6 +256,9 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 		BannerURI   string `json:"banner_uri"`
 		Twitter     string `json:"twitter"`
 		Website     string `json:"website"`
+		// v3.6: opt-out of governance notifications (default on, 043).
+		// Pointer so an absent field leaves the stored value alone.
+		SecurityAlerts *bool `json:"security_alerts"`
 	}
 	if err := bodyDecode(c, &u); err != nil {
 		return writeErr(c, fiber.StatusBadRequest, "invalid request body")
@@ -260,6 +281,11 @@ func (s *ProfilesService) handlePut(c *fiber.Ctx) error {
 	}
 	if err := s.q.UpsertProfile(c.Context(), p); err != nil {
 		return writeErr(c, fiber.StatusInternalServerError, "internal error")
+	}
+	if u.SecurityAlerts != nil {
+		if err := s.q.SetSecurityAlerts(c.Context(), addr, *u.SecurityAlerts); err != nil {
+			return writeErr(c, fiber.StatusInternalServerError, "internal error")
+		}
 	}
 	// Fetch the canonical stored row so the response reflects exactly what
 	// was persisted rather than the zero-values from our local struct.
