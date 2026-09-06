@@ -80,7 +80,7 @@ textarea:focus-visible, [tabindex]:focus-visible, [role="menuitem"]:focus-visibl
 .btn-danger:hover:not(:disabled):not([aria-disabled="true"]) { background: var(--red-12); }
 .btn .ico { width: 20px; height: 20px; flex: 0 0 auto; }
 /* Icon-only control: square 44px hit area. */
-.icon-btn {
+.icon-btn { flex: 0 0 var(--hit); min-width: var(--hit);
   display: inline-flex; align-items: center; justify-content: center;
   width: var(--hit); height: var(--hit); border-radius: var(--r-control);
   background: transparent; color: var(--text-2); border: 0; cursor: pointer;
