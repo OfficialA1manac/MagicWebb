@@ -14,6 +14,99 @@ numbered by the deployed contract/protocol generation instead —
 `MarketplaceManager`, timelocked upgrades and on-chain durations.
 The two schemes do not overlap: `v29` precedes `v3.0` in time.
 
+## v3.5 — 2026-09-04 — Keeper-mandatory protocol, UX-spec frontend, no-admin surface
+
+Live on Coston2 from block 34905078 (fresh set: Marketplace `0xa6fbad08…`,
+AuctionHouse `0x0ADe5F5A…`, OfferBook `0x358d4504…`, manager (unproxied)
+`0x14C3b1Ba…`; NFT unchanged; v3.2/v3.3 set superseded). Songbird and Flare
+stay read-only (no contracts) — browse-only banner, trading disabled per
+profile. Nine waves, all on `main`, each deployed on push.
+
+### Protocol
+
+- **14 durations** (10-minute option dropped): 1m 3m 5m 15m 30m 45m 1h 2h
+  4h 8h 12h 16h 20h 24h.
+- **Keeper is mandatory.** Cores refuse a zero manager and `_payFee` reverts
+  `NoKeeper` when `manager.keeper()` is unset — the 0.5% keeper share can never
+  fall back to `feeRecipient`. `NoManager` / `manager != 0` guards removed.
+- Tests rebuilt around a real manager everywhere (175 green), FeeSplit
+  fake-manager coverage, gas snapshot refreshed, frontend ABI regenerated.
+
+### Backend / API
+
+- **Per-network isolation**: Redis keys namespaced by chain (`cache.Key`),
+  boot refuses a Redis already bound to another chain. `chain/profile` is the
+  only per-network table (`knownNetworks` deleted); new knobs `WSCoalesceMs`,
+  `ImageProxyConcurrency`, `GraphQLMaxCost`, `RateLimitTier` (testnet 120/min,
+  mainnet 60/min), `FaucetURL`, `AuditNote`, `TradingStatus` (live |
+  browse-only). `deploy.yml` derives `NETWORK_TRADING` from `deployments/*.json`.
+- API shaped for the UX spec: card rows carry `collection_tracked` / name /
+  standard / image; `GET /collections/:addr/tokens` (paginated);
+  `verified_reason` on collections; `owner` / `last_sale` / `indexed_at` on
+  tokens; `collections_tracked` + `updated_at` on stats; `ts` / `status` /
+  `token_url` on activity. Unknown token / collection → 404 (was fabricated
+  rows). `auctions?status=all|ended|settled|cancelled` no longer 500s; listings
+  honour `min_price` / `max_price` / `sort=ending` / `collection` / `page`.
+- Token not-found decision races the on-chain fallback against a 6s timeout so
+  a dead RPC can never hang it.
+- Health probe refresh is single-flight and never caches a result from a
+  cancelled context; indexer observe set hard-capped at 4096 with eviction;
+  migration 042 audits 039's lowercase merge read-only and fails loudly if it
+  would ever be lossy.
+- **No-admin surface**: API keys are verify-only (Create/Revoke/List issuance
+  and its audit events deleted; migrations untouched). `/internal/metrics`
+  gains an optional `METRICS_TOKEN` gate (public when unset).
+- Infra: image also mirrored to ghcr.io (non-fatal) for the Kubernetes path,
+  kustomize image pins + a CI job rendering all three overlays, Zig 0.13.0
+  tarball pinned by sha256, goose migrations bounded by `MIGRATE_TIMEOUT`
+  (default 5m). `RESET_ON_ADDRESS_CHANGE` wipes chain tables on boot when the
+  contract set changes.
+
+### Frontend (UX spec B0–B5)
+
+- Design system: `tokens.css` (surfaces, text tiers ≥ 4.5:1, accents, type
+  scale, motion), one `.btn` system, focus-visible rings, 44px targets,
+  self-hosted fonts, SVG icon set, `docs/DESIGN.md`.
+- Global shell: header/nav, keyboard network menu that keeps the path, drawer
+  with focus trap, testnet banner with faucet link, browse-only banner, skip
+  link, toasts, Hint popover, branded 404, AppKit lazy-loaded.
+- **Three-tier badges** from one source (`lib/badge.ts`): Listed collection /
+  Verified / Authentic + ★ Creator; cards say "1 of 1" / "Multi-edition".
+- **Honest tx modal**: plan summary before signing (you pay / seller receives
+  (2% fee) / held safely / refundable…), estimated network fee, success card
+  with one next action, plain error titles with `[Switch to <chain>]`
+  (`wallet_addEthereumChain` fallback on 4902) and `[Get test FLR]` on Coston2.
+- Pages rebuilt to spec: Listings (URL-driven filters, chips, Load more,
+  distinct empty / no-match / error states), Token (always-present action
+  zone = full status × role matrix with disabled+reason cells, outbid and
+  expired-offer refunds on-page, mobile sticky bar), Collection (Items tab
+  default, badge tier tooltip, in-place offers toggle), Auctions (Live /
+  Ending soon / Ended, bid panel as phase × role matrix incl. 3-day
+  cancel-and-refund), Home (hero, first-run strip, honest "Right now" line),
+  Offers (teach-first viewer state, Received/Sent, net-proceeds accept
+  summary), Search (grouped + pluralised, recent searches), Profile (980-line
+  inline script → `ProfilePage.svelte`, ERC-721-only batch list, refunds card).
+- `/status` page: automation costs, indexer lag, running build SHA
+  (`X-MW-Build-SHA`). `/metrics/gas` redirects there.
+- Docs: registry-driven nav, 2-minute start-here guide with badge legend and
+  fee line, `capabilities.md` carries the capability matrix verbatim (mirrored
+  in `docs/ARCHITECTURE.md` §8).
+- **Accessibility debt paid**: sub-12px text raised, muted card text to
+  4.5:1, badge pills 12px with a light-scheme palette; exemption lists empty.
+
+### CI / tests
+
+- New required job **Frontend e2e (Playwright)**: 13 wallet-less smoke tests
+  (desktop + mobile) against the built site with API/RPC mocked — branded 404,
+  URL filters, collection Items tab, token 404, keyboard network switcher,
+  mobile tab-bar padding + no horizontal scroll, 44px / 12px sweeps, axe
+  contrast gate.
+- 298 vitest green, `astro check` 0 errors, full backend suite green,
+  CodeRabbit full-sweep (10 findings, 9 fixed, 1 skipped: migration 028
+  renumbering — append-only rule).
+- Seed: MagicWebb Genesis open-mint collection on Coston2 with a live
+  round-trip proof.
+
 ## v3.4 — 2026-09-02 — Gas repack + instant upgrades on every network
 
 The generation Songbird and Flare launch with. Fresh deployment on all
