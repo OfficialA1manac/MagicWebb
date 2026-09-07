@@ -815,3 +815,18 @@ func TestRefillTokens_BurstThenThrottle(t *testing.T) {
 		t.Fatalf("too many tokens refilled in one tick: %d > %d", found, wsConnMsgRefill)
 	}
 }
+
+// v3.6 wave 6c: the generated client interface gained the four subscription
+// streams; the WS handler never calls them, so the mock refuses them.
+func (m *mockMarketplaceClient) SubscribeListings(context.Context, *connect.Request[marketplacev1.SubscribeListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeListingsResponse], error) {
+	return nil, errors.New("not implemented in mock")
+}
+func (m *mockMarketplaceClient) SubscribeAuctions(context.Context, *connect.Request[marketplacev1.SubscribeAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeAuctionsResponse], error) {
+	return nil, errors.New("not implemented in mock")
+}
+func (m *mockMarketplaceClient) SubscribeActivity(context.Context, *connect.Request[marketplacev1.SubscribeActivityRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeActivityResponse], error) {
+	return nil, errors.New("not implemented in mock")
+}
+func (m *mockMarketplaceClient) SubscribeNotifications(context.Context, *connect.Request[marketplacev1.SubscribeNotificationsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeNotificationsResponse], error) {
+	return nil, errors.New("not implemented in mock")
+}
