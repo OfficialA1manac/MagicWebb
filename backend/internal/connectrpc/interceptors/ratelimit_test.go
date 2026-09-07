@@ -325,3 +325,25 @@ func TestTieredRateLimitInterceptor_UnknownIP(t *testing.T) {
 		t.Fatal("expected rate limit for unknown IP")
 	}
 }
+
+// v3.6 wave 6: the Connect table follows the profile's ConnectRateTier.
+func TestRateLimitsForTier(t *testing.T) {
+	base := DefaultRateLimits()
+	testnet := RateLimitsForTier("testnet")
+	mainnet := RateLimitsForTier("mainnet")
+	unknown := RateLimitsForTier("")
+	if len(testnet) != len(base) || len(mainnet) != len(base) || len(unknown) != len(base) {
+		t.Fatalf("tier tables must cover every procedure: base=%d testnet=%d mainnet=%d unknown=%d", len(base), len(testnet), len(mainnet), len(unknown))
+	}
+	for proc, b := range base {
+		if got := testnet[proc]; got.Limit != b.Limit*2 || got.Window != b.Window {
+			t.Errorf("%s testnet: want %d/%v, got %d/%v", proc, b.Limit*2, b.Window, got.Limit, got.Window)
+		}
+		if got := mainnet[proc]; got != b {
+			t.Errorf("%s mainnet: want base %+v, got %+v", proc, b, got)
+		}
+		if got := unknown[proc]; got != b {
+			t.Errorf("%s unknown tier: want base %+v, got %+v", proc, b, got)
+		}
+	}
+}

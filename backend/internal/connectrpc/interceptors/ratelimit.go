@@ -52,6 +52,22 @@ func DefaultRateLimits() map[string]RateLimitTier {
 	// Unknown procedures default to 60/min (standard tier).
 }
 
+// RateLimitsForTier returns the per-procedure table for a chain profile's
+// ConnectRateTier (v3.6): "testnet" doubles every budget in DefaultRateLimits
+// (testers hammer refresh and there is nothing to protect), anything else —
+// "mainnet" or unknown — returns the base table unchanged.
+func RateLimitsForTier(tier string) map[string]RateLimitTier {
+	base := DefaultRateLimits()
+	if tier != "testnet" {
+		return base
+	}
+	out := make(map[string]RateLimitTier, len(base))
+	for k, v := range base {
+		out[k] = RateLimitTier{Limit: v.Limit * 2, Window: v.Window}
+	}
+	return out
+}
+
 // TieredRateLimitInterceptor returns a Connect-RPC unary interceptor that
 // applies per-procedure rate limits. This closes the DoS vector where an
 // attacker could hammer ListCollections or Search without any limit.

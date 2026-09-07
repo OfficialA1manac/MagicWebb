@@ -4,7 +4,7 @@
 //   idle → approve? → sign → pending → confirmed → indexed
 //                                    ↘ error (any step)
 import type { Abi, Address, Hex, TransactionReceipt } from 'viem';
-import { currentChain, explorerTx } from '../chains';
+import { currentChain, explorerTx, pendingEtaSeconds } from '../chains';
 import { requireWallet, type WalletCtx } from './client';
 import { decodeRevert, TxError } from './errors';
 import { ws } from '../ws/client';
@@ -69,14 +69,15 @@ const STEP_LABEL: Record<TxStep, string> = {
   idle: '',
   approve: 'Allow MagicWebb to move this NFT (one time)',
   sign: 'Confirm in your wallet',
-  pending: 'Waiting for the network (~3s)',
+  pending: 'Waiting for the network',
   confirmed: 'Done',
   indexed: 'Done — the marketplace is up to date',
   error: 'Something went wrong',
 };
 
 function stepLabel(s: TxStep): string {
-  return s === 'pending' ? `Waiting for ${currentChain().name} (~3s)` : STEP_LABEL[s];
+  // ETA = blockTime × confirmations from the chain profile (1.8 s × 1 → "~2s").
+  return s === 'pending' ? `Waiting for ${currentChain().name} (~${pendingEtaSeconds()}s)` : STEP_LABEL[s];
 }
 
 /**

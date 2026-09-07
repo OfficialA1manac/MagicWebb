@@ -16,7 +16,7 @@
   "trackedCollections": [],
   "rpc": {
     "primary": "https://songbird-api.flare.network/ext/C/rpc",
-    "fallbacks": []
+    "fallbacks": ["https://rpc.ankr.com/flare_songbird"]
   },
   "explorer": "https://songbird-explorer.flare.network",
   "app": {

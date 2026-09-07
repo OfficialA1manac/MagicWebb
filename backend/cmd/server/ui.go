@@ -13,6 +13,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/rs/zerolog/log"
 
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain/profile"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 )
 
@@ -176,6 +177,9 @@ window.MW_TRADING='%s';
 window.MW_FAUCET_URL='%s';
 window.MW_AUDIT_NOTE='%s';
 window.MW_NETWORK_STATUS_JSON='%s';
+window.MW_BLOCK_TIME_MS='%d';
+window.MW_CONFIRMATIONS='%d';
+window.MW_TESTNET='%t';
 </script>`,
 		config.C.ChainID,
 		jsStringEscape(config.C.RPCURL),
@@ -194,6 +198,11 @@ window.MW_NETWORK_STATUS_JSON='%s';
 		jsStringEscape(config.C.Profile.FaucetURL),
 		jsStringEscape(config.C.Profile.AuditNote),
 		jsStringEscape(networkStatusJSON()),
+		// v3.6: the profile decides ETAs and the testnet banner, not a chain-id
+		// check in the browser.
+		config.C.Profile.BlockTime.Milliseconds(),
+		config.C.Profile.Confirmations,
+		!config.C.Profile.Mainnet,
 	)
 }
 
@@ -293,11 +302,14 @@ func sendHTMLWithConfig(c *fiber.Ctx, htmlPath string) error {
 
 	// Server-side replacement of .mw-cur span content so the correct
 	// currency symbol renders immediately (no FOUC).
-	curPlaceholder := `<span class="mw-cur">C2FLR</span>`
+	// The Astro build is rendered with Coston2's identity (the dev default);
+	// the placeholders therefore carry Coston2's profile values, not literals.
+	buildProfile := profile.MustFor(114)
+	curPlaceholder := `<span class="mw-cur">` + html.EscapeString(buildProfile.Currency) + `</span>`
 	curReplacement := `<span class="mw-cur">` + html.EscapeString(config.C.NativeCurrency) + `</span>`
 	content = strings.ReplaceAll(content, curPlaceholder, curReplacement)
 	// Also update .mw-net-name spans (used in the homepage testnet badge).
-	netPlaceholder := `<span class="mw-net-name">Flare Coston2</span>`
+	netPlaceholder := `<span class="mw-net-name">` + html.EscapeString(buildProfile.Name) + `</span>`
 	netReplacement := `<span class="mw-net-name">` + html.EscapeString(config.C.NetworkName) + `</span>`
 	content = strings.ReplaceAll(content, netPlaceholder, netReplacement)
 

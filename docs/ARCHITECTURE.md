@@ -169,7 +169,7 @@ backend/             Go 1.26 · Fiber
   internal/chain/profile   per-network tuning table
   internal/indexer   watcher · observe (instant lane) · keepers · metadata
   internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier
-  zigsha256 · zigcrypto · zigsniff   Zig libraries (CGO, -tags zigmedia)
+  zigsha256 · zigsniff               Zig libraries (CGO, -tags zigmedia)
 contracts/           Foundry · src/ · test/ (118) · script/Deploy*.s.sol
 deployments/         per-network address records (source of truth)
 docs/                operator docs (deploy, checklist, monitoring, immutability, networks)

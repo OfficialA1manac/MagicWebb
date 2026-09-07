@@ -1134,8 +1134,11 @@ func (r *Runner) runAuctionKeeper(ctx context.Context) {
 	chainIDBig := big.NewInt(int64(r.cfg.ChainID))
 	signer := types.NewLondonSigner(chainIDBig)
 
-	log.Info().Str("keeper", keeperAddr.Hex()).Msg("keeper: started")
-	ticker := time.NewTicker(1 * time.Second)
+	log.Info().Str("keeper", keeperAddr.Hex()).Dur("tick", r.tick(r.cfg.Profile.KeeperTick, time.Second)).Msg("keeper: started")
+	// v3.6: the profile's KeeperTick (1s Coston2, 2s mainnets) drives this
+	// loop; forceCancelEvery / cleanExpired cadences count ticks, so they
+	// scale with it (a ~1 min force-cancel sweep on mainnet loses nothing).
+	ticker := time.NewTicker(r.tick(r.cfg.Profile.KeeperTick, time.Second))
 	defer ticker.Stop()
 	// Expired-listing cleanup runs on a slower cadence than settlement (each
 	// clean is a paid tx and listings carry no escrow urgency).

@@ -7,7 +7,7 @@
   import { fade, scale } from 'svelte/transition';
   import { txModal, closeTxModal } from '../lib/stores/txmodal.svelte';
   import { shortAddr, copyText } from '../lib/format';
-  import { currentChain, faucetUrl } from '../lib/chains';
+  import { currentChain, faucetUrl, pendingEtaSeconds } from '../lib/chains';
   import { switchToSiteChain, waitForWagmi } from '../lib/tx/client';
   import { toastError, toastSuccess } from '../lib/toast.svelte';
   import Hint from './Hint.svelte';
@@ -15,7 +15,9 @@
   let dialog: HTMLDivElement | undefined = $state();
   let chainName = $state('the network');
   let chainId = $state(0);
-  onMount(() => { const c = currentChain(); chainName = c.name; chainId = c.id; });
+  let testnet = $state(false);
+  let eta = $state(2);
+  onMount(() => { const c = currentChain(); chainName = c.name; chainId = c.id; testnet = c.testnet; eta = pendingEtaSeconds(c); });
 
   type Rail = { key: string; label: string; state: 'done' | 'active' | 'todo' | 'error' };
   const order = ['approve', 'sign', 'pending', 'confirmed'] as const;
@@ -27,7 +29,7 @@
     const labels: Record<string, string> = {
       approve: 'Allow MagicWebb to move this NFT (one time)',
       sign: 'Confirm in your wallet',
-      pending: `Waiting for ${chainName} (~3s)`,
+      pending: `Waiting for ${chainName} (~${eta}s)`,
       confirmed: 'Done',
     };
     order.forEach((k, i) => {
@@ -54,7 +56,8 @@
   // One primary next action: the plan's own success card wins over the page's fallback.
   let cta = $derived(txModal.success?.action ?? txModal.successAction);
   let successMessage = $derived(txModal.success?.message ?? (txModal.step === 'indexed' ? 'Confirmed and live on the marketplace.' : `Confirmed on ${chainName}.`));
-  let faucet = $derived(chainId === 114 ? faucetUrl() : null);
+  // Testnet by profile (window.MW_TESTNET), never a chain-id check. chainId stays for copy-details.
+  let faucet = $derived(testnet && chainId ? faucetUrl() : null);
 
   let switching = $state(false);
   async function doSwitch() {

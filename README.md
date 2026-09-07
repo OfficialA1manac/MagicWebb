@@ -119,7 +119,7 @@ The app uses a pgxpool tuned for Neon (see `backend/internal/db/pool.go`):
 
 The backend reads configuration from environment variables (see `.env.example`). Provide them via your shell, a `.env` file, or your host's secret manager.
 
-**Required:** `RPC_URL`, `CHAIN_ID`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `POSTGRES_URL`, `JWT_SECRET` (≥32 chars).
+**Required:** `CHAIN_ID`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `POSTGRES_URL`, `JWT_SECRET` (≥32 chars). `RPC_URL` is optional since v3.6: the chain profile's public RPC set (`backend/internal/chain/profile/<network>.go`) rotates by default; set `RPC_URL`/`RPC_URLS` to use a private provider.
 
 **All assets self-hosted:** No IPFS gateway JWT, no Pinata key, no third-party object storage needed. NFT images are stored directly in Postgres BYTEA columns and served from `/api/v1/img/<sha256>`.
 

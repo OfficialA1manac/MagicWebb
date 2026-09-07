@@ -16,11 +16,12 @@ import (
 	"github.com/rs/zerolog/log"
 )
 
-// Zodiac Allowance Module v0.62.0 address. Canonical singleton address
-// deployed at the same CREATE2 address on Flare (14), Songbird (19), and
-// Coston2 (114). Verify bytecode at this address on your target chain before
-// first use: https://github.com/gnosisguild/zodiac/blob/master/contracts/allowance/AllowanceModule.sol
-const allowanceModuleAddr = "0xCFbFaC74C26F8647cBDb8c5caf80BB5b32E43134"
+// The Zodiac Allowance Module address comes from the chain profile
+// (profile.AllowanceModuleAddr — one CREATE2 singleton on every Flare-family
+// chain today). runFeeSweeper verifies bytecode exists there before its first
+// sweep so a network that lacks the module disables the sweeper loudly
+// instead of signing transfers into the void.
+func (r *Runner) allowanceModuleAddr() string { return r.cfg.Profile.AllowanceModuleAddr }
 
 // executeAllowanceTransfer selector:
 // keccak256("executeAllowanceTransfer(address,address,address,uint96,address,uint96,address,bytes)")
@@ -82,7 +83,7 @@ func (r *Runner) readAllowanceNonce(ctx context.Context, delegate, safe common.A
 	data = append(data, common.LeftPadBytes(delegate.Bytes(), 32)...)
 	data = append(data, common.LeftPadBytes(safe.Bytes(), 32)...)
 
-	modAddr := common.HexToAddress(allowanceModuleAddr)
+	modAddr := common.HexToAddress(r.allowanceModuleAddr())
 	out, err := r.eth.CallContract(ctx, ethereum.CallMsg{To: &modAddr, Data: data}, nil)
 	if err != nil {
 		return nil, err
@@ -129,7 +130,7 @@ func (r *Runner) buildAllowanceTransferTypedData(
 			Name:              "AllowanceModule",
 			Version:           "1.0.0",
 			ChainId:           math.NewHexOrDecimal256(int64(r.cfg.ChainID)),
-			VerifyingContract: allowanceModuleAddr,
+			VerifyingContract: r.allowanceModuleAddr(),
 		},
 		Message: apitypes.TypedDataMessage{
 			"safe":         safe.Hex(),
@@ -211,9 +212,34 @@ func (r *Runner) runFeeSweeper(ctx context.Context) {
 	keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
 	safeAddr := common.HexToAddress(r.cfg.SafeAddr)
 	walletAddr := common.HexToAddress(r.cfg.PersonalWalletAddr)
-	modAddr := common.HexToAddress(allowanceModuleAddr)
+	modAddr := common.HexToAddress(r.allowanceModuleAddr())
 	chainIDBig := big.NewInt(int64(r.cfg.ChainID))
 	signer := types.NewLondonSigner(chainIDBig)
+
+	// v3.6: per-chain bytecode check before the first sweep. nonces(keeper,
+	// safe) against an address with no contract returns empty bytes; a real
+	// module answers a 32-byte word. A definite "no code" disables the
+	// sweeper; an RPC error keeps it in a verify-first state — no sweep runs
+	// until a probe succeeds (re-probed every tick).
+	moduleVerified := false
+	verify := func() (disable bool) {
+		deployed, transient := allowanceModuleProbe(r.probeAllowanceModule(ctx, keeperAddr, safeAddr, modAddr))
+		switch {
+		case deployed:
+			moduleVerified = true
+			return false
+		case transient:
+			log.Warn().Str("module", modAddr.Hex()).Msg("fee sweeper: could not verify Allowance Module bytecode (RPC error) — no sweep until verified; retrying next tick")
+			return false
+		default:
+			log.Error().Str("module", modAddr.Hex()).Uint64("chain", r.cfg.ChainID).
+				Msg("fee sweeper: no Allowance Module bytecode at the profile address — sweeper disabled (fix profile.AllowanceModuleAddr or deploy the module)")
+			return true
+		}
+	}
+	if verify() {
+		return
+	}
 
 	// Parse dust threshold.
 	dustStr := r.cfg.FeeSweepMinWei
@@ -239,9 +265,38 @@ func (r *Runner) runFeeSweeper(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
+			if !moduleVerified {
+				if verify() {
+					return
+				}
+				if !moduleVerified {
+					continue
+				}
+			}
 			r.sweepFee(ctx, key, keeperAddr, safeAddr, walletAddr, modAddr, signer, chainIDBig, dustThreshold)
 		}
 	}
+}
+
+// probeAllowanceModule performs the raw nonces() eth_call used by the boot check.
+func (r *Runner) probeAllowanceModule(ctx context.Context, keeperAddr, safeAddr, modAddr common.Address) ([]byte, error) {
+	data := append([]byte(nil), noncesSelector...)
+	data = append(data, common.LeftPadBytes(keeperAddr.Bytes(), 32)...)
+	data = append(data, common.LeftPadBytes(safeAddr.Bytes(), 32)...)
+	pctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	defer cancel()
+	return r.eth.CallContract(pctx, ethereum.CallMsg{To: &modAddr, Data: data}, nil)
+}
+
+// allowanceModuleProbe interprets the probe result: (deployed, transient).
+// A successful call with a 32-byte return means the module answered; a
+// successful call with an empty return means no code at the address; any
+// error is treated as transient (retry later, do not disable).
+func allowanceModuleProbe(out []byte, err error) (deployed bool, transient bool) {
+	if err != nil {
+		return false, true
+	}
+	return len(out) >= 32, false
 }
 
 func (r *Runner) sweepFee(

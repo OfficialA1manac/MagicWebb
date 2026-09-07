@@ -68,17 +68,17 @@ RUN apt-get update && \
 
 # ── Compile Zig shared libraries ──
 # Compile each library with -O ReleaseFast for maximum performance.
-# The output .so files (libzigsha256.so, libzigcrypto.so, libzignsniff.so)
-# are placed in their respective directories. LDFLAGS in the Go CGO code
-# reference them via -L${SRCDIR}/../../<lib> -l<lib>.
+# The output .so files (libzigsha256.so, libzignsniff.so) are placed in their
+# respective directories. LDFLAGS in the Go CGO code reference them via
+# -L${SRCDIR}/../../<lib> -l<lib>. (zigcrypto was removed in v3.6: it had no
+# callers — Keccak comes from go-ethereum.)
 RUN cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig && \
-    cd ../zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig && \
     cd ../zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
 
 # ── Build Go binary with zigmedia acceleration ──
 # CGO_ENABLED=1 is required for the #cgo LDFLAGS directives in the Zig
 # bridge files. -tags zigmedia activates the CGO-backed implementations
-# in hasher_zigmedia.go, zigcrypto.go, and zignsniff_zigmedia.go instead
+# in hasher_zigmedia.go and zignsniff_zigmedia.go instead
 # of the Go fallback defaults.
 RUN cd backend && CGO_ENABLED=1 go build -tags zigmedia -ldflags="-s -w" -o /magicwebb ./cmd/server
 
@@ -88,12 +88,11 @@ FROM gcr.io/distroless/base-debian12:nonroot
 # Go binary
 COPY --from=go-build /magicwebb /magicwebb
 
-# Zig-accelerated shared libraries for SHA-256, Keccak256, and image sniffing
+# Zig-accelerated shared libraries for SHA-256 and image sniffing
 # (compiled with zig build-lib -O ReleaseFast -dynamic). Copied to /usr/lib so
 # the dynamic linker can find them at runtime via the default search path.
 # Built with CGO_ENABLED=1 -tags zigmedia in the go-build stage.
 COPY --from=go-build /src/backend/zigsha256/libzigsha256.so /usr/lib/
-COPY --from=go-build /src/backend/zigcrypto/libzigcrypto.so /usr/lib/
 COPY --from=go-build /src/backend/zigsniff/libzignsniff.so /usr/lib/
 
 # Astro build output — served by Go at /app/* via ASTRO_DIST_DIR=/app/dist

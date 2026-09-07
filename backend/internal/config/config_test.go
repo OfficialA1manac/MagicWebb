@@ -1,6 +1,7 @@
 package config
 
 import (
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain/profile"
 	"crypto/ecdsa"
 	"encoding/hex"
 	"fmt"
@@ -684,4 +685,53 @@ func TestLoadReadOnlyMode_Subprocess(t *testing.T) {
 			t.Fatalf("expected address-validation FATAL, got:\n%s", out)
 		}
 	})
+}
+
+// v3.6 wave 6: DefaultRPCs rotate when the operator set no RPC env at all;
+// any explicit RPC_URL/RPC_URLS keeps the old "primary + additions" shape.
+func TestRPCRotationDefaults(t *testing.T) {
+	defaults := []string{"https://a", "https://b", "https://c"}
+	got := rpcRotation("https://a", "", "", defaults)
+	if len(got) != 3 || got[0] != "https://a" || got[2] != "https://c" {
+		t.Fatalf("no env: want all defaults, got %v", got)
+	}
+	got = rpcRotation("https://x", "https://x", "", defaults)
+	if len(got) != 1 || got[0] != "https://x" {
+		t.Fatalf("RPC_URL only: want [x], got %v", got)
+	}
+	got = rpcRotation("https://a", "", "https://y,https://a", defaults)
+	if len(got) != 2 || got[0] != "https://a" || got[1] != "https://y" {
+		t.Fatalf("RPC_URLS only: want primary first + additions deduped, got %v", got)
+	}
+}
+
+func TestMainnetGuardRefusesResetOnMainnet(t *testing.T) {
+	if err := mainnetGuard(profile.MustFor(19), "true"); err == nil {
+		t.Fatal("songbird + RESET_ON_ADDRESS_CHANGE=true must be refused")
+	}
+	if err := mainnetGuard(profile.MustFor(14), " TRUE "); err == nil {
+		t.Fatal("flare + RESET_ON_ADDRESS_CHANGE=TRUE must be refused")
+	}
+	if err := mainnetGuard(profile.MustFor(114), "true"); err != nil {
+		t.Fatalf("coston2 may reset: %v", err)
+	}
+	if err := mainnetGuard(profile.MustFor(19), "false"); err != nil {
+		t.Fatalf("mainnet without reset is fine: %v", err)
+	}
+}
+
+func TestGasCapsGuard(t *testing.T) {
+	m := profile.MustFor(19)
+	if err := gasCapsGuard(m, 200, 20); err != nil {
+		t.Fatalf("valid caps rejected: %v", err)
+	}
+	if err := gasCapsGuard(m, 0, 20); err == nil {
+		t.Fatal("zero fee cap must be rejected")
+	}
+	if err := gasCapsGuard(m, 200, 0); err == nil {
+		t.Fatal("zero tip cap must be rejected")
+	}
+	if err := gasCapsGuard(m, 10, 20); err == nil {
+		t.Fatal("feeCap < tipCap must be rejected")
+	}
 }

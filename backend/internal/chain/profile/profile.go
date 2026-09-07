@@ -3,13 +3,18 @@
 // Coston2, Songbird and Flare lives here: identity, default RPC set, block
 // cadence, finality depth, poll/keeper cadences, getLogs limits, gas caps.
 //
+// Layout (v3.6 wave 6): this file owns the Profile struct, the lookup
+// functions and Validate(); each network's values live in their own file
+// (coston2.go, songbird.go, flare.go) as a plain `var`. The table below is
+// the only place that maps chain id → profile — no init(), no registration.
+//
 // Shared helpers (internal/chain, rpcpool, indexer, keeper) stay common and
 // read their knobs from the active profile. Environment variables still
 // override individual values (see config.Load) so an operator can tune a
 // deployment without a rebuild; the profile is the default, not a cage.
 //
-// app/src/lib/chains.ts mirrors the identity half of this table for the
-// browser; profile_test.go asserts the two stay in sync.
+// app/src/lib/chains/{coston2,songbird,flare}.ts mirror the identity half of
+// this table for the browser; profile_test.go asserts the two stay in sync.
 //
 // Rule: any future per-network behavior (gas strategy, explorer API quirks,
 // finality tweaks) is a new FIELD in this table, never a forked package or a
@@ -19,7 +24,11 @@
 package profile
 
 import (
+	"errors"
 	"fmt"
+	"net/url"
+	"regexp"
+	"strings"
 	"time"
 )
 
@@ -30,14 +39,19 @@ type Profile struct {
 	Name     string // display label
 	Currency string // native token symbol
 	Explorer string // block explorer base URL (no trailing slash)
-	// Mainnet means real value is at stake: stricter gas caps, longer upgrade delay.
+	// Mainnet means real value is at stake: stricter gas caps, longer upgrade
+	// delay, no faucet, and config.Load refuses RESET_ON_ADDRESS_CHANGE.
 	Mainnet bool
 
-	// DefaultRPCs is the public endpoint set used when RPC_URL/RPC_URLS are unset.
+	// DefaultRPCs is the public endpoint set used when RPC_URL/RPC_URLS are
+	// unset: [0] is the primary, the rest are the rotation fallbacks
+	// (deployments/<key>.json rpc.primary + rpc.fallbacks mirror it).
+	// Validate() requires at least two on mainnets — one public endpoint
+	// rate-limiting us must not stall settlement.
 	DefaultRPCs []string
 
-	// BlockTime is the typical interval between blocks. Drives UI ETAs and the
-	// watcher poll interval.
+	// BlockTime is the typical interval between blocks. Drives UI ETAs
+	// (window.MW_BLOCK_TIME_MS, /api/v1/server-time) and the watcher poll.
 	BlockTime time.Duration
 	// ReorgSafety is how many blocks behind the head the watcher indexes.
 	// Flare-family chains run Snowman consensus with single-slot finality, so
@@ -49,11 +63,11 @@ type Profile struct {
 
 	// Watcher + keeper cadences.
 	PollInterval    time.Duration // head poll
-	KeeperTick      time.Duration // auction/offer expiry keepers
+	KeeperTick      time.Duration // auction settlement / expired-listing keeper loop
 	RefundTick      time.Duration // loser/offer refund sweeper
 	MetadataTick    time.Duration // metadata fetch worker
 	OwnershipTick   time.Duration // ownership repair
-	FeeSweepTick    time.Duration // fee sweeper
+	FeeSweepTick    time.Duration // fee sweeper + keeper balance check
 	VerifierTick    time.Duration // collection badge sweeper
 	VerifierRecheck time.Duration // how stale a verification may be
 
@@ -61,7 +75,8 @@ type Profile struct {
 	GetLogsChunk    uint64
 	GetLogsBlockCap uint64
 
-	// Gas caps for the keeper (gwei). 0 = no cap.
+	// Gas caps for the keeper (gwei). 0 = no cap. Validate() refuses 0 on
+	// every network: an uncapped keeper can drain its wallet in one spike.
 	MaxFeeCapGwei float64
 	MaxTipCapGwei float64
 
@@ -79,9 +94,13 @@ type Profile struct {
 	// ImageProxyConcurrency bounds concurrent outbound fetches through the
 	// /api/v1/media proxy (upstream IPFS gateways are slow and rate-limited).
 	ImageProxyConcurrency int
-	// RateLimitTier names the rate-limit posture: "testnet" | "mainnet"
-	// (config.APIRateLimitPerMin derives the per-IP budget from it).
+	// RateLimitTier names the REST/GraphQL rate-limit posture: "testnet" |
+	// "mainnet" (config.APIRateLimitPerMin derives the per-IP budget from it).
 	RateLimitTier string
+	// ConnectRateTier names the Connect-RPC per-procedure posture, consumed by
+	// connectrpc/interceptors.RateLimitsForTier: "testnet" doubles every
+	// procedure budget (testers hammer refresh), "mainnet" keeps the base table.
+	ConnectRateTier string
 	// GraphQLMaxCost is the per-query complexity budget enforced by the
 	// GraphQL server (graphql.MaxQueryCost is the compile-time fallback).
 	GraphQLMaxCost int
@@ -90,60 +109,21 @@ type Profile struct {
 	// AuditNote is surfaced to the UI while a network is browse-only; "" when
 	// there is nothing to say.
 	AuditNote string
+
+	// AllowanceModuleAddr is the Zodiac Allowance Module singleton the fee
+	// sweeper drives (keeper_feesweep.go). Deployed at one CREATE2 address on
+	// every Flare-family chain today; a per-chain field so a network that
+	// ships a different module (or none) is a data change, not a code branch.
+	// The sweeper verifies bytecode at this address before its first sweep.
+	AllowanceModuleAddr string
 }
 
+// table is the ONLY chain id → profile mapping. Values live per network in
+// coston2.go / songbird.go / flare.go.
 var table = map[uint64]Profile{
-	114: {
-		ChainID: 114, Key: "coston2", Name: "Flare Coston2", Currency: "C2FLR",
-		Explorer: "https://coston2-explorer.flare.network", Mainnet: false,
-		DefaultRPCs: []string{
-			"https://coston2-api.flare.network/ext/C/rpc",
-			"https://coston2.enosys.global/ext/C/rpc",
-			"https://rpc.ankr.com/flare_coston2",
-		},
-		BlockTime: 1800 * time.Millisecond, ReorgSafety: 3, Confirmations: 1,
-		PollInterval: 2 * time.Second, KeeperTick: time.Second, RefundTick: 2 * time.Second,
-		MetadataTick: 30 * time.Second, OwnershipTick: 60 * time.Second, FeeSweepTick: 5 * time.Minute,
-		VerifierTick: 5 * time.Minute, VerifierRecheck: 24 * time.Hour,
-		GetLogsChunk: 30, GetLogsBlockCap: 30,
-		// Coston2's gas market runs HOT for a testnet: observed 2026-08-31, the
-		// RPC pool minimum fee cap was 500 gwei and eth_gasPrice suggested
-		// ~1450 gwei, so the old 100-gwei ceiling made every keeper tx
-		// underpriced-rejected — auction 1 sat unsettled for hours behind
-		// "have gas fee cap (100000000000) < pool minimum fee cap
-		// (500000000000)". C2FLR is a faucet token; a generous cap costs
-		// nothing real, while a starved cap silently halts settlement. The
-		// mainnet profiles below keep tight caps on purpose.
-		MaxFeeCapGwei: 3000, MaxTipCapGwei: 300, MetadataConcurrency: 3,
-		ProfileSource: 1, WSCoalesceMs: 50, ImageProxyConcurrency: 8, RateLimitTier: "testnet", GraphQLMaxCost: 1000,
-		FaucetURL: "https://faucet.flare.network/coston2", AuditNote: "",
-	},
-	19: {
-		ChainID: 19, Key: "songbird", Name: "Songbird", Currency: "SGB",
-		Explorer: "https://songbird-explorer.flare.network", Mainnet: true,
-		DefaultRPCs: []string{"https://songbird-api.flare.network/ext/C/rpc"},
-		BlockTime:   1800 * time.Millisecond, ReorgSafety: 2, Confirmations: 1,
-		PollInterval: 2 * time.Second, KeeperTick: 2 * time.Second, RefundTick: 2 * time.Second,
-		MetadataTick: 30 * time.Second, OwnershipTick: 90 * time.Second, FeeSweepTick: 10 * time.Minute,
-		VerifierTick: 10 * time.Minute, VerifierRecheck: 24 * time.Hour,
-		GetLogsChunk: 30, GetLogsBlockCap: 30,
-		MaxFeeCapGwei: 60, MaxTipCapGwei: 3, MetadataConcurrency: 3,
-		ProfileSource: 3, WSCoalesceMs: 100, ImageProxyConcurrency: 4, RateLimitTier: "mainnet", GraphQLMaxCost: 1000,
-		FaucetURL: "", AuditNote: "view-only until the security audit finishes",
-	},
-	14: {
-		ChainID: 14, Key: "flare", Name: "Flare", Currency: "FLR",
-		Explorer: "https://flare-explorer.flare.network", Mainnet: true,
-		DefaultRPCs: []string{"https://flare-api.flare.network/ext/C/rpc"},
-		BlockTime:   1800 * time.Millisecond, ReorgSafety: 2, Confirmations: 1,
-		PollInterval: 2 * time.Second, KeeperTick: 2 * time.Second, RefundTick: 2 * time.Second,
-		MetadataTick: 30 * time.Second, OwnershipTick: 90 * time.Second, FeeSweepTick: 10 * time.Minute,
-		VerifierTick: 10 * time.Minute, VerifierRecheck: 24 * time.Hour,
-		GetLogsChunk: 30, GetLogsBlockCap: 30,
-		MaxFeeCapGwei: 50, MaxTipCapGwei: 2, MetadataConcurrency: 3,
-		ProfileSource: 2, WSCoalesceMs: 100, ImageProxyConcurrency: 4, RateLimitTier: "mainnet", GraphQLMaxCost: 1000,
-		FaucetURL: "", AuditNote: "view-only until the security audit finishes",
-	},
+	114: coston2,
+	19:  songbird,
+	14:  flare,
 }
 
 // For returns the profile for a chain id, or an error listing the supported ones.
@@ -172,3 +152,95 @@ func All() []Profile {
 
 // Supported reports whether a chain id has a profile.
 func Supported(chainID uint64) bool { _, ok := table[chainID]; return ok }
+
+var hexAddrRE = regexp.MustCompile(`^0x[0-9a-fA-F]{40}$`)
+
+// Validate checks the invariants every profile must hold before a process
+// boots on it. config.Load calls it and exits with the joined error, so a
+// bad edit to a per-network file fails the deploy instead of starving the
+// keeper at 3am:
+//   - identity fields present, explorer without a trailing slash;
+//   - at least one RPC, and at least TWO on mainnets (rotation fallback);
+//   - non-zero gas caps (0 = uncapped = a spike can drain the keeper);
+//   - every cadence and getLogs limit non-zero;
+//   - tiers are "testnet" | "mainnet"; testnets carry a faucet, mainnets none;
+//   - the Allowance Module address is a well-formed address.
+func (p Profile) Validate() error {
+	var errs []error
+	fail := func(format string, a ...any) { errs = append(errs, fmt.Errorf("profile %s (%d): "+format, append([]any{p.Key, p.ChainID}, a...)...)) }
+
+	if p.ChainID == 0 || p.Key == "" || p.Name == "" || p.Currency == "" || p.Explorer == "" {
+		fail("identity fields (ChainID, Key, Name, Currency, Explorer) must all be set")
+	}
+	if strings.HasSuffix(p.Explorer, "/") {
+		fail("Explorer must not end with '/'")
+	}
+	if !validHTTPSURL(p.Explorer) {
+		fail("Explorer=%q must be an https URL with a host", p.Explorer)
+	}
+	if len(p.DefaultRPCs) == 0 {
+		fail("DefaultRPCs must list at least one endpoint")
+	}
+	if p.Mainnet && len(p.DefaultRPCs) < 2 {
+		fail("mainnet needs >= 2 DefaultRPCs for rotation fallback, have %d", len(p.DefaultRPCs))
+	}
+	for i, u := range p.DefaultRPCs {
+		if !validHTTPSURL(u) {
+			fail("DefaultRPCs[%d]=%q must be an https URL with a host", i, u)
+		}
+	}
+	if p.MaxFeeCapGwei <= 0 || p.MaxTipCapGwei <= 0 {
+		fail("gas caps must be > 0 (MaxFeeCapGwei=%v MaxTipCapGwei=%v)", p.MaxFeeCapGwei, p.MaxTipCapGwei)
+	}
+	if p.MaxFeeCapGwei < p.MaxTipCapGwei {
+		fail("MaxFeeCapGwei (%v) must be >= MaxTipCapGwei (%v) (EIP-1559 invariant)", p.MaxFeeCapGwei, p.MaxTipCapGwei)
+	}
+	for name, d := range map[string]time.Duration{
+		"BlockTime": p.BlockTime, "PollInterval": p.PollInterval, "KeeperTick": p.KeeperTick, "RefundTick": p.RefundTick,
+		"MetadataTick": p.MetadataTick, "OwnershipTick": p.OwnershipTick, "FeeSweepTick": p.FeeSweepTick,
+		"VerifierTick": p.VerifierTick, "VerifierRecheck": p.VerifierRecheck,
+	} {
+		if d <= 0 {
+			fail("%s must be > 0", name)
+		}
+	}
+	if p.ReorgSafety == 0 || p.Confirmations == 0 || p.GetLogsChunk == 0 || p.GetLogsBlockCap == 0 {
+		fail("ReorgSafety, Confirmations, GetLogsChunk and GetLogsBlockCap must be > 0")
+	}
+	if p.MetadataConcurrency <= 0 || p.ImageProxyConcurrency <= 0 || p.WSCoalesceMs <= 0 || p.GraphQLMaxCost <= 0 || p.ProfileSource <= 0 {
+		fail("MetadataConcurrency, ImageProxyConcurrency, WSCoalesceMs, GraphQLMaxCost and ProfileSource must be > 0")
+	}
+	for name, tier := range map[string]string{"RateLimitTier": p.RateLimitTier, "ConnectRateTier": p.ConnectRateTier} {
+		if tier != "testnet" && tier != "mainnet" {
+			fail("%s=%q must be \"testnet\" or \"mainnet\"", name, tier)
+		}
+	}
+	if p.Mainnet && p.FaucetURL != "" {
+		fail("mainnet must not advertise a faucet")
+	}
+	if !p.Mainnet && p.FaucetURL == "" {
+		fail("testnet must advertise a faucet")
+	}
+	if !hexAddrRE.MatchString(p.AllowanceModuleAddr) {
+		fail("AllowanceModuleAddr=%q is not a 0x-prefixed 20-byte address", p.AllowanceModuleAddr)
+	}
+	return errors.Join(errs...)
+}
+
+// validHTTPSURL parses s and requires the https scheme and a non-empty host
+// ("https://" alone, or a bare hostname, is rejected).
+func validHTTPSURL(s string) bool {
+	u, err := url.Parse(s)
+	return err == nil && u.Scheme == "https" && u.Host != ""
+}
+
+// ValidateAll runs Validate on every profile in the table.
+func ValidateAll() error {
+	var errs []error
+	for _, p := range All() {
+		if err := p.Validate(); err != nil {
+			errs = append(errs, err)
+		}
+	}
+	return errors.Join(errs...)
+}

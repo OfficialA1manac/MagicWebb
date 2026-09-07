@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { currentChain, tradingLive, tradingOrigin, readOnlyCopy, networkOrigins, _resetChainCache } from './chains';
+import { currentChain, tradingLive, tradingOrigin, readOnlyCopy, networkOrigins, _resetChainCache } from './index';
 
 const w = globalThis as unknown as Record<string, unknown>;
 const KEYS = ['MW_CHAIN_ID', 'MW_NETWORK_NAME', 'MW_MARKETPLACE', 'MW_AUCTION', 'MW_OFFERBOOK', 'MW_NETWORK_URLS'];

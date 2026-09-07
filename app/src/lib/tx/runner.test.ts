@@ -108,7 +108,7 @@ describe('runTx — summary, success card, toasts', () => {
     await runTx(plan({ approval: async () => ({ address: ADDR, abi: [], functionName: 'setApprovalForAll', args: [] }) }), { onStep: (s, m) => { labels[s] = m.label; } }, { observe: false });
     expect(labels.approve).toBe('Allow MagicWebb to move this NFT (one time)');
     expect(labels.sign).toBe('Confirm in your wallet');
-    expect(labels.pending).toBe('Waiting for Flare Coston2 (~3s)');
+    expect(labels.pending).toBe('Waiting for Flare Coston2 (~2s)');
     expect(labels.confirmed).toBe('Done');
   });
 });

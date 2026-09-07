@@ -59,12 +59,10 @@ jobs:
       - name: Compile Zig libraries (zigmedia)
         run: |
           cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig && \
-          cd ../zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig && \
           cd ../zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
       - name: Test Zig libraries (ZIG-4)
         run: |
           cd backend/zigsha256 && zig test zigsha256.zig && \
-          cd ../zigcrypto && zig test zigcrypto.zig && \
           cd ../zigsniff && zig test zignsniff.zig && \
           echo "All Zig tests passed"
       - name: Build (zigmedia)
@@ -81,14 +79,14 @@ jobs:
       # The Zig libraries are built as shared objects, and cgo does not embed
       # an rpath pointing at them. Building and vetting only need them at link
       # time, but `go test` *runs* the binaries, so the loader has to find
-      # libzigsha256.so / libzigcrypto.so / libzignsniff.so or every package
+      # libzigsha256.so / libzignsniff.so or every package
       # dies before main with "cannot open shared object file". The production
       # image sidesteps this by copying the .so files into /usr/lib (see
       # Dockerfile); CI resolves them in place instead.
       - name: Test (zigmedia)
         working-directory: backend
         run: |
-          export LD_LIBRARY_PATH="$PWD/zigsha256:$PWD/zigcrypto:$PWD/zigsniff:$LD_LIBRARY_PATH"
+          export LD_LIBRARY_PATH="$PWD/zigsha256:$PWD/zigsniff:$LD_LIBRARY_PATH"
           CGO_ENABLED=1 go test -tags zigmedia ./...
       - name: Check deployments/ source of truth
         working-directory: .

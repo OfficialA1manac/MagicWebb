@@ -303,7 +303,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	//  4. Deadline — applies 30s default timeout when none set
 	grpcInterceptors := connect.WithInterceptors(
 		interceptors.MetricsInterceptor(),
-		interceptors.TieredRateLimitInterceptor(rl, interceptors.DefaultRateLimits()),
+		interceptors.TieredRateLimitInterceptor(rl, interceptors.RateLimitsForTier(cfg.Profile.ConnectRateTier)),
 		interceptors.AuthInterceptorWithAPIKeys(cfg.JWTSecret, false, apiKeyStore, auditLog), // public-read + API key support (AUTH-3)
 		interceptors.DeadlineInterceptor(30*time.Second),
 	)
@@ -428,7 +428,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	NewSearchService(q).RegisterRoutes(apiSearch)
 	NewSavedSearchesService(q).RegisterRoutes(api, cfg)
 	NewWebhookService(q, cfg).RegisterRoutes(api, cfg)
-	metricsSvc := NewMetricsService(q, activityCache, wsHandler)
+	metricsSvc := NewMetricsService(q, activityCache, wsHandler).WithChainID(cfg.ChainID)
 	metricsSvc.RegisterRoutes(api)
 	// Composite: one request for all of the profile page's lists (see
 	// ProfilePageService). Reuses the metrics service's BuildResponse.
@@ -462,8 +462,15 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	// Server-time endpoint (used by auction countdown timers). Moved
 	// from mountUI's bare app.Get into the rate-limited api group so
 	// it inherits rateLimitMiddleware (60 req/min per IP).
+	// v3.6: carries the profile's block cadence + confirmation depth so the UI's
+	// pending-tx ETA ("~2 s") and countdown copy come from the server, not a
+	// hardcoded constant.
 	api.Get("/server-time", func(c *fiber.Ctx) error {
-		return c.JSON(fiber.Map{"unix_ms": atomic.LoadInt64(serverTimeMs)})
+		return c.JSON(fiber.Map{
+			"unix_ms":       atomic.LoadInt64(serverTimeMs),
+			"block_time_ms": cfg.Profile.BlockTime.Milliseconds(),
+			"confirmations": cfg.Profile.Confirmations,
+		})
 	})
 }
 

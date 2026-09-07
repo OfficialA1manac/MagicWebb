@@ -3,7 +3,6 @@ package api
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"math"
 	"strconv"
 	"strings"
@@ -43,6 +42,18 @@ type MetricsService struct {
 	q     *db.Q
 	cache cache.CacheInterface
 	ws    WSStatsProvider // optional — nil when WS handler is not wired
+	// chainID namespaces every cache key (cache.Key): a Redis shared between
+	// two networks must never serve Songbird's activity to a Coston2 page.
+	chainID uint64
+}
+
+// WithChainID sets the chain id every cache key is namespaced by (v3.6).
+func (s *MetricsService) WithChainID(id uint64) *MetricsService { s.chainID = id; return s }
+
+// actKey is the ONE builder for activity cache keys — always through
+// cache.Key so the chain prefix cannot be forgotten at a call site.
+func (s *MetricsService) actKey(parts ...string) string {
+	return cache.Key(s.chainID, append([]string{"act"}, parts...)...)
 }
 
 // NewMetricsService creates a MetricsService. The cache backend can be
@@ -141,13 +152,13 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 	// not cached. Global activity (no params) and address activity are the
 	// hot paths hit by every homepage / profile page load.
 	if address != "" && collection == "" && tokenID == "" {
-		ckey := fmt.Sprintf("act:%s:%d", address, limit)
+		ckey := s.actKey(address, strconv.Itoa(limit))
 		if cached, ok := s.cache.Get(ckey); ok {
 			return c.JSON(cached)
 		}
 	}
 	if address == "" && collection == "" && tokenID == "" {
-		ckey := fmt.Sprintf("act:g:%d", limit)
+		ckey := s.actKey("g", strconv.Itoa(limit))
 		if cached, ok := s.cache.Get(ckey); ok {
 			return c.JSON(cached)
 		}
@@ -211,9 +222,9 @@ func (s *MetricsService) handleRecentActivity(c *fiber.Ctx) error {
 	// (the hot paths); token-specific activity is rare and personal.
 	if tokenRows == nil {
 		if address != "" {
-			s.cache.Set(fmt.Sprintf("act:%s:%d", address, limit), rows)
+			s.cache.Set(s.actKey(address, strconv.Itoa(limit)), rows)
 		} else if collection == "" && tokenID == "" {
-			s.cache.Set(fmt.Sprintf("act:g:%d", limit), rows)
+			s.cache.Set(s.actKey("g", strconv.Itoa(limit)), rows)
 		}
 	}
 

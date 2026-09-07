@@ -267,9 +267,11 @@ const TABS = [
       (function(){
         try {
           var id = Number(window.MW_CHAIN_ID || '114');
+          // Testnet by profile: the server injects MW_TESTNET (v3.6); the chain-id check is the dev fallback.
+          var testnet = window.MW_TESTNET === 'true' || (window.MW_TESTNET === undefined && id === 114);
           var dev = document.getElementById('mw-devbanner');
           if (dev) {
-            if (id !== 114 || sessionStorage.getItem('mw_dev_dismissed')) { dev.remove(); }
+            if (!testnet || sessionStorage.getItem('mw_dev_dismissed')) { dev.remove(); }
             else {
               var f = document.getElementById('mw-faucet-link'); if (f && window.MW_FAUCET_URL) f.href = window.MW_FAUCET_URL;
               dev.hidden = false;

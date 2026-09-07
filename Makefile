@@ -77,15 +77,16 @@ regen-abi: ## regenerate app/src/lib/abi from forge build
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
 	cd app && npm run gen:abi
 
-# ---- Zig Accelerated Libraries (sha256, keccak256, image sniffing) --------
+# ---- Zig Accelerated Libraries (sha256, image sniffing) -------------------
+# zigcrypto (Keccak) was removed in v3.6: no Go caller; go-ethereum's Keccak
+# is the one implementation.
 
-ZIG_LIBS = zigsha256 zigcrypto zignsniff
+ZIG_LIBS = zigsha256 zignsniff
 
 zigmedia-build: ## compile all Zig libraries + build Go binary with zigmedia tag
 	@mkdir -p bin
 	@echo "  Compiling Zig libraries..."
 	cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig
-	cd backend/zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
 	cd backend/zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
 	@echo "  Building Go binary with -tags zigmedia..."
 	$(eval MW_GIT_SHA := $(shell git rev-parse HEAD 2>/dev/null || echo unknown))
@@ -97,28 +98,22 @@ zigsha256-lib: ## compile only the Zig SHA-256 library
 	@echo "  Compiling Zig SHA-256 library..."
 	cd backend/zigsha256 && zig build-lib -O ReleaseFast -dynamic zigsha256.zig
 
-zigcrypto-lib: ## compile only the Zig Keccak256 library
-	@echo "  Compiling Zig crypto library..."
-	cd backend/zigcrypto && zig build-lib -O ReleaseFast -dynamic zigcrypto.zig
-
 zignsniff-lib: ## compile only the Zig image-sniffing library
 	@echo "  Compiling Zig image-sniffing library..."
 	cd backend/zigsniff && zig build-lib -O ReleaseFast -dynamic zignsniff.zig
 
 zigmedia-test: ## run Zig unit tests for all libraries
 	cd backend/zigsha256 && zig test zigsha256.zig
-	cd backend/zigcrypto && zig test zigcrypto.zig
 	cd backend/zigsniff && zig test zignsniff.zig
 
 zigmedia-bench: ## benchmark Zig vs Go
 	@echo "  Go benchmark: go test -bench=BenchmarkHash -benchmem ./internal/imagestore/"
 	@echo "  Zig benchmark: cd backend/zigsha256 && zig build -Doptimize=ReleaseFast"
 
-.PHONY: zigmedia-build zigsha256-lib zigcrypto-lib zignsniff-lib zigmedia-test zigmedia-bench
+.PHONY: zigmedia-build zigsha256-lib zignsniff-lib zigmedia-test zigmedia-bench
 
 clean-zig: ## remove compiled Zig library artifacts
 	rm -f backend/zigsha256/*.so backend/zigsha256/*.dylib backend/zigsha256/*.dll
-	rm -f backend/zigcrypto/*.so backend/zigcrypto/*.dylib backend/zigcrypto/*.dll
 	rm -f backend/zigsniff/*.so backend/zigsniff/*.dylib backend/zigsniff/*.dll
 
 # ---- Quality ----
@@ -160,5 +155,4 @@ lint: ## run golangci-lint over the backend
 clean: ## remove build artifacts
 	rm -rf bin contracts/out contracts/cache contracts/broadcast
 	rm -f backend/zigsha256/*.o backend/zigsha256/*.so
-	rm -f backend/zigcrypto/*.o backend/zigcrypto/*.so
 	rm -f backend/zigsniff/*.o backend/zigsniff/*.so

@@ -16,7 +16,7 @@
   "trackedCollections": [],
   "rpc": {
     "primary": "https://flare-api.flare.network/ext/C/rpc",
-    "fallbacks": []
+    "fallbacks": ["https://rpc.ankr.com/flare", "https://flare.rpc.thirdweb.com"]
   },
   "explorer": "https://flare-explorer.flare.network",
   "app": {

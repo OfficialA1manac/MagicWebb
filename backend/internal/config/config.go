@@ -221,9 +221,17 @@ type Config struct {
 // Load reads environment variables and panics on missing required values.
 func Load() {
 	prof := profileFor(requiredUint64("CHAIN_ID"))
+	// v3.6: a broken per-network file must fail the boot, not starve the
+	// keeper at 3am (mainnets need >= 2 RPCs, non-zero gas caps, ...).
+	if err := prof.Validate(); err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: chain profile invalid: %v\n", err)
+		os.Exit(1)
+	}
 	C = Config{
-		Env:     envOrDefault("ENV", "development"),
-		RPCURL:  required("RPC_URL"),
+		Env: envOrDefault("ENV", "development"),
+		// RPC_URL is optional since v3.6: the profile's DefaultRPCs[0] is the
+		// public primary; RPC_URLS still adds private endpoints to rotation.
+		RPCURL: envOrDefault("RPC_URL", prof.DefaultRPCs[0]),
 		ChainID: requiredUint64("CHAIN_ID"),
 
 		// Chain identity. Required by the UI for WalletConnect pairing,
@@ -344,14 +352,31 @@ func Load() {
 	// network's own trading status.
 	C.Networks = buildNetworks(os.Getenv("NETWORK_URLS"), os.Getenv("NETWORK_TRADING"), C.ChainID, C.TradingStatus())
 
-	// RPC rotation set: RPC_URLS (comma-separated) plus the required RPC_URL,
-	// deduped with the primary first — setting RPC_URLS can only ADD endpoints,
-	// never silently drop the primary from rotation.
-	C.RPCURLs = []string{C.RPCURL}
-	for _, u := range parseURLList(os.Getenv("RPC_URLS")) {
-		if u != C.RPCURL {
-			C.RPCURLs = append(C.RPCURLs, u)
+	// RPC rotation set: RPC_URLS (comma-separated) plus RPC_URL, deduped with
+	// the primary first — setting RPC_URLS can only ADD endpoints, never
+	// silently drop the primary from rotation. With NEITHER set (v3.6) the
+	// profile's whole DefaultRPCs list rotates, so a mainnet never runs on a
+	// single public endpoint by omission.
+	C.RPCURLs = rpcRotation(C.RPCURL, os.Getenv("RPC_URL"), os.Getenv("RPC_URLS"), C.Profile.DefaultRPCs)
+
+	// v3.6: the profile's caps passed Validate(); the env overrides
+	// (KEEPER_MAX_FEE_CAP_GWEI / KEEPER_MAX_TIP_CAP_GWEI) can still set 0 or
+	// invert the EIP-1559 invariant. Mainnets refuse to boot on that; testnets
+	// warn (an uncapped keeper only burns faucet tokens there).
+	if err := gasCapsGuard(C.Profile, C.MaxFeeCapGwei, C.MaxTipCapGwei); err != nil {
+		if C.Profile.Mainnet {
+			fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+			os.Exit(1)
 		}
+		fmt.Fprintf(os.Stderr, "WARN: %v\n", err)
+	}
+
+	// v3.6: RESET_ON_ADDRESS_CHANGE wipes chain-derived tables on a contract
+	// address mismatch. That is a testnet convenience; on a mainnet it would
+	// erase real trade history on a config typo, so the process refuses to boot.
+	if err := mainnetGuard(C.Profile, os.Getenv("RESET_ON_ADDRESS_CHANGE")); err != nil {
+		fmt.Fprintf(os.Stderr, "FATAL: %v\n", err)
+		os.Exit(1)
 	}
 
 	if len(C.JWTSecret) < 32 {
@@ -692,6 +717,60 @@ func optInt(key string, def int) int {
 		return def
 	}
 	return n
+}
+
+// rpcRotation builds the RPC rotation set. primary is the resolved RPC_URL
+// (env or profile default); rpcURLEnv/rpcURLsEnv are the raw env values.
+// When the operator set neither, every profile default rotates.
+func rpcRotation(primary, rpcURLEnv, rpcURLsEnv string, defaults []string) []string {
+	if rpcURLEnv == "" && rpcURLsEnv == "" {
+		out := make([]string, 0, len(defaults))
+		for _, u := range defaults {
+			if u != "" && !contains(out, u) {
+				out = append(out, u)
+			}
+		}
+		if len(out) > 0 {
+			return out
+		}
+	}
+	out := []string{primary}
+	for _, u := range parseURLList(rpcURLsEnv) {
+		if u != primary && !contains(out, u) {
+			out = append(out, u)
+		}
+	}
+	return out
+}
+
+func contains(list []string, s string) bool {
+	for _, v := range list {
+		if v == s {
+			return true
+		}
+	}
+	return false
+}
+
+// gasCapsGuard checks the effective keeper gas caps: both > 0 (0 = uncapped =
+// one spike can drain the wallet) and feeCap >= tipCap (EIP-1559 invariant;
+// sendRaw lifts feeCap to tipCap, but a misconfig should be visible at boot).
+func gasCapsGuard(p profile.Profile, feeGwei, tipGwei float64) error {
+	if feeGwei <= 0 || tipGwei <= 0 {
+		return fmt.Errorf("keeper gas caps must be > 0 on %s (KEEPER_MAX_FEE_CAP_GWEI=%v KEEPER_MAX_TIP_CAP_GWEI=%v); an uncapped keeper can drain its wallet in one fee spike", p.Name, feeGwei, tipGwei)
+	}
+	if feeGwei < tipGwei {
+		return fmt.Errorf("KEEPER_MAX_FEE_CAP_GWEI=%v is below KEEPER_MAX_TIP_CAP_GWEI=%v on %s (EIP-1559 requires feeCap >= tipCap)", feeGwei, tipGwei, p.Name)
+	}
+	return nil
+}
+
+// mainnetGuard refuses boot-time settings that are only safe with fake money.
+func mainnetGuard(p profile.Profile, resetOnAddressChange string) error {
+	if p.Mainnet && strings.EqualFold(strings.TrimSpace(resetOnAddressChange), "true") {
+		return fmt.Errorf("RESET_ON_ADDRESS_CHANGE=true is refused on %s (chain %d): it would wipe real trade history on a contract-address mismatch; run cmd/chainwipe deliberately instead", p.Name, p.ChainID)
+	}
+	return nil
 }
 
 // profileFor resolves the per-chain profile or exits with the same FATAL line
