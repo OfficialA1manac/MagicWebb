@@ -285,9 +285,10 @@ for (const path of AXE_PAGES) {
 
 test('token happy path: known token renders, #offer opens the offer panel', async ({ page }) => {
   desktopOnly();
+  test.slow(); // CI runners have no Reown id: the owner read waits out the 15s wagmi timeout before the page settles
   await liveTrading(page);
   await open(page, TOKEN_PATH + '#offer', { tokenKnown: true });
-  await expect(page.locator('h1.tp-title')).toContainText('Meadow #1');
+  await expect(page.locator('h1.tp-title')).toContainText('Meadow #1', { timeout: 40000 });
   await expect(page.locator('.tp-media img')).toBeVisible();
   await expect(page.getByText('Created by')).toBeVisible();
   // Wallet-less visitor: the deep link still opens the offer panel (spec G6).
@@ -307,10 +308,11 @@ test('profile #nfts selects the Items tab for a stored wallet', async ({ page })
 
 test('mobile: sticky action bar publishes --sticky-bar-h and toasts stack above it', async ({ page }) => {
   mobileOnly();
+  test.slow(); // same 15s wagmi timeout on CI as the token happy path
   await liveTrading(page);
   await open(page, TOKEN_PATH, { tokenKnown: true });
   const bar = page.getByTestId('sticky-bar');
-  await expect(bar).toBeVisible();
+  await expect(bar).toBeVisible({ timeout: 40000 });
   const barTop = (await bar.boundingBox())!.y;
   const h = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sticky-bar-h')));
   expect(h).toBeGreaterThanOrEqual(40);
