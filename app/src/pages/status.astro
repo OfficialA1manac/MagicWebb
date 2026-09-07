@@ -30,6 +30,7 @@ import WalletConnect from '../components/WalletConnect';
       <div class="tile"><span class="k">Admin</span><span class="v" id="gov-admin">—</span><span class="sub" id="gov-admin-kind"></span></div>
       <div class="tile"><span class="k">Pending admin</span><span class="v" id="gov-pending">—</span></div>
       <div class="tile"><span class="k">Keeper</span><span class="v" id="gov-keeper">—</span></div>
+      <div class="tile"><span class="k">Keeper balance</span><span class="v" id="gov-keeper-bal">—</span><span class="sub" id="gov-keeper-bal-sub"></span></div>
       <div class="tile"><span class="k">Upgrade delay</span><span class="v" id="gov-delay">—</span></div>
     </div>
     <div id="gov-alert" class="gas-alerts" hidden></div>
@@ -225,6 +226,24 @@ import WalletConnect from '../components/WalletConnect';
     set('gov-pending', live.pending_admin && live.pending_admin !== ZERO ? addrLink(live.pending_admin) : 'none');
     set('gov-keeper', addrLink(live.keeper || ''));
     set('gov-delay', live.error ? '—' : `${live.upgrade_delay ?? 0}s (instant)`);
+    // Keeper wallet (v3.6 wave 6): balance + level from the keeper-health worker.
+    const kh = g.keeper_health;
+    const toNative = (wei: string) => { try { const w = BigInt(wei || '0'); const whole = w / 10n ** 18n; const frac = ((w % 10n ** 18n) / 10n ** 14n).toString().padStart(4, '0'); return `${whole}.${frac}`; } catch { return '—'; } };
+    if (kh && kh.level && kh.level !== 'disabled') {
+      set('gov-keeper-bal', kh.level === 'unknown' ? '—' : `${toNative(kh.balance_wei)} ${esc(kh.currency || '')}`);
+      set('gov-keeper-bal-sub', kh.level === 'ok' ? `min ${toNative(kh.min_wei)}` : kh.level === 'unknown' ? 'balance read failed' : `${kh.level.toUpperCase()} — min ${toNative(kh.min_wei)}`);
+      if (kh.level === 'warning' || kh.level === 'critical') {
+        alertBox.innerHTML += `<p>⚠ Keeper wallet is ${kh.level === 'critical' ? 'critically ' : ''}low: ${esc(toNative(kh.balance_wei))} ${esc(kh.currency || '')} (minimum ${esc(toNative(kh.min_wei))}). Settlements fail under gas spikes until it is topped up.</p>`;
+        alertBox.hidden = false;
+      }
+      if ((kh.fee_cap_below_for ?? 0) >= 3) {
+        alertBox.innerHTML += `<p>⚠ The keeper's gas cap (${esc(String(kh.fee_cap_gwei))} gwei) has been below the network's suggested fee (${esc(String(Math.round(kh.suggested_gwei)))} gwei) for ${esc(String(kh.fee_cap_below_for))} checks — keeper transactions are being rejected as underpriced.</p>`;
+        alertBox.hidden = false;
+      }
+    } else {
+      set('gov-keeper-bal', '—');
+      set('gov-keeper-bal-sub', kh ? 'check disabled' : '');
+    }
     // Pending upgrades: per proxy, the newest lifecycle event (block, then log
     // index) decides. Only a later Upgraded/UpgradeCancelled on the SAME
     // contract clears a queued one — a different core upgrading must not hide it.

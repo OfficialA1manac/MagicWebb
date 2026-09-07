@@ -1292,3 +1292,51 @@ func (q *Q) ListBlobsMissingThumbnails(ctx context.Context, limit int) ([]BlobNe
 	}
 	return out, rows.Err()
 }
+
+// ── v3.6 wave 6: LRU eviction of unreferenced blobs (imagestore.Evicter) ───
+
+// ListEvictableBlobs returns full-size blobs (parent_hash IS NULL) that no
+// nft_metadata / nft_tokens image_uri references any more, least-recently-seen
+// first. Bytes includes the blob's thumbnail variants so the caller can reason
+// about what one DeleteBlob frees. A blob still referenced by any token is
+// never a candidate — references are matched on the content hash inside the
+// stored /img/<sha256> URL.
+func (q *Q) ListEvictableBlobs(ctx context.Context, limit int) ([]imagestore.EvictableBlob, error) {
+	if limit <= 0 || limit > 500 {
+		limit = 100
+	}
+	rows, err := q.reader().Query(ctx,
+		`SELECT p.sha256,
+		        p.byte_length + COALESCE((SELECT sum(t.byte_length) FROM nft_image_blobs t WHERE t.parent_hash = p.sha256), 0)
+		   FROM nft_image_blobs p
+		  WHERE p.parent_hash IS NULL
+		    AND NOT EXISTS (SELECT 1 FROM nft_metadata m WHERE m.image_uri LIKE '%' || p.sha256 || '%')
+		    AND NOT EXISTS (SELECT 1 FROM nft_tokens n WHERE n.image_uri LIKE '%' || p.sha256 || '%')
+		  ORDER BY p.last_seen_at ASC
+		  LIMIT $1`, limit)
+	if err != nil {
+		return nil, err
+	}
+	defer rows.Close()
+	var out []imagestore.EvictableBlob
+	for rows.Next() {
+		var b imagestore.EvictableBlob
+		if err := rows.Scan(&b.Sha256, &b.Bytes); err != nil {
+			return nil, err
+		}
+		out = append(out, b)
+	}
+	return out, rows.Err()
+}
+
+// DeleteBlob removes a full-size blob and its thumbnail variants (parent_hash
+// = sha256) in one statement and returns the bytes freed.
+func (q *Q) DeleteBlob(ctx context.Context, sha256hex string) (int64, error) {
+	var freed int64
+	err := q.writer().QueryRow(ctx,
+		`WITH gone AS (
+		   DELETE FROM nft_image_blobs WHERE sha256 = $1 OR parent_hash = $1
+		   RETURNING byte_length)
+		 SELECT COALESCE(sum(byte_length), 0) FROM gone`, sha256hex).Scan(&freed)
+	return freed, err
+}

@@ -22,6 +22,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/config"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ops"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/sse"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/webhook"
 )
@@ -97,6 +98,10 @@ type Runner struct {
 	lastNonceMu sync.Mutex
 	lastNonce   map[common.Address]uint64
 	lastNonceAt map[common.Address]time.Time
+
+	// v3.6 ops alerts (ops_health.go): per-key cooldown + active set.
+	opsOnce   sync.Once
+	opsAlerts *opsAlerter
 }
 
 // lastNonceTTL bounds how long the KPR-3 duplicate-nonce guard suppresses
@@ -165,6 +170,10 @@ func (r *Runner) Run(ctx context.Context) {
 		{"withdrawal-sweeper", r.runWithdrawalSweeper},
 		// Gas alert worker — runs independently of keeper key; just needs DB access.
 		{"gas-alert", r.runGasAlertWorker},
+		// v3.6 ops hardening (ops_health.go): head-lag SLO webhook and the
+		// blob-store gauge / LRU eviction. Neither needs the keeper key.
+		{"lag-alert", r.runLagAlertWorker},
+		{"image-store", r.runImageStoreWorker},
 	}
 	for _, w := range workers {
 		wg.Add(1)
@@ -185,6 +194,11 @@ func (r *Runner) Run(ctx context.Context) {
 			keeperAddr := crypto.PubkeyToAddress(key.PublicKey)
 			// Initial balance check (best-effort; non-fatal on RPC failure).
 			r.checkKeeperBalance(ctx, keeperAddr)
+			// v3.6: continuous keeper health (balance gauge + levels + fee-cap
+			// watch) on the profile's FeeSweepTick. Read-only, so it runs on
+			// every instance outside the single-flight gate.
+			wg.Add(1)
+			go func() { defer wg.Done(); supervise(ctx, "keeper-health", func(c context.Context) { r.runKeeperHealthWorker(c, keeperAddr) }) }()
 
 			wg.Add(1)
 			go func() {
@@ -1411,6 +1425,11 @@ func (r *Runner) sendRaw(ctx context.Context, key *cryptoecdsa.PrivateKey, from,
 		return common.Hash{}, err
 	}
 	if err := r.eth.SendTransaction(ctx, signed); err != nil {
+		// v3.6: count fee-cap rejections (magicwebb_keeper_underpriced_total);
+		// the keeper-health worker alerts when the cap sits below the network.
+		if isUnderpricedErr(err) {
+			ops.IncUnderpriced()
+		}
 		return common.Hash{}, err
 	}
 

@@ -8,7 +8,7 @@ and indexer. Nothing is shared except the Docker image and the code.
 | Chain id | 114 | 19 | 14 |
 | Role | testnet | canary mainnet | mainnet |
 | Fly app | `magicwebb` | `magicwebb-songbird` | `magicwebb-flare` |
-| Neon project | `still-mountain-83246431` | `snowy-mountain-21008952` | `falling-dust-05670744` |
+| Neon project | `still-mountain-83246431` | `bitter-pond-73256956` (SIN) | `royal-paper-82216877` (SIN) |
 | Record | `deployments/coston2.json` | `deployments/songbird.json` | `deployments/flare.json` |
 | CI flag | `COSTON2_ENABLED` (default true) | `SONGBIRD_ENABLED` | `FLARE_ENABLED` |
 | Profile | `internal/chain/profile` 114 | 19 | 14 |
@@ -23,6 +23,11 @@ and indexer. Nothing is shared except the Docker image and the code.
    activity (10s) and the merged wallet inventory (30s) — see `internal/cache`. Rate-limit
    counters and SIWE nonces are **Postgres-backed** (`internal/ratelimit`, `internal/nonce`)
    and never touch Redis. Unset = per-instance memory caches (fine for one machine).
+   **HA note (v3.6):** one Fly machine per app is the design, not an oversight — the
+   in-memory REST caches and WebSocket fan-out are per-process. Scaling to two is
+   safe (the gRPC mesh fans out SSE, `internal/keeper`'s election keeps exactly one
+   keeper broadcasting) but doubles the Neon connection count; see
+   `docs/RUNBOOK_RESTORE.md` for the restore drill and snapshot schedule.
 3. **Fly secrets** — `POSTGRES_URL`, `JWT_SECRET`, `KEEPER_KEY`, `WC_PROJECT_ID`; optional
    `REDIS_URL`, `READ_POOL_URL`, `RPC_URL`/`RPC_URLS` (private provider), `SAFE_ADDR`,
    `PERSONAL_WALLET_ADDR`, `DISCORD_WEBHOOK_URL`, `SENTRY_DSN`.

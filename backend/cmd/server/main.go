@@ -47,6 +47,7 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/health"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/imagestore"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/indexer"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ops"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/keeper"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/nonce"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/ratelimit"
@@ -726,6 +727,41 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 			wsConns, wsTotalConns, wsMsgRateLimited, wsRejectedIP, wsRejectedGlobal,
 		)
 
+		// ── Ops health (v3.6 wave 6): keeper wallet, fee-cap watch, blob store, head-lag alert ──
+		kh, ih, lh := ops.Keeper(), ops.ImageStore(), ops.Lag()
+		levelNum := map[string]int{ops.LevelOK: 0, ops.LevelWarning: 1, ops.LevelCritical: 2, ops.LevelUnknown: 3, ops.LevelDisabled: 4}[kh.Level]
+		fmt.Fprintf(&b,
+			"# HELP magicwebb_keeper_balance_wei Keeper wallet native balance (wei) at the last keeper-health sample.\n"+
+				"# TYPE magicwebb_keeper_balance_wei gauge\n"+
+				"magicwebb_keeper_balance_wei %s\n"+
+				"# HELP magicwebb_keeper_min_balance_wei KEEPER_MIN_BALANCE_WEI; warning below it, critical below 20%% of it.\n"+
+				"# TYPE magicwebb_keeper_min_balance_wei gauge\n"+
+				"magicwebb_keeper_min_balance_wei %s\n"+
+				"# HELP magicwebb_keeper_balance_level 0=ok 1=warning 2=critical 3=unknown 4=disabled.\n"+
+				"# TYPE magicwebb_keeper_balance_level gauge\n"+
+				"magicwebb_keeper_balance_level{level=\"%s\"} %d\n"+
+				"# HELP magicwebb_keeper_underpriced_total Keeper broadcasts the RPC rejected as underpriced (fee cap below the network).\n"+
+				"# TYPE magicwebb_keeper_underpriced_total counter\n"+
+				"magicwebb_keeper_underpriced_total %d\n"+
+				"# HELP magicwebb_keeper_feecap_below_network_ticks Consecutive keeper-health ticks with the suggested fee above the keeper's cap (alert at 3).\n"+
+				"# TYPE magicwebb_keeper_feecap_below_network_ticks gauge\n"+
+				"magicwebb_keeper_feecap_below_network_ticks %d\n"+
+				"# HELP magicwebb_imagestore_bytes Self-hosted image blob bytes (alert at 80%% of the cap, LRU eviction of unreferenced blobs).\n"+
+				"# TYPE magicwebb_imagestore_bytes gauge\n"+
+				"magicwebb_imagestore_bytes %d\n"+
+				"# HELP magicwebb_imagestore_cap_bytes imagestore.MaxTotalBlobBytes.\n"+
+				"# TYPE magicwebb_imagestore_cap_bytes gauge\n"+
+				"magicwebb_imagestore_cap_bytes %d\n"+
+				"# HELP magicwebb_imagestore_evicted_total Unreferenced blobs evicted since boot.\n"+
+				"# TYPE magicwebb_imagestore_evicted_total counter\n"+
+				"magicwebb_imagestore_evicted_total %d\n"+
+				"# HELP magicwebb_head_lag_alerting 1 while head lag has exceeded 30 blocks for 2 minutes (webhook fired).\n"+
+				"# TYPE magicwebb_head_lag_alerting gauge\n"+
+				"magicwebb_head_lag_alerting %d\n",
+			zeroIfEmpty(kh.BalanceWei), zeroIfEmpty(kh.MinWei), kh.Level, levelNum, kh.UnderpricedTotal, kh.FeeCapBelowFor,
+			ih.Bytes, ih.CapBytes, ih.Evicted, boolToInt(lh.Alerting),
+		)
+
 		// ── Governance events (v3.6) ──────────────────────────────────
 		// One counter per event label. UpgradeQueued is the alert to page on.
 		fmt.Fprintf(&b,
@@ -771,6 +807,21 @@ func registerMetricsRoute(app *fiber.App, _ *db.Q, getHeadLag func() uint64, eth
 
 		return c.SendString(b.String())
 	})
+}
+
+// zeroIfEmpty renders an unset big-number string as a valid Prometheus sample.
+func zeroIfEmpty(s string) string {
+	if s == "" {
+		return "0"
+	}
+	return s
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
 }
 
 // metricsAuth optionally gates /internal/metrics behind METRICS_TOKEN.

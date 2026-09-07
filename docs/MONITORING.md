@@ -51,3 +51,25 @@ What to watch per network
 Runbooks: `docs/DEPLOY_FLY.md` (redeploy, secrets), `go run ./cmd/chainwipe`
 (reset a network's indexed data when contract addresses change), `fly ssh console`
 for on-box inspection.
+
+## Ops health (v3.6 wave 6)
+
+Three supervised workers in the indexer process publish an operational
+snapshot (`internal/ops`) that `/internal/metrics`, `/api/v1/governance`
+(`keeper_health`) and the `/status` page read:
+
+| Worker | Cadence | Gauges / counters | Alert (Discord + Prometheus + SMTP when configured) |
+|---|---|---|---|
+| `keeper-health` | profile `FeeSweepTick` (5 min Coston2, 10 min mainnets) | `magicwebb_keeper_balance_wei`, `magicwebb_keeper_min_balance_wei`, `magicwebb_keeper_balance_level{level}`, `magicwebb_keeper_underpriced_total`, `magicwebb_keeper_feecap_below_network_ticks` | `KeeperBalanceLow` warning below `KEEPER_MIN_BALANCE_WEI`, critical below 20 % of it (fires on each level transition, then hourly); `KeeperFeeCapBelowNetwork` critical after 3 consecutive ticks with `eth_gasPrice` above the keeper's fee cap |
+| `lag-alert` | 15 s | `magicwebb_head_lag_alerting` (+ `magicwebb_head_lag_blocks`) | `IndexerHeadLag` warning when head lag stays above 30 blocks for 2 minutes; resolved notice when it recovers |
+| `image-store` | 5 min | `magicwebb_imagestore_bytes`, `magicwebb_imagestore_cap_bytes`, `magicwebb_imagestore_evicted_total` | `ImageStoreNearCap` at 80 % of `MaxTotalBlobBytes` — but first the worker evicts unreferenced blobs (no token's `image_uri` points at them) least-recently-seen first down to 70 %, so the alert only fires when there is nothing left to evict |
+
+`magicwebb_keeper_underpriced_total` counts keeper broadcasts the RPC rejected
+as underpriced / below the pool minimum fee cap — the Coston2 2026-08-31
+starvation signature. If it climbs while `…feecap_below_network_ticks` ≥ 3,
+raise `KEEPER_MAX_FEE_CAP_GWEI` (or the profile's `MaxFeeCapGwei`).
+
+Alert channels are the existing `DISCORD_WEBHOOK_URL`, `PROMETHEUS_WEBHOOK_URL`
+and SMTP (`SMTP_HOST`, `SMTP_USER`, `SMTP_PASS`, `EMAIL_FROM`, `EMAIL_TO`);
+with none set the alerts are log lines only. Backups and the restore drill:
+`docs/RUNBOOK_RESTORE.md`.

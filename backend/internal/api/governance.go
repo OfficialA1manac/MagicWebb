@@ -14,6 +14,7 @@ import (
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/chain"
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
+	"github.com/OfficialA1manac/MagicWebb/backend/internal/ops"
 )
 
 // GovernanceService serves GET /api/v1/governance (v3.6 wave 1): who controls
@@ -54,6 +55,10 @@ type governanceResp struct {
 	Live            *governanceLive         `json:"live,omitempty"`
 	Implementations map[string]string       `json:"implementations,omitempty"`
 	Events          []db.GovernanceEventRow `json:"events"`
+	// KeeperHealth (v3.6 wave 6): the keeper wallet's last balance sample and
+	// level, so /status can warn below KEEPER_MIN_BALANCE_WEI. Omitted until
+	// the keeper-health worker has sampled once.
+	KeeperHealth *ops.KeeperHealth `json:"keeper_health,omitempty"`
 }
 
 var (
@@ -104,6 +109,9 @@ func (s *GovernanceService) handleGet(c *fiber.Ctx) error {
 		resp.Implementations = named
 	}
 	resp.Live = s.live(ctx)
+	if kh := ops.Keeper(); kh.Address != "" {
+		resp.KeeperHealth = &kh
+	}
 	return c.JSON(resp)
 }
 
