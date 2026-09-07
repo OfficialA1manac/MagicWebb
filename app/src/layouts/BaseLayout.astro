@@ -51,6 +51,9 @@ const TABS = [
     <meta charset="utf-8" />
     <!-- Theme choice (v3.6 toggle) applied before first paint: no flash. System = no attribute. -->
     <script is:inline>try{var t=localStorage.getItem('mw-theme');if(t==='light'||t==='dark'){document.documentElement.dataset.theme=t;}}catch(e){}</script>
+    <!-- mw-toast events fired before the toast island hydrates (arrival toast at DOMContentLoaded, the network
+         switcher under load) are queued here and drained by installToastBridge() in lib/toast.svelte.ts. -->
+    <script is:inline>(function(){var q=[];window.__mwToastQ=q;window.addEventListener('mw-toast',function(e){if(!window.__mwToastLive)q.push(e.detail);});})();</script>
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
     <title>{title} — MagicWebb</title>
     <meta name="description" content={desc} />

@@ -67,10 +67,23 @@ export const toastError = (m: string, o: Omit<ToastOptions, 'variant'> = {}) => 
  */
 export function installToastBridge(): () => void {
   if (typeof window === 'undefined') return () => {};
-  const on = (e: Event) => {
-    const d = (e as CustomEvent<{ message?: string; variant?: ToastVariant; duration?: number }>).detail || {};
-    if (d.message) toast(String(d.message), { variant: d.variant, duration: d.duration });
+  type Detail = { message?: string; variant?: ToastVariant; duration?: number };
+  const w = window as unknown as { __mwToastQ?: Detail[]; __mwToastLive?: boolean };
+  const apply = (d: Detail | undefined) => {
+    if (d && d.message) toast(String(d.message), { variant: d.variant, duration: d.duration });
   };
+  const on = (e: Event) => apply((e as CustomEvent<Detail>).detail || {});
   window.addEventListener('mw-toast', on);
-  return () => window.removeEventListener('mw-toast', on);
+  // <MwRuntime client:load/> server-renders the .toasts host, so a page script
+  // can dispatch before this island has hydrated (the arrival toast fires at
+  // DOMContentLoaded; the network switcher's "Opening …" under load). The
+  // inline script in BaseLayout queues those events until the bridge is live;
+  // drain them now, in order.
+  w.__mwToastLive = true;
+  const q = w.__mwToastQ;
+  if (Array.isArray(q)) for (const d of q.splice(0, q.length)) apply(d);
+  return () => {
+    w.__mwToastLive = false;
+    window.removeEventListener('mw-toast', on);
+  };
 }

@@ -358,12 +358,14 @@ test('no-wallet sheet opens from the header, closes on Escape, returns focus', a
   await expect(btn).toBeFocused();
 });
 
-// FIXME (v3.6 wave 7): passes ~1 run in 3. The handler probes the sibling
-// origin with a no-cors HEAD before navigating; under Playwright's route
-// abort the probe sometimes still resolves and the page navigates away, so
-// the "unreachable" toast never renders. Diagnose with the error-context
-// snapshot (does the URL change?) before re-enabling.
-test.fixme('network switch to an unreachable sibling stays on the page with a toast', async ({ page }) => {
+// Was test.fixme in wave 7 (passed ~1 run in 3). Root cause (wave 8,
+// instrumented run): <MwRuntime client:load/> server-renders the .toasts host,
+// so it is attached before the island hydrates and installs the mw-toast
+// listener; both toasts ("Opening Songbird…" and the unreachable error) were
+// dispatched into the void and the page never navigated. BaseLayout now queues
+// mw-toast events until the bridge is live and the bridge drains the queue on
+// mount (lib/toast.svelte.ts), so the click may land before or after hydration.
+test('network switch to an unreachable sibling stays on the page with a toast', async ({ page }) => {
   desktopOnly();
   await mockApi(page);
   await page.addInitScript((status) => { (window as unknown as Record<string, unknown>).MW_NETWORK_STATUS_JSON = status; }, NETWORK_STATUS);
