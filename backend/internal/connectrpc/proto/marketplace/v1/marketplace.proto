@@ -61,6 +61,23 @@ service MarketplaceService {
 
   // GetMetrics returns aggregate market metrics.
   rpc GetMetrics(GetMetricsRequest) returns (GetMetricsResponse);
+
+  // ── Real-time subscriptions (v3.6 wave 6) ─────────────────────────────
+  // Server-streaming push of the same events the WebSocket carries, for
+  // generated clients. Each stream stays open until the client cancels.
+
+  // SubscribeListings streams listing-updated events (optional collection / token filter).
+  rpc SubscribeListings(SubscribeListingsRequest) returns (stream SubscribeListingsResponse);
+
+  // SubscribeAuctions streams auction-updated events (optional auction_id filter).
+  rpc SubscribeAuctions(SubscribeAuctionsRequest) returns (stream SubscribeAuctionsResponse);
+
+  // SubscribeActivity streams activity feed rows (optional address / collection / token filter).
+  rpc SubscribeActivity(SubscribeActivityRequest) returns (stream SubscribeActivityResponse);
+
+  // SubscribeNotifications streams the authenticated wallet's notifications.
+  // Requires a JWT bearer token or session cookie; API keys are refused.
+  rpc SubscribeNotifications(SubscribeNotificationsRequest) returns (stream SubscribeNotificationsResponse);
 }
 
 // ── GetListing ────────────────────────────────────────────────────────────────
@@ -368,6 +385,46 @@ message SearchResult {
 
 message SearchResponse {
   repeated SearchResult results = 1;
+}
+
+// ── Subscriptions (v3.6 wave 6) ───────────────────────────────────────────────
+// Field names keep the JSON shape of the pre-proto Go structs (tokenId,
+// auctionId, payload) so existing JSON clients see no change.
+
+message SubscribeListingsRequest {
+  string collection = 1; // optional collection address filter
+  string token_id = 2;   // optional token ID filter
+}
+
+message SubscribeListingsResponse {
+  Listing listing = 1;
+}
+
+message SubscribeAuctionsRequest {
+  int64 auction_id = 1;  // optional auction ID filter
+}
+
+message SubscribeAuctionsResponse {
+  Auction auction = 1;
+}
+
+message SubscribeActivityRequest {
+  string address = 1;    // optional: from/to/address match
+  string collection = 2; // optional collection filter
+  string token_id = 3;   // optional token ID filter
+}
+
+message SubscribeActivityResponse {
+  ActivityEvent event = 1;
+}
+
+message SubscribeNotificationsRequest {
+  string address = 1;    // optional; must equal the authenticated caller when set
+}
+
+message SubscribeNotificationsResponse {
+  // The marshalled sse.NotificationEvent (user_addr, title, body, link, kind).
+  bytes payload = 1;
 }
 
 // ── GetMetrics ────────────────────────────────────────────────────────────────

@@ -1,10 +1,11 @@
 // Package marketplacev1 — Connect-RPC streaming subscription handlers.
 //
-// This file provides the client and server streaming implementations for the
-// SubscribeListings, SubscribeAuctions, SubscribeActivity, and
-// SubscribeNotifications RPCs. These are registered as separate streaming
-// procedures on the /marketplace.v1.MarketplaceService/ path alongside the
-// existing unary RPCs.
+// SubscribeListings, SubscribeAuctions, SubscribeActivity and
+// SubscribeNotifications are declared in marketplace.proto (v3.6 wave 6) and
+// served through the generated MarketplaceService handler alongside the unary
+// RPCs — generated clients and reflection consumers discover them like any
+// other procedure. This file holds the handler bodies and the row → proto
+// mappers; the message types live in marketplace.pb.go.
 package marketplacev1
 
 import (
@@ -16,15 +17,6 @@ import (
 	"connectrpc.com/connect"
 
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
-)
-
-// Streaming RPC procedure names (match the /marketplace.v1.MarketplaceService/
-// path prefix used by the unary handler).
-const (
-	ProcedureSubscribeListings       = "/marketplace.v1.MarketplaceService/SubscribeListings"
-	ProcedureSubscribeAuctions       = "/marketplace.v1.MarketplaceService/SubscribeAuctions"
-	ProcedureSubscribeActivity       = "/marketplace.v1.MarketplaceService/SubscribeActivity"
-	ProcedureSubscribeNotifications = "/marketplace.v1.MarketplaceService/SubscribeNotifications"
 )
 
 // ── Server-side streaming handler implementations ─────────────────────────────
@@ -349,166 +341,3 @@ func auctionRowToProto(row *db.AuctionRow) *Auction {
 	}
 	return a
 }
-
-// ── Connect-RPC streaming client ────────────────────────────────────────────
-
-// SubscribeListingsClient is a convenience wrapper around the generic
-// Connect-RPC streaming client. Callers receive listings via Receive().
-type SubscribeListingsClient struct {
-	client *connect.Client[SubscribeListingsRequest, SubscribeListingsResponse]
-}
-
-// NewSubscribeListingsClient creates a streaming client for SubscribeListings.
-func NewSubscribeListingsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *SubscribeListingsClient {
-	return &SubscribeListingsClient{
-		client: connect.NewClient[SubscribeListingsRequest, SubscribeListingsResponse](
-			httpClient,
-			baseURL+ProcedureSubscribeListings,
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-// CallStream opens a server-streaming connection and returns an iterator.
-func (c *SubscribeListingsClient) CallStream(ctx context.Context, req *connect.Request[SubscribeListingsRequest]) (*connect.ServerStreamForClient[SubscribeListingsResponse], error) {
-	return c.client.CallServerStream(ctx, req)
-}
-
-// SubscribeAuctionsClient wraps the SubscribeAuctions streaming RPC.
-type SubscribeAuctionsClient struct {
-	client *connect.Client[SubscribeAuctionsRequest, SubscribeAuctionsResponse]
-}
-
-// NewSubscribeAuctionsClient creates a streaming client for SubscribeAuctions.
-func NewSubscribeAuctionsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *SubscribeAuctionsClient {
-	return &SubscribeAuctionsClient{
-		client: connect.NewClient[SubscribeAuctionsRequest, SubscribeAuctionsResponse](
-			httpClient,
-			baseURL+ProcedureSubscribeAuctions,
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-func (c *SubscribeAuctionsClient) CallStream(ctx context.Context, req *connect.Request[SubscribeAuctionsRequest]) (*connect.ServerStreamForClient[SubscribeAuctionsResponse], error) {
-	return c.client.CallServerStream(ctx, req)
-}
-
-// SubscribeActivityClient wraps the SubscribeActivity streaming RPC.
-type SubscribeActivityClient struct {
-	client *connect.Client[SubscribeActivityRequest, SubscribeActivityResponse]
-}
-
-func NewSubscribeActivityClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *SubscribeActivityClient {
-	return &SubscribeActivityClient{
-		client: connect.NewClient[SubscribeActivityRequest, SubscribeActivityResponse](
-			httpClient,
-			baseURL+ProcedureSubscribeActivity,
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-func (c *SubscribeActivityClient) CallStream(ctx context.Context, req *connect.Request[SubscribeActivityRequest]) (*connect.ServerStreamForClient[SubscribeActivityResponse], error) {
-	return c.client.CallServerStream(ctx, req)
-}
-
-// SubscribeNotificationsClient wraps the SubscribeNotifications streaming RPC.
-type SubscribeNotificationsClient struct {
-	client *connect.Client[SubscribeNotificationsRequest, SubscribeNotificationsResponse]
-}
-
-func NewSubscribeNotificationsClient(httpClient connect.HTTPClient, baseURL string, opts ...connect.ClientOption) *SubscribeNotificationsClient {
-	return &SubscribeNotificationsClient{
-		client: connect.NewClient[SubscribeNotificationsRequest, SubscribeNotificationsResponse](
-			httpClient,
-			baseURL+ProcedureSubscribeNotifications,
-			connect.WithClientOptions(opts...),
-		),
-	}
-}
-
-func (c *SubscribeNotificationsClient) CallStream(ctx context.Context, req *connect.Request[SubscribeNotificationsRequest]) (*connect.ServerStreamForClient[SubscribeNotificationsResponse], error) {
-	return c.client.CallServerStream(ctx, req)
-}
-
-// ── Streaming handler constructors ────────────────────────────────────────────
-// Each handler is registered on the same path prefix as the unary handler.
-
-// NewSubscribeListingsHandler creates an HTTP handler for the SubscribeListings RPC.
-func NewSubscribeListingsHandler(svc *Server, opts ...connect.HandlerOption) (string, *connect.Handler) {
-	return ProcedureSubscribeListings, connect.NewServerStreamHandler(
-		ProcedureSubscribeListings,
-		svc.SubscribeListings,
-		opts...,
-	)
-}
-
-// NewSubscribeAuctionsHandler creates an HTTP handler for the SubscribeAuctions RPC.
-func NewSubscribeAuctionsHandler(svc *Server, opts ...connect.HandlerOption) (string, *connect.Handler) {
-	return ProcedureSubscribeAuctions, connect.NewServerStreamHandler(
-		ProcedureSubscribeAuctions,
-		svc.SubscribeAuctions,
-		opts...,
-	)
-}
-
-// NewSubscribeActivityHandler creates an HTTP handler for the SubscribeActivity RPC.
-func NewSubscribeActivityHandler(svc *Server, opts ...connect.HandlerOption) (string, *connect.Handler) {
-	return ProcedureSubscribeActivity, connect.NewServerStreamHandler(
-		ProcedureSubscribeActivity,
-		svc.SubscribeActivity,
-		opts...,
-	)
-}
-
-// NewSubscribeNotificationsHandler creates an HTTP handler for the SubscribeNotifications RPC.
-func NewSubscribeNotificationsHandler(svc *Server, opts ...connect.HandlerOption) (string, *connect.Handler) {
-	return ProcedureSubscribeNotifications, connect.NewServerStreamHandler(
-		ProcedureSubscribeNotifications,
-		svc.SubscribeNotifications,
-		opts...,
-	)
-}
-
-// GetField helpers to satisfy the proto message interface for streaming types.
-// These implement the protoreflect.ProtoMessage interface minimally so that
-// Connect-RPC can use them with JSON codec.
-
-func (x *SubscribeListingsRequest) GetCollection() string     { return x.Collection }
-func (x *SubscribeListingsRequest) GetTokenId() string        { return x.TokenID }
-func (x *SubscribeAuctionsRequest) GetAuctionId() int64       { return x.AuctionID }
-func (x *SubscribeActivityRequest) GetAddress() string        { return x.Address }
-func (x *SubscribeActivityRequest) GetCollection() string     { return x.Collection }
-func (x *SubscribeActivityRequest) GetTokenId() string        { return x.TokenID }
-func (x *SubscribeNotificationsRequest) GetAddress() string   { return x.Address }
-func (x *SubscribeListingsResponse) GetListing() *Listing     { return x.Listing }
-func (x *SubscribeAuctionsResponse) GetAuction() *Auction     { return x.Auction }
-func (x *SubscribeActivityResponse) GetEvent() *ActivityEvent { return x.Event }
-func (x *SubscribeNotificationsResponse) GetPayload() []byte  { return x.Payload }
-
-// ProtoMessage is required by protoreflect for Connect-RPC compatibility.
-func (*SubscribeListingsRequest) ProtoMessage()       {}
-func (*SubscribeListingsResponse) ProtoMessage()      {}
-func (*SubscribeAuctionsRequest) ProtoMessage()        {}
-func (*SubscribeAuctionsResponse) ProtoMessage()       {}
-func (*SubscribeActivityRequest) ProtoMessage()        {}
-func (*SubscribeActivityResponse) ProtoMessage()       {}
-func (*SubscribeNotificationsRequest) ProtoMessage()   {}
-func (*SubscribeNotificationsResponse) ProtoMessage()  {}
-func (*SubscribeListingsRequest) Reset()               {}
-func (*SubscribeListingsResponse) Reset()              {}
-func (*SubscribeAuctionsRequest) Reset()                {}
-func (*SubscribeAuctionsResponse) Reset()               {}
-func (*SubscribeActivityRequest) Reset()                {}
-func (*SubscribeActivityResponse) Reset()               {}
-func (*SubscribeNotificationsRequest) Reset()           {}
-func (*SubscribeNotificationsResponse) Reset()          {}
-func (x *SubscribeListingsRequest) String() string        { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeListingsResponse) String() string       { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeAuctionsRequest) String() string         { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeAuctionsResponse) String() string        { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeActivityRequest) String() string         { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeActivityResponse) String() string        { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeNotificationsRequest) String() string    { return fmt.Sprintf("%+v", *x) }
-func (x *SubscribeNotificationsResponse) String() string   { return fmt.Sprintf("%+v", *x) }

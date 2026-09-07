@@ -77,6 +77,35 @@ regen-abi: ## regenerate app/src/lib/abi from forge build
 	@test -d contracts/out || { echo "FATAL: run 'make contracts-build' first"; exit 1; }
 	cd app && npm run gen:abi
 
+# ---- Protobuf / Connect-RPC (v3.6 wave 6) --------------------------------
+# Pinned toolchain — the generated headers record these versions and CI's
+# proto-drift job regenerates with the same pins and fails on any diff.
+PROTOC_VERSION        = 28.3
+PROTOC_GEN_GO         = google.golang.org/protobuf/cmd/protoc-gen-go@v1.36.11
+PROTOC_GEN_CONNECT_GO = connectrpc.com/connect/cmd/protoc-gen-connect-go@v1.20.0
+PROTOC_GEN_GO_GRPC    = google.golang.org/grpc/cmd/protoc-gen-go-grpc@v1.6.2
+
+proto-tools: ## install the pinned protoc plugins (protoc $(PROTOC_VERSION) itself: https://github.com/protocolbuffers/protobuf/releases)
+	go install $(PROTOC_GEN_GO)
+	go install $(PROTOC_GEN_CONNECT_GO)
+	go install $(PROTOC_GEN_GO_GRPC)
+
+proto: ## regenerate every .pb.go / .connect.go from the .proto sources (requires protoc $(PROTOC_VERSION) + make proto-tools)
+	@protoc --version | grep -q "libprotoc $(PROTOC_VERSION)" || (echo "need protoc $(PROTOC_VERSION), have: $$(protoc --version)"; exit 1)
+	cd backend && protoc -I internal/connectrpc/proto \
+	  --go_out=. --go_opt=module=github.com/OfficialA1manac/MagicWebb/backend \
+	  --connect-go_out=. --connect-go_opt=module=github.com/OfficialA1manac/MagicWebb/backend \
+	  marketplace/v1/marketplace.proto
+	cd backend/internal/sse/proto && protoc -I . --go_out=. --go_opt=paths=source_relative \
+	  --go-grpc_out=. --go-grpc_opt=paths=source_relative events.proto
+	cd backend/internal/keeper/proto && protoc -I . --go_out=. --go_opt=paths=source_relative \
+	  --go-grpc_out=. --go-grpc_opt=paths=source_relative election.proto
+
+proto-check: proto ## regenerate and fail if the committed generated code drifted from the .proto sources
+	git diff --exit-code -- backend/internal/connectrpc/marketplacev1 backend/internal/sse/proto backend/internal/keeper/proto
+
+.PHONY: proto proto-tools proto-check
+
 # ---- Zig Accelerated Libraries (sha256, image sniffing) -------------------
 # zigcrypto (Keccak) was removed in v3.6: no Go caller; go-ethereum's Keccak
 # is the one implementation.

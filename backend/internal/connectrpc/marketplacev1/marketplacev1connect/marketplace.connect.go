@@ -75,6 +75,18 @@ const (
 	// MarketplaceServiceGetMetricsProcedure is the fully-qualified name of the MarketplaceService's
 	// GetMetrics RPC.
 	MarketplaceServiceGetMetricsProcedure = "/marketplace.v1.MarketplaceService/GetMetrics"
+	// MarketplaceServiceSubscribeListingsProcedure is the fully-qualified name of the
+	// MarketplaceService's SubscribeListings RPC.
+	MarketplaceServiceSubscribeListingsProcedure = "/marketplace.v1.MarketplaceService/SubscribeListings"
+	// MarketplaceServiceSubscribeAuctionsProcedure is the fully-qualified name of the
+	// MarketplaceService's SubscribeAuctions RPC.
+	MarketplaceServiceSubscribeAuctionsProcedure = "/marketplace.v1.MarketplaceService/SubscribeAuctions"
+	// MarketplaceServiceSubscribeActivityProcedure is the fully-qualified name of the
+	// MarketplaceService's SubscribeActivity RPC.
+	MarketplaceServiceSubscribeActivityProcedure = "/marketplace.v1.MarketplaceService/SubscribeActivity"
+	// MarketplaceServiceSubscribeNotificationsProcedure is the fully-qualified name of the
+	// MarketplaceService's SubscribeNotifications RPC.
+	MarketplaceServiceSubscribeNotificationsProcedure = "/marketplace.v1.MarketplaceService/SubscribeNotifications"
 )
 
 // MarketplaceServiceClient is a client for the marketplace.v1.MarketplaceService service.
@@ -113,6 +125,15 @@ type MarketplaceServiceClient interface {
 	Search(context.Context, *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error)
 	// GetMetrics returns aggregate market metrics.
 	GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error)
+	// SubscribeListings streams listing-updated events (optional collection / token filter).
+	SubscribeListings(context.Context, *connect.Request[marketplacev1.SubscribeListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeListingsResponse], error)
+	// SubscribeAuctions streams auction-updated events (optional auction_id filter).
+	SubscribeAuctions(context.Context, *connect.Request[marketplacev1.SubscribeAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeAuctionsResponse], error)
+	// SubscribeActivity streams activity feed rows (optional address / collection / token filter).
+	SubscribeActivity(context.Context, *connect.Request[marketplacev1.SubscribeActivityRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeActivityResponse], error)
+	// SubscribeNotifications streams the authenticated wallet's notifications.
+	// Requires a JWT bearer token or session cookie; API keys are refused.
+	SubscribeNotifications(context.Context, *connect.Request[marketplacev1.SubscribeNotificationsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeNotificationsResponse], error)
 }
 
 // NewMarketplaceServiceClient constructs a client for the marketplace.v1.MarketplaceService
@@ -210,25 +231,53 @@ func NewMarketplaceServiceClient(httpClient connect.HTTPClient, baseURL string, 
 			connect.WithSchema(marketplaceServiceMethods.ByName("GetMetrics")),
 			connect.WithClientOptions(opts...),
 		),
+		subscribeListings: connect.NewClient[marketplacev1.SubscribeListingsRequest, marketplacev1.SubscribeListingsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceSubscribeListingsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeListings")),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeAuctions: connect.NewClient[marketplacev1.SubscribeAuctionsRequest, marketplacev1.SubscribeAuctionsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceSubscribeAuctionsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeAuctions")),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeActivity: connect.NewClient[marketplacev1.SubscribeActivityRequest, marketplacev1.SubscribeActivityResponse](
+			httpClient,
+			baseURL+MarketplaceServiceSubscribeActivityProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeActivity")),
+			connect.WithClientOptions(opts...),
+		),
+		subscribeNotifications: connect.NewClient[marketplacev1.SubscribeNotificationsRequest, marketplacev1.SubscribeNotificationsResponse](
+			httpClient,
+			baseURL+MarketplaceServiceSubscribeNotificationsProcedure,
+			connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeNotifications")),
+			connect.WithClientOptions(opts...),
+		),
 	}
 }
 
 // marketplaceServiceClient implements MarketplaceServiceClient.
 type marketplaceServiceClient struct {
-	getListing      *connect.Client[marketplacev1.GetListingRequest, marketplacev1.GetListingResponse]
-	getAuction      *connect.Client[marketplacev1.GetAuctionRequest, marketplacev1.GetAuctionResponse]
-	getOffer        *connect.Client[marketplacev1.GetOfferRequest, marketplacev1.GetOfferResponse]
-	getToken        *connect.Client[marketplacev1.GetTokenRequest, marketplacev1.GetTokenResponse]
-	listCollections *connect.Client[marketplacev1.ListCollectionsRequest, marketplacev1.Collection]
-	getCollection   *connect.Client[marketplacev1.GetCollectionRequest, marketplacev1.GetCollectionResponse]
-	listListings    *connect.Client[marketplacev1.ListListingsRequest, marketplacev1.Listing]
-	listAuctions    *connect.Client[marketplacev1.ListAuctionsRequest, marketplacev1.Auction]
-	getActivity     *connect.Client[marketplacev1.GetActivityRequest, marketplacev1.GetActivityResponse]
-	listOffers      *connect.Client[marketplacev1.ListOffersRequest, marketplacev1.Offer]
-	getWalletNFTs   *connect.Client[marketplacev1.GetWalletNFTsRequest, marketplacev1.GetWalletNFTsResponse]
-	getProfile      *connect.Client[marketplacev1.GetProfileRequest, marketplacev1.GetProfileResponse]
-	search          *connect.Client[marketplacev1.SearchRequest, marketplacev1.SearchResponse]
-	getMetrics      *connect.Client[marketplacev1.GetMetricsRequest, marketplacev1.GetMetricsResponse]
+	getListing             *connect.Client[marketplacev1.GetListingRequest, marketplacev1.GetListingResponse]
+	getAuction             *connect.Client[marketplacev1.GetAuctionRequest, marketplacev1.GetAuctionResponse]
+	getOffer               *connect.Client[marketplacev1.GetOfferRequest, marketplacev1.GetOfferResponse]
+	getToken               *connect.Client[marketplacev1.GetTokenRequest, marketplacev1.GetTokenResponse]
+	listCollections        *connect.Client[marketplacev1.ListCollectionsRequest, marketplacev1.Collection]
+	getCollection          *connect.Client[marketplacev1.GetCollectionRequest, marketplacev1.GetCollectionResponse]
+	listListings           *connect.Client[marketplacev1.ListListingsRequest, marketplacev1.Listing]
+	listAuctions           *connect.Client[marketplacev1.ListAuctionsRequest, marketplacev1.Auction]
+	getActivity            *connect.Client[marketplacev1.GetActivityRequest, marketplacev1.GetActivityResponse]
+	listOffers             *connect.Client[marketplacev1.ListOffersRequest, marketplacev1.Offer]
+	getWalletNFTs          *connect.Client[marketplacev1.GetWalletNFTsRequest, marketplacev1.GetWalletNFTsResponse]
+	getProfile             *connect.Client[marketplacev1.GetProfileRequest, marketplacev1.GetProfileResponse]
+	search                 *connect.Client[marketplacev1.SearchRequest, marketplacev1.SearchResponse]
+	getMetrics             *connect.Client[marketplacev1.GetMetricsRequest, marketplacev1.GetMetricsResponse]
+	subscribeListings      *connect.Client[marketplacev1.SubscribeListingsRequest, marketplacev1.SubscribeListingsResponse]
+	subscribeAuctions      *connect.Client[marketplacev1.SubscribeAuctionsRequest, marketplacev1.SubscribeAuctionsResponse]
+	subscribeActivity      *connect.Client[marketplacev1.SubscribeActivityRequest, marketplacev1.SubscribeActivityResponse]
+	subscribeNotifications *connect.Client[marketplacev1.SubscribeNotificationsRequest, marketplacev1.SubscribeNotificationsResponse]
 }
 
 // GetListing calls marketplace.v1.MarketplaceService.GetListing.
@@ -301,6 +350,26 @@ func (c *marketplaceServiceClient) GetMetrics(ctx context.Context, req *connect.
 	return c.getMetrics.CallUnary(ctx, req)
 }
 
+// SubscribeListings calls marketplace.v1.MarketplaceService.SubscribeListings.
+func (c *marketplaceServiceClient) SubscribeListings(ctx context.Context, req *connect.Request[marketplacev1.SubscribeListingsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeListingsResponse], error) {
+	return c.subscribeListings.CallServerStream(ctx, req)
+}
+
+// SubscribeAuctions calls marketplace.v1.MarketplaceService.SubscribeAuctions.
+func (c *marketplaceServiceClient) SubscribeAuctions(ctx context.Context, req *connect.Request[marketplacev1.SubscribeAuctionsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeAuctionsResponse], error) {
+	return c.subscribeAuctions.CallServerStream(ctx, req)
+}
+
+// SubscribeActivity calls marketplace.v1.MarketplaceService.SubscribeActivity.
+func (c *marketplaceServiceClient) SubscribeActivity(ctx context.Context, req *connect.Request[marketplacev1.SubscribeActivityRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeActivityResponse], error) {
+	return c.subscribeActivity.CallServerStream(ctx, req)
+}
+
+// SubscribeNotifications calls marketplace.v1.MarketplaceService.SubscribeNotifications.
+func (c *marketplaceServiceClient) SubscribeNotifications(ctx context.Context, req *connect.Request[marketplacev1.SubscribeNotificationsRequest]) (*connect.ServerStreamForClient[marketplacev1.SubscribeNotificationsResponse], error) {
+	return c.subscribeNotifications.CallServerStream(ctx, req)
+}
+
 // MarketplaceServiceHandler is an implementation of the marketplace.v1.MarketplaceService service.
 type MarketplaceServiceHandler interface {
 	// GetListing returns the current active listing for a token.
@@ -337,6 +406,15 @@ type MarketplaceServiceHandler interface {
 	Search(context.Context, *connect.Request[marketplacev1.SearchRequest]) (*connect.Response[marketplacev1.SearchResponse], error)
 	// GetMetrics returns aggregate market metrics.
 	GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error)
+	// SubscribeListings streams listing-updated events (optional collection / token filter).
+	SubscribeListings(context.Context, *connect.Request[marketplacev1.SubscribeListingsRequest], *connect.ServerStream[marketplacev1.SubscribeListingsResponse]) error
+	// SubscribeAuctions streams auction-updated events (optional auction_id filter).
+	SubscribeAuctions(context.Context, *connect.Request[marketplacev1.SubscribeAuctionsRequest], *connect.ServerStream[marketplacev1.SubscribeAuctionsResponse]) error
+	// SubscribeActivity streams activity feed rows (optional address / collection / token filter).
+	SubscribeActivity(context.Context, *connect.Request[marketplacev1.SubscribeActivityRequest], *connect.ServerStream[marketplacev1.SubscribeActivityResponse]) error
+	// SubscribeNotifications streams the authenticated wallet's notifications.
+	// Requires a JWT bearer token or session cookie; API keys are refused.
+	SubscribeNotifications(context.Context, *connect.Request[marketplacev1.SubscribeNotificationsRequest], *connect.ServerStream[marketplacev1.SubscribeNotificationsResponse]) error
 }
 
 // NewMarketplaceServiceHandler builds an HTTP handler from the service implementation. It returns
@@ -430,6 +508,30 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 		connect.WithSchema(marketplaceServiceMethods.ByName("GetMetrics")),
 		connect.WithHandlerOptions(opts...),
 	)
+	marketplaceServiceSubscribeListingsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceSubscribeListingsProcedure,
+		svc.SubscribeListings,
+		connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeListings")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceSubscribeAuctionsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceSubscribeAuctionsProcedure,
+		svc.SubscribeAuctions,
+		connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeAuctions")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceSubscribeActivityHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceSubscribeActivityProcedure,
+		svc.SubscribeActivity,
+		connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeActivity")),
+		connect.WithHandlerOptions(opts...),
+	)
+	marketplaceServiceSubscribeNotificationsHandler := connect.NewServerStreamHandler(
+		MarketplaceServiceSubscribeNotificationsProcedure,
+		svc.SubscribeNotifications,
+		connect.WithSchema(marketplaceServiceMethods.ByName("SubscribeNotifications")),
+		connect.WithHandlerOptions(opts...),
+	)
 	return "/marketplace.v1.MarketplaceService/", http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		switch r.URL.Path {
 		case MarketplaceServiceGetListingProcedure:
@@ -460,6 +562,14 @@ func NewMarketplaceServiceHandler(svc MarketplaceServiceHandler, opts ...connect
 			marketplaceServiceSearchHandler.ServeHTTP(w, r)
 		case MarketplaceServiceGetMetricsProcedure:
 			marketplaceServiceGetMetricsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceSubscribeListingsProcedure:
+			marketplaceServiceSubscribeListingsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceSubscribeAuctionsProcedure:
+			marketplaceServiceSubscribeAuctionsHandler.ServeHTTP(w, r)
+		case MarketplaceServiceSubscribeActivityProcedure:
+			marketplaceServiceSubscribeActivityHandler.ServeHTTP(w, r)
+		case MarketplaceServiceSubscribeNotificationsProcedure:
+			marketplaceServiceSubscribeNotificationsHandler.ServeHTTP(w, r)
 		default:
 			http.NotFound(w, r)
 		}
@@ -523,4 +633,20 @@ func (UnimplementedMarketplaceServiceHandler) Search(context.Context, *connect.R
 
 func (UnimplementedMarketplaceServiceHandler) GetMetrics(context.Context, *connect.Request[marketplacev1.GetMetricsRequest]) (*connect.Response[marketplacev1.GetMetricsResponse], error) {
 	return nil, connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.GetMetrics is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) SubscribeListings(context.Context, *connect.Request[marketplacev1.SubscribeListingsRequest], *connect.ServerStream[marketplacev1.SubscribeListingsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.SubscribeListings is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) SubscribeAuctions(context.Context, *connect.Request[marketplacev1.SubscribeAuctionsRequest], *connect.ServerStream[marketplacev1.SubscribeAuctionsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.SubscribeAuctions is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) SubscribeActivity(context.Context, *connect.Request[marketplacev1.SubscribeActivityRequest], *connect.ServerStream[marketplacev1.SubscribeActivityResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.SubscribeActivity is not implemented"))
+}
+
+func (UnimplementedMarketplaceServiceHandler) SubscribeNotifications(context.Context, *connect.Request[marketplacev1.SubscribeNotificationsRequest], *connect.ServerStream[marketplacev1.SubscribeNotificationsResponse]) error {
+	return connect.NewError(connect.CodeUnimplemented, errors.New("marketplace.v1.MarketplaceService.SubscribeNotifications is not implemented"))
 }

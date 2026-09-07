@@ -28,9 +28,10 @@ const (
 //
 // KeeperElection is a unary RPC service for cluster-wide leader election.
 // Every instance in the cluster registers a server and connects a client
-// to every peer. The lowest-addressed instance (lexicographic on address)
-// is the initial leader. Leader sends heartbeats every 1s; any follower
-// that misses 3 consecutive heartbeats declares itself leader.
+// to every peer. The instance with the lexicographically lowest
+// instance_id (UUID) wins leadership conflicts. Leader sends heartbeats
+// every 1s; any follower that misses 3 consecutive heartbeats declares
+// itself leader.
 type KeeperElectionClient interface {
 	Heartbeat(ctx context.Context, in *HeartbeatRequest, opts ...grpc.CallOption) (*HeartbeatResponse, error)
 }
@@ -59,9 +60,10 @@ func (c *keeperElectionClient) Heartbeat(ctx context.Context, in *HeartbeatReque
 //
 // KeeperElection is a unary RPC service for cluster-wide leader election.
 // Every instance in the cluster registers a server and connects a client
-// to every peer. The lowest-addressed instance (lexicographic on address)
-// is the initial leader. Leader sends heartbeats every 1s; any follower
-// that misses 3 consecutive heartbeats declares itself leader.
+// to every peer. The instance with the lexicographically lowest
+// instance_id (UUID) wins leadership conflicts. Leader sends heartbeats
+// every 1s; any follower that misses 3 consecutive heartbeats declares
+// itself leader.
 type KeeperElectionServer interface {
 	Heartbeat(context.Context, *HeartbeatRequest) (*HeartbeatResponse, error)
 	mustEmbedUnimplementedKeeperElectionServer()

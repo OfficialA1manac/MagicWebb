@@ -2618,6 +2618,383 @@ func (x *SearchResponse) GetResults() []*SearchResult {
 	return nil
 }
 
+type SubscribeListingsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Collection    string                 `protobuf:"bytes,1,opt,name=collection,proto3" json:"collection,omitempty"`          // optional collection address filter
+	TokenId       string                 `protobuf:"bytes,2,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"` // optional token ID filter
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeListingsRequest) Reset() {
+	*x = SubscribeListingsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeListingsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeListingsRequest) ProtoMessage() {}
+
+func (x *SubscribeListingsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeListingsRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeListingsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{33}
+}
+
+func (x *SubscribeListingsRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *SubscribeListingsRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+type SubscribeListingsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Listing       *Listing               `protobuf:"bytes,1,opt,name=listing,proto3" json:"listing,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeListingsResponse) Reset() {
+	*x = SubscribeListingsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeListingsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeListingsResponse) ProtoMessage() {}
+
+func (x *SubscribeListingsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeListingsResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeListingsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{34}
+}
+
+func (x *SubscribeListingsResponse) GetListing() *Listing {
+	if x != nil {
+		return x.Listing
+	}
+	return nil
+}
+
+type SubscribeAuctionsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	AuctionId     int64                  `protobuf:"varint,1,opt,name=auction_id,json=auctionId,proto3" json:"auction_id,omitempty"` // optional auction ID filter
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeAuctionsRequest) Reset() {
+	*x = SubscribeAuctionsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[35]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeAuctionsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeAuctionsRequest) ProtoMessage() {}
+
+func (x *SubscribeAuctionsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[35]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeAuctionsRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeAuctionsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{35}
+}
+
+func (x *SubscribeAuctionsRequest) GetAuctionId() int64 {
+	if x != nil {
+		return x.AuctionId
+	}
+	return 0
+}
+
+type SubscribeAuctionsResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Auction       *Auction               `protobuf:"bytes,1,opt,name=auction,proto3" json:"auction,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeAuctionsResponse) Reset() {
+	*x = SubscribeAuctionsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[36]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeAuctionsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeAuctionsResponse) ProtoMessage() {}
+
+func (x *SubscribeAuctionsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[36]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeAuctionsResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeAuctionsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{36}
+}
+
+func (x *SubscribeAuctionsResponse) GetAuction() *Auction {
+	if x != nil {
+		return x.Auction
+	}
+	return nil
+}
+
+type SubscribeActivityRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"`                // optional: from/to/address match
+	Collection    string                 `protobuf:"bytes,2,opt,name=collection,proto3" json:"collection,omitempty"`          // optional collection filter
+	TokenId       string                 `protobuf:"bytes,3,opt,name=token_id,json=tokenId,proto3" json:"token_id,omitempty"` // optional token ID filter
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeActivityRequest) Reset() {
+	*x = SubscribeActivityRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[37]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeActivityRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeActivityRequest) ProtoMessage() {}
+
+func (x *SubscribeActivityRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[37]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeActivityRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeActivityRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{37}
+}
+
+func (x *SubscribeActivityRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+func (x *SubscribeActivityRequest) GetCollection() string {
+	if x != nil {
+		return x.Collection
+	}
+	return ""
+}
+
+func (x *SubscribeActivityRequest) GetTokenId() string {
+	if x != nil {
+		return x.TokenId
+	}
+	return ""
+}
+
+type SubscribeActivityResponse struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Event         *ActivityEvent         `protobuf:"bytes,1,opt,name=event,proto3" json:"event,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeActivityResponse) Reset() {
+	*x = SubscribeActivityResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[38]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeActivityResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeActivityResponse) ProtoMessage() {}
+
+func (x *SubscribeActivityResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[38]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeActivityResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeActivityResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{38}
+}
+
+func (x *SubscribeActivityResponse) GetEvent() *ActivityEvent {
+	if x != nil {
+		return x.Event
+	}
+	return nil
+}
+
+type SubscribeNotificationsRequest struct {
+	state         protoimpl.MessageState `protogen:"open.v1"`
+	Address       string                 `protobuf:"bytes,1,opt,name=address,proto3" json:"address,omitempty"` // optional; must equal the authenticated caller when set
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeNotificationsRequest) Reset() {
+	*x = SubscribeNotificationsRequest{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[39]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeNotificationsRequest) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeNotificationsRequest) ProtoMessage() {}
+
+func (x *SubscribeNotificationsRequest) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[39]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeNotificationsRequest.ProtoReflect.Descriptor instead.
+func (*SubscribeNotificationsRequest) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{39}
+}
+
+func (x *SubscribeNotificationsRequest) GetAddress() string {
+	if x != nil {
+		return x.Address
+	}
+	return ""
+}
+
+type SubscribeNotificationsResponse struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// The marshalled sse.NotificationEvent (user_addr, title, body, link, kind).
+	Payload       []byte `protobuf:"bytes,1,opt,name=payload,proto3" json:"payload,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubscribeNotificationsResponse) Reset() {
+	*x = SubscribeNotificationsResponse{}
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[40]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubscribeNotificationsResponse) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubscribeNotificationsResponse) ProtoMessage() {}
+
+func (x *SubscribeNotificationsResponse) ProtoReflect() protoreflect.Message {
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[40]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubscribeNotificationsResponse.ProtoReflect.Descriptor instead.
+func (*SubscribeNotificationsResponse) Descriptor() ([]byte, []int) {
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{40}
+}
+
+func (x *SubscribeNotificationsResponse) GetPayload() []byte {
+	if x != nil {
+		return x.Payload
+	}
+	return nil
+}
+
 type GetMetricsRequest struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	unknownFields protoimpl.UnknownFields
@@ -2626,7 +3003,7 @@ type GetMetricsRequest struct {
 
 func (x *GetMetricsRequest) Reset() {
 	*x = GetMetricsRequest{}
-	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[41]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2638,7 +3015,7 @@ func (x *GetMetricsRequest) String() string {
 func (*GetMetricsRequest) ProtoMessage() {}
 
 func (x *GetMetricsRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_marketplace_v1_marketplace_proto_msgTypes[33]
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[41]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2651,7 +3028,7 @@ func (x *GetMetricsRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMetricsRequest.ProtoReflect.Descriptor instead.
 func (*GetMetricsRequest) Descriptor() ([]byte, []int) {
-	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{33}
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{41}
 }
 
 type GetMetricsResponse struct {
@@ -2668,7 +3045,7 @@ type GetMetricsResponse struct {
 
 func (x *GetMetricsResponse) Reset() {
 	*x = GetMetricsResponse{}
-	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[42]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -2680,7 +3057,7 @@ func (x *GetMetricsResponse) String() string {
 func (*GetMetricsResponse) ProtoMessage() {}
 
 func (x *GetMetricsResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_marketplace_v1_marketplace_proto_msgTypes[34]
+	mi := &file_marketplace_v1_marketplace_proto_msgTypes[42]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -2693,7 +3070,7 @@ func (x *GetMetricsResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use GetMetricsResponse.ProtoReflect.Descriptor instead.
 func (*GetMetricsResponse) Descriptor() ([]byte, []int) {
-	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{34}
+	return file_marketplace_v1_marketplace_proto_rawDescGZIP(), []int{42}
 }
 
 func (x *GetMetricsResponse) GetTotalActiveListings() int32 {
@@ -3008,7 +3385,31 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x04name\x18\x04 \x01(\tR\x04name\x12\x1b\n" +
 	"\timage_uri\x18\x05 \x01(\tR\bimageUri\"H\n" +
 	"\x0eSearchResponse\x126\n" +
-	"\aresults\x18\x01 \x03(\v2\x1c.marketplace.v1.SearchResultR\aresults\"\x13\n" +
+	"\aresults\x18\x01 \x03(\v2\x1c.marketplace.v1.SearchResultR\aresults\"U\n" +
+	"\x18SubscribeListingsRequest\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x01 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x02 \x01(\tR\atokenId\"N\n" +
+	"\x19SubscribeListingsResponse\x121\n" +
+	"\alisting\x18\x01 \x01(\v2\x17.marketplace.v1.ListingR\alisting\"9\n" +
+	"\x18SubscribeAuctionsRequest\x12\x1d\n" +
+	"\n" +
+	"auction_id\x18\x01 \x01(\x03R\tauctionId\"N\n" +
+	"\x19SubscribeAuctionsResponse\x121\n" +
+	"\aauction\x18\x01 \x01(\v2\x17.marketplace.v1.AuctionR\aauction\"o\n" +
+	"\x18SubscribeActivityRequest\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\x12\x1e\n" +
+	"\n" +
+	"collection\x18\x02 \x01(\tR\n" +
+	"collection\x12\x19\n" +
+	"\btoken_id\x18\x03 \x01(\tR\atokenId\"P\n" +
+	"\x19SubscribeActivityResponse\x123\n" +
+	"\x05event\x18\x01 \x01(\v2\x1d.marketplace.v1.ActivityEventR\x05event\"9\n" +
+	"\x1dSubscribeNotificationsRequest\x12\x18\n" +
+	"\aaddress\x18\x01 \x01(\tR\aaddress\":\n" +
+	"\x1eSubscribeNotificationsResponse\x12\x18\n" +
+	"\apayload\x18\x01 \x01(\fR\apayload\"\x13\n" +
 	"\x11GetMetricsRequest\"\xfc\x01\n" +
 	"\x12GetMetricsResponse\x122\n" +
 	"\x15total_active_listings\x18\x01 \x01(\x05R\x13totalActiveListings\x12\x1f\n" +
@@ -3018,7 +3419,7 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"\x0etotal_auctions\x18\x04 \x01(\x05R\rtotalAuctions\x12\x1d\n" +
 	"\n" +
 	"total_bids\x18\x05 \x01(\x05R\ttotalBids\x12!\n" +
-	"\ftotal_offers\x18\x06 \x01(\x05R\vtotalOffers2\xa6\t\n" +
+	"\ftotal_offers\x18\x06 \x01(\x05R\vtotalOffers2\xe5\f\n" +
 	"\x12MarketplaceService\x12S\n" +
 	"\n" +
 	"GetListing\x12!.marketplace.v1.GetListingRequest\x1a\".marketplace.v1.GetListingResponse\x12S\n" +
@@ -3038,7 +3439,11 @@ const file_marketplace_v1_marketplace_proto_rawDesc = "" +
 	"GetProfile\x12!.marketplace.v1.GetProfileRequest\x1a\".marketplace.v1.GetProfileResponse\x12G\n" +
 	"\x06Search\x12\x1d.marketplace.v1.SearchRequest\x1a\x1e.marketplace.v1.SearchResponse\x12S\n" +
 	"\n" +
-	"GetMetrics\x12!.marketplace.v1.GetMetricsRequest\x1a\".marketplace.v1.GetMetricsResponseBPZNgithub.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1b\x06proto3"
+	"GetMetrics\x12!.marketplace.v1.GetMetricsRequest\x1a\".marketplace.v1.GetMetricsResponse\x12j\n" +
+	"\x11SubscribeListings\x12(.marketplace.v1.SubscribeListingsRequest\x1a).marketplace.v1.SubscribeListingsResponse0\x01\x12j\n" +
+	"\x11SubscribeAuctions\x12(.marketplace.v1.SubscribeAuctionsRequest\x1a).marketplace.v1.SubscribeAuctionsResponse0\x01\x12j\n" +
+	"\x11SubscribeActivity\x12(.marketplace.v1.SubscribeActivityRequest\x1a).marketplace.v1.SubscribeActivityResponse0\x01\x12y\n" +
+	"\x16SubscribeNotifications\x12-.marketplace.v1.SubscribeNotificationsRequest\x1a..marketplace.v1.SubscribeNotificationsResponse0\x01BPZNgithub.com/OfficialA1manac/MagicWebb/backend/internal/connectrpc/marketplacev1b\x06proto3"
 
 var (
 	file_marketplace_v1_marketplace_proto_rawDescOnce sync.Once
@@ -3052,43 +3457,51 @@ func file_marketplace_v1_marketplace_proto_rawDescGZIP() []byte {
 	return file_marketplace_v1_marketplace_proto_rawDescData
 }
 
-var file_marketplace_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 35)
+var file_marketplace_v1_marketplace_proto_msgTypes = make([]protoimpl.MessageInfo, 43)
 var file_marketplace_v1_marketplace_proto_goTypes = []any{
-	(*GetListingRequest)(nil),       // 0: marketplace.v1.GetListingRequest
-	(*GetListingResponse)(nil),      // 1: marketplace.v1.GetListingResponse
-	(*GetAuctionRequest)(nil),       // 2: marketplace.v1.GetAuctionRequest
-	(*GetAuctionResponse)(nil),      // 3: marketplace.v1.GetAuctionResponse
-	(*GetOfferRequest)(nil),         // 4: marketplace.v1.GetOfferRequest
-	(*GetOfferResponse)(nil),        // 5: marketplace.v1.GetOfferResponse
-	(*GetTokenRequest)(nil),         // 6: marketplace.v1.GetTokenRequest
-	(*GetTokenResponse)(nil),        // 7: marketplace.v1.GetTokenResponse
-	(*ListCollectionsRequest)(nil),  // 8: marketplace.v1.ListCollectionsRequest
-	(*ListCollectionsResponse)(nil), // 9: marketplace.v1.ListCollectionsResponse
-	(*Collection)(nil),              // 10: marketplace.v1.Collection
-	(*GetCollectionRequest)(nil),    // 11: marketplace.v1.GetCollectionRequest
-	(*GetCollectionResponse)(nil),   // 12: marketplace.v1.GetCollectionResponse
-	(*ListListingsRequest)(nil),     // 13: marketplace.v1.ListListingsRequest
-	(*ListListingsResponse)(nil),    // 14: marketplace.v1.ListListingsResponse
-	(*Listing)(nil),                 // 15: marketplace.v1.Listing
-	(*ListAuctionsRequest)(nil),     // 16: marketplace.v1.ListAuctionsRequest
-	(*ListAuctionsResponse)(nil),    // 17: marketplace.v1.ListAuctionsResponse
-	(*Auction)(nil),                 // 18: marketplace.v1.Auction
-	(*GetActivityRequest)(nil),      // 19: marketplace.v1.GetActivityRequest
-	(*ActivityEvent)(nil),           // 20: marketplace.v1.ActivityEvent
-	(*GetActivityResponse)(nil),     // 21: marketplace.v1.GetActivityResponse
-	(*ListOffersRequest)(nil),       // 22: marketplace.v1.ListOffersRequest
-	(*Offer)(nil),                   // 23: marketplace.v1.Offer
-	(*ListOffersResponse)(nil),      // 24: marketplace.v1.ListOffersResponse
-	(*GetWalletNFTsRequest)(nil),    // 25: marketplace.v1.GetWalletNFTsRequest
-	(*OwnedNFT)(nil),                // 26: marketplace.v1.OwnedNFT
-	(*GetWalletNFTsResponse)(nil),   // 27: marketplace.v1.GetWalletNFTsResponse
-	(*GetProfileRequest)(nil),       // 28: marketplace.v1.GetProfileRequest
-	(*GetProfileResponse)(nil),      // 29: marketplace.v1.GetProfileResponse
-	(*SearchRequest)(nil),           // 30: marketplace.v1.SearchRequest
-	(*SearchResult)(nil),            // 31: marketplace.v1.SearchResult
-	(*SearchResponse)(nil),          // 32: marketplace.v1.SearchResponse
-	(*GetMetricsRequest)(nil),       // 33: marketplace.v1.GetMetricsRequest
-	(*GetMetricsResponse)(nil),      // 34: marketplace.v1.GetMetricsResponse
+	(*GetListingRequest)(nil),              // 0: marketplace.v1.GetListingRequest
+	(*GetListingResponse)(nil),             // 1: marketplace.v1.GetListingResponse
+	(*GetAuctionRequest)(nil),              // 2: marketplace.v1.GetAuctionRequest
+	(*GetAuctionResponse)(nil),             // 3: marketplace.v1.GetAuctionResponse
+	(*GetOfferRequest)(nil),                // 4: marketplace.v1.GetOfferRequest
+	(*GetOfferResponse)(nil),               // 5: marketplace.v1.GetOfferResponse
+	(*GetTokenRequest)(nil),                // 6: marketplace.v1.GetTokenRequest
+	(*GetTokenResponse)(nil),               // 7: marketplace.v1.GetTokenResponse
+	(*ListCollectionsRequest)(nil),         // 8: marketplace.v1.ListCollectionsRequest
+	(*ListCollectionsResponse)(nil),        // 9: marketplace.v1.ListCollectionsResponse
+	(*Collection)(nil),                     // 10: marketplace.v1.Collection
+	(*GetCollectionRequest)(nil),           // 11: marketplace.v1.GetCollectionRequest
+	(*GetCollectionResponse)(nil),          // 12: marketplace.v1.GetCollectionResponse
+	(*ListListingsRequest)(nil),            // 13: marketplace.v1.ListListingsRequest
+	(*ListListingsResponse)(nil),           // 14: marketplace.v1.ListListingsResponse
+	(*Listing)(nil),                        // 15: marketplace.v1.Listing
+	(*ListAuctionsRequest)(nil),            // 16: marketplace.v1.ListAuctionsRequest
+	(*ListAuctionsResponse)(nil),           // 17: marketplace.v1.ListAuctionsResponse
+	(*Auction)(nil),                        // 18: marketplace.v1.Auction
+	(*GetActivityRequest)(nil),             // 19: marketplace.v1.GetActivityRequest
+	(*ActivityEvent)(nil),                  // 20: marketplace.v1.ActivityEvent
+	(*GetActivityResponse)(nil),            // 21: marketplace.v1.GetActivityResponse
+	(*ListOffersRequest)(nil),              // 22: marketplace.v1.ListOffersRequest
+	(*Offer)(nil),                          // 23: marketplace.v1.Offer
+	(*ListOffersResponse)(nil),             // 24: marketplace.v1.ListOffersResponse
+	(*GetWalletNFTsRequest)(nil),           // 25: marketplace.v1.GetWalletNFTsRequest
+	(*OwnedNFT)(nil),                       // 26: marketplace.v1.OwnedNFT
+	(*GetWalletNFTsResponse)(nil),          // 27: marketplace.v1.GetWalletNFTsResponse
+	(*GetProfileRequest)(nil),              // 28: marketplace.v1.GetProfileRequest
+	(*GetProfileResponse)(nil),             // 29: marketplace.v1.GetProfileResponse
+	(*SearchRequest)(nil),                  // 30: marketplace.v1.SearchRequest
+	(*SearchResult)(nil),                   // 31: marketplace.v1.SearchResult
+	(*SearchResponse)(nil),                 // 32: marketplace.v1.SearchResponse
+	(*SubscribeListingsRequest)(nil),       // 33: marketplace.v1.SubscribeListingsRequest
+	(*SubscribeListingsResponse)(nil),      // 34: marketplace.v1.SubscribeListingsResponse
+	(*SubscribeAuctionsRequest)(nil),       // 35: marketplace.v1.SubscribeAuctionsRequest
+	(*SubscribeAuctionsResponse)(nil),      // 36: marketplace.v1.SubscribeAuctionsResponse
+	(*SubscribeActivityRequest)(nil),       // 37: marketplace.v1.SubscribeActivityRequest
+	(*SubscribeActivityResponse)(nil),      // 38: marketplace.v1.SubscribeActivityResponse
+	(*SubscribeNotificationsRequest)(nil),  // 39: marketplace.v1.SubscribeNotificationsRequest
+	(*SubscribeNotificationsResponse)(nil), // 40: marketplace.v1.SubscribeNotificationsResponse
+	(*GetMetricsRequest)(nil),              // 41: marketplace.v1.GetMetricsRequest
+	(*GetMetricsResponse)(nil),             // 42: marketplace.v1.GetMetricsResponse
 }
 var file_marketplace_v1_marketplace_proto_depIdxs = []int32{
 	10, // 0: marketplace.v1.ListCollectionsResponse.collection:type_name -> marketplace.v1.Collection
@@ -3098,39 +3511,50 @@ var file_marketplace_v1_marketplace_proto_depIdxs = []int32{
 	23, // 4: marketplace.v1.ListOffersResponse.offers:type_name -> marketplace.v1.Offer
 	26, // 5: marketplace.v1.GetWalletNFTsResponse.nfts:type_name -> marketplace.v1.OwnedNFT
 	31, // 6: marketplace.v1.SearchResponse.results:type_name -> marketplace.v1.SearchResult
-	0,  // 7: marketplace.v1.MarketplaceService.GetListing:input_type -> marketplace.v1.GetListingRequest
-	2,  // 8: marketplace.v1.MarketplaceService.GetAuction:input_type -> marketplace.v1.GetAuctionRequest
-	4,  // 9: marketplace.v1.MarketplaceService.GetOffer:input_type -> marketplace.v1.GetOfferRequest
-	6,  // 10: marketplace.v1.MarketplaceService.GetToken:input_type -> marketplace.v1.GetTokenRequest
-	8,  // 11: marketplace.v1.MarketplaceService.ListCollections:input_type -> marketplace.v1.ListCollectionsRequest
-	11, // 12: marketplace.v1.MarketplaceService.GetCollection:input_type -> marketplace.v1.GetCollectionRequest
-	13, // 13: marketplace.v1.MarketplaceService.ListListings:input_type -> marketplace.v1.ListListingsRequest
-	16, // 14: marketplace.v1.MarketplaceService.ListAuctions:input_type -> marketplace.v1.ListAuctionsRequest
-	19, // 15: marketplace.v1.MarketplaceService.GetActivity:input_type -> marketplace.v1.GetActivityRequest
-	22, // 16: marketplace.v1.MarketplaceService.ListOffers:input_type -> marketplace.v1.ListOffersRequest
-	25, // 17: marketplace.v1.MarketplaceService.GetWalletNFTs:input_type -> marketplace.v1.GetWalletNFTsRequest
-	28, // 18: marketplace.v1.MarketplaceService.GetProfile:input_type -> marketplace.v1.GetProfileRequest
-	30, // 19: marketplace.v1.MarketplaceService.Search:input_type -> marketplace.v1.SearchRequest
-	33, // 20: marketplace.v1.MarketplaceService.GetMetrics:input_type -> marketplace.v1.GetMetricsRequest
-	1,  // 21: marketplace.v1.MarketplaceService.GetListing:output_type -> marketplace.v1.GetListingResponse
-	3,  // 22: marketplace.v1.MarketplaceService.GetAuction:output_type -> marketplace.v1.GetAuctionResponse
-	5,  // 23: marketplace.v1.MarketplaceService.GetOffer:output_type -> marketplace.v1.GetOfferResponse
-	7,  // 24: marketplace.v1.MarketplaceService.GetToken:output_type -> marketplace.v1.GetTokenResponse
-	10, // 25: marketplace.v1.MarketplaceService.ListCollections:output_type -> marketplace.v1.Collection
-	12, // 26: marketplace.v1.MarketplaceService.GetCollection:output_type -> marketplace.v1.GetCollectionResponse
-	15, // 27: marketplace.v1.MarketplaceService.ListListings:output_type -> marketplace.v1.Listing
-	18, // 28: marketplace.v1.MarketplaceService.ListAuctions:output_type -> marketplace.v1.Auction
-	21, // 29: marketplace.v1.MarketplaceService.GetActivity:output_type -> marketplace.v1.GetActivityResponse
-	23, // 30: marketplace.v1.MarketplaceService.ListOffers:output_type -> marketplace.v1.Offer
-	27, // 31: marketplace.v1.MarketplaceService.GetWalletNFTs:output_type -> marketplace.v1.GetWalletNFTsResponse
-	29, // 32: marketplace.v1.MarketplaceService.GetProfile:output_type -> marketplace.v1.GetProfileResponse
-	32, // 33: marketplace.v1.MarketplaceService.Search:output_type -> marketplace.v1.SearchResponse
-	34, // 34: marketplace.v1.MarketplaceService.GetMetrics:output_type -> marketplace.v1.GetMetricsResponse
-	21, // [21:35] is the sub-list for method output_type
-	7,  // [7:21] is the sub-list for method input_type
-	7,  // [7:7] is the sub-list for extension type_name
-	7,  // [7:7] is the sub-list for extension extendee
-	0,  // [0:7] is the sub-list for field type_name
+	15, // 7: marketplace.v1.SubscribeListingsResponse.listing:type_name -> marketplace.v1.Listing
+	18, // 8: marketplace.v1.SubscribeAuctionsResponse.auction:type_name -> marketplace.v1.Auction
+	20, // 9: marketplace.v1.SubscribeActivityResponse.event:type_name -> marketplace.v1.ActivityEvent
+	0,  // 10: marketplace.v1.MarketplaceService.GetListing:input_type -> marketplace.v1.GetListingRequest
+	2,  // 11: marketplace.v1.MarketplaceService.GetAuction:input_type -> marketplace.v1.GetAuctionRequest
+	4,  // 12: marketplace.v1.MarketplaceService.GetOffer:input_type -> marketplace.v1.GetOfferRequest
+	6,  // 13: marketplace.v1.MarketplaceService.GetToken:input_type -> marketplace.v1.GetTokenRequest
+	8,  // 14: marketplace.v1.MarketplaceService.ListCollections:input_type -> marketplace.v1.ListCollectionsRequest
+	11, // 15: marketplace.v1.MarketplaceService.GetCollection:input_type -> marketplace.v1.GetCollectionRequest
+	13, // 16: marketplace.v1.MarketplaceService.ListListings:input_type -> marketplace.v1.ListListingsRequest
+	16, // 17: marketplace.v1.MarketplaceService.ListAuctions:input_type -> marketplace.v1.ListAuctionsRequest
+	19, // 18: marketplace.v1.MarketplaceService.GetActivity:input_type -> marketplace.v1.GetActivityRequest
+	22, // 19: marketplace.v1.MarketplaceService.ListOffers:input_type -> marketplace.v1.ListOffersRequest
+	25, // 20: marketplace.v1.MarketplaceService.GetWalletNFTs:input_type -> marketplace.v1.GetWalletNFTsRequest
+	28, // 21: marketplace.v1.MarketplaceService.GetProfile:input_type -> marketplace.v1.GetProfileRequest
+	30, // 22: marketplace.v1.MarketplaceService.Search:input_type -> marketplace.v1.SearchRequest
+	41, // 23: marketplace.v1.MarketplaceService.GetMetrics:input_type -> marketplace.v1.GetMetricsRequest
+	33, // 24: marketplace.v1.MarketplaceService.SubscribeListings:input_type -> marketplace.v1.SubscribeListingsRequest
+	35, // 25: marketplace.v1.MarketplaceService.SubscribeAuctions:input_type -> marketplace.v1.SubscribeAuctionsRequest
+	37, // 26: marketplace.v1.MarketplaceService.SubscribeActivity:input_type -> marketplace.v1.SubscribeActivityRequest
+	39, // 27: marketplace.v1.MarketplaceService.SubscribeNotifications:input_type -> marketplace.v1.SubscribeNotificationsRequest
+	1,  // 28: marketplace.v1.MarketplaceService.GetListing:output_type -> marketplace.v1.GetListingResponse
+	3,  // 29: marketplace.v1.MarketplaceService.GetAuction:output_type -> marketplace.v1.GetAuctionResponse
+	5,  // 30: marketplace.v1.MarketplaceService.GetOffer:output_type -> marketplace.v1.GetOfferResponse
+	7,  // 31: marketplace.v1.MarketplaceService.GetToken:output_type -> marketplace.v1.GetTokenResponse
+	10, // 32: marketplace.v1.MarketplaceService.ListCollections:output_type -> marketplace.v1.Collection
+	12, // 33: marketplace.v1.MarketplaceService.GetCollection:output_type -> marketplace.v1.GetCollectionResponse
+	15, // 34: marketplace.v1.MarketplaceService.ListListings:output_type -> marketplace.v1.Listing
+	18, // 35: marketplace.v1.MarketplaceService.ListAuctions:output_type -> marketplace.v1.Auction
+	21, // 36: marketplace.v1.MarketplaceService.GetActivity:output_type -> marketplace.v1.GetActivityResponse
+	23, // 37: marketplace.v1.MarketplaceService.ListOffers:output_type -> marketplace.v1.Offer
+	27, // 38: marketplace.v1.MarketplaceService.GetWalletNFTs:output_type -> marketplace.v1.GetWalletNFTsResponse
+	29, // 39: marketplace.v1.MarketplaceService.GetProfile:output_type -> marketplace.v1.GetProfileResponse
+	32, // 40: marketplace.v1.MarketplaceService.Search:output_type -> marketplace.v1.SearchResponse
+	42, // 41: marketplace.v1.MarketplaceService.GetMetrics:output_type -> marketplace.v1.GetMetricsResponse
+	34, // 42: marketplace.v1.MarketplaceService.SubscribeListings:output_type -> marketplace.v1.SubscribeListingsResponse
+	36, // 43: marketplace.v1.MarketplaceService.SubscribeAuctions:output_type -> marketplace.v1.SubscribeAuctionsResponse
+	38, // 44: marketplace.v1.MarketplaceService.SubscribeActivity:output_type -> marketplace.v1.SubscribeActivityResponse
+	40, // 45: marketplace.v1.MarketplaceService.SubscribeNotifications:output_type -> marketplace.v1.SubscribeNotificationsResponse
+	28, // [28:46] is the sub-list for method output_type
+	10, // [10:28] is the sub-list for method input_type
+	10, // [10:10] is the sub-list for extension type_name
+	10, // [10:10] is the sub-list for extension extendee
+	0,  // [0:10] is the sub-list for field type_name
 }
 
 func init() { file_marketplace_v1_marketplace_proto_init() }
@@ -3144,7 +3568,7 @@ func file_marketplace_v1_marketplace_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_marketplace_v1_marketplace_proto_rawDesc), len(file_marketplace_v1_marketplace_proto_rawDesc)),
 			NumEnums:      0,
-			NumMessages:   35,
+			NumMessages:   43,
 			NumExtensions: 0,
 			NumServices:   1,
 		},
