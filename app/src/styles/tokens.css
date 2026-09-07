@@ -15,6 +15,8 @@
   --text-2: rgba(255, 255, 255, 0.72);
   --text-3: rgba(255, 255, 255, 0.56);
   --text-on-accent: #09090b;
+  /* Gold flips to a deep amber in light (#b45309): its label must be white there. */
+  --text-on-gold: #09090b;
 
   /* ── Accents ──────────────────────────────────────────────────────────── */
   --sky: #7dd3fc;      /* primary / listings */
@@ -81,7 +83,8 @@
   --violet-300: var(--violet); --violet-500: #7c3aed;
   --white: var(--text);
   --white-10: rgba(255, 255, 255, 0.1); --white-20: rgba(255, 255, 255, 0.2);
-  --white-40: rgba(255, 255, 255, 0.4); --white-60: rgba(255, 255, 255, 0.6); --white-80: rgba(255, 255, 255, 0.8);
+  /* --white-40 is a TEXT alias in practice (captions, dims): it must clear 4.5:1, so it tracks --text-3 (axe gate, v3.6). */
+  --white-40: var(--text-3); --white-60: rgba(255, 255, 255, 0.6); --white-80: rgba(255, 255, 255, 0.8);
 }
 
 @media (max-width: 640px) {
@@ -107,6 +110,7 @@
     --green: #15803d;
     --red: #b91c1c;
     --amber: #b45309;
+    --text-on-gold: #ffffff;
     --shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
     --sky-12: rgba(2,132,199,.12); --sky-35: rgba(2,132,199,.35);
     --gold-12: rgba(180,83,9,.12); --gold-35: rgba(180,83,9,.35);
@@ -115,7 +119,7 @@
     --red-12: rgba(185,28,28,.12); --red-35: rgba(185,28,28,.35);
     --amber-12: rgba(180,83,9,.12); --amber-35: rgba(180,83,9,.35);
     --white-10: rgba(0, 0, 0, 0.06); --white-20: rgba(0, 0, 0, 0.12);
-    --white-40: rgba(0, 0, 0, 0.4); --white-60: rgba(0, 0, 0, 0.6); --white-80: rgba(0, 0, 0, 0.8);
+    --white-40: var(--text-3); --white-60: rgba(0, 0, 0, 0.62); --white-80: rgba(0, 0, 0, 0.8);
   }
 }
 
@@ -136,6 +140,7 @@
     --green: #15803d;
     --red: #b91c1c;
     --amber: #b45309;
+    --text-on-gold: #ffffff;
     --shadow: 0 8px 24px rgba(0, 0, 0, 0.14);
     --sky-12: rgba(2,132,199,.12); --sky-35: rgba(2,132,199,.35);
     --gold-12: rgba(180,83,9,.12); --gold-35: rgba(180,83,9,.35);
@@ -144,6 +149,6 @@
     --red-12: rgba(185,28,28,.12); --red-35: rgba(185,28,28,.35);
     --amber-12: rgba(180,83,9,.12); --amber-35: rgba(180,83,9,.35);
     --white-10: rgba(0, 0, 0, 0.06); --white-20: rgba(0, 0, 0, 0.12);
-    --white-40: rgba(0, 0, 0, 0.4); --white-60: rgba(0, 0, 0, 0.6); --white-80: rgba(0, 0, 0, 0.8);
+    --white-40: var(--text-3); --white-60: rgba(0, 0, 0, 0.62); --white-80: rgba(0, 0, 0, 0.8);
 }
 

@@ -22,6 +22,12 @@ export default defineConfig({
       use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 } },
     },
     {
+      // v3.6: the same desktop viewport in the dark colour scheme — every
+      // axe contrast sweep runs in both schemes (tokens.css swaps palettes).
+      name: 'dark',
+      use: { ...devices['Desktop Chrome'], viewport: { width: 1440, height: 900 }, colorScheme: 'dark' },
+    },
+    {
       // One small-screen project (iPhone 14-ish logical viewport) for the
       // mobile tab bar + touch-target sweeps. Same chromium binary.
       name: 'mobile',

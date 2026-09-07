@@ -94,7 +94,7 @@ textarea:focus-visible, [tabindex]:focus-visible, [role="menuitem"]:focus-visibl
   transition: filter var(--dur-fast) var(--ease), transform var(--dur-fast) var(--ease);
 }
 .btn-sky { background: var(--sky); background-image: none; color: var(--text-on-accent) !important; }
-.btn-gold { background: var(--gold); background-image: none; color: var(--text-on-accent) !important; }
+.btn-gold { background: var(--gold); background-image: none; color: var(--text-on-gold) !important; }
 .btn-violet { background: var(--violet); background-image: none; color: var(--text-on-accent) !important; }
 .btn-sky:hover, .btn-gold:hover, .btn-violet:hover { filter: brightness(1.08); }
 .btn-sky:active, .btn-gold:active, .btn-violet:active { transform: scale(0.98); }

@@ -104,7 +104,7 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
 
   .doc-nav-label {
     font-size: 0.625rem; font-weight: 800; letter-spacing: 0.12em;
-    text-transform: uppercase; color: var(--white-40);
+    text-transform: uppercase; color: var(--text-3);
     margin: 0 0 0.5rem 0.75rem;
   }
   .doc-nav-link {
@@ -114,8 +114,8 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
     color: var(--white-60); transition: all 0.2s;
   }
   .doc-nav-link:hover { color: var(--text); background: var(--white-10); }
-  .doc-nav-link.is-current { color: #7dd3fc; background: rgba(56,189,248,0.12); }
-  .doc-nav-aux { color: var(--white-40); margin-top: 0.5rem; }
+  .doc-nav-link.is-current { color: var(--link-strong); background: var(--sky-12); }
+  .doc-nav-aux { color: var(--text-3); margin-top: 0.5rem; }
 
   /* Markdown body. Measure is capped so long prose stays readable. */
   .doc-body { min-width: 0; max-width: 68ch; color: var(--white-80); line-height: 1.7; }
@@ -132,7 +132,7 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
   .doc-body :global(p) { margin: 0 0 1rem; }
   .doc-body :global(ul), .doc-body :global(ol) { margin: 0 0 1rem; padding-left: 1.35rem; }
   .doc-body :global(li) { margin: 0 0 0.4rem; }
-  .doc-body :global(a) { color: #7dd3fc; text-decoration: underline; text-underline-offset: 2px; }
+  .doc-body :global(a) { color: var(--link-strong); text-decoration: underline; text-underline-offset: 2px; }
   .doc-body :global(strong) { color: var(--text); font-weight: 700; }
   .doc-body :global(hr) { border: none; border-top: 1px solid var(--white-10); margin: 2rem 0; }
   .doc-body :global(blockquote) {
@@ -146,7 +146,7 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
   }
   /* Wide content scrolls inside its own box so the page never scrolls sideways. */
   .doc-body :global(pre) {
-    background: rgba(9,9,11,0.7); border: 1px solid var(--white-10);
+    background: var(--surface-2); border: 1px solid var(--white-10);
     border-radius: 0.75rem; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem;
   }
   .doc-body :global(pre code) { background: none; border: none; padding: 0; }

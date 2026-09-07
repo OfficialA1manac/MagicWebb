@@ -87,7 +87,21 @@ export interface MockOptions {
   emptyListings?: boolean;
   /** /api/v1/collections/:addr → 404 (untracked collection). */
   collection404?: boolean;
+  /** Token #1 is known: listing detail + token detail answer 200 (token happy path). */
+  tokenKnown?: boolean;
 }
+
+/** Token detail row for the known-token fixture (GET /api/v1/token/:coll/:id). */
+export const tokenDetail = {
+  owner: SELLER,
+  image_uri: DATA_IMG,
+  name: 'Meadow #1',
+  verified: true,
+  verified_reason: [],
+  creator_is_owner: false,
+  minter: CREATOR,
+  creator: { address: CREATOR, display_name: 'Meadow Studio' },
+};
 
 /**
  * Intercept every /api/v1/** call with small fixtures, and abort chain-RPC
@@ -132,8 +146,16 @@ export async function mockApi(page: Page, opts: MockOptions = {}): Promise<void>
       return opts.collection404 ? json({ error: 'not found' }, 404) : json(collectionDetail);
     }
     if (p === '/api/v1/listings') return json(opts.emptyListings ? [] : listings);
-    if (p.startsWith('/api/v1/listings/')) return json({ error: 'not found' }, 404); // single listing
-    if (p.startsWith('/api/v1/token/')) return json({ error: 'not found' }, 404); // token detail 404
+    if (p.startsWith('/api/v1/listings/')) {
+      return opts.tokenKnown && p.endsWith('/1') ? json(listings[0]) : json({ error: 'not found' }, 404); // single listing
+    }
+    if (p.startsWith('/api/v1/token/')) {
+      return opts.tokenKnown && p.endsWith('/1') ? json(tokenDetail) : json({ error: 'not found' }, 404); // token detail
+    }
+    if (p.startsWith('/api/v1/profile-page/')) return json({ listings: [], auctions: [], offersSent: [], offersReceived: [], activity: [], createdCollections: [] });
+    if (p === '/api/v1/governance') return json({ deployed: false, chain_id: 114, events: [] });
+    if (p === '/api/v1/indexer/slo') return route.fulfill({ status: 200, contentType: 'text/plain', body: 'head_lag_blocks 0\n' });
+    if (p.startsWith('/api/v1/metrics/gas')) return json({ count: 0, total_wei: '0', alerts: [] });
     if (p.startsWith('/api/v1/wallet/')) return json([]);
     if (p.startsWith('/api/v1/profile/')) return json({ error: 'not found' }, 404);
     if (p.startsWith('/api/v1/notifications')) return json({ notifications: [], unread: 0 });

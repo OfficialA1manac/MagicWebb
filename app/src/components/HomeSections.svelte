@@ -293,5 +293,5 @@
   .hs-how { list-style: none; margin: 0 0 var(--sp-3); padding: 0; display: flex; flex-direction: column; gap: var(--sp-2); }
   .hs-how li { font-size: var(--fs-body); line-height: var(--lh-body); color: var(--text-2); }
   .hs-how strong { color: var(--text); }
-  .hs-guide { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-body); font-weight: 700; color: var(--sky-300); min-height: var(--hit); }
+  .hs-guide { display: inline-flex; align-items: center; gap: 4px; font-size: var(--fs-body); font-weight: 700; color: var(--link-strong); min-height: var(--hit); }
 </style>

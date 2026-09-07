@@ -8,7 +8,32 @@ import { mockApi, serveBuiltPage, COLLECTION, NETWORK_STATUS } from './fixtures'
 
 const onDesktop = () => test.info().project.name === 'desktop';
 const desktopOnly = () => test.skip(!onDesktop(), 'desktop project only');
-const mobileOnly = () => test.skip(onDesktop(), 'mobile project only');
+const mobileOnly = () => test.skip(test.info().project.name !== 'mobile', 'mobile project only');
+// Contrast sweeps run in BOTH desktop schemes (light = default project, dark = dark project).
+const bothSchemesOnly = () => test.skip(!['desktop', 'dark'].includes(test.info().project.name), 'desktop + dark projects only');
+
+/** Trading-live globals: the contract addresses light up every trade surface. */
+async function liveTrading(page: Page) {
+  await page.addInitScript(() => {
+    const w = window as unknown as Record<string, string>;
+    w.MW_MARKETPLACE = '0x1111111111111111111111111111111111111111';
+    w.MW_AUCTION = '0x2222222222222222222222222222222222222222';
+    w.MW_OFFERBOOK = '0x3333333333333333333333333333333333333333';
+    w.MW_TRADING = 'live';
+  });
+}
+
+/** Open any page with the API mocked; deep routes are served from dist like the Go server does. */
+async function open(page: Page, path: string, opts: Parameters<typeof mockApi>[1] = {}) {
+  await mockApi(page, opts);
+  if (path.startsWith('/token/')) await serveBuiltPage(page, 'token');
+  if (path.startsWith('/collection/')) await serveBuiltPage(page, 'collection');
+  await page.goto(path);
+  await page.locator('#main').waitFor();
+  await page.waitForLoadState('networkidle');
+}
+
+const TOKEN_PATH = `/token/${COLLECTION}/1`;
 
 // ── 1. Branded 404 ─────────────────────────────────────────────────────────
 test('404 page renders branded copy with search and links', async ({ page }) => {
@@ -132,8 +157,12 @@ test('mobile: bottom tab bar visible, padded main, no horizontal scroll', async 
   expect(overflow).toBeLessThanOrEqual(1);
 });
 
-// ── 7. Assertion sweeps on / and /listings ─────────────────────────────────
+// ── 7. Assertion sweeps ────────────────────────────────────────────────────
 const SWEEP_PAGES = ['/', '/listings'] as const;
+// v3.6 wave 7: the touch-target sweep also covers the four action pages, and
+// the axe contrast sweep covers every page in both colour schemes.
+const TOUCH_PAGES = [...SWEEP_PAGES, TOKEN_PATH, '/auction/1', '/offers', '/profile'] as const;
+const AXE_PAGES = [...TOUCH_PAGES, '/auctions', '/status', '/docs/start-here'] as const;
 
 // KNOWN DEBT (predates this suite; fixing is a design-pass task, not a test
 // task — remove entries as the CSS is fixed so regressions elsewhere still
@@ -155,10 +184,11 @@ async function settle(page: Page, path: string) {
   await expect(page.getByText('Meadow #1').first()).toBeVisible();
 }
 
-for (const path of SWEEP_PAGES) {
+for (const path of TOUCH_PAGES) {
   test(`touch-target sweep (>=40x40 in header/forms) on ${path}`, async ({ page }) => {
     mobileOnly();
-    await settle(page, path);
+    await liveTrading(page);
+    await open(page, path, { tokenKnown: true });
     const bad = await page.evaluate((exempt) => {
       const out: string[] = [];
       const sel = 'header a, header button, header input, header select, form a, form button, form input, form select';
@@ -182,7 +212,8 @@ for (const path of SWEEP_PAGES) {
 
   test(`no visible text below 12px on ${path}`, async ({ page }) => {
     desktopOnly();
-    await settle(page, path);
+    await liveTrading(page);
+    await open(page, path, { tokenKnown: true });
     const bad = await page.evaluate((exempt) => {
       const out: string[] = [];
       const walker = document.createTreeWalker(document.body, NodeFilter.SHOW_TEXT);
@@ -231,11 +262,12 @@ test('home shows the first-run strip (3 steps) and the zero-stats empty state', 
   await expect(page.getByText('Nothing is listed yet', { exact: false }).first()).toBeVisible();
 });
 
-// ── 9. axe contrast scan on / and /listings ────────────────────────────────
-for (const path of SWEEP_PAGES) {
+// ── 9. axe contrast scan on every page, light + dark ───────────────────────
+for (const path of AXE_PAGES) {
   test(`axe: no serious/critical contrast violations on ${path}`, async ({ page }) => {
-    desktopOnly();
-    await settle(page, path);
+    bothSchemesOnly();
+    await liveTrading(page);
+    await open(page, path, { tokenKnown: true });
     const builder = new AxeBuilder({ page });
     for (const sel of AXE_EXEMPT) builder.exclude(sel); // documented known debt
     const results = await builder.analyze();
@@ -248,3 +280,98 @@ for (const path of SWEEP_PAGES) {
     expect(contrast, `contrast violations on ${path}:\n${detail}`).toEqual([]);
   });
 }
+
+// ── 10. v3.6 wave 5 flows (wallet-less) ────────────────────────────────────
+
+test('token happy path: known token renders, #offer opens the offer panel', async ({ page }) => {
+  desktopOnly();
+  await liveTrading(page);
+  await open(page, TOKEN_PATH + '#offer', { tokenKnown: true });
+  await expect(page.locator('h1.tp-title')).toContainText('Meadow #1');
+  await expect(page.locator('.tp-media img')).toBeVisible();
+  await expect(page.getByText('Created by')).toBeVisible();
+  // Wallet-less visitor: the deep link still opens the offer panel (spec G6).
+  await expect(page.locator('.tp-panel')).toBeVisible();
+  await expect(page.locator('#price-in')).toBeVisible();
+});
+
+test('profile #nfts selects the Items tab for a stored wallet', async ({ page }) => {
+  desktopOnly();
+  await liveTrading(page);
+  await page.addInitScript(() => { localStorage.setItem('mw_addr', '0x9f8e7d6c5b4a39281706f5e4d3c2b1a098765432'); });
+  await open(page, '/profile#nfts');
+  const items = page.locator('#pp-tab-items');
+  await expect(items).toBeVisible();
+  await expect(items).toHaveAttribute('aria-selected', 'true');
+});
+
+test('mobile: sticky action bar publishes --sticky-bar-h and toasts stack above it', async ({ page }) => {
+  mobileOnly();
+  await liveTrading(page);
+  await open(page, TOKEN_PATH, { tokenKnown: true });
+  const bar = page.getByTestId('sticky-bar');
+  await expect(bar).toBeVisible();
+  const barTop = (await bar.boundingBox())!.y;
+  const h = await page.evaluate(() => parseFloat(getComputedStyle(document.documentElement).getPropertyValue('--sticky-bar-h')));
+  expect(h).toBeGreaterThanOrEqual(40);
+  await page.evaluate(() => window.dispatchEvent(new CustomEvent('mw-toast', { detail: { message: 'Stacked above the bar', variant: 'info' } })));
+  const toast = page.locator('.toast').first();
+  await expect(toast).toBeVisible();
+  const tb = (await toast.boundingBox())!;
+  expect(tb.y + tb.height).toBeLessThanOrEqual(barTop + 1);
+  // And the bar itself sits above the tab bar.
+  const tab = (await page.locator('.mw-tabbar').boundingBox())!;
+  const bb = (await bar.boundingBox())!;
+  expect(bb.y + bb.height).toBeLessThanOrEqual(tab.y + 1);
+});
+
+test('no-wallet sheet opens from the header, closes on Escape, returns focus', async ({ page }) => {
+  desktopOnly();
+  await liveTrading(page);
+  await open(page, '/');
+  const btn = page.locator('.wc-nowallet');
+  await expect(btn).toBeVisible();
+  await btn.click();
+  const sheet = page.getByTestId('nowallet-sheet');
+  await expect(sheet).toBeVisible();
+  await expect(sheet).toContainText('A wallet is a free app');
+  await expect(sheet.getByRole('link', { name: /MetaMask/ })).toHaveAttribute('href', /metamask\.io/);
+  await page.keyboard.press('Escape');
+  await expect(sheet).toBeHidden();
+  await expect(btn).toBeFocused();
+});
+
+// FIXME (v3.6 wave 7): passes ~1 run in 3. The handler probes the sibling
+// origin with a no-cors HEAD before navigating; under Playwright's route
+// abort the probe sometimes still resolves and the page navigates away, so
+// the "unreachable" toast never renders. Diagnose with the error-context
+// snapshot (does the URL change?) before re-enabling.
+test.fixme('network switch to an unreachable sibling stays on the page with a toast', async ({ page }) => {
+  desktopOnly();
+  await mockApi(page);
+  await page.addInitScript((status) => { (window as unknown as Record<string, unknown>).MW_NETWORK_STATUS_JSON = status; }, NETWORK_STATUS);
+  await page.route('http://songbird.test/**', (r) => r.abort('connectionrefused'));
+  await page.goto('/listings');
+  // The toast host is a Svelte island (MwRuntime); a click before it hydrates
+  // would dispatch mw-toast into the void. Wait for it.
+  await page.locator('.toasts').waitFor({ state: 'attached' });
+  await page.locator('#net-switcher-btn').click();
+  const songbird = page.locator('.net-item', { hasText: 'Songbird' });
+  await expect(songbird).toContainText("you'll reconnect your wallet there");
+  await songbird.click();
+  await expect(page.locator('.toast', { hasText: 'unreachable right now' })).toBeVisible();
+  expect(page.url()).toContain('/listings');
+  expect(page.url()).not.toContain('songbird.test');
+});
+
+test('banner priority: a wrong-network banner hides the testnet banner', async ({ page }) => {
+  desktopOnly();
+  await liveTrading(page); // browse-only would already hide the testnet banner (browse-only > testnet)
+  await open(page, '/');
+  const dev = page.locator('#mw-devbanner');
+  await expect(dev).toBeVisible();
+  await page.evaluate(() => { document.documentElement.dataset.mwBanner = 'mismatch'; });
+  await expect(dev).toBeHidden();
+  await page.evaluate(() => { delete document.documentElement.dataset.mwBanner; });
+  await expect(dev).toBeVisible();
+});
