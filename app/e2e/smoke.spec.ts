@@ -162,7 +162,7 @@ const SWEEP_PAGES = ['/', '/listings'] as const;
 // v3.6 wave 7: the touch-target sweep also covers the four action pages, and
 // the axe contrast sweep covers every page in both colour schemes.
 const TOUCH_PAGES = [...SWEEP_PAGES, TOKEN_PATH, '/auction/1', '/offers', '/profile'] as const;
-const AXE_PAGES = [...TOUCH_PAGES, '/auctions', '/status', '/docs/start-here'] as const;
+const AXE_PAGES = [...TOUCH_PAGES, '/auctions', '/status', '/docs/start-here', '/docs/system'] as const;
 
 // KNOWN DEBT (predates this suite; fixing is a design-pass task, not a test
 // task — remove entries as the CSS is fixed so regressions elsewhere still
@@ -280,6 +280,21 @@ for (const path of AXE_PAGES) {
     expect(contrast, `contrast violations on ${path}:\n${detail}`).toEqual([]);
   });
 }
+
+// ── 9b. v3.6 wave 8: the system breakdown renders its diagrams client-side ──
+
+test('docs/system renders every mermaid fence as an SVG diagram', async ({ page }) => {
+  desktopOnly();
+  await open(page, '/docs/system');
+  // DocLayout swaps each <pre><code class="language-mermaid"> for a <figure> once the
+  // lazy mermaid chunk has rendered it; the source block stays in the DOM, hidden.
+  const figures = page.locator('figure.mermaid-diagram svg');
+  await expect(figures.first()).toBeVisible({ timeout: 30000 });
+  const sources = await page.locator('.doc-body pre > code.language-mermaid').count();
+  expect(sources).toBeGreaterThanOrEqual(7);
+  await expect(figures).toHaveCount(sources);
+  await expect(page.locator('.doc-body pre > code.language-mermaid').first()).toBeHidden();
+});
 
 // ── 10. v3.6 wave 5 flows (wallet-less) ────────────────────────────────────
 

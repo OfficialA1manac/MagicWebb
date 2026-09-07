@@ -131,6 +131,11 @@ jobs:
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          # Same as ci.yml: the action looks the repo owner up through the
+          # GitHub API to decide whether a license is required; anonymous on
+          # the runner's shared IP it 403s and fails with "missing gitleaks
+          # license" (2026-09-07 nightly). A token makes the call authenticated.
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
 
   # ── Audit summary ─────────────────────────────────────────────────────
   audit-summary:

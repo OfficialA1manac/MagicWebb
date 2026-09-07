@@ -19,6 +19,8 @@ export const DOCS: DocEntry[] = [
     blurb: 'Vision, market, and the seller-pays economic model.' },
   { slug: 'technical',   title: 'Technical Whitepaper', icon: '⚙️', accent: '#7dd3fc',
     blurb: 'Contracts, escrow flows, and the indexer pipeline in depth.' },
+  { slug: 'system',      title: 'System Breakdown',     icon: '🗺️', accent: '#a78bfa',
+    blurb: 'Diagrams: deployment, request path, indexer + keeper loop, state machines, roles, governance, badges.' },
   { slug: 'user-guide',  title: 'User Guide',           icon: '🧭', accent: '#a78bfa',
     blurb: 'Listing, bidding, offers, and withdrawals — step by step.' },
   { slug: 'capabilities', title: 'What You Can Do',     icon: '✅', accent: '#4ade80',

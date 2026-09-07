@@ -1,200 +1,183 @@
 # MagicWebb
 
-A fast, **unstoppable** NFT marketplace on the [Flare](https://flare.network) network.
+An open, non-custodial NFT marketplace on the [Flare](https://flare.network)
+family of networks. No accounts, no login, no admin console: anyone with a
+wallet can list, bid, offer and buy. Fixed-price listings, English auctions and
+fully escrowed offers for ERC-721 and ERC-1155.
 
-MagicWebb is a fixed-price + auction + offer marketplace with a **seller-pays 1.5%** fee model and **no-override** smart contracts (no pause, no owner withdrawal, immutable fee; upgrades are admin-gated per network until that network's admin is renounced). Listings, auction creation, bidding, and making offers are free. On any successful sale, 1.5% is deducted from the seller's proceeds — the seller receives 98.5% of the sale price.
+- **Fee: 2 %, seller pays, only on a sale** — 1.5 % to the platform, 0.5 % to
+  the keeper that automates settlement. Listing, auctioning, bidding and
+  offering are free (gas only) and every escrow is refundable.
+- **Nothing is pausable.** No entry or exit path — list, bid, offer, buy,
+  cancel, settle, withdraw — can be halted by anyone.
+- **One admin key per network** (instant UUPS upgrades + keeper rotation),
+  rotatable in two steps and burnable forever with `renounceAdmin()`. The whole
+  control trail is public at `/status` and `/api/v1/governance`.
+- **Badges are computed, never granted**: ✓ on an NFT whose collection passed
+  the verifier and whose name, image and holder are known; ★ when the holder is
+  the collection's creator and minted the token.
+- **15 durations** (1 m … 24 h) shared by listings, auctions and offers;
+  expiry is computed on-chain from the mining block.
 
-> Network: **Coston2 testnet** (chain `114`). This marketplace operates exclusively on Flare Coston2 testnet.
+| Network | Chain | App | Status |
+|---|---|---|---|
+| Coston2 (testnet) | 114 | https://magicwebb.fly.dev | **trading** — contracts live since block 34905078 (2026-09-04) |
+| Songbird | 19 | https://magicwebb-songbird.fly.dev | browse-only until the contracts deploy (wave 9, owner-gated) |
+| Flare | 14 | https://magicwebb-flare.fly.dev | browse-only until the contracts deploy (wave 9, owner-gated) |
 
----
+Addresses: [`deployments/`](deployments/) is the single source of truth.
 
-## Architecture
+## How it is built
 
-A **single Go binary** serves everything — REST API, server-rendered HTMX UI, real-time event stream, and the on-chain indexer — backed by [Neon Postgres](https://neon.tech) (serverless, free tier).
-
+```mermaid
+flowchart LR
+  subgraph B["Browser"]
+    UI["Astro pages + Svelte islands\nReact wallet island (Reown AppKit · wagmi · viem)"]
+  end
+  subgraph N["one Fly app per network · same image"]
+    GO["Go binary\nREST · GraphQL · Connect/gRPC · /ws\nindexer · keepers · verifier · image store"]
+    PG[("Neon Postgres")]
+    RD[("Redis · optional")]
+    GO --- PG
+    GO -.-> RD
+  end
+  UI -->|"same-origin HTTP + WS"| GO
+  UI -->|"eth_sendTransaction"| C["Marketplace · AuctionHouse · OfferBook\nMarketplaceManager"]
+  GO -->|"getLogs · RPC rotation"| C
 ```
-Browser (HTMX + Alpine + ethers.js)
-        │  HTTP / WebSocket / SSE
-        ▼
-┌─────────────────────────────────────────────┐
-│  Go Fiber binary (cmd/server)                │
-│  • REST API              (internal/api)      │
-│  • HTMX page handlers    (cmd/server/ui)     │
-│  • Real-time SSE hub     (internal/sse)      │
-│  • SIWE auth + JWT       (internal/auth)     │
-│  • Chain indexer         (internal/indexer)  │── JSON-RPC ──▶ Flare/Coston2
-│  • Offer/auction keeper                      │
-│  • Image self-host store (internal/imagestore)│
-└────────────────────┬────────────────────────┘
-                     │ pgxpool (tuned for Neon free tier:
-                     │   MaxConns=10, idle timeout <5 min)
-                     ▼
-              Neon Postgres (serverless)
-              ┌──────────────────────┐
-              │  NFT listings/tokens  │
-              │  Auctions, bids, sales│
-              │  Offers, profiles     │
-              │  Image BYTEA blobs    │ ← Self-hosted, no IPFS/Pinata
-              │  Real-time events     │
-              │  Full-text search     │
-              └──────────────────────┘
-```
 
-The browser talks to the **contracts directly** (wallet signs txs via ethers.js); the backend **observes** the chain through its indexer and projects state into Postgres for fast reads and live updates.
+The browser talks to the **contracts directly** (the wallet signs); the backend
+**observes** the chain through its indexer and projects state into Postgres for
+fast reads and live updates. One process serves exactly one chain; switching
+network is a navigation to the sibling origin. NFT images are fetched once,
+hashed and served from our own store — no IPFS gateway at render time.
 
-NFT images are **self-hosted** in Postgres BYTEA columns — no IPFS, no Pinata, no third-party gateways at render time. The indexer fetches metadata from upstream URIs on first discovery, hashes the bytes (SHA-256), stores them in `nft_image_blobs`, and rewrites `image_uri` to `/api/v1/img/<sha256>`. Every page load serves images from the local store.
+Read the map in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the
+diagrams (deployment, request path, indexer + keeper loop, state machines,
+roles, governance, badges, screenshots) in
+[`docs/SYSTEM_BREAKDOWN.md`](docs/SYSTEM_BREAKDOWN.md).
 
 ## Tech stack
 
-| Layer | Tech | Free tier |
-|------|------|-----------|
-| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin v5 | Open source |
-| Backend | Go 1.25, [Fiber](https://gofiber.io) v2, pgx v5, goose migrations, go-ethereum, zerolog | Open source |
-| Frontend | HTMX 2, Alpine.js 3, ethers.js 6, Tailwind, WalletConnect v2 (self-hosted via `embed.FS`) | Open source |
-| Database | [Neon Postgres](https://neon.tech) (serverless); `LISTEN/NOTIFY` as the real-time bus | Free tier: 0.5 GB storage, 100 CU-hours/mo, 10k pooled connections |
-| Auth | Sign-In-with-Ethereum (EIP-191) → JWT | None needed |
-| Chain RPC | Flare Coston2 public endpoints | Free public RPC |
-| Image storage | Self-hosted in Postgres BYTEA (`nft_image_blobs`) | Included in DB storage |
-| Hosting | [Fly.io](https://fly.io) (single Go binary) | ~$3-4/mo or trial credits |
+| Layer | Tech |
+|---|---|
+| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin v5 — three UUPS cores + one plain `MarketplaceManager` |
+| Backend | Go 1.26, [Fiber](https://gofiber.io) v2, pgx v5 + goose migrations, go-ethereum, gqlgen, connect-go, zerolog; optional Zig media helpers (`-tags zigmedia`) |
+| Frontend | Astro 7 (static), Svelte 5 islands, one React island for the wallet (Reown AppKit, wagmi, viem), self-hosted Inter + JetBrains Mono, Mermaid for the docs |
+| Data | [Neon Postgres](https://neon.tech) — one project per network; Redis optional (shared read caches only) |
+| Real-time | `/ws` channels, GraphQL subscriptions, Connect server streams, webhooks — all fed by one broadcaster |
+| Auth | Sign-In-with-Ethereum → JWT, only for saved searches, notifications, profile edits and webhooks |
+| Hosting | [Fly.io](https://fly.io) — three apps in `sin`, one Docker image built once per push |
+| CI | GitHub Actions: Go build/vet/race, Foundry, Slither, gitleaks, `astro check`, vitest, Playwright (light + dark + mobile, axe-gated), proto drift, governance check, CodeQL; nightly full suite; `audit.yml` on `v*` tags |
 
 ## Repository layout
 
 ```
-contracts/        Foundry project — Marketplace, AuctionHouse, OfferBook + tests + deploy scripts
-backend/
-  cmd/server/     Entry point: HTTP server + indexer wiring + HTMX page handlers
-  internal/
-    api/          REST handlers + router
-    auth/         SIWE verification + JWT
-    config/       Env-var configuration
-    db/           pgx pool, queries, SQL migrations
-    imagestore/   Content-addressed SHA-256 BYTEA blob store
-    indexer/      Chain event watcher, handlers, keeper
-    media/        IPFS/ar:// URI resolution + SSRF-safe fetcher
-    sse/          Real-time event hub
-    ui/           Embedded templates + static assets (HTMX/Alpine/ethers/wallet.js)
-docs/             Ops docs (deploy, checklist, monitoring, immutability); user docs live in app/src/pages/docs
-deployments/      Per-network contract addresses — the single source of truth
+app/                 Astro 7 UI · Svelte 5 islands · React wallet island
+  src/lib/tx         contract write flows (viem) · runner state machine · builders · durations
+  src/lib/ws         MwSocket · channels           src/lib/chains   per-network mirror of the Go profile
+  src/lib/optimistic.ts  optimistic reducers        src/pages/docs   user docs (served at /docs)
+  e2e/               Playwright smoke suite + docs screenshot spec
+backend/             Go 1.26 · Fiber
+  cmd/server         boot: migrate → connect → guard → indexer → http
+  cmd/keeperrotate · cmd/reindexgov · cmd/chainwipe   operator tools
+  internal/chain/profile   per-network tuning table (validated at boot)
+  internal/indexer   watcher · instant lane · keepers · metadata · governance · ops health
+  internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier · imagestore · ops
+contracts/           Foundry · src/ · test/ · script/DeployV34.s.sol · script/DeploySafe.s.sol
+deployments/         per-network address records (source of truth, schema-checked)
+docs/                operator docs + system breakdown + screenshots
+tools/               upgrade-cores.sh · check-governance.sh · check-deployments.sh
+fly.<net>.toml.example   per-network Fly templates (CI fills placeholders)
+.github/workflows    ci · deploy · nightly · audit · codeql
 ```
 
-## Prerequisites
+## Run it locally
 
-- [Go](https://go.dev/dl/) **1.25+**
-- [Foundry](https://book.getfoundry.sh/getting-started/installation) (`forge`)
-- A [Neon Postgres](https://neon.tech) project (free tier works)
-- Optionally [slither](https://github.com/crytic/slither) for contract static analysis
-
-## Neon Database Setup (Free Tier)
-
-1. **Create a Neon account** at [neon.tech](https://neon.tech) (no credit card required).
-2. **Create a project** — choose any region (us-east-2 recommended for Fly.io `iad`).
-3. **Get your connection string** from the Neon dashboard → Connection Details → `psql` / `Postgres` tab.
-   ```
-   postgresql://user:password@ep-<project>-<pooler>.us-east-2.aws.neon.tech/magicwebb?sslmode=require
-   ```
-4. **Create the database** (the default `neondb` is fine, or create a named one):
-   ```bash
-   # Using the pooled connection string
-   psql "<your-neon-connection-string>" -c "CREATE DATABASE magicwebb;"
-   ```
-
-**Free tier quotas:**
-| Resource | Limit |
-|----------|-------|
-| Storage | 0.5 GB per project |
-| Compute | 100 CU-hours/month (auto-pauses when idle) |
-| Connections | Up to 10,000 pooled (built-in PgBouncer) |
-| Projects | Up to 100 per account |
-| Branching | Unlimited (copy-on-write, ideal for dev/CI) |
-
-The app uses a pgxpool tuned for Neon (see `backend/internal/db/pool.go`):
-- `MaxConns=10` — stays well within free tier
-- `MaxConnIdleTime=4m` — closes connections before Neon's ~5 min idle timeout
-- `MaxConnLifetime=30m` — rotates stale sockets
-- `HealthCheckPeriod=30s` — detects dead connections quickly
-
-> **Note:** Neon supports `LISTEN/NOTIFY` which the app uses for cross-instance real-time event fan-out. Use the **pooled** connection string (default port 5432) — the un-pooled direct port (6543) is only needed for long-running transactions or pg_dump.
-
-## Configuration
-
-The backend reads configuration from environment variables (see `.env.example`). Provide them via your shell, a `.env` file, or your host's secret manager.
-
-**Required:** `CHAIN_ID`, `MARKETPLACE_ADDR`, `AUCTION_ADDR`, `OFFERBOOK_ADDR`, `POSTGRES_URL`, `JWT_SECRET` (≥32 chars). `RPC_URL` is optional since v3.6: the chain profile's public RPC set (`backend/internal/chain/profile/<network>.go`) rotates by default; set `RPC_URL`/`RPC_URLS` to use a private provider.
-
-**All assets self-hosted:** No IPFS gateway JWT, no Pinata key, no third-party object storage needed. NFT images are stored directly in Postgres BYTEA columns and served from `/api/v1/img/<sha256>`.
-
-## Run locally
-
-```powershell
-# Windows (PowerShell) — loads .env and starts the server with hot reload
-./dev.ps1
-```
+Prerequisites: Go 1.26+, Node 20+, [Foundry](https://book.getfoundry.sh/) for
+the contracts, a Neon (or any) Postgres URL. `RPC_URL` is optional — the
+network profile's public RPC set rotates by default.
 
 ```bash
-# Or directly
+# backend (serves the API, /ws, and the built UI from app/dist when present)
 cd backend
-go run ./cmd/server      # serves on $HTTP_ADDR (default :8080)
+export CHAIN_ID=114 POSTGRES_URL=postgres://… JWT_SECRET=$(openssl rand -hex 32)
+export MARKETPLACE_ADDR=0x… AUCTION_ADDR=0x… OFFERBOOK_ADDR=0x…   # from deployments/coston2.json
+go run ./cmd/server            # :8080 · migrations run at boot · /healthz /readyz
+
+# frontend with hot reload (proxies /api, /auth, /ws to :8080)
+cd app && npm install && npm run dev      # http://localhost:4321
 ```
 
-Then open http://localhost:8080 — the server auto-runs DB migrations on first boot. `/healthz` reports liveness.
+On Windows, `./dev.ps1` loads `.env` and starts the backend with hot reload.
+`.env.example` lists every variable; the required ones are `CHAIN_ID`,
+`POSTGRES_URL`, `JWT_SECRET` (≥ 32 chars) and the three contract addresses.
+A network with no contracts (`status: read-only` in `deployments/`) boots in
+browse-only mode.
 
-### Using Neon branching for local development
-
-Neon's branching feature is ideal for testing schema migrations or indexer re-indexes without impacting production:
+## Tests
 
 ```bash
-# Create a branch (via Neon dashboard or API)
-# Get the branch's connection string
-POSTGRES_URL=<branch-connection-string> go run ./cmd/server
+cd contracts && forge test                         # unit + fuzz + invariants
+cd backend   && go test ./... -race                # whole backend (vet the WHOLE module before pushing)
+cd app       && npm test && npm run check          # vitest + astro check
+cd app       && npm run build && npm run test:e2e  # Playwright: desktop light, desktop dark, mobile; axe gate
+cd app       && npm run shots                      # docs screenshots → docs/images/v3.6/
 ```
 
-Each branch is a copy-on-write clone — zero additional storage cost until data diverges.
+CI runs all of it on every push and PR; `nightly.yml` adds the race + Foundry +
+Slither + gitleaks sweep, `audit.yml` runs on `v*` tags.
 
 ## Contracts
 
 ```bash
 cd contracts
-forge build
-forge test                       # full unit/scenario suite
+forge build && forge test
+# deploy a network (unsealed, admin-held, instant upgrades) — see docs/DEPLOY_CHECKLIST.md
 PRIVATE_KEY=0x… ADMIN_ADDR=0x… FEE_RECIPIENT_ADDR=0x… KEEPER_ADDR=0x… \
-  forge script script/DeployV34.s.sol --rpc-url coston2 --broadcast   # deploy unsealed (same env as `make deploy`)
-slither .                        # static analysis
+  forge script script/DeployV34.s.sol --rpc-url <rpc> --broadcast
+# upgrade all three cores on a live network (deploy impls → queue + install → verify → record)
+ADMIN_KEY=0x… DEPLOYER_KEY=0x… tools/upgrade-cores.sh coston2 [--dry-run|--verify|--rollback]
 ```
 
-Deployed Coston2 addresses are configured in `.env.example`.
+`MarketplaceCore` holds the shared rules: `PLATFORM_FEE_BPS = 200` split
+150 / 50 between `feeRecipient` and the keeper, `MIN_PRICE = 1 ether`, the
+fifteen durations, pull-payment refunds, and the admin-gated UUPS path.
+Governance, rotation and sealing: [`docs/UPGRADE_RUNBOOK.md`](docs/UPGRADE_RUNBOOK.md),
+[`docs/IMMUTABILITY_TRANSITION.md`](docs/IMMUTABILITY_TRANSITION.md).
 
 ## Deployment
 
-The app compiles to a single self-contained Go binary (`make build` → `bin/magicwebb`) that serves the REST API, HTMX UI, SSE stream, and on-chain indexer. Run it anywhere a Go binary runs: set the env vars from `.env.example` (`POSTGRES_URL`, `RPC_URL`, `CHAIN_ID`, contract addresses, `JWT_SECRET`, optional `KEEPER_KEY`) and launch the binary. Health check is at `/healthz`.
+Push to `main` = deploy. `deploy.yml` builds one image, pushes it as
+`sha-<commit>`, and deploys it to the three Fly apps with each network's
+environment derived from `deployments/*.json`. Verify with
 
-See [`docs/DEPLOY_FLY.md`](docs/DEPLOY_FLY.md) for Fly.io deployment instructions.
+```bash
+curl -sI https://magicwebb.fly.dev/healthz | grep -i x-mw-build-sha
+```
 
-### What makes it free to run
+Bringing a network up, read-only or trading: [`docs/NETWORKS.md`](docs/NETWORKS.md),
+[`docs/DEPLOY_FLY.md`](docs/DEPLOY_FLY.md), [`docs/DEPLOY_CHECKLIST.md`](docs/DEPLOY_CHECKLIST.md).
+Monitoring and alerts: [`docs/MONITORING.md`](docs/MONITORING.md). Backups and
+the restore drill: [`docs/RUNBOOK_RESTORE.md`](docs/RUNBOOK_RESTORE.md).
 
-| Component | Cost |
-|-----------|------|
-| Database | [Neon free tier](https://neon.tech/pricing) — 0.5 GB, 100 CU-hours/mo, 10k connections |
-| Hosting | [Fly.io](https://fly.io/pricing) — shared-cpu-1x/512MB ~$3-4/mo (trial credits available) |
-| Smart contracts | Deployed on Flare Coston2 — no admin gas overhead on any trade |
-| Image storage | Self-hosted in Postgres BYTEA — no IPFS/Pinata/CDN costs |
-| WalletConnect | Free project ID from [Reown Cloud](https://cloud.reown.com) |
-| RPC | Free public Flare Coston2 endpoints |
-
-**The entire application has zero paid dependencies** beyond the Fly.io hosting fee (~$3-4/mo).
+Running cost is the Fly machines (three × shared-cpu-1x) and Neon usage; the
+free tier covers a testnet. No IPFS pinning, no third-party object storage, no
+paid RPC.
 
 ## Documentation
 
-User docs are served by the app at `/docs` (source: `app/src/pages/docs/`):
-user guide, whitepaper, technical architecture, FAQ, token hooks, API (`/docs/api.yaml`).
+User docs are served by the app at `/docs` (source `app/src/pages/docs/`):
+Start here, Whitepaper, Technical whitepaper, **System breakdown**, User guide,
+What you can do, FAQ, Token architecture, API reference (`/docs/api.yaml`).
 
-Operator docs in [`docs/`](docs/):
-- **`DEPLOY_FLY.md`** — one Fly app per network, CI flow, bringing up Songbird/Flare
-- **`DEPLOY_CHECKLIST.md`** — contract deployment gates (audit + multisig on mainnet)
-- **`IMMUTABILITY_TRANSITION.md`** — unsealed-by-default networks, instant admin-gated upgrades, admin rotation, per-network `renounceAdmin()`
-- **`MONITORING.md`** — health endpoints, metrics, alerts
+Operator docs in [`docs/`](docs/): `ARCHITECTURE.md`, `SYSTEM_BREAKDOWN.md`,
+`NETWORKS.md`, `DEPLOY_FLY.md`, `DEPLOY_CHECKLIST.md`, `UPGRADE_RUNBOOK.md`,
+`IMMUTABILITY_TRANSITION.md`, `MONITORING.md`, `RUNBOOK_RESTORE.md`,
+`DESIGN.md`, `USER_CAPABILITIES.md`. Release notes: [`CHANGELOG.md`](CHANGELOG.md).
 
-Contract addresses: [`deployments/`](deployments/) is the single source of truth.
-Migration numbering note: `backend/internal/db/migrations` skips 031 on purpose — never renumber goose files.
+Migration numbering note: `backend/internal/db/migrations` skips 031 on
+purpose — never renumber goose files.
 
 ## License
 

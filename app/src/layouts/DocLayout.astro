@@ -19,6 +19,9 @@ import { DOCS } from '../pages/docs/_registry';
 const { frontmatter } = Astro.props;
 const title = frontmatter?.title ?? 'Docs';
 const description = frontmatter?.description;
+// `wide: true` in a document's frontmatter lifts the 68ch measure — the
+// system breakdown's diagrams and matrices need the full column.
+const wide = frontmatter?.wide === true;
 
 const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
 ---
@@ -26,7 +29,7 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
 <BaseLayout title={title} description={description} activeNav="docs">
   <WalletConnect slot="wallet" client:only="react" />
 
-  <div class="doc-shell">
+  <div class={`doc-shell${wide ? ' is-wide' : ''}`}>
     <nav class="doc-nav" aria-label="Documents">
       <!-- Desktop: always-visible list. -->
       <div class="doc-nav-static">
@@ -57,11 +60,133 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
       </details>
     </nav>
 
-    <article class="doc-body">
+    <article class={`doc-body${wide ? ' is-wide' : ''}`}>
       <slot />
     </article>
   </div>
 </BaseLayout>
+
+<script>
+  // ```mermaid fences reach the page as <pre><code class="language-mermaid">
+  // (astro.config excludes mermaid from shiki). Render them client-side, only
+  // on pages that have one (dynamic import → its own chunk), in the active
+  // colour scheme; re-render when the OS scheme or the header toggle flips.
+  const codes = Array.from(document.querySelectorAll<HTMLElement>('.doc-body pre > code.language-mermaid'));
+  if (codes.length) {
+    const blocks = codes.map((code) => ({ pre: code.parentElement as HTMLElement, src: code.textContent ?? '' }));
+    const mq = matchMedia('(prefers-color-scheme: dark)');
+    const isDark = () => {
+      const t = document.documentElement.dataset.theme;
+      return t === 'dark' || (t !== 'light' && mq.matches);
+    };
+    let seq = 0;
+    let gen = 0;
+    const render = async () => {
+      const my = ++gen;
+      const mermaid = (await import('mermaid')).default;
+      if (my !== gen) return;
+      // Colours come from the site tokens so every diagram clears the same
+      // 4.5:1 gate as the rest of the page in both schemes (mermaid's own dark
+      // theme paints edge labels at 4.43:1).
+      const css = getComputedStyle(document.documentElement);
+      const tok = (name: string, fallback: string) => css.getPropertyValue(name).trim() || fallback;
+      const dark = isDark();
+      const text = tok('--text', dark ? '#f4f4f5' : '#18181b');
+      const surface = tok('--surface-2', dark ? '#16161c' : '#f4f4f5');
+      const surface1 = tok('--surface', dark ? '#0f0f13' : '#ffffff');
+      const line = tok('--line-strong', dark ? 'rgba(255,255,255,.16)' : 'rgba(0,0,0,.16)');
+      const accent = tok('--sky', '#7dd3fc');
+      mermaid.initialize({
+        startOnLoad: false,
+        theme: 'base',
+        darkMode: dark,
+        securityLevel: 'strict',
+        fontFamily: 'Inter, system-ui, sans-serif',
+        fontSize: 14,
+        themeVariables: {
+          darkMode: dark,
+          background: surface,
+          mainBkg: surface1,
+          primaryColor: surface1,
+          primaryTextColor: text,
+          primaryBorderColor: line,
+          secondaryColor: surface1,
+          secondaryTextColor: text,
+          secondaryBorderColor: line,
+          tertiaryColor: surface,
+          tertiaryTextColor: text,
+          tertiaryBorderColor: line,
+          textColor: text,
+          lineColor: accent,
+          nodeBorder: line,
+          clusterBkg: 'rgba(127,127,127,0.08)',
+          clusterBorder: line,
+          titleColor: text,
+          edgeLabelBackground: surface,
+          nodeTextColor: text,
+          // state diagrams
+          labelColor: text,
+          labelBackgroundColor: surface,
+          stateBkg: surface1,
+          stateLabelColor: text,
+          compositeBackground: surface,
+          altBackground: surface,
+          transitionColor: accent,
+          transitionLabelColor: text,
+          // sequence diagrams
+          actorBkg: surface1,
+          actorBorder: line,
+          actorTextColor: text,
+          actorLineColor: line,
+          signalColor: accent,
+          signalTextColor: text,
+          labelBoxBkgColor: surface1,
+          labelBoxBorderColor: line,
+          labelTextColor: text,
+          loopTextColor: text,
+          noteBkgColor: surface1,
+          noteBorderColor: line,
+          noteTextColor: text,
+          activationBkgColor: surface,
+          activationBorderColor: line,
+          sequenceNumberColor: text,
+        },
+      });
+      for (const b of blocks) {
+        try {
+          const { svg } = await mermaid.render(`mw-mermaid-${seq++}`, b.src);
+          if (my !== gen) return;
+          let host = b.pre.previousElementSibling as HTMLElement | null;
+          if (!host || !host.classList.contains('mermaid-diagram')) {
+            host = document.createElement('figure');
+            host.className = 'mermaid-diagram';
+            b.pre.before(host);
+          }
+          host.innerHTML = svg;
+          // mermaid emits width="100%" with max-width = the natural width, so a
+          // wide diagram shrinks to the column and its labels shrink with it.
+          // Below ~70 % keep the natural size and let the figure scroll sideways.
+          const el = host.querySelector('svg');
+          if (el) {
+            const natural = parseFloat(el.style.maxWidth || '0');
+            const avail = host.clientWidth - 32;
+            if (natural > 0 && avail > 0 && avail / natural < 0.7) {
+              el.style.width = `${natural}px`;
+              el.style.maxWidth = 'none';
+            }
+          }
+          b.pre.hidden = true;
+        } catch (err) {
+          b.pre.hidden = false; // leave the source readable
+          console.warn('mermaid: diagram failed to render', b.src.slice(0, 40), err);
+        }
+      }
+    };
+    render();
+    mq.addEventListener('change', () => { render(); });
+    new MutationObserver(() => { render(); }).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+  }
+</script>
 
 <style>
   .doc-shell {
@@ -150,6 +275,15 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
     border-radius: 0.75rem; padding: 1rem; overflow-x: auto; margin: 0 0 1.25rem;
   }
   .doc-body :global(pre code) { background: none; border: none; padding: 0; }
+  .doc-body.is-wide { max-width: none; }
+  /* Wide documents (diagrams, matrices) get the whole viewport, not 74rem. */
+  .doc-shell.is-wide { max-width: 100rem; }
+  /* Client-rendered mermaid diagrams (see the script above). */
+  .doc-body :global(.mermaid-diagram) {
+    margin: 0 0 1.25rem; padding: 1rem; background: var(--surface-2);
+    border: 1px solid var(--white-10); border-radius: 0.75rem; overflow-x: auto;
+  }
+  .doc-body :global(.mermaid-diagram svg) { display: block; max-width: 100%; height: auto; margin: 0 auto; }
   .doc-body :global(table) { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: 0.9375rem; display: block; overflow-x: auto; }
   .doc-body :global(th), .doc-body :global(td) {
     text-align: left; padding: 0.5rem 0.75rem;

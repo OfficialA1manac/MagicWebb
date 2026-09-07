@@ -14,7 +14,8 @@
     "test": "vitest run",
     "astro": "astro",
     "gen:abi": "node scripts/gen-abi.mjs",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "shots": "playwright test -c playwright.shots.config.ts"
   },
   "dependencies": {
     "@astrojs/react": "^4.0.0",
@@ -28,6 +29,7 @@
     "@wagmi/core": "^3.5.5",
     "astro": "^7.0.6",
     "ethers": "^6.17.0",
+    "mermaid": "^11.17.2",
     "react": "^18.3.0",
     "react-dom": "^18.3.0",
     "svelte": "^5.56.4",

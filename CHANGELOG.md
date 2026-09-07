@@ -14,6 +14,136 @@ numbered by the deployed contract/protocol generation instead —
 `MarketplaceManager`, timelocked upgrades and on-chain durations.
 The two schemes do not overlap: `v29` precedes `v3.0` in time.
 
+## v3.6 — 2026-09-07 — Governance trail, NFT badges, non-technical UX, ops hardening, both-scheme a11y gate
+
+Live on Coston2 on the v3.5 contract set (block 34905078; Marketplace
+`0xa6fbad08…`, AuctionHouse `0x0ADe5F5A…`, OfferBook `0x358d4504…`, manager
+`0x14C3b1Ba…`). Songbird and Flare stay browse-only. Eight waves on `main`
+(91f64b7 → this tag), each deployed on push — `X-MW-Build-SHA` verified on all
+three apps after every wave. **Owner-gated, not in this release:** the Coston2
+core upgrade to the 15-duration implementations (`tools/upgrade-cores.sh
+coston2` + `cmd/reindexgov`) — until then a 10-minute duration reverts
+`InvalidDuration` on-chain (decoded before the wallet opens) — and the wave 9
+mainnet go-live (Safe owners, deployer funding, fee recipient, keeper secrets,
+Neon snapshot schedule).
+
+### Contracts / tooling (wave 2)
+
+- **15 durations**: the 10-minute option is back (owner directive 2026-09-06);
+  NatSpec, tests and the frontend agree; gas baseline regenerated.
+- `tools/upgrade-cores.sh <network> [--dry-run|--verify|--rollback]`: deploys
+  the three implementations with immutables read from the live proxies, queues
+  and installs each with `ADMIN_KEY` (instant), verifies through the proxies
+  and records `impls` / `superseded_impls` in `deployments/<network>.json`.
+
+### Governance trail (wave 1)
+
+- The watcher now listens to the manager and to every core's upgrade events
+  (`KeeperSet`, `AdminTransferStarted/Cancelled/Transferred`, `AdminRenounced`,
+  `UpgradeQueued/Cancelled`, ERC-1967 `Upgraded`) — migration 043
+  `governance_events`, Prometheus counter, `governance` SSE / webhook event.
+- `GET /api/v1/governance`: live admin / pending admin / keeper / upgrade delay
+  (a Safe admin is labelled `admin_is_contract`), current implementations, last
+  50 events; `{deployed:false}` on read-only networks.
+- `/status` "Admin & upgrades" tiles + event table with a per-proxy
+  pending-upgrade warning; a `system` notification to every opted-in wallet
+  when control changes (`profiles.security_alerts`, `PUT /profile`,
+  `GET /profile/:addr/prefs`); `cmd/reindexgov` backfill;
+  `tools/check-governance.sh` as a CI job.
+
+### Badges (waves 3–4)
+
+- NFT-level **✓**: collection verified AND name AND image served from our store
+  AND holder known, computed in one place (`db/badge.go`) for listings,
+  auctions, offers, search, activity, collection tokens and token detail;
+  unmet checks are named in `verified_reason[]`.
+- **★ Creator** only where the owner decided (D3): holder == collection creator
+  AND minted by that creator (migration 044 `nft_tokens.minter`, recorded from
+  `Transfer` from `0x0`, backfilled by `reindexgov -collections`).
+- `/token` gains `minter` + `creator {address, display_name, tag}`; `/profile`
+  gains `creator_of` + `verified_creator`; verifier cadence from the profile.
+- One `Badge.svelte` (check / pill / creator) replaces three components and a
+  dead global; "Created by" links to the creator's profile on every surface.
+
+### UX for non-technical users (waves 5a–5c)
+
+- P1 fixes: token page reads the indexed image first; cards use 256px
+  renditions; deep links `/token#offer` and `/profile#nfts`; success cards +
+  next actions for every refund path; disconnected-wallet wait 120s → 30s.
+- **Light theme complete** (tokens only, light tints defined) + header toggle
+  System → Light → Dark (`[data-theme]` wins over the OS scheme, applied before
+  first paint).
+- **TxModal Review step**: nothing reaches the wallet until Confirm; "Step X of
+  N"; approval-row Hint; busy state explains why Cancel is disabled. Inline
+  Hints at the decision point ("What is an offer?", "What happens to my bid?").
+- No-wallet path (`NoWalletSheet`), `FirstRun` strip on home / token / auction /
+  collection, poster hero, network switcher built from `networkStatuses()` with
+  a HEAD probe + arrival toast, banner priority (wrong-network > browse-only >
+  testnet).
+- Optimistic UI: pure reducers (`lib/optimistic.ts`) + `settleAfterTx` (one
+  refetch on `tx-indexed`, else after 2s) replace the 1.5s + 6s double timers;
+  fixed the runner waiting on `hash` while the backend publishes `tx_hash`.
+- WS scoping (NFTGrid listing-only, TokenPage token + collection channels), one
+  `Skeleton.svelte`, the motion set, `--sticky-bar-h`, 44px touch targets on
+  phones, `DurationPicker` two-row scroller, FAQ `#networks`.
+
+### Backend layering + ops (waves 6a–6c)
+
+- `chain/profile` split into per-network files with `Validate()` /
+  `ValidateAll()` at boot; new `AllowanceModuleAddr` (fee sweeper probes the
+  bytecode first) and `ConnectRateTier`; dead knobs wired — `KeeperTick` drives
+  settlement (1s / 2s), `BlockTime` / `Confirmations` reach the UI via
+  `/api/v1/server-time` + `window.MW_*`, `Mainnet` gates the testnet banner and
+  refuses `RESET_ON_ADDRESS_CHANGE`, `DefaultRPCs` rotate so **`RPC_URL` is
+  optional**, effective gas caps are validated. Activity cache keys are
+  chain-namespaced; `internal/crypto` + `zigcrypto` deleted (zero callers);
+  frontend `lib/chains/` directory mirror with a field-by-field parity test.
+- **Ops hardening**: `internal/ops` snapshot; supervised `keeper-health`
+  (balance levels, fee-cap watch, underpriced counter), `lag-alert` (> 30
+  blocks for 2 min, resolved notice), `image-store` (gauge + LRU eviction of
+  unreferenced blobs 80 % → 70 %, migration 045); Discord / Prometheus / SMTP
+  alerts with hourly cooldown; nine new gauges; `/status` keeper-balance tile;
+  `docs/RUNBOOK_RESTORE.md`; `NETWORKS.md` Neon ids corrected.
+- **Connect subscriptions declared in the proto** (`SubscribeListings`,
+  `SubscribeAuctions`, `SubscribeActivity`, `SubscribeNotifications`),
+  regenerated with pinned protoc 28.3 / protoc-gen-go 1.36.11 /
+  protoc-gen-connect-go 1.20.0; hand-rolled shims deleted; `make proto`,
+  `proto-check`; CI `proto-drift` job. Hotfix b778394: the ws test mock
+  implements the four streams (`go vet ./...` on the whole module before any
+  push).
+
+### Tests / CI (wave 7)
+
+- Playwright: new `dark` project; the axe contrast gate runs in **both**
+  schemes on nine pages; touch-target and 12px sweeps cover token / auction /
+  offers / profile; new flows (token happy path, `#nfts` tab, sticky bar
+  variable + toast stacking at 390px, no-wallet sheet focus return, banner
+  priority); the "unreachable sibling" switch is `test.fixme` (flaky, ~1 in 3);
+  token-page cases allow the CI runner's 15s wagmi timeout (bf7d1c0).
+- vitest durations parity: the app's fifteen durations equal the `DURATION_*`
+  constants in `MarketplaceCore.sol`.
+- Contrast fixes forced by the gate: TokenPage tokens-only, `--white-40` now
+  tracks `--text-3`, new `--text-on-gold`, captions ≥ 12px.
+- Nightly / audit gitleaks steps pass `GITHUB_TOKEN` (the anonymous owner
+  lookup 403s on the runner's shared IP and reports "missing gitleaks license").
+
+### Docs (wave 8)
+
+- README rewritten for v3.6 (three networks, 2 % split, no admin, badges,
+  stack, tests, deploy).
+- `docs/SYSTEM_BREAKDOWN.md` + `/docs/system` (mermaid rendered client-side by
+  a lazy-loaded mermaid 11 chunk, theme-aware; `wide` docs layout): deployment
+  topology, request path + instant lane, indexer + keeper loop, listing /
+  auction / offer state machines, role × action matrix, governance lifecycle,
+  badge decision tree, real-time faces, ops health, screenshots. Mirror script
+  `tools/mirror-system-doc.py`.
+- Screenshots of every page — desktop + mobile, light + dark — in
+  `docs/images/v3.6/` from `npm run shots` (`playwright.shots.config.ts`).
+- `ARCHITECTURE.md` §6 / §7 / §8 (+ badges, governance, ops), `capabilities.md`
+  (badges, who controls the contracts), `UPGRADE_RUNBOOK.md` "Safe as admin",
+  `DEPLOY_CHECKLIST.md` mainnet rows, `DESIGN.md` v3.6 tokens / motion /
+  components / shell; the "MagicWebb System Atlas" artifact updated to v3.6.
+
 ## v3.5 — 2026-09-04 — Keeper-mandatory protocol, UX-spec frontend, no-admin surface
 
 Live on Coston2 from block 34905078 (fresh set: Marketplace `0xa6fbad08…`,

@@ -1,4 +1,4 @@
-# MagicWebb design system (v3.5, spec B0)
+# MagicWebb design system (v3.6)
 
 Source of truth: `app/src/styles/tokens.css` (tokens), `app/src/styles/base.css`
 (reset, type, `.btn`, forms, focus, tab bar, banners), `app/src/lib/icons.ts`
@@ -22,16 +22,20 @@ before signing) · **calm app UI** · **44px everywhere**.
 | | `--text-3` | `rgba(255,255,255,.56)` | captions ≥12px only; **never below .56 for text** |
 | Accent | `--sky` `#7dd3fc` | primary / listings | `--gold` `#fcd34d` price / offers |
 | | `--violet` `#a78bfa` auctions | `--green` `#4ade80` success / live | `--red` `#fca5a5` error · `--amber` `#fbbf24` creator |
+| | `--text-on-gold` | `#09090b` (light: `#ffffff`) | text on gold buttons — gold is a deep amber in light |
 | Tints | `--sky-12`, `--sky-35`, `--gold-12`, … | 12 % fills, 35 % borders for pills | |
 | Spacing | `--sp-1…16` | 4 8 12 16 24 32 48 64 | 4-pt grid |
 | Radius | `--r-control` 8 · `--r-card` 12 · `--r-pill` 999 | | |
 | Shadow | `--shadow` | `0 8px 24px rgba(0,0,0,.35)` | menus/modals only; cards use border |
 | Motion | `--dur-fast` 120ms · `--dur` 200ms · `--ease` `cubic-bezier(.2,.8,.2,1)` | | |
 | Layout | `--header-h` 60 (56 mobile) · `--tabbar-h` 60 · `--hit` 44 | | |
+| | `--sticky-bar-h` | `0px` | published by the token / auction / profile sticky bars (`lib/stickybar.ts`); toasts stack above tab bar + sticky bar |
 | z-index | header 40 · banner 30 · drawer 50 · modal 60 · toast 70 | `--z-*` | |
 
 Legacy aliases (`--ink-950`, `--sky-300`, `--white-60`, …) map onto the new
 tokens so unmigrated pages keep rendering; delete them when the last page moves.
+`--white-40` is a text colour in practice and equals `--text-3` in both schemes
+(0.4 alpha failed 4.5:1 everywhere it was used — axe gate, v3.6).
 
 **Light theme** is tokens only (`prefers-color-scheme: light` in tokens.css). v3.6
 adds a header toggle (System → Light → Dark) that sets `[data-theme]` on `<html>`;
@@ -107,6 +111,17 @@ No emoji in UI chrome.
   {detail:{message, variant}}))`.
 - `Hint.svelte` — `i` button (44px hit) with `aria-describedby` popover;
   click/focus opens, Escape/outside closes. Never `title=` only.
+- `Badge.svelte` — one component, three variants: `check` (NFT ✓, glyph-only on
+  cards with the explanation rendered outside the anchor), `pill` (collection
+  tier), `creator` (★).
+- `FirstRun.svelte` — the 3-step strip (fresh / progress / done / hidden) on the
+  home hero and on token, auction and collection pages for wallet-less visitors.
+- `NoWalletSheet.svelte` — 3 lines, MetaMask / Bifrost links, popup-blocked
+  fallback, focus return; opened from the header, the drawer and step 1.
+- `DurationPicker` — 44px chips; a two-row sideways scroller on phones.
+- `TxModal` — opens on a Review step (plan summary; nothing reaches the wallet
+  until Confirm), "Step X of N", approval-row Hint, busy state with a disabled
+  Cancel and "Waiting for your wallet…".
 - Cards: hover lift 2px + border glow; `<a>`-wrapped with an inner sibling
   `<button>` overlay for the action.
 
@@ -122,7 +137,10 @@ No emoji in UI chrome.
 ## Motion
 
 Allowed: card hover lift, button active scale, `.reveal` fade + 8px rise,
-toast slide 200ms, countdown colour change, skeleton shimmer 1.2s. Removed:
+toast slide 200ms, countdown colour change, skeleton shimmer 1.2s, and the v3.6
+set: profile tab underline slides, card images fade in, a price / leader change
+flashes gold, the countdown pulses in its last minute, modals scale .98→1 in
+`--dur-fast`. Removed:
 hero parallax off the home page, document-level tilt, floating blobs. All
 honour `prefers-reduced-motion`.
 
@@ -136,5 +154,7 @@ disabled; switching keeps `pathname + search` and toasts "Switching to X…")
 covers the tab bar, ✕ 44px, focus trap, Escape. Bottom tab bar: Home ·
 Listings · Auctions · Offers · Profile; `main` pads for it. Banners: testnet
 (faucet link from `MW_FAUCET_URL`) and browse-only ([Try Coston2] [Why?]),
-dismissible per session. Footer: Docs · GitHub · Status. 404 page:
+dismissible per session; priority wrong-network > browse-only > testnet, one at a
+time. Theme toggle (System → Light → Dark, 44px, labelled) sets `[data-theme]` on
+`<html>` before first paint. Footer: Docs · GitHub · Status. 404 page:
 `app/src/pages/404.astro`.

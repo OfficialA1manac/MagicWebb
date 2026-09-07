@@ -10,6 +10,11 @@ export default defineConfig({
   ],
   // Output static HTML + client-side JS islands
   output: 'static',
+  // Markdown: shiki highlights every fence except ```mermaid — DocLayout
+  // renders those client-side (lazy-loaded mermaid, follows the theme).
+  markdown: {
+    syntaxHighlight: { type: 'shiki', excludeLangs: ['mermaid'] },
+  },
   // Prefetch same-origin links on hover so navigation feels instant.
   // (ViewTransitions/ClientRouter evaluated and deferred: every page's inline
   // scripts key off DOMContentLoaded, which never re-fires after a client-side

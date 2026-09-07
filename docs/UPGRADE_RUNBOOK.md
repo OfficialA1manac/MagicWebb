@@ -128,6 +128,36 @@ no path back from renunciation and no path to a second admin. A pending offer
 never holds power — `hasRole(DEFAULT_ADMIN_ROLE, pending)` is false until
 accepted — so a compromised *offeree* key gains nothing; cancel and re-offer.
 
+## Safe as admin (mainnet)
+
+On Songbird and Flare the admin is a Gnosis Safe from block one
+(`contracts/script/DeploySafe.s.sol` creates it; `DeployV34.s.sol` takes its address as
+`ADMIN_ADDR`; threshold ≥ 2, owners saved offline). An existing EOA-held network moves
+to a Safe with the same 2-step hand-off: `transferAdmin(<safe>)` from the EOA, then
+`acceptAdmin()` executed **as a Safe transaction** (Transaction Builder → contract
+`MarketplaceManager`, method `acceptAdmin`, no arguments; collect the threshold
+signatures; execute). `/api/v1/governance` then reports `admin_is_contract: true`
+and `/status` labels the admin as a contract.
+
+Every admin action becomes a Safe transaction carrying the calldata the `cast send`
+lines above would have sent:
+
+```bash
+cast calldata "setKeeper(address)" $NEW_KEEPER          # to the manager
+cast calldata "queueUpgrade(address)" $NEW_IMPL         # to the CORE proxy
+cast calldata "upgradeTo(address)" $NEW_IMPL            # same proxy, after the queue tx executed
+cast calldata "cancelUpgrade()"                         # to the core proxy
+cast calldata "renounceAdmin()"                         # to the manager — final
+```
+
+Queue and install are two Safe transactions: the queue entry must exist on-chain when
+`upgradeTo` runs, so execute the queue transaction first, then collect the signatures
+for the install. The 7-day `MAX_UPGRADE_WINDOW` counts from the queue transaction's
+block. The implementation deploy (`forge create`, deployer key, no admin power) is
+unchanged; only the queue + install calls move into the Safe. Verify through the proxies
+exactly as in "Performing an upgrade" step 3. Keeper rotation on a Safe-held network:
+`setKeeper` as a Safe transaction, then the Fly secret + funding steps above unchanged.
+
 ## Going immutable (per network, owner's order only)
 
 One transaction from that network's admin:

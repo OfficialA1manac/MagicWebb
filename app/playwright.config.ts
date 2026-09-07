@@ -6,6 +6,8 @@ import { defineConfig, devices } from '@playwright/test';
 // chain is needed. Chromium only — this is a smoke gate, not a browser matrix.
 export default defineConfig({
   testDir: './e2e',
+  // Docs screenshots have their own runner (playwright.shots.config.ts, `npm run shots`).
+  testIgnore: /screenshots\.spec\.ts$/,
   timeout: 60_000,
   expect: { timeout: 15_000 },
   fullyParallel: true,

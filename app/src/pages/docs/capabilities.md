@@ -55,6 +55,9 @@ to a different site, so you connect your wallet again on arrival.
 | Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
 | Edit own profile (SIWE) | — | ✓ | ✓ |
 | Switch network (keeps path) | ✓ | ✓ | ✓ |
+| See who controls the contracts (`/status`, `/api/v1/governance`) | ✓ | ✓ | ✓ |
+| Security alerts when control changes (SIWE, opt-out) | — | ✓ | ✓ |
+| Theme: System / Light / Dark | ✓ | ✓ | ✓ |
 | Anything admin | none exists | none | none |
 
 The buttons carry the same names in the app: **Buy**, **List for sale**, **Change price**,
@@ -72,6 +75,27 @@ everyone**, returning every bid.
 **Bids must take the lead.** A bid that clears neither the reserve nor the leader's total
 plus the flat 1-native-token increment is rejected outright rather than parked as escrow — you never
 end up with money locked behind a position that cannot win.
+
+## Badges
+
+Badges are computed from on-chain and indexed facts, never granted by hand.
+
+- **✓ on an NFT** — its collection passed the verifier (a real ERC-721/1155 contract with
+  resolvable metadata), the token has a name, its image is served from MagicWebb's own
+  store, and its holder is known. Tap the ✓ (or hover) to see which checks a token without
+  it has not met.
+- **★ Creator** — the holder is the collection's creator and minted the token. A creator
+  who merely sells someone else's token shows no star.
+- **Collection tiers** on detail headers: *Listed collection* → *Verified* → *Authentic*
+  (verified and the creator is known).
+
+## Who controls the contracts
+
+Nobody in the product. On-chain, each network has one **admin** key (upgrades and keeper
+rotation, until it is renounced) and one **keeper** (automated settlement — it can never
+move or block funds). Both are public: `/status` shows the current admin, pending admin,
+keeper and every upgrade or hand-off ever made, and signed-in wallets are notified when
+control changes (opt out in your profile).
 
 ## Search & discovery
 

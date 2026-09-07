@@ -100,3 +100,7 @@ jobs:
         uses: gitleaks/gitleaks-action@ff98106e4c7b2bc287b24eaf42907196329070c7 # v2.3.9
         env:
           GITLEAKS_ENABLE_UPLOAD_ARTIFACT: "false"
+          # Same as ci.yml: the owner lookup is anonymous without a token and
+          # 403s on the runner's shared IP rate limit, which the action reports
+          # as "missing gitleaks license" (2026-09-07 nightly run 34102268349).
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}

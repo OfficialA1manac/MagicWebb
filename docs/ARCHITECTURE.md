@@ -7,7 +7,8 @@ address handles instant upgrades, keeper replacement and its own 2-step rotation
 single `keeper` address automates settlement; see
 `IMMUTABILITY_TRANSITION.md`. No role can pause trading entries or exits.) This document is
 the map; `USER_CAPABILITIES.md` is what each kind of user can do; `NETWORKS.md` is how a
-network is provisioned.
+network is provisioned; `SYSTEM_BREAKDOWN.md` is the picture book (deployment, request path,
+indexer + keeper loop, state machines, governance, badges, screenshots).
 
 ## 1. One stack per network
 
@@ -55,7 +56,7 @@ shows a dismissible banner plus read-only empty states pointing at the Coston2 o
 Per-network tuning (finality depth, poll cadence, keeper tickers, getLogs caps, gas caps,
 default RPCs, identity) lives in one table: `backend/internal/chain/profile`. Shared code
 (`internal/chain`, `rpcpool`, `indexer`, `keeper`, `ws`, `sse`) reads the active profile.
-The browser mirror is `app/src/lib/chains.ts`; a Go test keeps the two and
+The browser mirror is `app/src/lib/chains/` (one file per network); a Go test keeps the two and
 `deployments/<key>.json` in agreement.
 
 ## 2. Request & event flow inside one network
@@ -134,7 +135,7 @@ Deployed addresses: `deployments/<network>.json` (single source of truth).
 
 ## 5. Data
 
-Neon Postgres, one project per network, 34 goose migrations applied at boot
+Neon Postgres, one project per network, 45 goose migrations applied at boot
 (`backend/internal/db/migrations`; 031 intentionally skipped — never renumber). Row-level
 security policies exist for direct PostgREST-style access; the Go service connects as an
 owner role. `chain_id` is a label column on every indexed table. Idempotency: every indexed
@@ -147,13 +148,17 @@ and SIWE nonces are Postgres-backed (`internal/ratelimit`, `internal/nonce`) so 
 across instances without Redis. Unset means per-instance memory caches; an unreachable
 Redis degrades to memory with a warning.
 
-## 6. Real-time (P3 target: one spine, three faces)
+## 6. Real-time (one spine, three faces)
 
-`sse.Broadcaster` is the only publisher path. Today the WS hub and webhooks are fed from
-it; GraphQL subscriptions and the Connect `StreamEvents` mesh exist as separate plumbing.
-P3 unifies them: `/ws` for the product UI (channels + `?since` replay), GraphQL
-subscriptions for third-party dashboards (hydrated objects), Connect `WatchEvents` server
-streams for bots and keepers, and a generated event catalog that keeps all three in sync.
+`sse.Broadcaster` is the only publisher path (sequence-numbered, replay ring, fanned across
+machines over the gRPC mesh). It feeds `/ws` for the product UI (channels `token:`
+`collection:` `user:` `tx:` `activity` + `?since` replay; islands subscribe only to what they
+show), GraphQL subscriptions for third-party dashboards (hydrated objects), the Connect
+server streams for bots and keepers (`SubscribeListings` / `SubscribeAuctions` /
+`SubscribeActivity` / `SubscribeNotifications` — declared in `marketplace.proto` since v3.6
+wave 6c, regenerated with a pinned toolchain; `make proto-check` and the CI `proto-drift`
+job refuse drift), and webhooks. Still open (P3): a generated event catalog shared by all
+three faces.
 
 ## 7. Repository layout
 
@@ -167,14 +172,16 @@ app/                 Astro 7 UI (static) · Svelte 5 islands · React wallet isl
 backend/             Go 1.26 · Fiber
   cmd/server         boot sequence (migrate → connect → guard → indexer → http)
   internal/chain/profile   per-network tuning table
-  internal/indexer   watcher · observe (instant lane) · keepers · metadata
-  internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier
+  internal/indexer   watcher · observe (instant lane) · keepers · metadata · governance · ops health
+  internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier · ops · keeper (election)
   zigsha256 · zigsniff               Zig libraries (CGO, -tags zigmedia)
 contracts/           Foundry · src/ · test/ (118) · script/Deploy*.s.sol
 deployments/         per-network address records (source of truth)
-docs/                operator docs (deploy, checklist, monitoring, immutability, networks)
+docs/                operator docs (architecture, system breakdown + screenshots, deploy, checklist,
+                     monitoring, immutability, networks, upgrade runbook, restore drill, design)
+tools/               upgrade-cores.sh · check-governance.sh · check-deployments.sh · mirror-system-doc.py
 fly.<net>.toml.example   per-network Fly templates · CI fills placeholders
-.github/workflows    ci (zig/go/forge/slither/astro/vitest/gitleaks) · deploy (matrix) · nightly · audit · codeql
+.github/workflows    ci (zig/go/forge/slither/astro/vitest/playwright/gitleaks/proto-drift/governance) · deploy (build once, matrix) · nightly · audit (v* tags) · codeql
 ```
 
 ## Listing expiry (cleanExpired)
@@ -185,7 +192,7 @@ on-chain state that needs cleanup — `buy` simply reverts `Expired`. Off-chain,
 indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decision
 2026-08-28: keep the function as a dormant escape hatch, do not call it from the keeper.
 
-## 8. Capability matrix (v3.5 — mirrored in app/src/pages/docs/capabilities.md)
+## 8. Capability matrix (v3.6 — mirrored in app/src/pages/docs/capabilities.md)
 
 | Action | Viewer | Buyer (wallet) | Seller/Owner |
 |---|---|---|---|
@@ -207,8 +214,28 @@ indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decisi
 | Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
 | Edit own profile (SIWE) | — | ✓ | ✓ |
 | Switch network (keeps path) | ✓ | ✓ | ✓ |
+| See who controls the contracts (`/status`, `/api/v1/governance`) | ✓ | ✓ | ✓ |
+| Security alerts when control changes (SIWE, opt-out) | — | ✓ | ✓ |
+| Theme: System / Light / Dark | ✓ | ✓ | ✓ |
 | Anything admin | none exists | none | none |
 
 No admin page, no login form, no roles. The only privileged key is the
 per-network on-chain admin wallet (upgrades + keeper rotation), rotatable via
 transferAdmin/acceptAdmin and eventually burned per network with renounceAdmin().
+
+### Badges (v3.6)
+
+✓ on an NFT = collection verified (ERC-165 + metadata) AND name AND image served from our
+store AND holder known — unmet checks are named in `verified_reason[]`. ★ = holder is the
+collection creator AND minted the token (`nft_tokens.minter`, migration 044). One
+`Badge.svelte` renders both on every surface; the decision tree is drawn in
+`SYSTEM_BREAKDOWN.md` §7.
+
+### Governance trail and ops health (v3.6)
+
+Manager and upgrade events are indexed (`governance_events`, migration 043), served by
+`GET /api/v1/governance` (live admin / pending admin / keeper / upgrade delay /
+`admin_is_contract` / `renounced`, current implementations, last 50 events, `keeper_health`)
+and shown on `/status`; control changes notify every opted-in wallet. Three supervised ops
+workers (keeper balance + fee cap, head lag, image store) publish `internal/ops` gauges and
+alerts — `MONITORING.md`. Core upgrades are one command: `tools/upgrade-cores.sh <network>`.

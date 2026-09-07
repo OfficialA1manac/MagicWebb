@@ -4,10 +4,19 @@ Companion to `contracts/AUDIT_REPORT.md`. Use for every network. Items marked **
 are hard gates for Flare (chain 14).
 
 ## Before
-- [ ] `forge test` green (115 tests incl. fuzz + invariants); `slither` clean or triaged.
+- [ ] `forge test` green (unit + fuzz + invariants); `slither` clean or triaged.
 - [ ] **mainnet** External audit report covers the exact commit being deployed.
-- [ ] **mainnet** `CREATOR_ADDR` is a Gnosis Safe (`contracts/script/DeploySafe.s.sol`),
-      not an EOA. Threshold ≥ 2.
+- [ ] **mainnet** `ADMIN_ADDR` is a Gnosis Safe (`contracts/script/DeploySafe.s.sol`),
+      not an EOA. Threshold ≥ 2, 2–3 owners saved offline (`UPGRADE_RUNBOOK.md` → "Safe as admin").
+- [ ] **mainnet** `FEE_RECIPIENT_ADDR` decided (a Safe is recommended).
+- [ ] **mainnet** `KEEPER_KEY` generated with `go run ./backend/cmd/keeperrotate -gen`, stored ONLY
+      as the app's Fly secret, key file deleted; its address is `KEEPER_ADDR`, funded from the
+      deployer right after the deploy (≈ 50 native on a mainnet).
+- [ ] **mainnet** Deployer funded for five contracts + wiring + keeper funding
+      (≈ 7.7 native at 650 gwei for the deploy alone; 15 SGB / 15 FLR is comfortable).
+- [ ] **mainnet** RPC primary + fallbacks answer `eth_chainId` today; `deployments/<network>.json`
+      and `backend/internal/chain/profile/<network>.go` agree (the profile test enforces it).
+- [ ] **mainnet** Neon snapshot schedule set on the network's project (`RUNBOOK_RESTORE.md`).
 - [ ] Deployer EOA funded for ~5 UUPS proxy deployments + wiring calls.
 - [ ] `KEEPER_ADDR` decided (the backend's `KEEPER_KEY` address) and funded
       (`KEEPER_MIN_BALANCE_WEI`, default 0.1 native).
@@ -39,8 +48,15 @@ authority of any kind survives the deploy transaction.
       (`docs/DEPLOY_FLY.md`).
 - [ ] Smoke: `/healthz`, `/readyz`, `/api/v1/indexer/slo` head lag < 30 blocks.
 - [ ] One real list → buy round-trip from two wallets.
-- [ ] Add origin to `NETWORK_URLS` on the other networks' apps.
-- [ ] `docs/IMMUTABILITY_TRANSITION.md` — decide the upgrade-delay posture.
+- [ ] Add origin to `NETWORK_URLS` on the other networks' apps (`deploy.yml` derives it from
+      `deployments/*.json`; set `<NET>_ENABLED=true`).
+- [ ] **mainnet** `tools/check-governance.sh` / `GET /api/v1/governance`: `admin` is the Safe
+      (`admin_is_contract: true`), `keeper` is `KEEPER_ADDR`, `upgrade_delay` 0; `/status`
+      "Admin & upgrades" shows the deploy-time `KeeperSet` (run `go run ./backend/cmd/reindexgov`
+      if the trail is empty).
+- [ ] **mainnet** Delete the idle EU Neon projects only after a separate, explicit owner OK.
+- [ ] `docs/IMMUTABILITY_TRANSITION.md` — the network stays admin-held (instant upgrades) until
+      the owner's explicit go-immutable order (`renounceAdmin()`).
 
 ## Coston2 redeploy after the duration ABI change (2026-08-21)
 
