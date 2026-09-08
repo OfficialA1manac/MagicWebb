@@ -716,7 +716,8 @@
                 {#if me && o.bidder.toLowerCase() === me.toLowerCase()}
                   <button class="btn p sm" onclick={() => doRefundExpired(o)}>Get refund</button>
                 {:else if isOwner}
-                  <button class="btn g sm" onclick={() => doRefundExpired(o)}>Return funds</button>
+                  <!-- refundExpiredOffer admits only the bidder or the keeper (NotKeeper otherwise). -->
+                  <span class="tp-dim">the bidder or the keeper returns the escrow</span>
                 {/if}
               </li>
             {/each}

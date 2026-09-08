@@ -11,8 +11,8 @@ describe('OffersPage actions matrix', () => {
     ]);
   });
 
-  it('Received, expired → Return their funds', () => {
-    expect(offerActions('received', true)).toEqual([{ kind: 'return-funds', label: 'Return their funds' }]);
+  it('Received, expired → no owner action (only the bidder or the keeper can return the escrow)', () => {
+    expect(offerActions('received', true)).toEqual([]);
   });
 
   it('Sent, not expired → Raise offer + Withdraw offer (full refund)', () => {

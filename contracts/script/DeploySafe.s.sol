@@ -4,8 +4,8 @@ pragma solidity 0.8.26;
 import {Script, console2} from "forge-std/Script.sol";
 
 /// @notice Deploy or verify a Gnosis Safe (Safe) multisig proxy on Flare,
-///         Songbird, or Coston2. The resulting Safe address should be used
-///         as CREATOR_ADDR (feeRecipient) in the main deploy scripts.
+///         Songbird, or Coston2. The resulting Safe address is used as
+///         ADMIN_ADDR (and optionally FEE_RECIPIENT_ADDR) when running DeployV34.
 ///
 ///         Safe (v1.3.0 L2) singleton + proxy factory are deployed at
 ///         canonical addresses on Flare (14), Coston2 (114), and at the
@@ -25,9 +25,10 @@ import {Script, console2} from "forge-std/Script.sol";
 ///   SAFE_SALT      -- create2 salt nonce (default: 0, i.e. fresh deploy)
 ///
 /// The script prints the Safe address and the setup call data. Paste the
-/// address into CREATOR_ADDR when running DeployV34 (the unified deploy for
-/// every network). The script does NOT deploy marketplace contracts — it
-/// only creates the Safe.
+/// address into ADMIN_ADDR (and, if the Safe should also collect fees,
+/// FEE_RECIPIENT_ADDR) when running DeployV34 (the unified deploy for every
+/// network). The script does NOT deploy marketplace contracts — it only
+/// creates the Safe.
 contract DeploySafe is Script {
     /// @notice Canonical SafeL2 v1.3.0 singleton (used on chains 14, 114).
     address constant SAFE_SINGLETON_CANONICAL = 0x3E5c63644E683549055b9Be8653de26E0B4CD36E;
@@ -172,7 +173,7 @@ contract DeploySafe is Script {
         console2.log("");
         console2.log("=== Safe Multisig Deployed ===");
         console2.log("SAFE_ADDR=",  vm.toString(safe));
-        console2.log("CREATOR_ADDR (use this as feeRecipient):", vm.toString(safe));
+        console2.log("ADMIN_ADDR (or FEE_RECIPIENT_ADDR) for DeployV34:", vm.toString(safe));
         console2.log("Owners:",     owners.length);
         console2.log("Threshold:",  threshold);
 
@@ -197,9 +198,9 @@ contract DeploySafe is Script {
 
         console2.log("Safe verified: owner count + threshold match");
         console2.log("");
-        console2.log("Paste SAFE_ADDR into your .env as CREATOR_ADDR");
-        console2.log("CREATOR_ADDR=", vm.toString(safe));
-        console2.log("Then run the main deploy script with CREATOR_ADDR set to this Safe address.");
+        console2.log("Paste SAFE_ADDR into your .env as ADMIN_ADDR (and FEE_RECIPIENT_ADDR if the Safe collects fees)");
+        console2.log("ADMIN_ADDR=", vm.toString(safe));
+        console2.log("Then run DeployV34 with ADMIN_ADDR set to this Safe address.");
     }
 
     /// @notice Parses a comma-separated address string from an env var into

@@ -29,7 +29,9 @@ read from the live proxies, queues + installs each with `ADMIN_KEY`, verifies
 `manager()`/`feeRecipient()` through the proxies, and records `impls` +
 `superseded_impls` in `deployments/<network>.json`. `--dry-run` signs nothing,
 `--verify` only prints the current state, `--rollback` reinstalls the recorded
-previous implementations. Afterwards run `go run ./backend/cmd/reindexgov` so
+previous implementations. Afterwards run `cd backend && go run ./cmd/reindexgov -from
+<upgrade block>` (with the network's `CHAIN_ID`, `POSTGRES_URL`, `RPC_URL` and contract
+addresses in the environment — the Go module lives in `backend/`) so
 the `UpgradeQueued`/`Upgraded` events show on `/status` (the watcher normally
 catches them live; the backfill is belt-and-braces). The manual steps:
 
@@ -78,12 +80,13 @@ Notes:
 ## Keeper rotation
 
 ```bash
-go run ./backend/cmd/keeperrotate -gen -out keeper-<network>.key   # new key
-go run ./backend/cmd/keeperrotate -derive keeper-<network>.key     # its address
-go run ./backend/cmd/keeperrotate -set -granter $ADMIN_KEY -to <new-addr> \
+cd backend                                                          # the Go module root
+go run ./cmd/keeperrotate -gen -out keeper-<network>.key            # new key
+go run ./cmd/keeperrotate -derive keeper-<network>.key     # its address
+go run ./cmd/keeperrotate -set -granter $ADMIN_KEY -to <new-addr> \
   -manager $MANAGER_ADDR -rpc <rpc>                                # setKeeper
 fly secrets set -a magicwebb-<network> KEEPER_KEY=<hex>            # deploy it
-go run ./backend/cmd/keeperrotate -fund -granter <funder-key> -to <new-addr> \
+go run ./cmd/keeperrotate -fund -granter <funder-key> -to <new-addr> \
   -wei 100000000000000000 -rpc <rpc>                               # ≥0.1 native
 ```
 
@@ -98,9 +101,10 @@ never strand a network: nothing changes until the NEW key proves it can sign
 by accepting. Until then the old key keeps every power and can cancel.
 
 ```bash
+# (the `go run` alternatives below run from backend/, the Go module root)
 # 1) Current admin offers the role (sets pendingAdmin only):
 cast send $MANAGER_ADDR "transferAdmin(address)" $NEW_ADMIN_ADDR --rpc-url <rpc> --private-key $ADMIN_KEY
-#    or: go run ./backend/cmd/keeperrotate -transfer-admin -granter $ADMIN_KEY \
+#    or: go run ./cmd/keeperrotate -transfer-admin -granter $ADMIN_KEY \
 #          -to $NEW_ADMIN_ADDR -manager $MANAGER_ADDR -rpc <rpc>
 
 cast call $MANAGER_ADDR "pendingAdmin()(address)" --rpc-url <rpc>   # == $NEW_ADMIN_ADDR
@@ -108,7 +112,7 @@ cast call $MANAGER_ADDR "pendingAdmin()(address)" --rpc-url <rpc>   # == $NEW_AD
 # 2) NEW admin accepts from its own key (from this block the old key is dead
 #    on the manager AND on every core's queueUpgrade/upgradeTo):
 cast send $MANAGER_ADDR "acceptAdmin()" --rpc-url <rpc> --private-key $NEW_ADMIN_KEY
-#    or: go run ./backend/cmd/keeperrotate -accept-admin -granter $NEW_ADMIN_KEY \
+#    or: go run ./cmd/keeperrotate -accept-admin -granter $NEW_ADMIN_KEY \
 #          -manager $MANAGER_ADDR -rpc <rpc>
 
 # 3) Verify, then destroy the OLD key material:
@@ -130,8 +134,8 @@ accepted — so a compromised *offeree* key gains nothing; cancel and re-offer.
 
 ## Safe as admin (mainnet)
 
-On Songbird and Flare the admin is a Gnosis Safe from block one
-(`contracts/script/DeploySafe.s.sol` creates it; `DeployV34.s.sol` takes its address as
+On Songbird and Flare (not deployed yet — `deployments/<network>.json` is `read-only`)
+the admin MUST be a Gnosis Safe from block one (`contracts/script/DeploySafe.s.sol` creates it; `DeployV34.s.sol` takes its address as
 `ADMIN_ADDR`; threshold ≥ 2, owners saved offline). An existing EOA-held network moves
 to a Safe with the same 2-step hand-off: `transferAdmin(<safe>)` from the EOA, then
 `acceptAdmin()` executed **as a Safe transaction** (Transaction Builder → contract
@@ -150,13 +154,16 @@ cast calldata "cancelUpgrade()"                         # to the core proxy
 cast calldata "renounceAdmin()"                         # to the manager — final
 ```
 
-Queue and install are two Safe transactions: the queue entry must exist on-chain when
-`upgradeTo` runs, so execute the queue transaction first, then collect the signatures
-for the install. The 7-day `MAX_UPGRADE_WINDOW` counts from the queue transaction's
-block. The implementation deploy (`forge create`, deployer key, no admin power) is
-unchanged; only the queue + install calls move into the Safe. Verify through the proxies
-exactly as in "Performing an upgrade" step 3. Keeper rotation on a Safe-held network:
-`setKeeper` as a Safe transaction, then the Fly secret + funding steps above unchanged.
+Queue and install can be ONE Safe transaction: batch `queueUpgrade(impl)` and
+`upgradeTo(impl)` to the same proxy in the Transaction Builder (MultiSend runs as a
+delegatecall, so `msg.sender` stays the Safe, and with `upgradeDelay() == 0` the
+`upgradeEta == block.timestamp` check passes in the same block — the unit tests do
+both calls back-to-back). Two separate Safe transactions also work; then the 7-day
+`MAX_UPGRADE_WINDOW` counts from the queue transaction's block timestamp. The
+implementation deploy (`forge create`, deployer key, no admin power) is unchanged; only
+the queue + install calls move into the Safe. Verify through the proxies exactly as in
+"Performing an upgrade" step 3. Keeper rotation on a Safe-held network: `setKeeper` as a
+Safe transaction, then the Fly secret + funding steps above unchanged.
 
 ## Going immutable (per network, owner's order only)
 

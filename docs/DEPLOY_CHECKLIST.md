@@ -9,15 +9,17 @@ are hard gates for Flare (chain 14).
 - [ ] **mainnet** `ADMIN_ADDR` is a Gnosis Safe (`contracts/script/DeploySafe.s.sol`),
       not an EOA. Threshold ≥ 2, 2–3 owners saved offline (`UPGRADE_RUNBOOK.md` → "Safe as admin").
 - [ ] **mainnet** `FEE_RECIPIENT_ADDR` decided (a Safe is recommended).
-- [ ] **mainnet** `KEEPER_KEY` generated with `go run ./backend/cmd/keeperrotate -gen`, stored ONLY
-      as the app's Fly secret, key file deleted; its address is `KEEPER_ADDR`, funded from the
-      deployer right after the deploy (≈ 50 native on a mainnet).
-- [ ] **mainnet** Deployer funded for five contracts + wiring + keeper funding
-      (≈ 7.7 native at 650 gwei for the deploy alone; 15 SGB / 15 FLR is comfortable).
+- [ ] **mainnet** `KEEPER_KEY` generated with
+      `(cd backend && go run ./cmd/keeperrotate -gen -out ../keeper-<network>.key)` (prints the
+      address = `KEEPER_ADDR`), stored ONLY as the app's Fly secret, key file deleted; the keeper
+      is funded from the deployer right after the deploy (≈ 50 native on a mainnet).
+- [ ] **mainnet** Deployer funded for the 7 CREATEs of `DeployV34` (plain manager + 3 impls +
+      3 UUPS proxies; no wiring calls) + keeper funding (≈ 7.7 native at 650 gwei for the
+      deploy alone; 15 SGB / 15 FLR is comfortable).
 - [ ] **mainnet** RPC primary + fallbacks answer `eth_chainId` today; `deployments/<network>.json`
       and `backend/internal/chain/profile/<network>.go` agree (the profile test enforces it).
 - [ ] **mainnet** Neon snapshot schedule set on the network's project (`RUNBOOK_RESTORE.md`).
-- [ ] Deployer EOA funded for ~5 UUPS proxy deployments + wiring calls.
+- [ ] Deployer EOA funded for the 7-CREATE deploy (a few native tokens on a testnet).
 - [ ] `KEEPER_ADDR` decided (the backend's `KEEPER_KEY` address) and funded
       (`KEEPER_MIN_BALANCE_WEI`, default 0.1 native).
 - [ ] RPC endpoints for the network confirmed (`deployments/<network>.json → rpc`).
@@ -52,8 +54,9 @@ authority of any kind survives the deploy transaction.
       `deployments/*.json`; set `<NET>_ENABLED=true`).
 - [ ] **mainnet** `tools/check-governance.sh` / `GET /api/v1/governance`: `admin` is the Safe
       (`admin_is_contract: true`), `keeper` is `KEEPER_ADDR`, `upgrade_delay` 0; `/status`
-      "Admin & upgrades" shows the deploy-time `KeeperSet` (run `go run ./backend/cmd/reindexgov`
-      if the trail is empty).
+      "Admin & upgrades" shows the deploy-time `KeeperSet` (if the trail is empty:
+      `cd backend && CHAIN_ID=<id> POSTGRES_URL=… RPC_URL=… MARKETPLACE_ADDR=… AUCTION_ADDR=…
+      OFFERBOOK_ADDR=… MARKETPLACE_MANAGER_ADDR=… go run ./cmd/reindexgov -from <deploy block>`).
 - [ ] **mainnet** Delete the idle EU Neon projects only after a separate, explicit owner OK.
 - [ ] `docs/IMMUTABILITY_TRANSITION.md` — the network stays admin-held (instant upgrades) until
       the owner's explicit go-immutable order (`renounceAdmin()`).

@@ -17,7 +17,9 @@ fully escrowed offers for ERC-721 and ERC-1155.
   the verifier and whose name, image and holder are known; ★ when the holder is
   the collection's creator and minted the token.
 - **15 durations** (1 m … 24 h) shared by listings, auctions and offers;
-  expiry is computed on-chain from the mining block.
+  expiry is computed on-chain from the mining block. (The live Coston2 v3.5
+  set still accepts 14 — the 10-minute option reverts until the owner runs
+  `tools/upgrade-cores.sh coston2`.)
 
 | Network | Chain | App | Status |
 |---|---|---|---|
@@ -50,7 +52,9 @@ The browser talks to the **contracts directly** (the wallet signs); the backend
 **observes** the chain through its indexer and projects state into Postgres for
 fast reads and live updates. One process serves exactly one chain; switching
 network is a navigation to the sibling origin. NFT images are fetched once,
-hashed and served from our own store — no IPFS gateway at render time.
+hashed and served from our own store — indexed tokens never touch an IPFS
+gateway at render time (only the on-chain fallback for a token the indexer has
+never seen proxies a public gateway).
 
 Read the map in [`docs/ARCHITECTURE.md`](docs/ARCHITECTURE.md) and the
 diagrams (deployment, request path, indexer + keeper loop, state machines,
@@ -61,7 +65,7 @@ roles, governance, badges, screenshots) in
 
 | Layer | Tech |
 |---|---|
-| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin v5 — three UUPS cores + one plain `MarketplaceManager` |
+| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin 4.9.6 — three UUPS cores + one plain `MarketplaceManager` |
 | Backend | Go 1.26, [Fiber](https://gofiber.io) v2, pgx v5 + goose migrations, go-ethereum, gqlgen, connect-go, zerolog; optional Zig media helpers (`-tags zigmedia`) |
 | Frontend | Astro 7 (static), Svelte 5 islands, one React island for the wallet (Reown AppKit, wagmi, viem), self-hosted Inter + JetBrains Mono, Mermaid for the docs |
 | Data | [Neon Postgres](https://neon.tech) — one project per network; Redis optional (shared read caches only) |
@@ -94,7 +98,7 @@ fly.<net>.toml.example   per-network Fly templates (CI fills placeholders)
 
 ## Run it locally
 
-Prerequisites: Go 1.26+, Node 20+, [Foundry](https://book.getfoundry.sh/) for
+Prerequisites: Go 1.26+, Node 22.12+, [Foundry](https://book.getfoundry.sh/) for
 the contracts, a Neon (or any) Postgres URL. `RPC_URL` is optional — the
 network profile's public RPC set rotates by default.
 
@@ -109,11 +113,13 @@ go run ./cmd/server            # :8080 · migrations run at boot · /healthz /re
 cd app && npm install && npm run dev      # http://localhost:4321
 ```
 
-On Windows, `./dev.ps1` loads `.env` and starts the backend with hot reload.
-`.env.example` lists every variable; the required ones are `CHAIN_ID`,
-`POSTGRES_URL`, `JWT_SECRET` (≥ 32 chars) and the three contract addresses.
-A network with no contracts (`status: read-only` in `deployments/`) boots in
-browse-only mode.
+`make dev` starts both together (backend on :8080, Astro on :4321; the Makefile
+auto-loads `.env`). `.env.example` lists the common variables and
+`backend/internal/config/config.go` is the ground truth for all of them; the
+required ones are `CHAIN_ID`, `POSTGRES_URL` and `JWT_SECRET` (≥ 32 chars). The
+three contract addresses are optional but must be set together — all unset
+boots the network in browse-only (read-only) mode, exactly like a
+`status: read-only` entry in `deployments/`.
 
 ## Tests
 
@@ -125,8 +131,11 @@ cd app       && npm run build && npm run test:e2e  # Playwright: desktop light, 
 cd app       && npm run shots                      # docs screenshots → docs/images/v3.6/
 ```
 
-CI runs all of it on every push and PR; `nightly.yml` adds the race + Foundry +
-Slither + gitleaks sweep, `audit.yml` runs on `v*` tags.
+`ci.yml` runs the Go build / vet / tests (no race detector), Foundry, Slither,
+gitleaks, `astro check`, vitest, Playwright, proto drift and the governance
+check on every push and PR; the race detector runs in `deploy.yml` (push to
+`main`) and `nightly.yml`; `npm run shots` is manual; `audit.yml` runs on `v*`
+tags.
 
 ## Contracts
 

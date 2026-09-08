@@ -8,8 +8,11 @@
 
   export function offerActions(tab: OffersTab, expired: boolean): OfferActionCell[] {
     if (tab === 'received') {
+      // An expired received offer has NO owner action: OfferBook.refundExpiredOffer
+      // admits only the bidder or the keeper (anyone else reverts NotKeeper), and
+      // the keeper returns the escrow within a tick. The row shows a status instead.
       return expired
-        ? [{ kind: 'return-funds', label: 'Return their funds' }]
+        ? []
         : [{ kind: 'accept', label: 'Accept' }, { kind: 'decline', label: 'Decline' }];
     }
     return expired
@@ -128,7 +131,6 @@
     switch (kind) {
       case 'accept': void act(() => MW.acceptOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, principalWei: o.amount_wei, std: o.standard as 'erc721' | 'erc1155', name: label(o) }), 'Accepted · syncing', dropReceived(o)); break;
       case 'decline': void act(() => MW.rejectOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder, name: label(o) }), 'Declined · syncing', dropReceived(o)); break;
-      case 'return-funds': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Funds returned · syncing', dropReceived(o)); break;
       case 'raise': location.href = `/token/${o.collection}/${o.token_id}#offer`; break;
       case 'withdraw': void act(() => MW.cancelOffer({ nft: o.collection, tokenId: o.token_id, name: label(o) }), 'Withdrawn · full refund · syncing', dropSent(o)); break;
       case 'get-refund': void act(() => MW.refundExpiredOffer({ nft: o.collection, tokenId: o.token_id, bidder: o.bidder }), 'Refunded · syncing', dropSent(o)); break;
@@ -197,6 +199,9 @@
             {#each offerActions(tab, expired(o)) as cell (cell.kind)}
               <button class="btn {cell.kind === 'accept' || cell.kind === 'get-refund' ? 'btn-primary' : 'btn-secondary'} btn-sm op-act" onclick={() => runAction(cell.kind, o)}>{cell.label}</button>
             {/each}
+            {#if tab === 'received' && expired(o)}
+              <span class="op-dim">The bidder or the keeper can return the escrow</span>
+            {/if}
           </div>
         </li>
       {/each}

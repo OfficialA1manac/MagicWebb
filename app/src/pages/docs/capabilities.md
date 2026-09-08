@@ -43,14 +43,15 @@ to a different site, so you connect your wallet again on arrival.
 | Batch list up to 50 | — | — | ✓ 721 only |
 | Change price / cancel listing | — | — | ✓ seller |
 | Start auction (721 / 1155) | — | — | ✓ owner |
-| Bid (+1 C2FLR over lead, cumulative) | connect prompt | ✓ (not seller) | — |
+| Bid (+1 native token over lead, cumulative) | connect prompt | ✓ (not seller) | — |
 | Withdraw when outbid | — | ✓ | — |
 | Cancel auction | — | — | ✓ only with no bids |
-| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s) |
+| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s Coston2 / 2s mainnets) |
 | Cancel & refund everyone (3d after end) | — | ✓ winner | ✓ seller (+ keeper auto) |
 | Make offer (if collection allows) | connect prompt | ✓ | — |
 | Raise / withdraw own offer (full refund) | — | ✓ | — |
-| Accept / decline / return expired | — | — | ✓ owner |
+| Accept / decline an offer | — | — | ✓ owner |
+| Reclaim own expired offer (full refund) | — | ✓ bidder (+ keeper auto) | — |
 | Enable offers for a collection | — | — | ✓ ERC-173 owner |
 | Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
 | Edit own profile (SIWE) | — | ✓ | ✓ |
@@ -121,7 +122,9 @@ per-network, because those live in each network's own contracts.
 ## Refunds
 
 Outbid? Offer declined? Payment could not be pushed to your wallet? The amount is held for
-you in the contract. **Profile → the Refunds card → Withdraw.** Never expires.
+you in the contract. **Profile → the Refunds card → Withdraw.** Never expires. An offer
+that expired is returned to you by the keeper within seconds; **Get refund** on the token
+page or the Offers page reclaims it yourself (the NFT's owner cannot touch it).
 
 ## What nobody can do
 

@@ -78,7 +78,7 @@ flowchart TB
     IMG["/api/v1/img/:sha256<br/>content-addressed image store"]
     OBS["POST /api/v1/tx/observe<br/>instant lane"]
     AUTH["/auth · SIWE → JWT<br/>saved searches · notifications<br/>profile edits · webhooks"]
-    WS["/ws hub<br/>token: collection: user: tx: activity<br/>?since replay"]
+    WS["/ws hub<br/>token: collection: user: tx: activity<br/>retry {from_seq} replay"]
     GQL["/graphql · /graphql/ws<br/>gqlgen queries + subscriptions"]
     CN["Connect / gRPC MarketplaceService<br/>unary + Subscribe* streams"]
     HP["/healthz · /readyz<br/>/internal/metrics (METRICS_TOKEN)"]
@@ -139,7 +139,7 @@ flowchart TB
     H["handlers · idempotent upserts keyed (tx_hash, log_index)"]
   end
   RPC --> F --> H
-  H --> DB[("Postgres · 45 goose migrations at boot")]
+  H --> DB[("Postgres · 44 goose migrations at boot<br/>(numbered to 045, 031 skipped)")]
   H --> BC[("sse.Broadcaster")]
   BC --> OUT["/ws · GraphQL subs · Connect streams · webhooks · notifications"]
   subgraph WORK["supervised workers"]
@@ -162,6 +162,7 @@ flowchart TB
     LR["loser refund sweeper<br/>refundLosers in batches"]
     FEE["fee sweeper · Safe Allowance Module<br/>(probe bytecode first)"]
     OPS["ops health · keeper balance + fee cap<br/>head-lag alert · image-store gauge + LRU eviction"]
+    CLEAN["expired-listing clean · every 2nd KeeperTick<br/>Marketplace.cleanExpired per row (chain_cleaned=false)"]
     AK ~~~ FEE
     LR ~~~ OPS
   end
@@ -176,13 +177,14 @@ flowchart TB
 | watcher | `PollInterval` (profile), `ReorgSafety` behind head | `indexer/runner.go` `runWatcher` |
 | instant lane | on demand (`POST /tx/observe`) | `indexer/observe.go` |
 | metadata / image retry | continuous / periodic | `indexer/metadata.go` |
-| verifier | `VerifierInterval` (profile) | `internal/verifier` |
+| verifier | `VerifierTick` (profile) | `internal/verifier` |
 | score (trending) | periodic | `runner.go` `runScoreWorker` |
-| listing / offer expiry sweepers | periodic | `runner.go` |
-| withdrawal sweeper | 2 min | `runner.go` `runWithdrawalSweeper` |
+| listing / offer expiry sweepers | 1 s (DB flips only) | `runner.go` |
+| withdrawal sweeper | `RefundTick` (profile; default 30 s) | `runner.go` `runWithdrawalSweeper` |
 | ownership repair | periodic | `indexer/ownership_repair.go` |
 | auction keeper | `KeeperTick` (1 s / 2 s) | `runner.go` `runAuctionKeeper` |
-| loser refunds | ~45 s | `indexer/keeper_refund.go` |
+| expired-listing clean (on-chain `cleanExpired`) | every 2nd `KeeperTick` | `runner.go` `cleanExpiredListings` |
+| loser refunds | `RefundTick` (profile; default 45 s) | `indexer/keeper_refund.go` |
 | fee sweeper | `FeeSweepTick` (5 min / 10 min) | `indexer/keeper_feesweep.go` |
 | keeper-health · lag-alert · image-store | `FeeSweepTick` · 15 s · 5 min | `indexer/ops_health.go` |
 | governance | with the watcher | `indexer/governance.go` |
@@ -190,8 +192,9 @@ flowchart TB
 ## 4. State machines
 
 Money never depends on the keeper: every terminal state has a self-service exit
-(`withdrawRefund`, `withdrawLoserFunds`, `refundExpiredOffer`, `settle`,
-`forceCancel`). The keeper only makes those exits happen sooner.
+(`withdrawRefund`, `refundLosers` — permissionless after settlement,
+`withdrawLoserFunds` — non-leaders before settlement, `refundExpiredOffer`,
+`settle`, `forceCancel`). The keeper only makes those exits happen sooner.
 
 ### 4.1 Listing (non-custodial — the NFT stays in the seller's wallet)
 
@@ -201,17 +204,20 @@ stateDiagram-v2
   Active --> Active: editPrice (seller)
   Active --> Sold: buy (msg.value == price · NFT → buyer · 98% → seller · 1.5% platform · 0.5% keeper)
   Active --> Cancelled: cancel (seller)
-  Active --> Expired: block.timestamp ≥ expiresAt (buy reverts Expired)
+  Active --> Expired: block.timestamp > expiresAt (buy reverts Expired · keeper calls cleanExpired)
   Sold --> [*]
   Cancelled --> [*]
   Expired --> [*]
 ```
 
-Off-chain the expiry sweeper flips `listings.active=false` so the UI stops
-showing it; the on-chain `cleanExpired` (keeper-gated) stays dormant by decision
-2026-08-28. A stale ownership row that would block `buy` preflight is repaired
-by the ownership worker against the live holder. Transfers of a listed NFT
-(seen via `Transfer`) deactivate the seller's own listing.
+Off-chain the expiry sweeper flips `listings.active=false` every second so the
+UI stops showing it, and the keeper drives the on-chain `Marketplace.cleanExpired`
+(keeper-gated) every second `KeeperTick` for rows with `chain_cleaned=false` —
+owner decision 2026-08-31, everything that expires is handled instantly; the
+resulting `Cancelled` event marks the row so it is never re-sent. A stale
+ownership row that would block `buy` preflight is repaired by the ownership
+worker against the live holder. Transfers of a listed NFT (seen via `Transfer`)
+deactivate the seller's own listing.
 
 ### 4.2 Auction (escrowed, cumulative bids, flat +1 native increment)
 
@@ -219,22 +225,28 @@ by the ownership worker against the live holder. Transfers of a listed NFT
 stateDiagram-v2
   [*] --> Live: create · create1155 (reserve ≥ 1 native · duration)
   Live --> Live: bid (must beat reserve or leader + 1 native, else BidTooLow reverts — nothing is parked)
-  Live --> Live: anti-snipe — a bid in the last 3 min adds 3 min, 30 min cap (AuctionExtended)
+  Live --> Live: anti-snipe — a lead-changing bid in the last 3 min resets endsAt to now + 3 min (leader top-ups do not extend) · hard cap originalEndsAt + 30 min (AuctionExtended)
+  Live --> Live: withdrawLoserFunds (non-leader self-service, only before settlement)
   Live --> Cancelled: cancelEarly (seller, only while no bid leads)
   Live --> Ended: endsAt reached (no transaction)
   Ended --> Settled: settle — keeper within ~1 tick · or seller · or winner
   Ended --> ForceCancelled: forceCancel after endsAt + 3 days — keeper · seller · winner (everyone refunded)
-  Settled --> Settled: refundLosers batches (keeper) · withdrawLoserFunds (self-service, any time)
+  Settled --> Settled: refundLosers batches — permissionless (the keeper drives it every RefundTick; any loser can call it with their own address)
   Settled --> [*]
   Cancelled --> [*]
   ForceCancelled --> [*]
 ```
 
-Payout is pull-safe: if pushing proceeds to the seller fails
-(`AuctionSettlementFailed` / `PushFailed`) the amount lands in `pendingReturns`
-and the withdrawal sweeper surfaces it as a refund card. Outbid escrow is
-withdrawable at any moment; a losing bid is never locked behind a position that
-cannot win. DB `auction_status`: `active → settled | cancelled`, plus
+Payout is pull-safe: if pushing proceeds to the seller fails (`PushFailed`) the
+amount lands in `pendingReturns`, which the profile's Refunds card reads
+directly on-chain (the withdrawal sweeper separately re-verifies bidders seeded
+by `LoserRefunded` / `RefundPushed` and sends a "refund" notification).
+`AuctionSettlementFailed` is the other outcome: the NFT could not be delivered
+(seller moved it or revoked approval), so no fee is taken, the seller is paid
+nothing, the winner's escrow is pushed back (pull fallback) and the row is
+marked `cancelled`. A losing bidder can pull escrow with `withdrawLoserFunds`
+while the auction is live and is never locked behind a position that cannot
+win. DB `auction_status`: `active → settled | cancelled`, plus
 `losers_refunded`.
 
 ### 4.3 Offer (escrowed native, fee only at accept)
@@ -276,11 +288,12 @@ transaction on the network you are viewing.
 | Bid (+1 native over the lead, cumulative) | connect prompt | ✓ (not seller) | — |
 | Withdraw when outbid | — | ✓ any time | — |
 | Cancel auction | — | — | ✓ only with no bids |
-| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, ~1 s) |
+| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1 s Coston2 / 2 s mainnets) |
 | Cancel & refund everyone (3 d after end) | — | ✓ winner | ✓ seller (+ keeper auto) |
 | Make offer (if the collection allows) | connect prompt | ✓ | — |
 | Raise / withdraw own offer (full refund) | — | ✓ | — |
-| Accept / decline / return expired offer | — | — | ✓ owner |
+| Accept / decline an offer | — | — | ✓ owner |
+| Reclaim own expired offer (full refund) | — | ✓ bidder (+ keeper auto) | — |
 | Enable offers for a collection | — | — | ✓ ERC-173 owner |
 | Search, trending, activity, collection traits | ✓ | ✓ | ✓ |
 | Save search / notifications / security alerts (SIWE) | disabled + hint | ✓ | ✓ |
@@ -371,7 +384,7 @@ across machines over the gRPC mesh). Consumers:
 
 | Face | For | Shape |
 |---|---|---|
-| `/ws` | the product UI | channels `token:` `collection:` `user:` `tx:` `activity`, `?since` replay; islands subscribe only to what they show (TokenPage: its token + collection; NFTGrid: listing changes, page 1 refetch) |
+| `/ws` | the product UI | channels `token:` `collection:` `user:` `tx:` `activity`, `retry {from_seq}` replay from the seq-numbered ring; islands subscribe only to what they show (TokenPage: its token + collection; NFTGrid: listing changes, page 1 refetch) |
 | GraphQL subscriptions (`/graphql/ws`) | third-party dashboards | hydrated objects, cost-limited |
 | Connect server streams | bots and keepers | `SubscribeListings` `SubscribeAuctions` `SubscribeActivity` `SubscribeNotifications` (SIWE), declared in `marketplace.proto`, regenerated with a pinned toolchain, CI `proto-drift` gate |
 | Webhooks | integrations | per-type subscriptions incl. `governance` |

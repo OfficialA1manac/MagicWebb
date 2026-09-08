@@ -102,7 +102,7 @@ Neon snapshot schedule).
   (balance levels, fee-cap watch, underpriced counter), `lag-alert` (> 30
   blocks for 2 min, resolved notice), `image-store` (gauge + LRU eviction of
   unreferenced blobs 80 % → 70 %, migration 045); Discord / Prometheus / SMTP
-  alerts with hourly cooldown; nine new gauges; `/status` keeper-balance tile;
+  alerts with hourly cooldown; nine new metrics (seven gauges, two counters); `/status` keeper-balance tile;
   `docs/RUNBOOK_RESTORE.md`; `NETWORKS.md` Neon ids corrected.
 - **Connect subscriptions declared in the proto** (`SubscribeListings`,
   `SubscribeAuctions`, `SubscribeActivity`, `SubscribeNotifications`),
@@ -115,19 +115,39 @@ Neon snapshot schedule).
 ### Tests / CI (wave 7)
 
 - Playwright: new `dark` project; the axe contrast gate runs in **both**
-  schemes on nine pages; touch-target and 12px sweeps cover token / auction /
-  offers / profile; new flows (token happy path, `#nfts` tab, sticky bar
-  variable + toast stacking at 390px, no-wallet sheet focus return, banner
-  priority); the "unreachable sibling" switch is `test.fixme` (flaky, ~1 in 3);
-  token-page cases allow the CI runner's 15s wagmi timeout (bf7d1c0).
+  schemes on nine pages (ten once wave 8 added `/docs/system`); touch-target
+  and 12px sweeps cover token / auction / offers / profile; new flows (token
+  happy path, `#nfts` tab, sticky bar variable + toast stacking at 390px,
+  no-wallet sheet focus return, banner priority); token-page cases allow the
+  CI runner's 15s wagmi timeout (bf7d1c0). The "unreachable sibling" switch
+  shipped as `test.fixme` (flaky, ~1 in 3) — f3b7b04 found the root cause:
+  `<MwRuntime client:load/>` server-renders the `.toasts` host, so `mw-toast`
+  events dispatched before the island hydrated were lost (the same window
+  dropped the arrival toast in production); an inline BaseLayout script now
+  queues them on `window.__mwToastQ` until `installToastBridge()` drains the
+  queue, the case is a plain test again and `src/lib/toast.test.ts` covers
+  the drain.
 - vitest durations parity: the app's fifteen durations equal the `DURATION_*`
   constants in `MarketplaceCore.sol`.
 - Contrast fixes forced by the gate: TokenPage tokens-only, `--white-40` now
   tracks `--text-3`, new `--text-on-gold`, captions ≥ 12px.
-- Nightly / audit gitleaks steps pass `GITHUB_TOKEN` (the anonymous owner
-  lookup 403s on the runner's shared IP and reports "missing gitleaks license").
 
-### Docs (wave 8)
+### Docs + CI (wave 8)
+
+- CI: `audit.yml` and `nightly.yml` gitleaks steps pass `GITHUB_TOKEN` like
+  `ci.yml` (the anonymous owner lookup 403s on the runner's shared IP and the
+  action reports "missing gitleaks license" — 2026-09-07 nightly).
+- Post-review fixes (this tag): the token owner is no longer offered "Return
+  funds" on an expired received offer — `refundExpiredOffer` admits only the
+  bidder or the keeper, so the button reverted `NotKeeper`; the keeper returns
+  the escrow and the bidder can reclaim it. `tools/upgrade-cores.sh` and the
+  runbooks give `go run` commands from `backend/` (the Go module root);
+  `DeploySafe.s.sol` names `ADMIN_ADDR` / `FEE_RECIPIENT_ADDR` instead of the
+  non-existent `CREATOR_ADDR`; the docs' stale "cleanExpired unwired" note is
+  gone (the keeper has driven it every second tick since v3.2); `/ws` replay
+  is `retry {from_seq}`, not `?since`; and the counts now match the code (44
+  migration files numbered to 045, 175 Foundry tests, `RefundTick`-driven
+  sweepers, OpenZeppelin 4.9.6, Node 22.12+, thirteen screenshot pages).
 
 - README rewritten for v3.6 (three networks, 2 % split, no admin, badges,
   stack, tests, deploy).
@@ -137,8 +157,10 @@ Neon snapshot schedule).
   auction / offer state machines, role × action matrix, governance lifecycle,
   badge decision tree, real-time faces, ops health, screenshots. Mirror script
   `tools/mirror-system-doc.py`.
-- Screenshots of every page — desktop + mobile, light + dark — in
-  `docs/images/v3.6/` from `npm run shots` (`playwright.shots.config.ts`).
+- Screenshots of thirteen pages (home, listings, token, collection, auctions,
+  auction, offers, profile, search, status, docs index, start-here, system) —
+  desktop + mobile, light + dark — in `docs/images/v3.6/` from `npm run shots`
+  (`playwright.shots.config.ts`).
 - `ARCHITECTURE.md` §6 / §7 / §8 (+ badges, governance, ops), `capabilities.md`
   (badges, who controls the contracts), `UPGRADE_RUNBOOK.md` "Safe as admin",
   `DEPLOY_CHECKLIST.md` mainnet rows, `DESIGN.md` v3.6 tokens / motion /

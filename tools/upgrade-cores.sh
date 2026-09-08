@@ -108,4 +108,5 @@ jq --arg mp "${NEW[marketplace]}" --arg ah "${NEW[auctionHouse]}" --arg ob "${NE
    --arg omp "$OLD_MP" --arg oah "$OLD_AH" --arg oob "$OLD_OB" --arg at "$(date -u +%Y-%m-%d)" \
    '.impls = {marketplace:$mp, auctionHouse:$ah, offerBook:$ob, upgradedAt:$at}
     | .superseded_impls = {marketplace:$omp, auctionHouse:$oah, offerBook:$oob}' "$DEP" > "$tmp" && mv "$tmp" "$DEP"
-echo "== $DEP updated (impls + superseded_impls). Commit it, then run: go run ./backend/cmd/reindexgov"
+echo "== $DEP updated (impls + superseded_impls). Commit it, then backfill the trail from backend/ (the Go module root):"
+echo "   cd backend && CHAIN_ID=... POSTGRES_URL=... RPC_URL=... MARKETPLACE_ADDR=... AUCTION_ADDR=... OFFERBOOK_ADDR=... MARKETPLACE_MANAGER_ADDR=... go run ./cmd/reindexgov -from <upgrade block>"

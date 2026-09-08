@@ -135,8 +135,8 @@ Deployed addresses: `deployments/<network>.json` (single source of truth).
 
 ## 5. Data
 
-Neon Postgres, one project per network, 45 goose migrations applied at boot
-(`backend/internal/db/migrations`; 031 intentionally skipped — never renumber). Row-level
+Neon Postgres, one project per network, 44 goose migrations applied at boot
+(`backend/internal/db/migrations`, numbered to 045; 031 intentionally skipped — never renumber). Row-level
 security policies exist for direct PostgREST-style access; the Go service connects as an
 owner role. `chain_id` is a label column on every indexed table. Idempotency: every indexed
 write is an upsert keyed on `(tx_hash, log_index, …)`, which is what lets the instant lane
@@ -152,7 +152,7 @@ Redis degrades to memory with a warning.
 
 `sse.Broadcaster` is the only publisher path (sequence-numbered, replay ring, fanned across
 machines over the gRPC mesh). It feeds `/ws` for the product UI (channels `token:`
-`collection:` `user:` `tx:` `activity` + `?since` replay; islands subscribe only to what they
+`collection:` `user:` `tx:` `activity` + `retry {from_seq}` replay; islands subscribe only to what they
 show), GraphQL subscriptions for third-party dashboards (hydrated objects), the Connect
 server streams for bots and keepers (`SubscribeListings` / `SubscribeAuctions` /
 `SubscribeActivity` / `SubscribeNotifications` — declared in `marketplace.proto` since v3.6
@@ -175,7 +175,7 @@ backend/             Go 1.26 · Fiber
   internal/indexer   watcher · observe (instant lane) · keepers · metadata · governance · ops health
   internal/ws · sse · graphql · connectrpc · api · cache · rpcpool · verifier · ops · keeper (election)
   zigsha256 · zigsniff               Zig libraries (CGO, -tags zigmedia)
-contracts/           Foundry · src/ · test/ (118) · script/Deploy*.s.sol
+contracts/           Foundry · src/ · test/ (175 tests) · script/Deploy*.s.sol
 deployments/         per-network address records (source of truth)
 docs/                operator docs (architecture, system breakdown + screenshots, deploy, checklist,
                      monitoring, immutability, networks, upgrade runbook, restore drill, design)
@@ -186,11 +186,14 @@ fly.<net>.toml.example   per-network Fly templates · CI fills placeholders
 
 ## Listing expiry (cleanExpired)
 
-`Marketplace.cleanExpired(coll, id, seller)` exists on-chain (keeper-gated) but is
-deliberately **unwired**: listings are non-custodial, so an expired listing holds no
-on-chain state that needs cleanup — `buy` simply reverts `Expired`. Off-chain, the
-indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decision
-2026-08-28: keep the function as a dormant escape hatch, do not call it from the keeper.
+`Marketplace.cleanExpired(coll, id, seller)` is keeper-gated and **driven by the keeper**
+since v3.2 (owner decision 2026-08-31: everything that expires is handled instantly,
+superseding the 2026-08-28 "dormant escape hatch" note): `runAuctionKeeper` calls
+`cleanExpiredListings` every second `KeeperTick`, sending one paid `cleanExpired`
+transaction per expired-but-active row (`chain_cleaned=false`), bounded per pass; the
+resulting `Cancelled` event marks the row so it is never re-sent. Independently, the
+indexer's `runListingExpirySweeper` flips expired listings out of the UI every second, so
+nothing waits for the on-chain clean. `buy` on an expired listing reverts `Expired` either way.
 
 ## 8. Capability matrix (v3.6 — mirrored in app/src/pages/docs/capabilities.md)
 
@@ -202,14 +205,15 @@ indexer's `runListingExpirySweeper` flips expired listings out of the UI. Decisi
 | Batch list up to 50 | — | — | ✓ 721 only |
 | Change price / cancel listing | — | — | ✓ seller |
 | Start auction (721 / 1155) | — | — | ✓ owner |
-| Bid (+1 token over lead, cumulative) | connect prompt | ✓ (not seller) | — |
+| Bid (+1 native token over lead, cumulative) | connect prompt | ✓ (not seller) | — |
 | Withdraw when outbid | — | ✓ | — |
 | Cancel auction | — | — | ✓ only with no bids |
-| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s) |
+| Settle after end | — | ✓ winner | ✓ seller (+ keeper auto, 1s Coston2 / 2s mainnets) |
 | Cancel & refund everyone (3d after end) | — | ✓ winner | ✓ seller (+ keeper auto) |
 | Make offer (if collection allows) | connect prompt | ✓ | — |
 | Raise / withdraw own offer (full refund) | — | ✓ | — |
-| Accept / decline / return expired | — | — | ✓ owner |
+| Accept / decline an offer | — | — | ✓ owner |
+| Reclaim own expired offer (full refund) | — | ✓ bidder (+ keeper auto) | — |
 | Enable offers for a collection | — | — | ✓ ERC-173 owner |
 | Save search / notifications (SIWE) | disabled + hint | ✓ | ✓ |
 | Edit own profile (SIWE) | — | ✓ | ✓ |
