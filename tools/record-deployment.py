@@ -62,14 +62,21 @@ def main() -> int:
     dpath = ROOT / "deployments" / f"{a.network}.json"
     d = json.loads(dpath.read_text(encoding="utf-8"))
     old = d.get("contracts") or {}
-    if any(old.get(k) for k in ("marketplace", "auctionHouse", "offerBook", "marketplaceManager")):
+    cores = ("marketplace", "auctionHouse", "offerBook", "marketplaceManager")
+    new_set = {"marketplace": mp, "auctionHouse": ah, "offerBook": ob, "marketplaceManager": manager}
+    changed = any((old.get(k) or "").lower() != new_set[k].lower() for k in cores)
+    if any(old.get(k) for k in cores) and changed:
+        # Archive the previous set only when an address actually changes; a
+        # re-run for --track / --nft on the same broadcast keeps the record as is.
         d.setdefault("superseded", []).insert(0, {
             "note": f"replaced {dt.date.today().isoformat()} by the v3.6 DeployV34 set at block {first_block}",
             **{k: old.get(k) for k in ("marketplace", "auctionHouse", "offerBook", "marketplaceManager", "nft")},
         })
     d["status"] = "deployed"
-    d["deployedAt"] = dt.datetime.now(dt.timezone.utc).date().isoformat()
-    d["indexFromBlock"] = first_block
+    if changed or not d.get("deployedAt"):
+        d["deployedAt"] = dt.datetime.now(dt.timezone.utc).date().isoformat()
+    if changed or not d.get("indexFromBlock"):
+        d["indexFromBlock"] = first_block
     d["contracts"] = {
         "marketplace": mp,
         "auctionHouse": ah,
@@ -77,7 +84,8 @@ def main() -> int:
         "marketplaceManager": manager,
         "nft": a.nft or old.get("nft"),
     }
-    d["impls"] = {"marketplace": mp_impl, "auctionHouse": ah_impl, "offerBook": ob_impl, "upgradedAt": d["deployedAt"]}
+    if changed or not d.get("impls"):
+        d["impls"] = {"marketplace": mp_impl, "auctionHouse": ah_impl, "offerBook": ob_impl, "upgradedAt": d["deployedAt"]}
     tracked = [x.strip() for x in a.track.split(",") if x.strip()]
     d["trackedCollections"] = tracked if tracked else (d.get("trackedCollections") or [])
     d.pop("note", None)

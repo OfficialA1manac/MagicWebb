@@ -180,7 +180,7 @@ User docs are served by the app at `/docs` (source `app/src/pages/docs/`):
 Start here, Whitepaper, Technical whitepaper, **System breakdown**, User guide,
 What you can do, FAQ, Token architecture, API reference (`/docs/api.yaml`).
 
-Operator docs in [`docs/`](docs/): `ARCHITECTURE.md`, `SYSTEM_BREAKDOWN.md`,
+Operator docs in [`docs/`](docs/): `ARCHITECTURE.md`, `SYSTEM_BREAKDOWN.md`, `GO_LIVE_MAINNET.md`,
 `NETWORKS.md`, `DEPLOY_FLY.md`, `DEPLOY_CHECKLIST.md`, `UPGRADE_RUNBOOK.md`,
 `IMMUTABILITY_TRANSITION.md`, `MONITORING.md`, `RUNBOOK_RESTORE.md`,
 `DESIGN.md`, `USER_CAPABILITIES.md`. Release notes: [`CHANGELOG.md`](CHANGELOG.md).

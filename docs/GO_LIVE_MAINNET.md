@@ -14,7 +14,7 @@ until the owner orders `renounceAdmin()` — see `UPGRADE_RUNBOOK.md`.
 | Neon Postgres (Singapore) | `bitter-pond-73256956` | `royal-paper-82216877` |
 | Fly secrets | `POSTGRES_URL` `JWT_SECRET` `WC_PROJECT_ID` + `KEEPER_KEY` (staged; applies on the next deploy) | same |
 | Keeper wallet (address to fund) | `0x979Dd049B9C7952f768e753bae575c199f847E4c` | `0x1F0aD251f923579781EcB7D8D76edE08a6A498FF` |
-| Keeper key backup | `C:\Users\Alman\.magicwebb\keeper-songbird.key` → move to the password manager | `…\keeper-flare.key` → same |
+| Keeper key backup | the local file `keeperrotate -gen -out` wrote → move it to the password manager, then delete it | same |
 | CI deploy flag | `SONGBIRD_ENABLED=true` | `FLARE_ENABLED=true` |
 | RPC primary + fallbacks answer `eth_chainId` | flare-api + ankr | flare-api + ankr + thirdweb |
 | Safe v1.3.0 singleton + proxy factory on-chain | eip155 addresses, bytecode present | canonical addresses, bytecode present |
