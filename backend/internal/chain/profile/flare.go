@@ -21,7 +21,7 @@ var flare = Profile{
 	GetLogsChunk: 30, GetLogsBlockCap: 30,
 	// Mainnet gas caps (v3.6): 200 / 20 gwei — same rationale as songbird.go
 	// (Coston2 starvation precedent; bounded worst case ≈ 0.03 FLR per settle).
-	MaxFeeCapGwei: 200, MaxTipCapGwei: 20, MetadataConcurrency: 3,
+	MaxFeeCapGwei: 2000, MaxTipCapGwei: 200, MetadataConcurrency: 3, // 2026-09-08: base fee is 500 gwei on all three networks (probed); 200 starved the keeper (feeCap clamp < base fee)
 	ProfileSource: 2, WSCoalesceMs: 100, ImageProxyConcurrency: 4,
 	RateLimitTier: "mainnet", ConnectRateTier: "mainnet", GraphQLMaxCost: 1000,
 	FaucetURL: "", AuditNote: "view-only until the security audit finishes",

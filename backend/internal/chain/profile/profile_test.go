@@ -68,10 +68,14 @@ func TestValidateShippedProfiles(t *testing.T) {
 			t.Fatalf("mainnet %d must ship >= 2 RPCs, has %d", id, n)
 		}
 	}
-	// Mainnet gas caps are the v3.6 200/20 (Coston2 starvation precedent).
+	// Mainnet gas caps: 2000/200 (2026-09-08). eth_getBlockByNumber reports a
+	// 500 gwei base fee and a 150 gwei priority fee on Songbird, Flare AND
+	// Coston2; the earlier 200/20 clamped feeCap below the base fee, which is
+	// exactly the Coston2 2026-08-31 starvation. 4x headroom over the base fee,
+	// still below Coston2's 3000/300 (TestMainnetsAreStricterThanTestnet).
 	for _, id := range []uint64{19, 14} {
-		if p := MustFor(id); p.MaxFeeCapGwei != 200 || p.MaxTipCapGwei != 20 {
-			t.Fatalf("mainnet %d caps: want 200/20, got %v/%v", id, p.MaxFeeCapGwei, p.MaxTipCapGwei)
+		if p := MustFor(id); p.MaxFeeCapGwei != 2000 || p.MaxTipCapGwei != 200 {
+			t.Fatalf("mainnet %d caps: want 2000/200, got %v/%v", id, p.MaxFeeCapGwei, p.MaxTipCapGwei)
 		}
 	}
 	// One Allowance Module singleton across the family.
