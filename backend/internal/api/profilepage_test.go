@@ -12,7 +12,6 @@ import (
 	"github.com/OfficialA1manac/MagicWebb/backend/internal/db"
 )
 
-const ppOwner = "0x00000000000000000000000000000000000000bb"
 
 func newProfilePageApp(t *testing.T, mock pgxmock.PgxPoolIface) *fiber.App {
 	t.Helper()

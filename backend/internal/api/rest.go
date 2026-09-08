@@ -461,7 +461,7 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 
 	// Server-time endpoint (used by auction countdown timers). Moved
 	// from mountUI's bare app.Get into the rate-limited api group so
-	// it inherits rateLimitMiddleware (60 req/min per IP).
+	// it inherits apiRateLimitMiddleware (60 req/min per IP).
 	// v3.6: carries the profile's block cadence + confirmation depth so the UI's
 	// pending-tx ETA ("~2 s") and countdown copy come from the server, not a
 	// hardcoded constant.
@@ -550,11 +550,7 @@ func sessionCookieNames(c *fiber.Ctx) []string {
 	return out
 }
 
-func rateLimitMiddleware(rl *ratelimit.Limiter) fiber.Handler {
-	return tieredRateLimitMiddleware(rl, "api", 60, time.Minute)
-}
-
-// apiRateLimitMiddleware is rateLimitMiddleware with the per-network budget
+// apiRateLimitMiddleware is the tiered API limiter with the per-network budget
 // (config.APIRateLimitPerMin, from the profile's RateLimitTier); a zero or
 // negative budget keeps the historical 60/min.
 func apiRateLimitMiddleware(rl *ratelimit.Limiter, perMin int) fiber.Handler {

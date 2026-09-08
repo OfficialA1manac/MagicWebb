@@ -28,6 +28,7 @@ package main
 import (
 	"context"
 	"crypto/ecdsa"
+	"encoding/hex"
 	"flag"
 	"fmt"
 	"math/big"
@@ -90,7 +91,7 @@ func main() {
 		if err != nil {
 			die("generate: %v", err)
 		}
-		hexKey := fmt.Sprintf("%064x", k.D)
+		hexKey := hex.EncodeToString(crypto.FromECDSA(k)) // 32-byte scalar, no big.Int access (SA1019)
 		if err := os.WriteFile(*out, []byte(hexKey+"\n"), 0o600); err != nil {
 			die("write %s: %v", *out, err)
 		}
