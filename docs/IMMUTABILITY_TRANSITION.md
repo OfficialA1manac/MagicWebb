@@ -15,7 +15,7 @@ One `MarketplaceManager` per network holds exactly two addresses:
 | Slot | Power | Lifetime |
 |---|---|---|
 | `keeper` | Settle ended auctions to their recorded parties, sweep refunds to their owners, clean expired listings. Cannot move, redirect, or block funds. Cannot change the keeper set. | Forever (replaceable only by the admin, while one exists) |
-| `admin` | `setKeeper`, instant UUPS upgrades (`upgradeDelay` 0), 2-step `transferAdmin`/`acceptAdmin` (`cancelAdminTransfer` aborts a pending handover), `renounceAdmin`. | Until `renounceAdmin()` — then nobody, forever |
+| `admin` | `setKeeper`, instant UUPS upgrades of the three cores (`upgradeDelay` 0) AND of the manager itself (v3.7: `upgradeTo`, no queue), 2-step `transferAdmin`/`acceptAdmin` (`cancelAdminTransfer` aborts a pending handover), `renounceAdmin`. | Until `renounceAdmin()` — then nobody, forever |
 
 The cores (Marketplace, AuctionHouse, OfferBook) consult the manager through
 the same `hasRole(bytes32,address)` staticcall protocol as v3.1; the manager
@@ -34,8 +34,9 @@ function in the deployed system adds a settlement-authorized address.
   the new wallet (2-step; `cancelAdminTransfer()` aborts).
 - **Sealed -- the go-immutable switch:** when the owner gives the order for a
   network, its admin calls `MarketplaceManager.renounceAdmin()` -- one way,
-  one transaction. From that block: no admin, no upgrades, no keeper
-  rotation, no grants, fee recipient fixed. (`SEAL=true` at deploy time
+  one transaction. From that block: no admin, no upgrades (cores AND manager —
+  the manager's `_authorizeUpgrade` is `onlyAdmin`), no keeper rotation, no
+  grants, fee recipient fixed. (`SEAL=true` at deploy time
   still exists for a deliberate sealed-from-block-one deployment and
   requires a Safe/contract fee recipient.)
 

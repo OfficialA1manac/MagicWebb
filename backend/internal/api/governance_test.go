@@ -96,7 +96,10 @@ func TestGovernance_LiveAndEvents(t *testing.T) {
 			AddRow(int64(1), int64(114), int64(34905078), "0xbb", int32(1), govManager, "KeeperSet", zeroAddr, govKeeper, "", now))
 	mock.ExpectQuery(`SELECT DISTINCT ON \(contract\) contract`).
 		WithArgs(int64(114)).
-		WillReturnRows(pgxmock.NewRows([]string{"contract", "subject"}).AddRow(govMarket, "0x00000000000000000000000000000000000000ee"))
+		WillReturnRows(pgxmock.NewRows([]string{"contract", "subject"}).
+			AddRow(govMarket, "0x00000000000000000000000000000000000000ee").
+			// v3.7: the proxied manager emits Upgraded too → surfaced as marketplace_manager.
+			AddRow(govManager, "0x00000000000000000000000000000000000000mm"))
 
 	eth := &govCaller{}
 	app := newGovApp(mock, eth, govManager)
@@ -115,7 +118,8 @@ func TestGovernance_LiveAndEvents(t *testing.T) {
 	if body.Live.UpgradeDelay != 0 || body.Live.Renounced || !body.Live.AdminIsSafe || body.Live.Error != "" {
 		t.Fatalf("live flags: %+v", body.Live)
 	}
-	if body.Implementations["marketplace"] != "0x00000000000000000000000000000000000000ee" {
+	if body.Implementations["marketplace"] != "0x00000000000000000000000000000000000000ee" ||
+		body.Implementations["marketplace_manager"] != "0x00000000000000000000000000000000000000mm" {
 		t.Fatalf("impls: %+v", body.Implementations)
 	}
 	if len(body.Events) != 2 || body.Events[0].Event != "Upgraded" || body.Events[1].Event != "KeeperSet" {

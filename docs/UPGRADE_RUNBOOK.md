@@ -1,4 +1,10 @@
-# Upgrade Runbook (v3.4+)
+# Upgrade Runbook (v3.7+)
+
+**Owner directive 2026-09-09: every contract on every network is upgradeable
+until the owner orders immutability.** All four contracts — the three cores
+AND the `MarketplaceManager` — are UUPS (ERC-1967) proxies. Nothing is
+sealed at deploy; `renounceAdmin()` (last section) is the only way a network
+becomes immutable, per network, on the owner's explicit order.
 
 Every network — Coston2 (114), Songbird (19), Flare (14) — runs the same
 bytecode, deployed UNSEALED: a single per-network **admin wallet** (saved
@@ -18,8 +24,9 @@ a hot machine longer than the minutes an upgrade takes.
 | Contract | Proxy? | How it changes |
 |---|---|---|
 | Marketplace / AuctionHouse / OfferBook | UUPS (ERC-1967) | `queueUpgrade` → `upgradeTo` (admin-gated via the manager) |
-| MarketplaceManager | **NO — plain bytecode** | Never changes in place. To replace: deploy a new manager, build new core impls baking its address, upgrade the cores. |
+| MarketplaceManager | UUPS (ERC-1967) — v3.7 | `upgradeTo` signed by the admin (instant, no queue — the manager holds no escrow). `tools/upgrade-cores.sh <network> --manager`. Its address never changes. |
 | feeRecipient / manager address | impl **immutables** | New impl with new constructor args, installed via the same upgrade path |
+| Coston2's manager `0x14C3b1Ba…` (deployed 2026-09-04 as v3.4 plain bytecode) | **not yet** | One-time migration below ("Migrating a v3.4 plain manager"); Songbird/Flare deploy the proxied manager from block one. |
 
 ## Performing an upgrade (per core, per network)
 
@@ -63,6 +70,51 @@ Notes:
   re-queued — an old approval cannot be exercised months later.
 - The queue is one-shot and exact-match: only the queued impl installs, and
   installing consumes the entry.
+
+## Upgrading the manager (v3.7)
+
+```bash
+ADMIN_KEY=0x… DEPLOYER_KEY=0x… tools/upgrade-cores.sh <network> --manager
+```
+
+Deploys a new `MarketplaceManager` implementation (no constructor args), sends
+`upgradeTo(newImpl)` from the admin, checks the ERC-1967 slot and that
+`admin()`/`keeper()` survived (state lives on the proxy), and records
+`impls.marketplaceManager` / `superseded_impls.marketplaceManager`. By hand:
+
+```bash
+forge create src/MarketplaceManager.sol:MarketplaceManager --rpc-url <rpc> --private-key $DEPLOYER_KEY
+cast send $MANAGER_ADDR "upgradeTo(address)" $NEW_MGR_IMPL --rpc-url <rpc> --private-key $ADMIN_KEY
+cast call $MANAGER_ADDR "admin()(address)" --rpc-url <rpc>     # unchanged
+```
+
+`_authorizeUpgrade` is `onlyAdmin` and rejects non-contracts; there is no
+queue and no expiry. The proxy emits `Upgraded` + `AuditLog("UPGRADE")`, which
+the watcher indexes into the governance trail. After `renounceAdmin()` the
+call reverts `NotAdmin` forever — the seal covers the manager too.
+
+## Migrating a v3.4 plain manager (Coston2, one time)
+
+Coston2 went live on 2026-09-04 with the v3.4 manager as plain bytecode. The
+cores keep their addresses, listings, escrow and history; only the authority
+anchor moves to a proxy:
+
+```bash
+# 1) New proxied manager with the SAME admin and keeper (deployer key pays):
+cd contracts && PRIVATE_KEY=0x… ADMIN_ADDR=0x987f10f49b35a8ef48b664a8dc457f61c6fe2105 \
+  KEEPER_ADDR=0x16278eadd682b114e922cd25de9dd211fc93767f \
+  forge script script/DeployManager.s.sol --rpc-url https://coston2-api.flare.network/ext/C/rpc --broadcast -vv
+# → MANAGER_ADDR=<new proxy>
+# 2) New core impls baking the new manager, installed under the OLD manager's admin:
+cd .. && MANAGER_ADDR=<new proxy> ADMIN_KEY=0x… DEPLOYER_KEY=0x… tools/upgrade-cores.sh coston2
+# 3) deployments/coston2.json now carries the new marketplaceManager + impls; commit + push (= deploy),
+#    then backfill the trail from the DeployManager block:
+cd backend && CHAIN_ID=114 POSTGRES_URL=… RPC_URL=… MARKETPLACE_ADDR=… AUCTION_ADDR=… OFFERBOOK_ADDR=… \
+  MARKETPLACE_MANAGER_ADDR=<new proxy> go run ./cmd/reindexgov -from <block>
+```
+
+The old manager stays on chain, unreferenced and fund-less. The same run
+also installs the 15-duration implementations Coston2 is still waiting for.
 
 ## Compromised admin key — response
 
@@ -151,6 +203,7 @@ cast calldata "setKeeper(address)" $NEW_KEEPER          # to the manager
 cast calldata "queueUpgrade(address)" $NEW_IMPL         # to the CORE proxy
 cast calldata "upgradeTo(address)" $NEW_IMPL            # same proxy, after the queue tx executed
 cast calldata "cancelUpgrade()"                         # to the core proxy
+cast calldata "upgradeTo(address)" $NEW_MGR_IMPL        # to the MANAGER proxy (v3.7, no queue)
 cast calldata "renounceAdmin()"                         # to the manager — final
 ```
 

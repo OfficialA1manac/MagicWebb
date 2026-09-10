@@ -209,23 +209,35 @@ jobs:
             EXPLORER_URL=$(jq -r .explorer "$DEP")
             echo "=== ${NETWORK}: verifying on $EXPLORER_URL (chain $CHAIN_ID) ==="
 
-            verify() {
-              local name="$1" key="$2" file="$3"
-              local addr; addr=$(jq -r ".contracts.${key}" "$DEP")
+            verify() { # name, jq path of the address, source path (relative to contracts/)
+              local name="$1" path="$2" file="$3"
+              local addr; addr=$(jq -r "$path // empty" "$DEP")
+              [ -n "$addr" ] || { echo "--- $name: no address at $path (skipped) ---"; return 0; }
               echo "--- Verifying $name at $addr ---"
-              forge flatten "src/$file" -o "/tmp/${name}_flat.sol"
-              forge verify-contract               "$addr"               "src/$file"               --chain "$CHAIN_ID"               --verifier blockscout               --verifier-url "${EXPLORER_URL}/api/"               --etherscan-api-key "$EXPLORER_API_KEY"               --watch || echo "⚠  $name verification skipped or failed (check explorer)"
+              forge verify-contract               "$addr"               "$file"               --chain "$CHAIN_ID"               --verifier blockscout               --verifier-url "${EXPLORER_URL}/api/"               --etherscan-api-key "$EXPLORER_API_KEY"               --watch || echo "⚠  $name verification skipped or failed (check explorer)"
             }
 
             # The NFT at contracts.nft is a third-party/test collection, not a
             # contract in this repo (src/MagicWebbNFT.sol was removed in 3867c0c).
-            # v3.4: the manager is UNPROXIED — this verifies its real bytecode
-            # directly; the three cores are ERC1967 proxies (impls are logged
-            # in the deploy broadcast and can be verified manually if wanted).
-            verify "MarketplaceManager" "marketplaceManager" "MarketplaceManager.sol"
-            verify "Marketplace"       "marketplace"        "Marketplace.sol"
-            verify "AuctionHouse"      "auctionHouse"       "AuctionHouse.sol"
-            verify "OfferBook"         "offerBook"          "OfferBook.sol"
+            # v3.7: all four contracts are ERC-1967 proxies. The proxies verify
+            # against OpenZeppelin's ERC1967Proxy; the real logic lives at the
+            # implementation addresses in `impls` (written by
+            # tools/record-deployment.py / tools/upgrade-cores.sh). A network
+            # still on the v3.4 plain manager has no impls.marketplaceManager and
+            # verifies contracts.marketplaceManager as the manager source.
+            PROXY_SRC="lib/openzeppelin-contracts/contracts/proxy/ERC1967/ERC1967Proxy.sol:ERC1967Proxy"
+            verify "MarketplaceManager impl" ".impls.marketplaceManager" "src/MarketplaceManager.sol:MarketplaceManager"
+            if [ -z "$(jq -r '.impls.marketplaceManager // empty' "$DEP")" ]; then
+              verify "MarketplaceManager (plain, v3.4)" ".contracts.marketplaceManager" "src/MarketplaceManager.sol:MarketplaceManager"
+            else
+              verify "MarketplaceManager proxy" ".contracts.marketplaceManager" "$PROXY_SRC"
+            fi
+            verify "Marketplace impl"  ".impls.marketplace"  "src/Marketplace.sol:Marketplace"
+            verify "AuctionHouse impl" ".impls.auctionHouse" "src/AuctionHouse.sol:AuctionHouse"
+            verify "OfferBook impl"    ".impls.offerBook"    "src/OfferBook.sol:OfferBook"
+            verify "Marketplace proxy"  ".contracts.marketplace"  "$PROXY_SRC"
+            verify "AuctionHouse proxy" ".contracts.auctionHouse" "$PROXY_SRC"
+            verify "OfferBook proxy"    ".contracts.offerBook"    "$PROXY_SRC"
           done
 
   plan:

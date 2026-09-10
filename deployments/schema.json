@@ -113,7 +113,7 @@
     },
     "impls": {
       "type": "object",
-      "description": "Current UUPS implementation addresses behind the three core proxies (written by tools/upgrade-cores.sh).",
+      "description": "Current UUPS implementation addresses behind the four proxies (three cores + the v3.7 manager). Written by tools/record-deployment.py at deploy and by tools/upgrade-cores.sh on every upgrade. Absent marketplaceManager = the network still runs the v3.4 plain (unproxied) manager and needs the DeployManager migration.",
       "properties": {
         "marketplace": {
           "type": "string",
@@ -124,6 +124,10 @@
           "pattern": "^0x[0-9a-fA-F]{40}$"
         },
         "offerBook": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "marketplaceManager": {
           "type": "string",
           "pattern": "^0x[0-9a-fA-F]{40}$"
         },
@@ -145,6 +149,10 @@
           "pattern": "^0x[0-9a-fA-F]{40}$"
         },
         "offerBook": {
+          "type": "string",
+          "pattern": "^0x[0-9a-fA-F]{40}$"
+        },
+        "marketplaceManager": {
           "type": "string",
           "pattern": "^0x[0-9a-fA-F]{40}$"
         }

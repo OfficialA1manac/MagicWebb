@@ -2,7 +2,10 @@
 pragma solidity 0.8.26;
 
 import {Test} from "forge-std/Test.sol";
-import {MarketplaceManager, ZeroAddr, NotAdmin, SameAdmin, NotPendingAdmin} from "../src/MarketplaceManager.sol";
+import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.sol";
+import {
+    MarketplaceManager, ZeroAddr, NotAdmin, SameAdmin, NotPendingAdmin, BadManagerImplementation
+} from "../src/MarketplaceManager.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {AuctionHouse} from "../src/AuctionHouse.sol";
 import {OfferBook} from "../src/OfferBook.sol";
@@ -38,13 +41,133 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         assertFalse(mgr.hasRole(mgr.KEEPER_ROLE(), address(0)), "zero address never holds a role");
     }
 
-    function test_constructor_rejectsZeroAddresses() public {
-        // v3.4: the manager is a plain contract — validation lives in the
-        // constructor, there is no initializer.
+    function test_initialize_rejectsZeroAddresses() public {
+        // v3.7: the manager is a UUPS proxy — validation lives in the
+        // initializer, which the ERC1967Proxy constructor runs.
+        MarketplaceManager impl = new MarketplaceManager();
         vm.expectRevert(ZeroAddr.selector);
-        new MarketplaceManager(address(0), keeper);
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, address(0), keeper));
         vm.expectRevert(ZeroAddr.selector);
-        new MarketplaceManager(admin, address(0));
+        new ERC1967Proxy(address(impl), abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, address(0)));
+    }
+
+    function test_initialize_runsOnce_andImplIsLocked() public {
+        // The proxy cannot be re-initialized by anyone (no admin takeover).
+        vm.expectRevert("Initializable: contract is already initialized");
+        mgr.initialize(address(0xBAD), address(0xBAD));
+        vm.prank(admin);
+        vm.expectRevert("Initializable: contract is already initialized");
+        mgr.initialize(address(0xBAD), address(0xBAD));
+        // And the bare implementation has its initializers disabled.
+        MarketplaceManager impl = MarketplaceManager(_implOf(address(mgr)));
+        vm.expectRevert("Initializable: contract is already initialized");
+        impl.initialize(address(0xBAD), address(0xBAD));
+        assertEq(impl.admin(), address(0), "bare impl holds no admin");
+        assertEq(impl.keeper(), address(0), "bare impl holds no keeper");
+    }
+
+    // ── UUPS upgrade surface (v3.7: manager upgradeable in place) ────────────
+
+    bytes32 internal constant IMPL_SLOT = 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc;
+
+    function _implOf(address proxy) internal view returns (address) {
+        return address(uint160(uint256(vm.load(proxy, IMPL_SLOT))));
+    }
+
+    event Upgraded(address indexed implementation);
+
+    function test_upgrade_adminInstantSwap_stateAndAddressSurvive() public {
+        address before = _implOf(address(mgr));
+        MarketplaceManager next = new MarketplaceManager();
+        assertTrue(before != address(next), "sanity: new impl differs");
+
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit AuditLog("UPGRADE", admin, address(next), 0);
+        vm.expectEmit(true, true, true, true, address(mgr));
+        emit Upgraded(address(next));
+        vm.prank(admin);
+        mgr.upgradeTo(address(next));
+
+        assertEq(_implOf(address(mgr)), address(next), "implementation swapped");
+        // Storage lives on the proxy: authority addresses are untouched.
+        assertEq(mgr.admin(), admin);
+        assertEq(mgr.keeper(), keeper);
+        assertEq(mgr.pendingAdmin(), address(0));
+        assertTrue(mgr.hasRole(mgr.KEEPER_ROLE(), keeper));
+        // The cores keep consulting the SAME address, so their immutables and
+        // their upgrade gate are unaffected by a manager upgrade.
+        assertEq(mp.manager(), address(mgr));
+        Marketplace nextCore = new Marketplace(feeRecipient, address(mgr));
+        vm.startPrank(admin);
+        mp.queueUpgrade(address(nextCore));
+        mp.upgradeTo(address(nextCore));
+        vm.stopPrank();
+    }
+
+    function test_upgrade_onlyAdmin() public {
+        MarketplaceManager next = new MarketplaceManager();
+        vm.prank(keeper);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeToAndCall(address(next), "");
+        // A pending (unaccepted) admin has no upgrade power either.
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        vm.prank(admin2);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+    }
+
+    function test_upgrade_rejectsNonContract() public {
+        vm.startPrank(admin);
+        vm.expectRevert(BadManagerImplementation.selector);
+        mgr.upgradeTo(address(0));
+        vm.expectRevert(BadManagerImplementation.selector);
+        mgr.upgradeTo(address(0xDEAD)); // EOA: no code
+        vm.stopPrank();
+    }
+
+    function test_upgrade_deadAfterRenounce() public {
+        MarketplaceManager next = new MarketplaceManager();
+        vm.prank(admin);
+        mgr.renounceAdmin();
+        vm.prank(admin);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+        // The seal is total: no key, no upgrade, forever.
+        vm.prank(address(0x999));
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+    }
+
+    function test_upgrade_followsAdminHandOff() public {
+        MarketplaceManager next = new MarketplaceManager();
+        vm.prank(admin);
+        mgr.transferAdmin(admin2);
+        vm.prank(admin2);
+        mgr.acceptAdmin();
+        vm.prank(admin);
+        vm.expectRevert(NotAdmin.selector);
+        mgr.upgradeTo(address(next));
+        vm.prank(admin2);
+        mgr.upgradeTo(address(next));
+        assertEq(_implOf(address(mgr)), address(next));
+    }
+
+    function test_upgrade_implCannotBeUpgradedDirectly() public {
+        // UUPS onlyProxy: upgradeTo on the bare implementation reverts.
+        MarketplaceManager impl = MarketplaceManager(_implOf(address(mgr)));
+        MarketplaceManager next = new MarketplaceManager();
+        vm.expectRevert("Function must be called through delegatecall");
+        impl.upgradeTo(address(next));
+        // ERC-1822: the impl advertises the ERC-1967 slot (notDelegated, so
+        // it is read on the impl itself), which is what upgradeTo checks.
+        assertEq(impl.proxiableUUID(), IMPL_SLOT);
     }
 
     // ── Single keeper: only the admin can replace it, nobody can add ─────────
@@ -90,22 +213,18 @@ contract MarketplaceManagerTest is Test, TestHelpers {
         assertFalse(ok, "removeKeeper must not exist");
     }
 
-    function test_noUpgradeSurfaceExists() public {
-        // v3.4: the manager is UNPROXIED plain bytecode. Every upgrade-related
-        // selector must be absent at the ABI level — there is nothing to
-        // upgrade and no proxy to point elsewhere.
-        (bool ok,) = address(mgr).call(abi.encodeWithSignature("upgradeTo(address)", address(0xB0B)));
-        assertFalse(ok, "upgradeTo must not exist");
-        (ok,) = address(mgr).call(abi.encodeWithSignature("upgradeToAndCall(address,bytes)", address(0xB0B), ""));
-        assertFalse(ok, "upgradeToAndCall must not exist");
-        (ok,) = address(mgr).call(abi.encodeWithSignature("queueUpgrade(address)", address(0xB0B)));
-        assertFalse(ok, "queueUpgrade must not exist");
+    function test_noPauseOrQueueSurfaceExists() public {
+        // v3.7: the manager is a UUPS proxy, but it still has NO pause and NO
+        // upgrade queue of its own (instant, admin-only) — those selectors
+        // must be absent at the ABI level.
+        (bool ok,) = address(mgr).call(abi.encodeWithSignature("queueUpgrade(address)", address(0xB0B)));
+        assertFalse(ok, "queueUpgrade must not exist on the manager");
         (ok,) = address(mgr).call(abi.encodeWithSignature("cancelUpgrade()"));
-        assertFalse(ok, "cancelUpgrade must not exist");
-        (ok,) = address(mgr).call(abi.encodeWithSignature("proxiableUUID()"));
-        assertFalse(ok, "proxiableUUID must not exist (not UUPS)");
-        (ok,) = address(mgr).call(abi.encodeWithSignature("initialize(address,address)", admin, keeper));
-        assertFalse(ok, "initialize must not exist (plain constructor)");
+        assertFalse(ok, "cancelUpgrade must not exist on the manager");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("pauseEntries()"));
+        assertFalse(ok, "pauseEntries must not exist");
+        (ok,) = address(mgr).call(abi.encodeWithSignature("pause()"));
+        assertFalse(ok, "pause must not exist");
     }
 
     // ── renounceAdmin: the one-way seal ──────────────────────────────────────

@@ -4,8 +4,8 @@
     python tools/record-deployment.py <songbird|flare|coston2> [--nft 0x…] [--track 0x…,0x…]
 
 Reads contracts/broadcast/DeployV34.s.sol/<chainId>/run-latest.json (the file
-`forge script … --broadcast` writes), maps the seven CREATEs to the record
-(manager, three implementations, three ERC-1967 proxies), sets status
+`forge script … --broadcast` writes), maps the eight CREATEs to the record
+(v3.7: four implementations + four ERC-1967 proxies — manager first), sets status
 "deployed", deployedAt (today, UTC), indexFromBlock (the first receipt's block)
 and impls, moves any previous contract set into `superseded`, and leaves nft /
 trackedCollections as given (null / [] for a mainnet with no seed collection).
@@ -43,15 +43,15 @@ def main() -> int:
 
     creates = [t for t in b["transactions"] if t.get("transactionType") == "CREATE"]
     names = [t.get("contractName") for t in creates]
-    expect = ["MarketplaceManager", "Marketplace", "ERC1967Proxy", "AuctionHouse", "ERC1967Proxy", "OfferBook", "ERC1967Proxy"]
+    expect = ["MarketplaceManager", "ERC1967Proxy", "Marketplace", "ERC1967Proxy", "AuctionHouse", "ERC1967Proxy", "OfferBook", "ERC1967Proxy"]
     if names != expect:
         print(f"unexpected CREATE order {names}; expected {expect}", file=sys.stderr)
         return 1
     addr = [t["contractAddress"] for t in creates]
-    manager, mp_impl, mp, ah_impl, ah, ob_impl, ob = addr
+    mgr_impl, manager, mp_impl, mp, ah_impl, ah, ob_impl, ob = addr
     # The proxy constructor's first argument is the implementation it wraps —
     # cross-check so a reordered broadcast can never be recorded wrong.
-    for proxy_tx, impl in ((creates[2], mp_impl), (creates[4], ah_impl), (creates[6], ob_impl)):
+    for proxy_tx, impl in ((creates[1], mgr_impl), (creates[3], mp_impl), (creates[5], ah_impl), (creates[7], ob_impl)):
         arg0 = (proxy_tx.get("arguments") or [""])[0]
         if arg0.lower() != impl.lower():
             print(f"proxy {proxy_tx['contractAddress']} wraps {arg0}, expected {impl}", file=sys.stderr)
@@ -69,7 +69,7 @@ def main() -> int:
         # Archive the previous set only when an address actually changes; a
         # re-run for --track / --nft on the same broadcast keeps the record as is.
         d.setdefault("superseded", []).insert(0, {
-            "note": f"replaced {dt.date.today().isoformat()} by the v3.6 DeployV34 set at block {first_block}",
+            "note": f"replaced {dt.date.today().isoformat()} by the v3.7 DeployV34 set at block {first_block}",
             **{k: old.get(k) for k in ("marketplace", "auctionHouse", "offerBook", "marketplaceManager", "nft")},
         })
     d["status"] = "deployed"
@@ -85,13 +85,13 @@ def main() -> int:
         "nft": a.nft or old.get("nft"),
     }
     if changed or not d.get("impls"):
-        d["impls"] = {"marketplace": mp_impl, "auctionHouse": ah_impl, "offerBook": ob_impl, "upgradedAt": d["deployedAt"]}
+        d["impls"] = {"marketplace": mp_impl, "auctionHouse": ah_impl, "offerBook": ob_impl, "marketplaceManager": mgr_impl, "upgradedAt": d["deployedAt"]}
     tracked = [x.strip() for x in a.track.split(",") if x.strip()]
     d["trackedCollections"] = tracked if tracked else (d.get("trackedCollections") or [])
     d.pop("note", None)
     dpath.write_text(json.dumps(d, indent=2, ensure_ascii=False) + "\n", encoding="utf-8")
     print(f"{dpath.relative_to(ROOT)}: status deployed, indexFromBlock {first_block}")
-    print(f"  manager {manager}\n  marketplace {mp} (impl {mp_impl})\n  auctionHouse {ah} (impl {ah_impl})\n  offerBook {ob} (impl {ob_impl})")
+    print(f"  manager {manager} (impl {mgr_impl})\n  marketplace {mp} (impl {mp_impl})\n  auctionHouse {ah} (impl {ah_impl})\n  offerBook {ob} (impl {ob_impl})")
     print("next: bash tools/check-deployments.sh && git add deployments && git commit && git push")
     return 0
 

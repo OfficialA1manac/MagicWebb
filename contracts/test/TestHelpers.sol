@@ -7,10 +7,12 @@ import {OfferBook} from "../src/OfferBook.sol";
 import {Marketplace} from "../src/Marketplace.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 
-/// @notice Shared helpers for deploying the v3.4 contract set in tests.
+/// @notice Shared helpers for deploying the v3.7 contract set in tests.
 ///         v3.4: feeRecipient + manager are implementation-constructor args
-///         (immutables); the proxy initializer takes no arguments. The
-///         manager is a PLAIN contract — no proxy.
+///         (immutables); the core proxy initializers take no arguments.
+///         v3.7: the manager is a UUPS proxy again — `initialize(admin,
+///         keeper)` runs in the ERC1967Proxy constructor, exactly as
+///         DeployV34 does on chain.
 contract TestHelpers {
     function _deployAuctionHouse(address recipient, address manager_)
         internal returns (AuctionHouse)
@@ -73,7 +75,12 @@ contract TestHelpers {
     function _deployMarketplaceManager(address admin, address keeper)
         internal returns (MarketplaceManager)
     {
-        // v3.4: plain contract, no proxy, no initializer.
-        return new MarketplaceManager(admin, keeper);
+        // v3.7: impl + ERC-1967 proxy, initialized in the proxy constructor.
+        MarketplaceManager impl = new MarketplaceManager();
+        ERC1967Proxy proxy = new ERC1967Proxy(
+            address(impl),
+            abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin, keeper)
+        );
+        return MarketplaceManager(address(proxy));
     }
 }

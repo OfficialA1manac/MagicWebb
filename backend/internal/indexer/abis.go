@@ -49,9 +49,11 @@ var (
 	TopicTransferBatch  = crypto.Keccak256Hash([]byte("TransferBatch(address,address,address,uint256[],uint256[])"))
 
 	// ── Governance (v3.6 wave 1) ────────────────────────────────────────────
-	// MarketplaceManager (plain, unproxied): the keeper slot and the admin
-	// lifecycle. AuditLog is emitted alongside every one of them; we index it
-	// too so the trail is complete even if a future manager adds an action.
+	// MarketplaceManager (v3.7: a UUPS proxy again): the keeper slot and the
+	// admin lifecycle. AuditLog is emitted alongside every one of them — and
+	// alongside a manager upgrade ("UPGRADE") — so the trail is complete even
+	// if a future manager adds an action. The manager proxy also emits the
+	// ERC-1967 Upgraded event below (once at construction, then per install).
 	TopicKeeperSet              = crypto.Keccak256Hash([]byte("KeeperSet(address,address)"))
 	TopicAdminRenounced         = crypto.Keccak256Hash([]byte("AdminRenounced(address)"))
 	TopicAdminTransferStarted   = crypto.Keccak256Hash([]byte("AdminTransferStarted(address,address)"))

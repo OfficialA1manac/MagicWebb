@@ -162,7 +162,7 @@ contract MarketplaceCoreTest is Test, TestHelpers {
         // is installed under the OLD manager's authority; afterwards the new
         // manager's admin controls the next upgrade.
         (Marketplace gated, MarketplaceManager mgrA) = _gatedPair();
-        MarketplaceManager mgrB = new MarketplaceManager(address(0xB0B), TEST_SENTINEL_KEEPER);
+        MarketplaceManager mgrB = _deployMarketplaceManager(address(0xB0B), TEST_SENTINEL_KEEPER);
 
         Marketplace nextImpl = new Marketplace(creator, address(mgrB));
         gated.queueUpgrade(address(nextImpl));   // authorized by mgrA's admin (this)
@@ -202,7 +202,7 @@ contract MarketplaceCoreTest is Test, TestHelpers {
     }
 
     function test_sealedManager_freezesCoreUpgrades() public {
-        // renounceAdmin on the (plain) manager must kill core upgrades: the
+        // renounceAdmin on the (proxied) manager must kill core upgrades: the
         // cores' _requireAdmin consults exactly the hasRole probe that now
         // answers false for everyone.
         (Marketplace gated, MarketplaceManager mgr) = _gatedPair();

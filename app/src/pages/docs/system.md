@@ -48,7 +48,7 @@ flowchart TB
   A3 --- D3[("Neon<br/>royal-paper")]
   A1 -.-> R1[("Redis (optional)<br/>mw:114:*")]
   A1 --> K1["keeper wallet<br/>KEEPER_KEY Fly secret"]
-  A1 -->|"RPC rotation"| C2["Coston2 contracts · block 34905078<br/>Marketplace · AuctionHouse · OfferBook (UUPS)<br/>MarketplaceManager (plain)"]
+  A1 -->|"RPC rotation"| C2["Coston2 contracts · block 34905078<br/>Marketplace · AuctionHouse · OfferBook (UUPS)<br/>MarketplaceManager (plain v3.4 — proxied v3.7 after the DeployManager migration)"]
   K1 -->|"settle · refundLosers<br/>forceCancel · fee sweep"| C2
   A1 <-.->|"NETWORK_URLS"| A2
   A1 <-.-> A3
@@ -429,7 +429,7 @@ Desktop and phone, light and dark, for every page — captured from the live app
 ## 11. Where the code is
 
 See `ARCHITECTURE.md` §7 for the repository map. The short version: `contracts/`
-(Foundry, UUPS cores + plain manager, `script/DeployV34.s.sol`, `DeploySafe.s.sol`),
+(Foundry, four UUPS proxies — three cores + the v3.7 manager — `script/DeployV34.s.sol`, `DeployManager.s.sol`, `DeploySafe.s.sol`),
 `backend/` (Go 1.26 + Fiber; `cmd/server` boots migrate → connect → guard →
 indexer → http; `internal/chain/profile` is the per-network table; `internal/ops`
 the health snapshot), `app/` (Astro 7 + Svelte 5 islands + one React wallet

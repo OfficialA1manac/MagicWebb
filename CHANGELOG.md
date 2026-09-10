@@ -14,6 +14,96 @@ numbered by the deployed contract/protocol generation instead —
 `MarketplaceManager`, timelocked upgrades and on-chain durations.
 The two schemes do not overlap: `v29` precedes `v3.0` in time.
 
+## v3.7 — 2026-09-09 — Everything upgradeable: proxied MarketplaceManager, mobile pass
+
+**Owner directive 2026-09-09:** every contract on every network stays
+upgradeable until the owner explicitly orders immutability. The one
+exception in v3.4–v3.6 — the `MarketplaceManager`, deployed as plain
+unproxied bytecode to save ~7–12k gas per keeper consult — is a UUPS proxy
+again. Not yet on chain anywhere: Coston2 still runs the v3.4 manager
+`0x14C3b1Ba…` until the owner runs the one-time migration; Songbird/Flare
+deploy the proxied manager from block one.
+
+### Contracts
+
+- **`MarketplaceManager` is a UUPS (ERC-1967) proxy**: `initialize(admin,
+  keeper)` replaces the constructor (the impl locks its initializers);
+  `_authorizeUpgrade` is `onlyAdmin`, rejects non-contracts, emits
+  `AuditLog("UPGRADE")` next to OpenZeppelin's `Upgraded`; instant, no queue
+  (the manager holds no escrow). `renounceAdmin()` now seals all four
+  contracts at once (`admin == 0` → `NotAdmin` on `upgradeTo`). Storage gap
+  47 after keeper/admin/pendingAdmin. Cores unchanged — same immutable
+  `manager` address, same `hasRole` staticcall (now crossing the proxy
+  fallback).
+- `DeployV34.s.sol`: 8 CREATEs (manager impl + proxy first); asserts the
+  manager's impl slot and `proxiableUUID`. New `DeployManager.s.sol` deploys
+  only a proxied manager for an already-live network (Coston2 migration).
+- Tests: `MarketplaceManager.t.sol` gains the upgrade surface (admin-only,
+  hand-off follows, dead after renounce, impl locked, `onlyProxy`, state and
+  address survive a swap, cores keep upgrading through the same address);
+  `TestHelpers._deployMarketplaceManager` builds the proxy; gas snapshot
+  regenerated (keeper consults +~7–12k, as measured in v3.4).
+
+### Tooling / ops
+
+- `tools/upgrade-cores.sh <network> --manager` upgrades the manager impl in
+  place; `MANAGER_ADDR=<new proxy>` migrates a v3.4 plain manager (new core
+  impls bake it, the old admin installs them, `deployments/<network>.json`
+  moves `contracts.marketplaceManager` and records `impls.marketplaceManager`,
+  the old manager is archived under `superseded`). `--verify` prints whether
+  the manager is plain or proxied.
+- `tools/record-deployment.py` maps the 8 CREATEs and writes
+  `impls.marketplaceManager`; `deployments/schema.json` accepts it.
+- `deploy.yml` verifies implementations against their sources and the four
+  proxies against `ERC1967Proxy` (the old job verified proxies against core
+  sources, which could never match). `e2e_local.sh` inspects the manager
+  impl's bytecode through the ERC-1967 slot.
+- `/api/v1/governance` `implementations` gains `marketplace_manager` once the
+  proxied manager's `Upgraded` event is indexed.
+- Docs: `UPGRADE_RUNBOOK.md` (manager upgrade + Coston2 migration sections),
+  `GO_LIVE_MAINNET.md` / `DEPLOY_CHECKLIST.md` (8 CREATEs ≈ 13M gas),
+  `ARCHITECTURE.md`, `IMMUTABILITY_TRANSITION.md`, `SYSTEM_BREAKDOWN.md`,
+  the in-app system page, README.
+
+### Frontend (mobile pass — 390 and 360 px, light + dark, 30 page states)
+
+A Playwright audit (horizontal overflow, tap targets, text < 12px, fixed-layer
+overlap, clipped text, dialogs taller than the viewport) over every page and
+open state found these; all fixed and re-audited clean for overflow:
+
+- **Header cut off on 360-wide phones** (logo sliver, menu button off-screen,
+  and the drawer scrolled the page sideways when it opened): ≤400px the theme
+  toggle moves into the drawer (new "Theme: …" row, same script), the network
+  pill drops its chevron, gaps/padding tighten; the brand is a 44px square
+  target (was 28px — removed from the e2e known-debt list).
+- **Network menu rendered as bare text lines** and the **notification
+  dropdown was a 20px strip pinned to the bell**: the layout's `<style>` is
+  Astro-scoped, so the script-built `.net-item`/`.notif-*` elements never
+  matched a rule (now `:global()`), and an inline `position:relative` on the
+  bell container beat the ≤640px `static` rule. Same scoping bug on
+  `/status`: injected tile links and table rows lost their styles.
+- **Saved-wallet "Reconnect" pill** wrapped the address one character per
+  line off the right edge: address hidden ≤480px, ✕ hidden ≤400px (Reconnect
+  → Disconnect is the same end state).
+- **Profile header** squeezed name/badges/bio into a ~140px column beside
+  the avatar: the action buttons wrap under the header ≤640px.
+- **Offer duration picker could not scroll** on the token page (fieldset
+  `min-inline-size: min-content` grew the panel to 714px and hid the options
+  past "1 hour"): `min-width: 0`.
+- **Badge hint ⓘ landed at the section corner** on the home/listings grids
+  (it was an absolutely-positioned sibling grid item): cards are wrapped in a
+  positioned cell.
+- Search input overflowed at 360px (`min-width: 0`); mermaid diagrams keep a
+  readable 560px and scroll on phones instead of shrinking with spilling
+  labels.
+- Tap targets: activity-row explorer arrows (10×22 → 44×44), metrics/status
+  address links, banner links, filter-chip ✕ (28 → 36), forget-wallet button;
+  inline token metadata links get a coarse-pointer hit area; network menu
+  captions 11.1px → 12px.
+- e2e: the mobile smoke test asserts the header fits and the hint is anchored
+  to its card; a new test covers the injected network menu / notification
+  dropdown styling.
+
 ## v3.6 — 2026-09-07 — Governance trail, NFT badges, non-technical UX, ops hardening, both-scheme a11y gate
 
 Live on Coston2 on the v3.5 contract set (block 34905078; Marketplace

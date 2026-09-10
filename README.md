@@ -65,7 +65,7 @@ roles, governance, badges, screenshots) in
 
 | Layer | Tech |
 |---|---|
-| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin 4.9.6 — three UUPS cores + one plain `MarketplaceManager` |
+| Contracts | Solidity 0.8.26, Foundry, OpenZeppelin 4.9.6 — four UUPS proxies (three cores + `MarketplaceManager`), all instantly upgradeable by the per-network admin until the owner seals a network with `renounceAdmin()` |
 | Backend | Go 1.26, [Fiber](https://gofiber.io) v2, pgx v5 + goose migrations, go-ethereum, gqlgen, connect-go, zerolog; optional Zig media helpers (`-tags zigmedia`) |
 | Frontend | Astro 7 (static), Svelte 5 islands, one React island for the wallet (Reown AppKit, wagmi, viem), self-hosted Inter + JetBrains Mono, Mermaid for the docs |
 | Data | [Neon Postgres](https://neon.tech) — one project per network; Redis optional (shared read caches only) |

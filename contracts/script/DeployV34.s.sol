@@ -8,12 +8,24 @@ import {AuctionHouse}       from "../src/AuctionHouse.sol";
 import {OfferBook}          from "../src/OfferBook.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 
-/// @notice Unified v3.4 deploy for EVERY network — Coston2, Songbird, Flare.
+/// @notice Unified deploy for EVERY network — Coston2, Songbird, Flare.
 ///         One script; the only per-network differences are environment inputs.
+///         (File name kept as DeployV34 — the deployment records, CI and the
+///         runbooks reference it; the topology below is the v3.7 one.)
 ///
-/// v3.4 changes over v3.2:
-///   - MarketplaceManager is a PLAIN, UNPROXIED contract (no impl+proxy pair,
-///     no initializer). 7 CREATEs total instead of 8.
+/// v3.7 change (owner directive 2026-09-09 — EVERYTHING upgradeable until the
+/// owner orders immutability):
+///   - MarketplaceManager is a UUPS proxy again: impl + ERC1967Proxy whose
+///     constructor runs `initialize(admin, keeper)`. 8 CREATEs total, in this
+///     exact order (tools/record-deployment.py depends on it):
+///       MarketplaceManager impl, ERC1967Proxy (manager),
+///       Marketplace impl, ERC1967Proxy, AuctionHouse impl, ERC1967Proxy,
+///       OfferBook impl, ERC1967Proxy.
+///   - The manager's ADDRESS is stable for the life of the network; its logic
+///     is swapped in place by the admin (`upgradeTo`, instant, onlyAdmin).
+///     `renounceAdmin()` seals it together with the cores.
+///
+/// v3.4 changes over v3.2 (still in force):
 ///   - feeRecipient + manager are IMMUTABLES baked into each core
 ///     implementation via constructor args; the proxies initialize with NO
 ///     arguments. Changing either later = new impl via queueUpgrade+upgradeTo.
@@ -87,11 +99,17 @@ contract DeployV34 is Script {
 
         vm.startBroadcast(pk);
 
-        // ── MarketplaceManager — PLAIN contract, deliberately unproxied ────
-        // Two addresses and a shim; nothing worth an upgrade surface. Cores
-        // bake its address as an immutable; replacing it later = new core
-        // impls via the admin-gated upgrade path.
-        MarketplaceManager manager = new MarketplaceManager(admin_, keeper_);
+        // ── MarketplaceManager — UUPS impl + ERC-1967 proxy (v3.7) ─────────
+        // The proxy address is what the cores bake as their `manager`
+        // immutable and what deployments/<network>.json records. Its logic
+        // is upgradeable in place by ADMIN_ADDR (instant, no queue) until
+        // renounceAdmin().
+        MarketplaceManager managerImpl = new MarketplaceManager();
+        ERC1967Proxy managerProxy = new ERC1967Proxy(
+            address(managerImpl),
+            abi.encodeWithSelector(MarketplaceManager.initialize.selector, admin_, keeper_)
+        );
+        MarketplaceManager manager = MarketplaceManager(address(managerProxy));
 
         // ── Cores: impl bakes (feeRecipient, manager); proxy inits no-arg ──
         Marketplace marketplaceImpl = new Marketplace(feeRcpt, address(manager));
@@ -121,11 +139,11 @@ contract DeployV34 is Script {
 
         vm.stopBroadcast();
 
-        console2.log("# Magic Webb v3.4 deploy -- record in deployments/<network>.json");
+        console2.log("# Magic Webb v3.7 deploy -- record in deployments/<network>.json (python tools/record-deployment.py <network>)");
         console2.log("CHAIN_ID=",         block.chainid);
         console2.log("SEALED=",           seal);
         console2.log("MANAGER_ADDR=",     address(manager));
-        console2.log("  (manager is UNPROXIED plain bytecode -- there is no separate manager impl address)");
+        console2.log("MANAGER_IMPL=",     address(managerImpl));
         console2.log("MARKETPLACE_ADDR=", address(marketplace));
         console2.log("AUCTION_ADDR=",     address(auction));
         console2.log("OFFERBOOK_ADDR=",   address(offerBook));
@@ -135,7 +153,7 @@ contract DeployV34 is Script {
         console2.log("KEEPER_ADDR=",      keeper_);
         console2.log("FEE_RECIPIENT=",    feeRcpt);
         console2.log("FEE=",              "1.5% (150 bps, hardcoded, seller-pays on sale)");
-        console2.log("UPGRADE_DELAY=",    "0 on every chain (instant; queue+upgrade back-to-back)");
+        console2.log("UPGRADE_DELAY=",    "0 on every chain (instant; cores: queue+upgrade back-to-back; manager: upgradeTo)");
 
         // Sanity: every core must report the same fee recipient and manager —
         // read THROUGH the proxies, which also proves the immutables resolve
@@ -164,6 +182,10 @@ contract DeployV34 is Script {
         require(_impl(address(marketplaceProxy)) == address(marketplaceImpl), "MARKETPLACE impl slot mismatch");
         require(_impl(address(auctionProxy))     == address(auctionImpl),     "AUCTION impl slot mismatch");
         require(_impl(address(offerBookProxy))   == address(offerBookImpl),   "OFFERBOOK impl slot mismatch");
+        require(_impl(address(managerProxy))     == address(managerImpl),     "MANAGER impl slot mismatch");
+        // v3.7: the manager is upgradeable in place -- the impl must be the
+        // UUPS one (ERC-1822 proxiableUUID answers the ERC-1967 slot).
+        require(managerImpl.proxiableUUID() == _IMPL_SLOT, "MANAGER impl is not UUPS");
         if (seal) {
             require(manager.admin() == address(0), "sealed deploy must end with no admin");
             require(!manager.hasRole(manager.DEFAULT_ADMIN_ROLE(), deployer), "no admin may survive a sealed deploy");

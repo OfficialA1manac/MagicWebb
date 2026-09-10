@@ -31,10 +31,10 @@ contract GasTest is Test, TestHelpers {
     address keeper = address(0xCAFE);
 
     function setUp() public {
-        // A REAL manager (plain, unproxied -- the v3.4 shape) so the keeper
-        // consult path (hasRole staticcall from settle) is measured, not
-        // short-circuited by manager == address(0).
-        mgr = new MarketplaceManager(admin, keeper);
+        // A REAL manager behind its ERC-1967 proxy (the v3.7 shape) so the
+        // keeper consult path (hasRole staticcall from settle, crossing the
+        // proxy fallback) is measured exactly as it runs on chain.
+        mgr = _deployMarketplaceManager(admin, keeper);
         mp = _deployMarketplace(fee, address(mgr));
         ah = _deployAuctionHouse(fee, address(mgr));
         ob = _deployOfferBook(fee, address(mgr));

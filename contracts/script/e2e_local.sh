@@ -104,15 +104,18 @@ check "expired offer refunded" "1000000000000000000" "$(sub $B1 $B0)"
 
 echo "== E. pause-free protocol: no circuit breaker exists =="
 # A revert alone doesn't prove the selector is gone (it could be an auth
-# revert) -- inspect the bytecode for the 4-byte selector. v3.4: the manager
-# is PLAIN UNPROXIED bytecode (no ERC-1967 impl slot), so read its own code.
-MGR_CODE=$(cast code "$MGR" --rpc-url "$RPC")
-[ "$MGR_CODE" != "0x" ] || { echo "  FAIL  manager has no code at $MGR"; fail=1; }
+# revert) -- inspect the bytecode for the 4-byte selector. v3.7: the manager
+# is a UUPS proxy again -- read the IMPLEMENTATION's code (ERC-1967 slot); the
+# proxy itself only holds the delegatecall fallback.
+MGR_IMPL=$(cast storage "$MGR" 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url "$RPC" | sed 's/^0x0\{24\}/0x/')
+[ "$MGR_IMPL" != "0x0000000000000000000000000000000000000000" ] || { echo "  FAIL  manager at $MGR has no ERC-1967 implementation (not a proxy?)"; fail=1; }
+MGR_CODE=$(cast code "$MGR_IMPL" --rpc-url "$RPC")
+[ "$MGR_CODE" != "0x" ] || { echo "  FAIL  manager impl has no code at $MGR_IMPL"; fail=1; }
 PAUSE_SEL=$(cast sig "pauseEntries()")
 if printf '%s' "$MGR_CODE" | grep -qi "${PAUSE_SEL#0x}"; then
-  echo "  FAIL  pauseEntries selector present in manager bytecode"; fail=1
+  echo "  FAIL  pauseEntries selector present in manager impl bytecode"; fail=1
 else
-  echo "  PASS  protocol has no pause (pauseEntries selector absent from manager bytecode)"
+  echo "  PASS  protocol has no pause (pauseEntries selector absent from manager impl bytecode)"
 fi
 cast send "$MGR" "pauseEntries()" --rpc-url "$RPC" --private-key "$PK_CREATOR" >/dev/null 2>&1   && { echo "  FAIL  pauseEntries call should revert"; fail=1; }   || echo "  PASS  pauseEntries reverts for the creator too"
 # Entries must always work -- nothing can halt them.

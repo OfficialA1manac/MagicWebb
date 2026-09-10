@@ -3,8 +3,9 @@
 Everything below the "Owner steps" line is already done. Songbird and Flare run
 the same image as Coston2 in read-only mode today; flipping either one to
 trading is: fund → deploy the contracts → record the addresses → push. Both
-networks stay **admin-held and instantly upgradeable** (`upgradeDelay() == 0`)
-until the owner orders `renounceAdmin()` — see `UPGRADE_RUNBOOK.md`.
+networks stay **admin-held and instantly upgradeable** (`upgradeDelay() == 0`;
+v3.7: the `MarketplaceManager` is a UUPS proxy too, so all four contracts can be
+changed in place) until the owner orders `renounceAdmin()` — see `UPGRADE_RUNBOOK.md`.
 
 ## Already in place (verified 2026-09-08)
 
@@ -27,7 +28,8 @@ Deployer (the only key that pays for the deploy): **`0x14080c66253dfc5042ad5226c
 
 ## Owner steps (per network, Songbird first)
 
-**0. Fund** (base fee 500 gwei, priority 150 gwei, deploy = 7 CREATEs ≈ 12M gas):
+**0. Fund** (base fee 500 gwei, priority 150 gwei, deploy = 8 CREATEs ≈ 13M gas —
+v3.7 adds the manager's own impl + proxy so every contract is upgradeable):
 
 | Send to | Songbird | Flare | Why |
 |---|---|---|---|

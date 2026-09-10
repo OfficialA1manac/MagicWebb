@@ -13,9 +13,9 @@ are hard gates for Flare (chain 14).
       `(cd backend && go run ./cmd/keeperrotate -gen -out ../keeper-<network>.key)` (prints the
       address = `KEEPER_ADDR`), stored ONLY as the app's Fly secret, key file deleted; the keeper
       is funded from the deployer right after the deploy (≈ 50 native on a mainnet).
-- [ ] **mainnet** Deployer funded for the 7 CREATEs of `DeployV34` (plain manager + 3 impls +
-      3 UUPS proxies; no wiring calls) + keeper funding (≈ 7.7 native at 650 gwei for the
-      deploy alone; 15 SGB / 15 FLR is comfortable).
+- [ ] **mainnet** Deployer funded for the 8 CREATEs of `DeployV34` (v3.7: manager impl + proxy,
+      3 core impls + 3 core proxies; no wiring calls) + keeper funding (≈ 8.5 native at 650 gwei
+      for the deploy alone; 15 SGB / 15 FLR is comfortable).
 - [ ] **mainnet** RPC primary + fallbacks answer `eth_chainId` today; `deployments/<network>.json`
       and `backend/internal/chain/profile/<network>.go` agree (the profile test enforces it).
 - [ ] **mainnet** Neon snapshot schedule set on the network's project (`RUNBOOK_RESTORE.md`).

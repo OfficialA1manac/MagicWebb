@@ -11,9 +11,18 @@
 # which this script READS FROM THE LIVE PROXIES so an upgrade can never change
 # them by accident. Change them on purpose with FEE_RECIPIENT_ADDR / MANAGER_ADDR.
 #
+# v3.7: the MarketplaceManager is a UUPS proxy too. `--manager` upgrades ITS
+# implementation in place (admin-signed upgradeTo, instant, no queue) and
+# leaves the cores alone. Passing MANAGER_ADDR=<new proxy> (from
+# script/DeployManager.s.sol) migrates a network that still runs the v3.4
+# plain manager: the new core impls bake the new manager, the OLD manager's
+# admin authorizes the install, and deployments/<network>.json gets the new
+# contracts.marketplaceManager + impls.marketplaceManager.
+#
 # Usage:
 #   ADMIN_KEY=0x… DEPLOYER_KEY=0x… tools/upgrade-cores.sh <coston2|songbird|flare> [--dry-run]
-#   ADMIN_KEY=0x… tools/upgrade-cores.sh <network> --rollback     # reinstall superseded_impls
+#   ADMIN_KEY=0x… DEPLOYER_KEY=0x… tools/upgrade-cores.sh <network> --manager      # new manager impl only
+#   ADMIN_KEY=0x… tools/upgrade-cores.sh <network> --rollback     # reinstall superseded_impls (cores)
 #   tools/upgrade-cores.sh <network> --verify                     # read-only: print current state
 #
 # Keys are read from the environment only; nothing is written to disk. The
@@ -24,7 +33,7 @@ cd "$(git rev-parse --show-toplevel)"
 
 NET="${1:?network required: coston2 | songbird | flare}"; shift || true
 MODE="upgrade"
-for a in "$@"; do case "$a" in --dry-run) MODE=dry;; --rollback) MODE=rollback;; --verify) MODE=verify;; *) echo "unknown flag $a"; exit 2;; esac; done
+for a in "$@"; do case "$a" in --dry-run) MODE=dry;; --rollback) MODE=rollback;; --verify) MODE=verify;; --manager) MODE=manager;; *) echo "unknown flag $a"; exit 2;; esac; done
 
 DEP="deployments/$NET.json"
 [ "$(jq -r .status "$DEP")" = "deployed" ] || { echo "$NET is not deployed"; exit 1; }
@@ -43,9 +52,16 @@ impl_of() { # ERC-1967 implementation slot
   cast storage "$1" 0x360894a13ba1a3210667c828492db98dca3e2076cc3735a920a3ca505d382bbc --rpc-url "$RPC" | sed 's/^0x0\{24\}/0x/'
 }
 
+MGR_IMPL=$(impl_of "$MGR")
+ZERO=0x0000000000000000000000000000000000000000
 echo "== $NET via $RPC"
 echo "   admin          $ADMIN"
 echo "   manager        $MGR   (live: $MGR_LIVE)"
+if [ "$MGR_IMPL" = "$ZERO" ]; then
+  echo "   manager impl   — (v3.4 plain bytecode: NOT upgradeable in place; migrate with script/DeployManager.s.sol + MANAGER_ADDR=<new proxy>)"
+else
+  echo "   manager impl   $MGR_IMPL   (v3.7 UUPS proxy: upgrade with --manager)"
+fi
 echo "   feeRecipient   $FEE   (live: $FEE_LIVE)"
 echo "   upgradeDelay   ${DELAY}s"
 for pair in "Marketplace:$MP" "AuctionHouse:$AH" "OfferBook:$OB"; do
@@ -54,9 +70,33 @@ done
 [ "$MODE" = verify ] && exit 0
 
 if [ "$MODE" != dry ]; then
-  : "${ADMIN_KEY:?ADMIN_KEY required (the network's admin wallet)}"
+  # (no apostrophe in this message: bash parses one inside "${…:?…}" as an open quote)
+  : "${ADMIN_KEY:?ADMIN_KEY required (the network admin wallet)}"
   SIGNER=$(cast wallet address --private-key "$ADMIN_KEY")
   [ "${SIGNER,,}" = "${ADMIN,,}" ] || { echo "ADMIN_KEY signs as $SIGNER but admin() is $ADMIN"; exit 1; }
+fi
+
+# ── --manager: replace the MarketplaceManager implementation in place ────────
+if [ "$MODE" = manager ]; then
+  [ "$MGR_IMPL" != "$ZERO" ] || { echo "$MGR is the v3.4 plain manager — nothing to upgrade in place; run the DeployManager migration"; exit 1; }
+  : "${DEPLOYER_KEY:?DEPLOYER_KEY required to deploy the new manager implementation}"
+  (cd contracts && forge build >/dev/null)
+  NEW_MGR_IMPL=$(cd contracts && forge create "src/MarketplaceManager.sol:MarketplaceManager" --rpc-url "$RPC" --private-key "$DEPLOYER_KEY" --broadcast --json | jq -r .deployedTo)
+  echo "== deploying manager implementation → $NEW_MGR_IMPL"
+  # Instant, admin-only, no queue (the manager holds no escrow). upgradeTo,
+  # not upgradeToAndCall(impl,"") — OZ 4.9.6 force-calls empty calldata.
+  cast send "$MGR" "upgradeTo(address)" "$NEW_MGR_IMPL" --rpc-url "$RPC" --private-key "$ADMIN_KEY" >/dev/null
+  got=$(impl_of "$MGR")
+  [ "${got,,}" = "${NEW_MGR_IMPL,,}" ] || { echo "   FAILED: manager impl is $got, expected $NEW_MGR_IMPL"; exit 1; }
+  echo "   installed $NEW_MGR_IMPL on $MGR"
+  # State lives on the proxy: authority must be untouched.
+  [ "$(cast call "$MGR" "admin()(address)"  --rpc-url "$RPC")" = "$ADMIN" ] || { echo "admin changed across the upgrade"; exit 1; }
+  echo "   admin/keeper intact on the manager proxy"
+  tmp=$(mktemp)
+  jq --arg new "$NEW_MGR_IMPL" --arg old "$MGR_IMPL" --arg at "$(date -u +%Y-%m-%d)" \
+     '.impls.marketplaceManager = $new | .impls.upgradedAt = $at | .superseded_impls.marketplaceManager = $old' "$DEP" > "$tmp" && mv "$tmp" "$DEP"
+  echo "== $DEP updated (impls.marketplaceManager). Commit it; the watcher indexes the Upgraded + AuditLog(UPGRADE) events."
+  exit 0
 fi
 
 declare -A NEW
@@ -103,10 +143,20 @@ done
 echo "   immutables intact on all three proxies"
 
 # Record the swap so --rollback can undo it and check-deployments knows the impls.
+# A manager change (MANAGER_ADDR migration) also moves contracts.marketplaceManager
+# and records the new manager's implementation; the old manager is archived.
 tmp=$(mktemp)
 jq --arg mp "${NEW[marketplace]}" --arg ah "${NEW[auctionHouse]}" --arg ob "${NEW[offerBook]}" \
    --arg omp "$OLD_MP" --arg oah "$OLD_AH" --arg oob "$OLD_OB" --arg at "$(date -u +%Y-%m-%d)" \
-   '.impls = {marketplace:$mp, auctionHouse:$ah, offerBook:$ob, upgradedAt:$at}
-    | .superseded_impls = {marketplace:$omp, auctionHouse:$oah, offerBook:$oob}' "$DEP" > "$tmp" && mv "$tmp" "$DEP"
+   --arg mgr "$MGR" --arg mgrlive "$MGR_LIVE" --arg mgrimpl "$MGR_IMPL" --arg zero "$ZERO" \
+   '.impls = ((.impls // {}) + {marketplace:$mp, auctionHouse:$ah, offerBook:$ob, upgradedAt:$at})
+    | .superseded_impls = ((.superseded_impls // {}) + {marketplace:$omp, auctionHouse:$oah, offerBook:$oob})
+    | if ($mgr | ascii_downcase) != ($mgrlive | ascii_downcase) then
+        .superseded = ([{note: ("manager " + $mgrlive + " replaced " + $at + " by the v3.7 UUPS manager " + $mgr + " (cores re-pointed in place)"),
+                         marketplace: .contracts.marketplace, auctionHouse: .contracts.auctionHouse, offerBook: .contracts.offerBook,
+                         marketplaceManager: $mgrlive, nft: .contracts.nft}] + (.superseded // []))
+        | .contracts.marketplaceManager = $mgr
+      else . end
+    | if $mgrimpl != $zero then .impls.marketplaceManager = $mgrimpl else . end' "$DEP" > "$tmp" && mv "$tmp" "$DEP"
 echo "== $DEP updated (impls + superseded_impls). Commit it, then backfill the trail from backend/ (the Go module root):"
 echo "   cd backend && CHAIN_ID=... POSTGRES_URL=... RPC_URL=... MARKETPLACE_ADDR=... AUCTION_ADDR=... OFFERBOOK_ADDR=... MARKETPLACE_MANAGER_ADDR=... go run ./cmd/reindexgov -from <upgrade block>"

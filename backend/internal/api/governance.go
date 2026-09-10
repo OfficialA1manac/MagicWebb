@@ -106,6 +106,12 @@ func (s *GovernanceService) handleGet(c *fiber.Ctx) error {
 				named[name] = impl
 			}
 		}
+		// v3.7: the manager is a UUPS proxy too; it emits Upgraded at
+		// construction and on every admin upgradeTo. A network still on the
+		// v3.4 plain manager has no such event and simply omits the key.
+		if impl, ok := impls[s.manager]; ok {
+			named["marketplace_manager"] = impl
+		}
 		resp.Implementations = named
 	}
 	resp.Live = s.live(ctx)
