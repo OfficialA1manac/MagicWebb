@@ -11,6 +11,15 @@ optimizer_runs = 1_000_000
 via_ir = true
 fs_permissions = [{ access = "read", path = "./out" }, { access = "read-write", path = "./broadcast" }]
 
+# Storage-layout gate profile (tools/check-storage-layout.py): src/ only, own
+# out/cache dirs, same solc/via-IR/optimizer as default so the layout matches
+# what DeployV34 ships. Skipping test/ + script/ keeps the via-IR compile
+# inside an 8 GB machine.
+[profile.layout]
+skip = ["test/**", "script/**"]
+out = "out-layout"
+cache_path = "cache-layout"
+
 [fmt]
 line_length = 110
 tab_width = 4

@@ -140,10 +140,10 @@ func NewGraphQLServer(q *db.Q, bcast *sse.Broadcaster, grpc marketplacev1connect
 	responseCache := NewResponseCacheExtension()
 	srv.Use(responseCache)
 
-	// Introspection: enabled in all environments so GraphiQL and
-	// external tooling (Apollo Studio, Postman, etc.) can discover
-	// the schema. No auth secrets are exposed through introspection.
-	// CORS already limits which origins can access /graphql.
+	// Introspection: NOT registered (handler.New, no extension.Introspection),
+	// so __schema/__type queries are refused in every environment; tooling
+	// reads the committed schema instead. /graphiql is mounted only outside
+	// production (rest.go). CORS already limits which origins reach /graphql.
 
 	return &GraphQLServer{srv: srv, q: q, cfg: cfg, ResponseCache: responseCache}
 }

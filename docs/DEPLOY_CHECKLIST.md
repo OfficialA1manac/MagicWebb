@@ -58,6 +58,23 @@ authority of any kind survives the deploy transaction.
       `cd backend && CHAIN_ID=<id> POSTGRES_URL=… RPC_URL=… MARKETPLACE_ADDR=… AUCTION_ADDR=…
       OFFERBOOK_ADDR=… MARKETPLACE_MANAGER_ADDR=… go run ./cmd/reindexgov -from <deploy block>`).
 - [ ] **mainnet** Delete the idle EU Neon projects only after a separate, explicit owner OK.
+- [ ] **mainnet** None of the BURNED keys below holds any role or funds on the network.
+
+## Burned keys (public in git history — never reuse)
+
+Two Coston2 test wallets were committed in `contracts/script/e2e_coston2.sh` by
+`829ea3a` and removed by `88dd08b` ("secure hardcoded private keys"). History is
+not rewritten (owner rule), so their private keys are public forever:
+
+| Address | Status |
+|---|---|
+| `0x675c0da0957BEfeb9f874C3347F5305207Fe88EC` | burned — Coston2 test funds only; 0 on Songbird/Flare |
+| `0x87C694B3AbC8Df9599C0ACC87AE9Af0C2cD90b63` | burned — Coston2 test funds only; 0 on Songbird/Flare |
+
+Never set either as `ADMIN_ADDR`, `KEEPER_ADDR`, `FEE_RECIPIENT_ADDR`, a Safe
+owner, or fund them on a mainnet. `tools/go-live.sh` and the deploy scripts
+must be run with the gitignored root `.env` deployer key, which was never
+tracked (`git log --all -- .env` is empty).
 - [ ] `docs/IMMUTABILITY_TRANSITION.md` — the network stays admin-held (instant upgrades) until
       the owner's explicit go-immutable order (`renounceAdmin()`).
 

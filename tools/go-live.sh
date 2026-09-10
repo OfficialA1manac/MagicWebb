@@ -122,11 +122,23 @@ if [ "$DRY" = 1 ]; then
   exit 0
 fi
 
+# Broadcast lock: if step 1 succeeded but a later step failed, a rerun must
+# NOT deploy a second contract set (~8.5 native, and an orphaned first set).
+LOCK=".golive-$NET.lock"
+if [ -f "$LOCK" ]; then
+  echo "$LOCK exists (a broadcast already happened at $(cat "$LOCK")). Finish the record step by hand:" >&2
+  echo "   python tools/record-deployment.py $NET && bash tools/check-deployments.sh && git add deployments/$NET.json && git commit && git push" >&2
+  echo "then delete $LOCK. Refusing to broadcast again." >&2
+  exit 4
+fi
+
 echo "== 1/6 deploying DeployV34 on $NET (8 CREATEs, --slow)"
+date -u +%Y-%m-%dT%H:%M:%SZ > "$LOCK"
 (cd contracts && forge script script/DeployV34.s.sol --rpc-url "$RPC" --broadcast --slow -vv --private-key "$PRIVATE_KEY")
 
 echo "== 2/6 recording deployments/$NET.json"
 python tools/record-deployment.py "$NET"
+rm -f "$LOCK"
 
 echo "== 3/6 check-deployments"
 bash tools/check-deployments.sh

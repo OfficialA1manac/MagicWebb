@@ -1,0 +1,80 @@
+[
+  {
+    "label": "_initialized",
+    "slot": 0,
+    "offset": 0,
+    "type": "t_uint8"
+  },
+  {
+    "label": "_initializing",
+    "slot": 0,
+    "offset": 1,
+    "type": "t_bool"
+  },
+  {
+    "label": "__gap",
+    "slot": 1,
+    "offset": 0,
+    "type": "t_array(t_uint256)50_storage"
+  },
+  {
+    "label": "__gap",
+    "slot": 51,
+    "offset": 0,
+    "type": "t_array(t_uint256)50_storage"
+  },
+  {
+    "label": "__gap",
+    "slot": 101,
+    "offset": 0,
+    "type": "t_array(t_uint256)50_storage"
+  },
+  {
+    "label": "__gap",
+    "slot": 151,
+    "offset": 0,
+    "type": "t_array(t_uint256)50_storage"
+  },
+  {
+    "label": "__gap",
+    "slot": 201,
+    "offset": 0,
+    "type": "t_array(t_uint256)50_storage"
+  },
+  {
+    "label": "pendingReturns",
+    "slot": 251,
+    "offset": 0,
+    "type": "t_mapping(t_address,t_uint256)"
+  },
+  {
+    "label": "pendingImplementation",
+    "slot": 252,
+    "offset": 0,
+    "type": "t_address"
+  },
+  {
+    "label": "upgradeEta",
+    "slot": 252,
+    "offset": 20,
+    "type": "t_uint64"
+  },
+  {
+    "label": "__gap",
+    "slot": 253,
+    "offset": 0,
+    "type": "t_array(t_uint256)49_storage"
+  },
+  {
+    "label": "positions",
+    "slot": 302,
+    "offset": 0,
+    "type": "t_mapping(t_address,t_mapping(t_uint256,t_mapping(t_address,t_struct(Position)_storage)))"
+  },
+  {
+    "label": "offerEligible",
+    "slot": 303,
+    "offset": 0,
+    "type": "t_mapping(t_address,t_bool)"
+  }
+]

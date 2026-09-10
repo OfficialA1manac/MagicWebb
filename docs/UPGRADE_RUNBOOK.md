@@ -71,6 +71,36 @@ Notes:
 - The queue is one-shot and exact-match: only the queued impl installs, and
   installing consumes the entry.
 
+## Key handling in the tooling (accepted risk, single-user workstation)
+
+`tools/upgrade-cores.sh` and `tools/go-live.sh` pass `ADMIN_KEY` /
+`DEPLOYER_KEY` / `PRIVATE_KEY` to `cast`/`forge` via `--private-key`, which is
+visible in that machine's process list for the seconds a command runs. On the
+owner's single-user workstation this is accepted (2026-09-10 CSO). Before any
+of these tools run on a shared host or CI runner, switch to a keystore:
+`cast wallet import mw-admin --interactive` once, then `--account mw-admin`
+(+ `ETH_PASSWORD`), and drop the `--private-key` flags. Never paste a key into
+a shell history: export it from a file with `read -rs` or use the keystore.
+
+## Storage-layout gate (v3.7 — read before any upgrade)
+
+Upgrades are instant and the proxies hold escrow, so a new implementation
+whose storage layout drifted (a base contract inserted or reordered, a
+variable moved) makes every mapping read zero the moment it lands: bids,
+offers and `pendingReturns` become unreachable. `contracts/storage-layout/*.json`
+are the committed layouts of the four proxied contracts;
+`python tools/check-storage-layout.py` compares the current build against
+them (CI runs it after `forge build`; `tools/upgrade-cores.sh` runs it before
+deploying implementations). New state may only be **appended** or take slots
+freed by shrinking a `__gap`. Never re-insert `ReentrancyGuardUpgradeable` in
+`MarketplaceCore`'s inheritance list (see the warning in the source) — that
+alone shifts everything by 50 slots. Only a brand-new network with no live
+proxies may change the layout (`--update`, then commit the baselines).
+
+`--rollback` also refuses superseded implementations that bake a different
+manager or fee recipient than the live proxies report (after a manager
+migration the old impls would re-point the cores at the abandoned manager).
+
 ## Upgrading the manager (v3.7)
 
 ```bash

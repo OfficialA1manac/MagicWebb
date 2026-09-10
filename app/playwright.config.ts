@@ -41,6 +41,11 @@ export default defineConfig({
     // for unknown routes; deep routes like /collection/0x… are fulfilled from
     // the built HTML via page.route in the tests (prod: Go server rewrites).
     command: 'npx astro preview --host 127.0.0.1 --port 4321',
+    // astro ≥7.3 auto-detects an AI-agent shell (am-i-vibing: CLAUDECODE,
+    // CODEX_THREAD_ID, …) and daemonizes the preview server, which Playwright
+    // reports as "exited early". An empty value counts as unset for that
+    // detector, so the server stays a plain foreground child here and in CI.
+    env: { CLAUDECODE: '', CODEX_THREAD_ID: '', GEMINI_CLI: '' },
     url: 'http://127.0.0.1:4321/',
     reuseExistingServer: !process.env.CI,
     timeout: 120_000,

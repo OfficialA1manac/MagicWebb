@@ -66,7 +66,12 @@ const (
 		// JS — Go's html/template auto-escapes the injected strings — so the
 		// 'unsafe-inline' tradeoff is the standard practical match for
 		// self-hosted Alpine + dynamic injection.
-		"script-src 'self' 'unsafe-inline' 'unsafe-eval'; " +
+		// v3.7 CSO: 'unsafe-eval' dropped — the shipped Astro bundle contains
+		// no eval()/new Function (checked against app/dist). 'unsafe-inline'
+		// stays for the is:inline runtime-globals + theme scripts and the
+		// window.MW_* injection from cmd/server/ui.go; media responses carry
+		// their own `sandbox` CSP (see media.go imageResponseHeaders).
+		"script-src 'self' 'unsafe-inline'; " +
 		"style-src 'self' 'unsafe-inline' https://fonts.googleapis.com; " +
 		// font-src: Google Fonts (Inter, JetBrains Mono) + Reown AppKit fonts
 		// (KHTeka, KHTekaMono). AppKit's self-hosted web components load these
@@ -272,7 +277,13 @@ func Mount(app *fiber.App, q *db.Q, bcast *sse.Broadcaster, rl *ratelimit.Limite
 	gqlLimiter := apiRateLimitMiddleware(rl, cfg.APIRateLimitPerMin)
 	app.Post("/graphql", gqlLimiter, gql.HandlePOST)
 	app.Get("/graphql", gqlLimiter, gql.HandleGET)
-	app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
+	// v3.7 CSO: the IDE (which pulls its assets from unpkg) is a dev/staging
+	// tool; production serves 404 for it. Introspection itself is already off
+	// (handler.New without extension.Introspection), so the schema is only
+	// discoverable through the committed schema files.
+	if cfg.Env != "production" {
+		app.Get("/graphiql", gqlLimiter, gql.HandleGraphiQL)
+	}
 
 	// GQL-4: WebSocket subscription endpoint at /graphql/ws.
 	// Uses graphql-transport-ws protocol. JWT-authenticated subscriptions

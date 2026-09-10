@@ -1,4 +1,7 @@
 gas-report.txt
 out/
 cache/
+# storage-layout gate profile (tools/check-storage-layout.py)
+out-layout/
+cache-layout/
 broadcast/

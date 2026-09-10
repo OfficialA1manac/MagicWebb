@@ -936,12 +936,25 @@ func (h *Handler) handleRetry(c *Connection, raw json.RawMessage) {
 	}
 
 	// Replay each missed event in the same format as live push events —
-	// Type set to the original event type, Data as raw JSON. The client
-	// already knows it requested replay via its from_seq context, so no
-	// envelope wrapping is needed. Consistent message shape means the
-	// client uses ONE parser for both live and replayed events.
+	// Type set to the original event type, Data as raw JSON, Seq carried so
+	// the client's gap tracking stays consistent. Consistent message shape
+	// means the client uses ONE parser for both live and replayed events.
+	//
+	// v3.7 CSO (verified 8/10): replay MUST apply the same gates as the live
+	// dispatcher. The ring buffer holds every published event including
+	// per-user `notification` frames; before this filter an unauthenticated
+	// socket could send {"action":"retry","params":{"from_seq":1}} and read
+	// the last 1024 notifications addressed to every user.
 	for _, rev := range events {
-		c.writeJSON(Message{Type: MessageType(rev.Type), Data: mustJSON(rev.Data)})
+		etype := string(rev.Type)
+		payload := mustJSON(rev.Data)
+		if !c.allowedNotification(etype, payload) {
+			continue
+		}
+		if !c.isSubscribedToEvent(etype, payload) {
+			continue
+		}
+		c.writeJSON(Message{Type: MessageType(rev.Type), Data: payload, Seq: rev.Seq})
 	}
 
 	c.writeJSON(Message{Type: MsgReplayComplete, Data: mustJSON(AckData{Status: "ok", Message: "replay complete"})})

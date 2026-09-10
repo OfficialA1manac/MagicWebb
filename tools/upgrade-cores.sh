@@ -73,7 +73,20 @@ if [ "$MODE" != dry ]; then
   # (no apostrophe in this message: bash parses one inside "${…:?…}" as an open quote)
   : "${ADMIN_KEY:?ADMIN_KEY required (the network admin wallet)}"
   SIGNER=$(cast wallet address --private-key "$ADMIN_KEY")
-  [ "${SIGNER,,}" = "${ADMIN,,}" ] || { echo "ADMIN_KEY signs as $SIGNER but admin() is $ADMIN"; exit 1; }
+  # The cores' queueUpgrade/upgradeTo consult the manager that is LIVE in the
+  # installed implementation (MGR_LIVE), not the one being baked into the new
+  # impls — during a MANAGER_ADDR migration those differ.
+  ADMIN_LIVE=$(cast call "$MGR_LIVE" "admin()(address)" --rpc-url "$RPC")
+  [ "${SIGNER,,}" = "${ADMIN_LIVE,,}" ] || { echo "ADMIN_KEY signs as $SIGNER but the live manager admin() is $ADMIN_LIVE"; exit 1; }
+  [ "${ADMIN_LIVE,,}" = "${ADMIN,,}" ] || echo "   note: new manager admin $ADMIN differs from live admin $ADMIN_LIVE - after this install only $ADMIN can upgrade"
+fi
+
+# ── Storage-layout gate (v3.7 CSO finding, verified 9/10) ───────────────────
+# Instant upgrades on proxies holding escrow: an implementation whose layout
+# drifted from contracts/storage-layout/*.json would make every mapping read
+# zero on install. Refuse before anything is deployed or signed.
+if [ "$MODE" != rollback ]; then
+  python tools/check-storage-layout.py || { echo "storage layout drift - refusing to build/install implementations"; exit 1; }
 fi
 
 # ── --manager: replace the MarketplaceManager implementation in place ────────
@@ -104,7 +117,17 @@ if [ "$MODE" = rollback ]; then
   for k in marketplace auctionHouse offerBook; do
     NEW[$k]=$(jq -r ".superseded_impls.$k // empty" "$DEP")
     [ -n "${NEW[$k]}" ] || { echo "no superseded_impls.$k recorded in $DEP"; exit 1; }
+    # A superseded impl bakes its own manager/feeRecipient immutables. After a
+    # MANAGER_ADDR migration they point at the OLD manager: installing them
+    # would re-point the cores at a manager that may be abandoned (admin()==0
+    # → cores frozen forever). Check BEFORE signing anything; the immutable
+    # getters answer on the implementation itself.
+    im=$(cast call "${NEW[$k]}" "manager()(address)" --rpc-url "$RPC")
+    ifee=$(cast call "${NEW[$k]}" "feeRecipient()(address)" --rpc-url "$RPC")
+    [ "${im,,}" = "${MGR_LIVE,,}" ] || { echo "refusing rollback: superseded $k impl ${NEW[$k]} bakes manager $im, live manager is $MGR_LIVE"; exit 1; }
+    [ "${ifee,,}" = "${FEE_LIVE,,}" ] || { echo "refusing rollback: superseded $k impl ${NEW[$k]} bakes feeRecipient $ifee, live is $FEE_LIVE"; exit 1; }
   done
+  echo "   rollback impls bake the live manager + feeRecipient — OK"
 else
   : "${DEPLOYER_KEY:?DEPLOYER_KEY required to deploy the new implementations}"
   (cd contracts && forge build >/dev/null)

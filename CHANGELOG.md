@@ -65,6 +65,68 @@ deploy the proxied manager from block one.
   `ARCHITECTURE.md`, `IMMUTABILITY_TRANSITION.md`, `SYSTEM_BREAKDOWN.md`,
   the in-app system page, README.
 
+### Security pass (2026-09-10 — /cso daily audit, every finding independently verified)
+
+Four auditors (secrets/CI/infra, backend OWASP + SSRF, contracts + deploy
+tooling, frontend + supply chain) → 21 candidates → 13 reported → 11 fixed
+in this release, 2 accepted and documented. Report:
+`.gstack/security-reports/2026-09-10-*.{json,md}` (local, gitignored).
+
+- **HIGH (9/10) — storage-layout drift could lock all escrow.** Instant UUPS
+  upgrades had no layout gate and `MarketplaceCore.sol` told operators to
+  re-insert `ReentrancyGuardUpgradeable` as a "fallback" (shifts every slot by
+  50 → `pendingReturns`/`auctions`/`listings`/`positions` read zero on the live
+  proxies). Now: committed `contracts/storage-layout/*.json` baselines +
+  `tools/check-storage-layout.py` (CI after `forge build`; `upgrade-cores.sh`
+  refuses drift before deploying); the fallback text is a warning;
+  `UPGRADE_RUNBOOK.md` "Storage-layout gate".
+- **HIGH (8/10) — stored XSS via SVG NFT images.** The media proxy /
+  `/img/:sha256` served attacker-controlled SVG same-origin as
+  `image/svg+xml` under a CSP with `'unsafe-inline'`; a top-level navigation
+  executed script in the marketplace origin (session riding, wallet prompts).
+  Now every media response carries `Content-Security-Policy: sandbox;
+  default-src 'none'` + nosniff + `Content-Disposition: inline` (`<img>` use
+  unchanged; unit test), and the site CSP drops `'unsafe-eval'` (the bundle
+  has no eval).
+- **MED (8/10) — WebSocket `retry` replay leaked every user's notifications**
+  to unauthenticated sockets (ring buffer replayed without the per-recipient
+  gate the live path applies; security-alert fan-out enumerated up to 2000
+  known wallets). Now replay applies `allowedNotification` +
+  `isSubscribedToEvent` and carries `seq`; regression test.
+- **MED — CI supply chain:** 42 `uses:` lines SHA-pinned (ci/deploy/audit/
+  codeql; nightly already was); flyctl installed from a pinned release
+  tarball with `sha256sum -c` instead of `curl | sh` in the jobs that hold
+  `FLY_API_TOKEN`.
+- **MED — secrets:** two Coston2 test keys committed in `829ea3a` (removed
+  `88dd08b`) stay in history by owner rule → documented as BURNED in
+  `DEPLOY_CHECKLIST.md` with a mainnet gate. `.dockerignore` now excludes
+  `**/.env` (only the root `.env` was excluded; `backend/.env` could ride
+  into a `fly deploy --remote-only` context).
+- **MED (4/10, layout-safe) — cores accepted direct ERC-1155 sends** and
+  locked them forever (no custody model, no outbound path; ERC-721 already
+  reverted). `onERC1155Received`/`BatchReceived` now revert
+  `DirectTransferNotAccepted` (no storage change, ERC-165 unchanged; test).
+- **Supply chain:** `astro` → ≥7.2.8 (GHSA-26w7-cxv4-gfx2 / GHSA-376h-93r7-7g6f;
+  not reachable here, static output) + `npm audit fix` for the build-time
+  toolchain advisories (0 critical/high left; 15 moderates remain, all in
+  the WalletConnect chain behind the `wagmi` 3.x major — DoS-only
+  `decode-uri-component`, deferred to a dedicated upgrade); Go: `fasthttp`
+  1.58 → 1.70 (GO-2026-4950),
+  `x/crypto` → 0.57, `klauspost/compress` → 1.18.7 (govulncheck: 0 reachable
+  before and after). fasthttp now requires a Host header — compress tests
+  use absolute URLs.
+- **LOW:** `/graphiql` mounted only outside production (introspection was
+  already off; comment corrected). Tooling: `upgrade-cores.sh --rollback`
+  refuses superseded impls that bake a different manager/feeRecipient than
+  the live proxies; the signer is checked against the LIVE manager's admin
+  during a migration; `go-live.sh` keeps a broadcast lock so a failed record
+  step can never trigger a second 8-CREATE deploy; `record-deployment.py`
+  rejects broadcasts with failed or missing receipts.
+- **Accepted (documented):** 15-minute access tokens outlive logout (refresh
+  family is revoked; cookie is the primary channel); admin/deployer keys on
+  `--private-key` argv are acceptable on the single-user workstation — use
+  `cast wallet import` + `--account` before any shared runner.
+
 ### Frontend (mobile pass — 390 and 360 px, light + dark, 30 page states)
 
 A Playwright audit (horizontal overflow, tap targets, text < 12px, fixed-layer

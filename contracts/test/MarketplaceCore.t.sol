@@ -6,8 +6,9 @@ import {ERC1967Proxy} from "@openzeppelin/contracts/proxy/ERC1967/ERC1967Proxy.s
 import {Marketplace, NotOwner, NotListed} from "../src/Marketplace.sol";
 import {
     BelowMinPrice, ZeroAddress, NotAdmin, BadImplementation, BadManager,
-    UpgradeNotQueued, UpgradeNotReady, UpgradeExpired
+    UpgradeNotQueued, UpgradeNotReady, UpgradeExpired, DirectTransferNotAccepted
 } from "../src/MarketplaceCore.sol";
+import {MockERC1155} from "./MockERC1155.sol";
 import {MarketplaceManager} from "../src/MarketplaceManager.sol";
 import {TestHelpers} from "./TestHelpers.sol";
 
@@ -182,6 +183,34 @@ contract MarketplaceCoreTest is Test, TestHelpers {
         assertEq(_implOf(address(gated)), address(nextB));
         // Sanity: mgrA's authority genuinely lapsed for gating.
         assertTrue(address(mgrA) != address(mgrB));
+    }
+
+    // ── v3.7: direct ERC-1155 sends to a core are refused (no custody) ──────
+    function test_directERC1155SendIsRefused() public {
+        MockERC1155 tok = new MockERC1155();
+        address user = address(0xD1CE);
+        tok.mint(user, 7, 3);
+        // OZ's ERC1155 wraps a custom-error revert from the receiver into its
+        // generic "non-ERC1155Receiver implementer" string; either way the
+        // transfer must not go through and the token stays with the user.
+        vm.prank(user);
+        vm.expectRevert();
+        tok.safeTransferFrom(user, address(mp), 7, 1, "");
+        assertEq(tok.balanceOf(user, 7), 3, "token must stay with the sender");
+        assertEq(tok.balanceOf(address(mp), 7), 0, "core never custodies tokens");
+
+        uint256[] memory ids = new uint256[](1); ids[0] = 7;
+        uint256[] memory amts = new uint256[](1); amts[0] = 1;
+        vm.prank(user);
+        vm.expectRevert();
+        tok.safeBatchTransferFrom(user, address(mp), ids, amts, "");
+
+        // The hook itself reverts with the typed error (called directly).
+        vm.expectRevert(DirectTransferNotAccepted.selector);
+        mp.onERC1155Received(user, user, 7, 1, "");
+        // ERC-165 answers are unchanged: still advertises the receiver
+        // interface (the storage gap and interface stay for the live layout).
+        assertTrue(mp.supportsInterface(0x4e2312e0), "IERC1155Receiver id");
     }
 
     function test_cancelUpgrade_clearsQueue() public {

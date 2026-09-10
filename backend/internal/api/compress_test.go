@@ -39,7 +39,7 @@ func newCompressApp() *fiber.App {
 func TestCompressBrotliEndToEnd(t *testing.T) {
 	app := newCompressApp()
 
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/", nil) // absolute URL: fasthttp ≥1.70 requires a Host header
 	req.Header.Set("Accept-Encoding", "br")
 
 	resp, err := app.Test(req)
@@ -74,7 +74,7 @@ func TestCompressBrotliEndToEnd(t *testing.T) {
 func TestCompressGzipEndToEnd(t *testing.T) {
 	app := newCompressApp()
 
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/", nil) // absolute URL: fasthttp ≥1.70 requires a Host header
 	req.Header.Set("Accept-Encoding", "gzip")
 
 	resp, err := app.Test(req)
@@ -121,7 +121,7 @@ func TestCompressVaryPresentOnCompressedResponses(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			req, _ := http.NewRequest("GET", "/", nil)
+			req, _ := http.NewRequest("GET", "http://example.com/", nil) // absolute URL: fasthttp ≥1.70 requires a Host header
 			if tt.acceptEncoding != "" {
 				req.Header.Set("Accept-Encoding", tt.acceptEncoding)
 			}
@@ -153,7 +153,7 @@ func TestCompressVaryPresentOnCompressedResponses(t *testing.T) {
 func TestCompressContentTypePreserved(t *testing.T) {
 	app := newCompressApp()
 
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/", nil) // absolute URL: fasthttp ≥1.70 requires a Host header
 	req.Header.Set("Accept-Encoding", "br")
 
 	resp, err := app.Test(req)
@@ -175,7 +175,7 @@ func TestCompressSmallPayloadNotCompressed(t *testing.T) {
 		return c.SendString("ok") // 2 bytes — below compression threshold
 	})
 
-	req, _ := http.NewRequest("GET", "/small", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/small", nil)
 	req.Header.Set("Accept-Encoding", "br")
 
 	resp, err := app.Test(req)
@@ -209,7 +209,7 @@ func TestCompressBrotliPriorityOverGzip(t *testing.T) {
 	// When both br and gzip are offered, brotli should win.
 	app := newCompressApp()
 
-	req, _ := http.NewRequest("GET", "/", nil)
+	req, _ := http.NewRequest("GET", "http://example.com/", nil) // absolute URL: fasthttp ≥1.70 requires a Host header
 	req.Header.Set("Accept-Encoding", "gzip, br")
 
 	resp, err := app.Test(req)

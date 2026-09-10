@@ -358,3 +358,29 @@ func asString(v any) string {
 	}
 	return ""
 }
+
+// TestImageResponseHeadersSandboxSVG: every media response carries a
+// per-response `sandbox` CSP so an attacker-controlled SVG (from NFT
+// metadata) navigated top-level cannot run script in the marketplace origin
+// (v3.7 CSO finding). <img> use is unaffected by CSP.
+func TestImageResponseHeadersSandboxSVG(t *testing.T) {
+	app := fiber.New()
+	app.Get("/x.svg", func(c *fiber.Ctx) error {
+		c.Set("Content-Type", "image/svg+xml")
+		imageResponseHeaders(c)
+		return c.SendString(`<svg xmlns="http://www.w3.org/2000/svg"><script>alert(1)</script></svg>`)
+	})
+	resp, err := app.Test(httptest.NewRequest("GET", "/x.svg", nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := resp.Header.Get("Content-Security-Policy"); !strings.Contains(got, "sandbox") || !strings.Contains(got, "default-src 'none'") {
+		t.Fatalf("CSP = %q, want sandbox + default-src 'none'", got)
+	}
+	if resp.Header.Get("X-Content-Type-Options") != "nosniff" {
+		t.Fatal("missing nosniff")
+	}
+	if resp.Header.Get("Content-Disposition") != "inline" {
+		t.Fatal("missing Content-Disposition: inline")
+	}
+}

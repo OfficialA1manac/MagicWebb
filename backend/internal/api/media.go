@@ -122,7 +122,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 			return writeErr(c, fiber.StatusUnsupportedMediaType, "blob unfit for serve")
 		}
 		c.Set("Cache-Control", "public, max-age=31536000, immutable")
-		c.Set("X-Content-Type-Options", "nosniff")
+		imageResponseHeaders(c)
 		c.Set("X-Imagestore-Sha256", h)
 		return c.Send(blob.Body)
 	}
@@ -140,6 +140,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 		}
 		c.Set("Content-Type", ct)
 		c.Set("Cache-Control", "public, max-age=86400")
+		imageResponseHeaders(c)
 		return c.Send(body)
 	}
 
@@ -168,6 +169,7 @@ func (s *MediaService) handleProxy(c *fiber.Ctx) error {
 	}
 	c.Set("Content-Type", ct)
 	c.Set("Cache-Control", "public, max-age=86400")
+	imageResponseHeaders(c)
 	return c.Send(body)
 }
 
@@ -232,6 +234,23 @@ func (s *MediaService) imageByHash(c *fiber.Ctx) error {
 	return serveBlob(c, sha, blob)
 }
 
+// imageResponseHeaders hardens every byte-for-byte media response (v3.7 CSO
+// finding, verified 8/10). NFT metadata is attacker-controlled and SniffMedia
+// accepts SVG, which can carry <script>/onload: served same-origin as
+// image/svg+xml under the site CSP (which must allow inline script for the
+// Astro runtime), a top-level navigation to the proxied URL would execute it
+// in the marketplace origin — riding the HttpOnly session cookie on
+// same-origin API calls and prompting the connected wallet. A per-response
+// `sandbox` CSP puts the document in an opaque origin with scripts disabled;
+// `default-src 'none'` also stops an SVG from pulling external resources.
+// <img> rendering is unaffected (CSP does not apply to image decoding), so
+// every card/gallery keeps working; nosniff blocks MIME guessing.
+func imageResponseHeaders(c *fiber.Ctx) {
+	c.Set("Content-Security-Policy", "sandbox; default-src 'none'; style-src 'unsafe-inline'")
+	c.Set("X-Content-Type-Options", "nosniff")
+	c.Set("Content-Disposition", "inline")
+}
+
 // serveBlob writes a blob response with correct Content-Type, cache headers,
 // and security headers. Shared by the full-size and thumbnail paths.
 func serveBlob(c *fiber.Ctx, sha string, blob imagestore.Blob) error {
@@ -243,7 +262,7 @@ func serveBlob(c *fiber.Ctx, sha string, blob imagestore.Blob) error {
 		return writeErr(c, fiber.StatusUnsupportedMediaType, "blob unfit for serve")
 	}
 	c.Set("Cache-Control", "public, max-age=31536000, immutable")
-	c.Set("X-Content-Type-Options", "nosniff")
+	imageResponseHeaders(c)
 	c.Set("X-Imagestore-Sha256", sha)
 	return c.Send(blob.Body)
 }

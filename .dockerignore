@@ -15,3 +15,9 @@ app/node_modules/
 tools/seed-testnet/seed-testnet
 .env
 .env.example
+# Nested env files (backend/.env, app/.env) must never enter the build context
+# either — `fly deploy --remote-only` ships the context to Fly's builder and
+# the intermediate layers cache it. Root-anchored `.env` above did not cover them.
+**/.env
+**/.env.*
+!**/.env.example

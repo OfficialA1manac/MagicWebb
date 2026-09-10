@@ -7,13 +7,26 @@ import {ERC1155HolderUpgradeable} from "@openzeppelin/contracts-upgradeable/toke
 import {IERC721}  from "@openzeppelin/contracts/token/ERC721/IERC721.sol";
 import {IERC1155} from "@openzeppelin/contracts/token/ERC1155/IERC1155.sol";
 // v3.4: transient-storage (EIP-1153) reentrancy guard replaces OZ's
-// storage-slot ReentrancyGuardUpgradeable (−2k gas per guarded call). To
-// fall back (a target chain failing the Cancun probe), swap this import for
-// ReentrancyGuardUpgradeable, restore it in the inheritance list, and
-// re-add __ReentrancyGuard_init() in __MarketplaceCore_init.
+// storage-slot ReentrancyGuardUpgradeable (−2k gas per guarded call).
+//
+// STORAGE-LAYOUT WARNING (v3.7 CSO finding, verified): the guard sits at
+// inheritance position 2 and holds NO storage. Never "fall back" to OZ's
+// ReentrancyGuardUpgradeable by re-inserting it here — its _status + 49-slot
+// gap would shift every state variable of every core by 50 slots, and with
+// upgradeDelay()==0 an upgrade installs instantly: pendingReturns, auctions,
+// listings and positions would all read zero on the live proxies (escrow
+// locked). A storage guard for a non-Cancun chain must use a fixed slot
+// (ERC-7201 namespaced) inside TransientReentrancyGuard, never the
+// inheritance list. tools/check-storage-layout.py (run by CI and by
+// tools/upgrade-cores.sh before any install) enforces the committed layout.
 import {TransientReentrancyGuard} from "./TransientReentrancyGuard.sol";
 
 error TransferFailed();
+/// @dev An ERC-1155 was sent directly to a core. The cores never custody
+///      tokens (every transfer is seller→buyer), so accepting it would lock
+///      it forever; the receiver hook refuses instead (ERC-721 safe-sends
+///      already revert because no onERC721Received exists).
+error DirectTransferNotAccepted();
 error WithdrawFailed();
 error NothingToWithdraw();
 error ZeroAddress();
@@ -164,6 +177,24 @@ abstract contract MarketplaceCore is Initializable, TransientReentrancyGuard, ER
     function __MarketplaceCore_init() internal onlyInitializing {
         __ERC1155Holder_init();
         __UUPSUpgradeable_init();
+    }
+
+    // ── ERC-1155 receiver: refuse direct sends (v3.7) ────────────────────────
+    // ERC1155HolderUpgradeable stays in the inheritance list ONLY for its
+    // storage gap (150 slots, live on every proxy) and ERC-165 answers; the
+    // cores never hold tokens, so an accepted safeTransferFrom would be an
+    // irreversible user-error sink (a wallet "send to the marketplace
+    // address" is a plausible mistake). Overriding the hooks adds no storage.
+    function onERC1155Received(address, address, uint256, uint256, bytes memory)
+        public pure override returns (bytes4)
+    {
+        revert DirectTransferNotAccepted();
+    }
+
+    function onERC1155BatchReceived(address, address, uint256[] memory, uint256[] memory, bytes memory)
+        public pure override returns (bytes4)
+    {
+        revert DirectTransferNotAccepted();
     }
 
     // ═══════════════════════════════════════════════════════════════════════

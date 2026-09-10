@@ -198,3 +198,87 @@ func TestWelcomeIsFirstMessage(t *testing.T) {
 		t.Fatalf("first message type = %q, want ack (welcome must precede events)", env.Type)
 	}
 }
+
+// drainConn empties a connection's send channel (live pushes from the
+// dispatcher) so a test can assert on exactly what a later action produced.
+func drainConn(conn *Connection) {
+	for {
+		select {
+		case <-conn.send:
+		default:
+			return
+		}
+	}
+}
+
+// collectUntilReplayComplete reads replayed frames until the replay_complete
+// ack (or timeout) and returns the event types seen.
+func collectUntilReplayComplete(t *testing.T, conn *Connection) []string {
+	t.Helper()
+	var types []string
+	deadline := time.After(2 * time.Second)
+	for {
+		select {
+		case raw := <-conn.send:
+			var m Message
+			if err := json.Unmarshal(raw, &m); err != nil {
+				t.Fatalf("bad frame: %v", err)
+			}
+			if m.Type == MsgReplayComplete {
+				return types
+			}
+			types = append(types, string(m.Type))
+		case <-deadline:
+			t.Fatal("no replay_complete within 2s")
+		}
+	}
+}
+
+// TestHandleRetryFiltersPrivateNotifications: replay must apply the same
+// per-recipient gate as the live dispatcher (v3.7 CSO finding). An anonymous
+// socket gets public events only; the recipient gets its notification.
+func TestHandleRetryFiltersPrivateNotifications(t *testing.T) {
+	h, bc := newDispatchHandler(t)
+	anon := registerConn(h, "anon", "")
+	owner := registerConn(h, "owner", "0xABCDEF0000000000000000000000000000000001")
+	other := registerConn(h, "other", "0xABCDEF0000000000000000000000000000000002")
+
+	bc.Publish(sse.Event{Type: "notification", Data: &sse.NotificationEvent{
+		User: "0xabcdef0000000000000000000000000000000001", UserAddr: "0xabcdef0000000000000000000000000000000001",
+		Kind: "sold", Title: "Sold", Body: "1 C2FLR",
+	}})
+	bc.Publish(sse.Event{Type: "listing-updated", Data: map[string]any{"collection": "0x1", "token_id": "1"}})
+	time.Sleep(50 * time.Millisecond) // let the live dispatcher fan out
+	drainConn(anon)
+	drainConn(owner)
+	drainConn(other)
+
+	h.handleRetry(anon, json.RawMessage(`{"from_seq":1}`))
+	for _, ty := range collectUntilReplayComplete(t, anon) {
+		if ty == "notification" {
+			t.Fatal("anonymous replay leaked a notification")
+		}
+	}
+
+	h.handleRetry(other, json.RawMessage(`{"from_seq":1}`))
+	for _, ty := range collectUntilReplayComplete(t, other) {
+		if ty == "notification" {
+			t.Fatal("replay leaked another user's notification")
+		}
+	}
+
+	h.handleRetry(owner, json.RawMessage(`{"from_seq":1}`))
+	got := collectUntilReplayComplete(t, owner)
+	sawNotif, sawPublic := false, false
+	for _, ty := range got {
+		if ty == "notification" {
+			sawNotif = true
+		}
+		if ty == "listing-updated" {
+			sawPublic = true
+		}
+	}
+	if !sawNotif || !sawPublic {
+		t.Fatalf("recipient replay missing frames: %v", got)
+	}
+}

@@ -56,6 +56,16 @@ def main() -> int:
         if arg0.lower() != impl.lower():
             print(f"proxy {proxy_tx['contractAddress']} wraps {arg0}, expected {impl}", file=sys.stderr)
             return 1
+    # Every CREATE must have a successful receipt: a reverted broadcast still
+    # writes run-latest.json, and recording its addresses would point the app
+    # at contracts that do not exist.
+    bad = [r.get("transactionHash") for r in b["receipts"] if str(r.get("status", "0x1")).lower() not in ("0x1", "1", "true")]
+    if bad:
+        print(f"broadcast has {len(bad)} failed receipt(s): {bad}", file=sys.stderr)
+        return 1
+    if len(b["receipts"]) < len(creates):
+        print(f"broadcast has {len(b['receipts'])} receipts for {len(creates)} CREATEs — incomplete broadcast", file=sys.stderr)
+        return 1
     blocks = sorted(int(r["blockNumber"], 16) for r in b["receipts"])
     first_block = blocks[0]
 
