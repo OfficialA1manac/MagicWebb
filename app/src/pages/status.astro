@@ -293,7 +293,9 @@ import WalletConnect from '../components/WalletConnect';
   .tile .v { display: block; font-family: 'JetBrains Mono', ui-monospace, monospace; font-size: 1.125rem; font-weight: 700; color: var(--text); font-variant-numeric: tabular-nums; }
   .tile .sub { display: block; font-size: 0.75rem; color: var(--white-60); margin-top: 0.25rem; }
   .lead { color: var(--white-60); margin: -0.5rem 0 1rem; font-size: 0.9375rem; }
-  .tile .v a { color: var(--link-strong); text-decoration: none; }
+  /* :global — tile values and table rows are filled by the script below, so
+     scoped selectors never matched them (links rendered in the default colour). */
+  .tile .v :global(a) { color: var(--link-strong); text-decoration: none; display: inline-flex; align-items: center; min-height: 40px; margin: -10px 0; }
 
   .bar-row { display: grid; grid-template-columns: 10rem 1fr auto; gap: 0.875rem; align-items: center; margin-bottom: 0.625rem; font-size: 0.8125rem; }
   .bar-label { color: var(--white-80); }
@@ -303,12 +305,12 @@ import WalletConnect from '../components/WalletConnect';
 
   .tablewrap { overflow-x: auto; border: 1px solid var(--white-10); border-radius: 0.875rem; }
   table { width: 100%; min-width: 40rem; border-collapse: collapse; font-size: 0.8125rem; }
-  th, td { text-align: left; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--white-10); }
-  th { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); background: var(--white-10); }
-  tbody tr:last-child td { border-bottom: none; }
-  .mono { font-family: 'JetBrains Mono', ui-monospace, monospace; }
-  .mono a { color: var(--link-strong); }
-  .muted { color: var(--text-3); }
+  :global(th), :global(td) { text-align: left; padding: 0.625rem 0.875rem; border-bottom: 1px solid var(--white-10); }
+  :global(th) { font-size: 0.75rem; letter-spacing: 0.1em; text-transform: uppercase; color: var(--text-3); background: var(--white-10); }
+  :global(tbody tr:last-child td) { border-bottom: none; }
+  :global(.mono) { font-family: 'JetBrains Mono', ui-monospace, monospace; }
+  :global(.mono a), :global(a.mono) { color: var(--link-strong); display: inline-flex; align-items: center; min-height: 40px; }
+  :global(.muted) { color: var(--text-3); }
 
   @media (max-width: 640px) { .bar-row { grid-template-columns: 1fr; gap: 0.25rem; } }
 </style>

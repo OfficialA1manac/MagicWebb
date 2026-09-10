@@ -396,7 +396,7 @@
   .lf-dim { color: var(--text-3); font-size: var(--fs-small); margin: 0; }
   .lf-chips { display: flex; flex-wrap: wrap; gap: var(--sp-2); margin-bottom: var(--sp-3); }
   .lf-chip { display: inline-flex; align-items: center; gap: 6px; padding: 6px 12px; border-radius: var(--r-pill); background: var(--sky-12); border: 1px solid var(--sky-35); color: var(--ink); font-size: var(--fs-small); font-weight: 700; }
-  .lf-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 28px; height: 28px; margin: -6px -8px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
+  .lf-chip-x { display: inline-flex; align-items: center; justify-content: center; width: 36px; height: 36px; margin: -6px -10px -6px 0; border: 0; border-radius: var(--r-pill); background: transparent; color: inherit; cursor: pointer; }
   .lf-chip-x:hover { background: var(--white-10); }
   .lf-chip-toggle { background: var(--white-10); border-color: var(--line-strong); color: var(--text-2); cursor: pointer; font-family: inherit; min-height: 36px; }
   @media (max-width: 640px) { .lf-chip-toggle { min-height: var(--hit); } }

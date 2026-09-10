@@ -155,6 +155,40 @@ test('mobile: bottom tab bar visible, padded main, no horizontal scroll', async 
     () => document.documentElement.scrollWidth - document.documentElement.clientWidth,
   );
   expect(overflow).toBeLessThanOrEqual(1);
+
+  // v3.7 mobile pass: the header fits the viewport (the menu button used to
+  // be cut off on 360-wide phones) and the badge hint is anchored to its card,
+  // not to the section corner.
+  const menuBox = await page.locator('#mobile-menu-btn').boundingBox();
+  const vw = page.viewportSize()!.width;
+  expect(menuBox!.x + menuBox!.width).toBeLessThanOrEqual(vw);
+  const hintBox = await page.locator('.card-hint').first().boundingBox();
+  const cardBox = await page.locator('.nft-card').first().boundingBox();
+  expect(hintBox!.x).toBeGreaterThanOrEqual(cardBox!.x);
+  expect(hintBox!.y).toBeGreaterThanOrEqual(cardBox!.y);
+});
+
+test('mobile: script-injected network menu items carry the layout styles', async ({ page }) => {
+  // The layout's <style> is Astro-scoped; the switcher builds its items with
+  // createElement, so the rules must be :global() or the menu renders as
+  // bare text lines (regression seen in the v3.7 phone audit).
+  mobileOnly();
+  await mockApi(page);
+  await page.goto('/');
+  await page.locator('#net-switcher-btn').click();
+  const item = page.locator('#net-switcher-menu .net-item').first();
+  await expect(item).toBeVisible();
+  const box = await item.boundingBox();
+  expect(box!.height).toBeGreaterThanOrEqual(44);
+  const capSize = await page.locator('#net-switcher-menu .net-cap').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(capSize).toBeGreaterThanOrEqual(12);
+  const smallSize = await page.locator('#net-switcher-menu small').first().evaluate((el) => parseFloat(getComputedStyle(el).fontSize));
+  expect(smallSize).toBeGreaterThanOrEqual(12);
+  // The notification dropdown spans the header on phones instead of the bell.
+  await page.keyboard.press('Escape');
+  await page.locator('#notif-bell-btn').click();
+  const dd = await page.locator('#notif-dropdown').boundingBox();
+  expect(dd!.width).toBeGreaterThan(page.viewportSize()!.width * 0.8);
 });
 
 // ── 7. Assertion sweeps ────────────────────────────────────────────────────
@@ -167,13 +201,14 @@ const AXE_PAGES = [...TOUCH_PAGES, '/auctions', '/status', '/docs/start-here', '
 // KNOWN DEBT (predates this suite; fixing is a design-pass task, not a test
 // task — remove entries as the CSS is fixed so regressions elsewhere still
 // fail the gate):
-//  - .nav-brand: 28px wide on <=480px viewports (logo text hidden, icon only).
+//  - (.nav-brand was 28px wide on <=480px viewports — fixed in the v3.7
+//    mobile pass: min-width 44px, so it is now swept like everything else.)
 //  - .nft-card internals: 9-11px text (standard-badge, price-symbol,
 //    collection-addr, supply-text, buy-btn) and low-contrast captions.
 //  - .vb badge pill: 11px label at size sm; axe flags .vb.is-authentic
 //    (gold on dark) as serious contrast.
 //  - .hs-more / .lf-pill: low-contrast caption links/pills.
-const TARGET_SIZE_EXEMPT = '.nav-brand';
+const TARGET_SIZE_EXEMPT = '[data-target-size-exempt]'; // nothing exempt today; keep the hook
 const FONT_SWEEP_EXEMPT = '[data-font-sweep-exempt]';
 const AXE_EXEMPT = [] as const;
 

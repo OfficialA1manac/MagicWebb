@@ -41,7 +41,11 @@
 </fieldset>
 
 <style>
-  .dp { border: 0; padding: 0; margin: 0; }
+  /* min-width: 0 — a fieldset defaults to min-inline-size: min-content, which
+     stops the scrolling option row from ever shrinking below its full width
+     (on a 390px token page the offer panel grew to 714px and the options past
+     "1 hour" were unreachable). */
+  .dp { border: 0; padding: 0; margin: 0; min-width: 0; }
   legend { font-size: 12px; color: var(--white-60); font-weight: 600; margin-bottom: 6px; }
   .dp-row { display: grid; grid-template-columns: repeat(auto-fill, minmax(72px, 1fr)); gap: 6px; }
   .dp-opt { min-height: var(--hit); padding: 0 8px; border-radius: 10px; background: var(--white-10); color: var(--text); border: 1px solid var(--white-10); font-family: inherit; font-size: 12px; font-weight: 600; cursor: pointer; white-space: nowrap; transition: background-color var(--dur-fast) var(--ease), border-color var(--dur-fast) var(--ease); }

@@ -715,6 +715,13 @@
   .pp-carry { margin: 0; color: var(--text-3); font-size: var(--fs-caption); font-style: italic; }
   .pp-balance { margin: 0; color: var(--text-2); font-size: var(--fs-small); }
   .pp-actions { display: flex; align-items: center; gap: var(--sp-2); }
+  /* Phones: the action buttons drop under the name/bio instead of squeezing
+     them into a ~140px column beside the avatar. */
+  @media (max-width: 640px) {
+    .pp-actions { flex: 1 1 100%; }
+    .pp-actions > * { flex: 1 1 auto; }
+    .pp-explorer { white-space: nowrap; }
+  }
   .pp-stale { margin: 0 0 var(--sp-3); color: var(--text-3); font-size: var(--fs-caption); }
 
   /* Tabs — scroll-snap row with fade edges on mobile (spec). */

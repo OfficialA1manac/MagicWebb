@@ -170,6 +170,8 @@ main { position: relative; z-index: 1; }
 :root[data-mw-banner="mismatch"] #mw-devbanner, :root[data-mw-banner="mismatch"] #ro-banner { display: none !important; }
 .mw-devbanner { background: var(--gold-12); color: #fde68a; border-bottom-color: var(--gold-35); }
 .mw-devbanner a { color: #fde68a; }
+/* Banner links are thumb targets (were 32px tall). */
+.mw-devbanner a, #ro-banner a { display: inline-flex; align-items: center; min-height: 40px; }
 #ro-banner { background: var(--sky-12); border-bottom-color: var(--sky-35); }
 /* Light: amber-900 on the gold tint clears 4.5:1 (var(--gold) did not once the tint was defined for light). */
 @media (prefers-color-scheme: light) { :root:not([data-theme="dark"]) .mw-devbanner, :root:not([data-theme="dark"]) .mw-devbanner a { color: #78350f; } }
@@ -220,7 +222,7 @@ main { position: relative; z-index: 1; }
 .wc-trigger .wc-addr { color: var(--text); }
 .wc-dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--green); box-shadow: 0 0 0 3px var(--green-12); flex: 0 0 auto; }
 .wc-dot.is-warn { background: var(--amber); box-shadow: 0 0 0 3px var(--amber-12); }
-.wc-forget { width: 36px; height: 36px; color: var(--text-3); font-size: 14px; }
+.wc-forget { width: var(--hit); height: var(--hit); color: var(--text-3); font-size: 14px; }
 .wc-forget:hover { color: var(--red); }
 .wc-menu { position: absolute; top: calc(100% + 6px); right: 0; z-index: var(--z-modal); min-width: 12rem; padding: var(--sp-1); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-card); box-shadow: var(--shadow); display: flex; flex-direction: column; }
 .wc-item { display: flex; align-items: center; width: 100%; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); background: transparent; border: 0; color: var(--text-2); font: inherit; font-size: 14px; font-weight: 600; text-align: left; cursor: pointer; text-decoration: none; }
@@ -232,7 +234,25 @@ main { position: relative; z-index: 1; }
 .wc-connect-group { display: inline-flex; align-items: center; gap: var(--sp-1); }
 .wc-nowallet { min-height: var(--hit); font-weight: 600; color: var(--text-3); white-space: nowrap; }
 .wc-nowallet:hover { color: var(--text); }
-@media (max-width: 480px) { .wc-connect-full { display: none; } .wc-addr { font-size: 12px; } .wc-nowallet { display: none; } }
+@media (max-width: 480px) {
+  .wc-connect-full { display: none; } .wc-addr { font-size: 12px; } .wc-nowallet { display: none; }
+  /* Reconnect state ([● Reconnect] [addr] [✕]) does not fit a phone header:
+     the address wrapped one character per line off the right edge. The
+     address is one tap away (Reconnect, or the drawer's wallet section). */
+  .wc-pill:not(.wc-connected) .wc-addr { display: none; }
+  .wc-pill:not(.wc-connected) .btn-sm { padding: 0 10px; }
+  .wc-forget { width: 36px; }
+}
+/* ≤400px (360-wide phones) — global on purpose: the wallet control is a React
+   island and the network pill's chevron is set:html, so BaseLayout's scoped
+   <style> cannot reach them. */
+@media (max-width: 400px) {
+  .wc-connect { padding: 0 var(--sp-3); }
+  .net-btn > svg { display: none; } /* chevron: the pill is obviously a menu at this size */
+  /* Saved-wallet state: [● Reconnect] only. Forgetting a wallet at this
+     width = Reconnect → Disconnect (the same end state). */
+  .wc-pill:not(.wc-connected) .wc-forget { display: none; }
+}
 @media (min-width: 481px) { .wc-connect-short { display: none; } }
 
 /* ── Notification bell sign-in button (injected by BaseLayout script) ───── */

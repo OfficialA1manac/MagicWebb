@@ -97,31 +97,45 @@ const TABS = [
       @media (max-width: 480px) {
         header.topnav { padding: 0 var(--sp-3); }
         .nav-logo-text { display: none; }
+        .nav-brand { min-width: var(--hit); justify-content: center; }
+      }
+      /* ≤400px (360-wide phones): net pill + theme + bell + Connect + menu
+         did not fit — the logo and the menu button were cut off. The theme
+         toggle lives in the drawer at this width; everything else tightens. */
+      @media (max-width: 400px) {
+        header.topnav { padding: 0 var(--sp-2); gap: var(--sp-1); }
+        .nav-right { gap: 0; }
+        #theme-toggle { display: none; }
+        .net-btn { padding: 0 6px; gap: 6px; }
+        /* The chevron (set:html) and the wallet island (React) carry no scope
+           attribute — their ≤400px rules live in styles/base.css. */
       }
 
       /* Network pill + menu */
       .net-switcher { position: relative; }
       .net-btn { display: inline-flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-pill); background: transparent; border: 1px solid var(--line); color: var(--text-2); font-size: 13px; font-weight: 600; transition: color var(--dur-fast) var(--ease), background-color var(--dur-fast) var(--ease); }
       .net-btn:hover, .net-btn[aria-expanded="true"] { color: var(--text); background: rgba(255,255,255,0.06); }
-      .net-dot { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--text-3); flex-shrink: 0; }
-      .net-dot.is-live { background: var(--green); box-shadow: 0 0 0 3px var(--green-12); }
+      :global(.net-dot) { width: 8px; height: 8px; border-radius: var(--r-pill); background: var(--text-3); flex-shrink: 0; }
+      :global(.net-dot.is-live) { background: var(--green); box-shadow: 0 0 0 3px var(--green-12); }
       .net-kind { color: var(--text-3); font-weight: 500; }
       @media (max-width: 480px) { .net-kind, .net-sep { display: none; } .net-btn { padding: 0 var(--sp-2); } }
       .net-menu { display: none; position: absolute; top: calc(100% + 6px); right: 0; min-width: 16rem; padding: var(--sp-1); background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-card); z-index: var(--z-modal); box-shadow: var(--shadow); }
       .net-menu.open { display: block; }
-      .net-item { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 14px; font-weight: 600; color: var(--text-2); background: transparent; border: 0; text-align: left; cursor: pointer; font-family: inherit; }
-      .net-item:hover, .net-item:focus-visible { color: var(--text); background: rgba(255,255,255,0.06); }
-      .net-item[aria-checked="true"] { color: var(--text); cursor: default; }
-      .net-item[aria-checked="true"]:hover { background: transparent; }
-      .net-item .net-dot { margin-right: 2px; }
-      .net-item .net-check { margin-left: auto; color: var(--sky); display: inline-flex; }
-      .net-item small { color: var(--text-3); font-weight: 500; }
-      .net-item .net-label { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: var(--sp-2) 0; }
-      .net-item .net-cap { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-3); font-weight: 500; white-space: normal; }
-      .net-item[aria-disabled="true"] { cursor: not-allowed; opacity: .7; }
+      /* :global — the menu items are built by the switcher script below, so Astro's scoped selectors would never match them. */
+      :global(.net-item) { display: flex; align-items: center; gap: var(--sp-2); width: 100%; min-height: var(--hit); padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 14px; font-weight: 600; color: var(--text-2); background: transparent; border: 0; text-align: left; cursor: pointer; font-family: inherit; }
+      :global(.net-item:hover), :global(.net-item:focus-visible) { color: var(--text); background: rgba(255,255,255,0.06); }
+      :global(.net-item[aria-checked="true"]) { color: var(--text); cursor: default; }
+      :global(.net-item[aria-checked="true"]:hover) { background: transparent; }
+      :global(.net-item .net-dot) { margin-right: 2px; }
+      :global(.net-item .net-check) { margin-left: auto; color: var(--sky); display: inline-flex; }
+      :global(.net-item small) { color: var(--text-3); font-weight: 500; font-size: 12px; }
+      :global(.net-item .net-label) { display: flex; flex-direction: column; gap: 1px; min-width: 0; padding: var(--sp-2) 0; }
+      :global(.net-item .net-cap) { font-size: var(--fs-caption); line-height: var(--lh-caption); color: var(--text-3); font-weight: 500; white-space: normal; }
+      :global(.net-item[aria-disabled="true"]) { cursor: not-allowed; opacity: .7; }
 
       /* Bell */
       .notif-btn { position: relative; }
+      #notif-bell-container { position: relative; } /* was an inline style, which beat the ≤640px `static` below and pinned the dropdown to the 44px bell */
       .notif-badge { position: absolute; top: 6px; right: 6px; min-width: 16px; height: 16px; padding: 0 4px; border-radius: var(--r-pill); background: var(--gold); color: var(--text-on-accent); font-size: 10px; font-weight: 800; display: inline-flex; align-items: center; justify-content: center; }
       .notif-dropdown { display: none; position: absolute; top: calc(100% + 6px); right: 0; width: 22rem; max-width: 90vw; background: var(--surface-2); border: 1px solid var(--line-strong); border-radius: var(--r-card); overflow: hidden; z-index: var(--z-modal); box-shadow: var(--shadow); }
       .notif-dropdown.open { display: block; }
@@ -132,11 +146,12 @@ const TABS = [
       }
       .notif-header { padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; }
       .notif-list { max-height: 20rem; overflow-y: auto; }
-      .notif-list a { display: block; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
-      .notif-list a:hover { background: rgba(255,255,255,0.04); }
-      .notif-title { font-size: 14px; font-weight: 600; color: var(--text); }
-      .notif-body { font-size: 13px; color: var(--text-2); margin-top: 2px; }
-      .notif-empty { padding: var(--sp-8) var(--sp-4); text-align: center; color: var(--text-2); font-size: 14px; }
+      /* :global — the list is filled by the bell script. */
+      .notif-list :global(a) { display: block; padding: var(--sp-3) var(--sp-4); border-bottom: 1px solid var(--line); }
+      .notif-list :global(a:hover) { background: rgba(255,255,255,0.04); }
+      :global(.notif-title) { font-size: 14px; font-weight: 600; color: var(--text); }
+      :global(.notif-body) { font-size: 13px; color: var(--text-2); margin-top: 2px; }
+      :global(.notif-empty) { padding: var(--sp-8) var(--sp-4); text-align: center; color: var(--text-2); font-size: 14px; }
 
       /* Hamburger + drawer */
       .hamburger { display: inline-flex; }
@@ -145,8 +160,12 @@ const TABS = [
       .mobile-menu.open { display: flex; }
       .mobile-menu-head { display: flex; align-items: center; justify-content: space-between; min-height: var(--hit); margin-bottom: var(--sp-2); }
       .mobile-menu-title { font-size: 17px; font-weight: 600; color: var(--text); }
-      .mobile-menu a.mm-link { display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 16px; font-weight: 600; color: var(--text-2); }
-      .mobile-menu a.mm-link:hover, .mobile-menu a.mm-link.active { color: var(--text); background: rgba(255,255,255,0.06); }
+      .mobile-menu .mm-link { display: flex; align-items: center; gap: var(--sp-3); min-height: 48px; padding: 0 var(--sp-3); border-radius: var(--r-control); font-size: 16px; font-weight: 600; color: var(--text-2); }
+      .mobile-menu .mm-link:hover, .mobile-menu .mm-link.active { color: var(--text); background: rgba(255,255,255,0.06); }
+      .mobile-menu button.mm-link { width: 100%; background: transparent; border: 0; font-family: inherit; cursor: pointer; text-align: left; }
+      .mobile-menu button.mm-link:hover { color: var(--text); background: rgba(255,255,255,0.06); }
+      .mm-theme { display: none; }
+      @media (max-width: 400px) { .mm-theme { display: flex; } }
       .mobile-wallet-section { margin-top: var(--sp-4); padding-top: var(--sp-4); border-top: 1px solid var(--line); display: flex; flex-direction: column; gap: var(--sp-2); }
       .mobile-section-label { font-size: 12px; font-weight: 600; color: var(--text-3); text-transform: uppercase; letter-spacing: 0.04em; padding: 0 var(--sp-3); }
       .mobile-wallet-info { display: flex; align-items: center; gap: var(--sp-2); min-height: var(--hit); padding: 0 var(--sp-3); color: var(--text-2); font-size: 14px; }
@@ -206,10 +225,10 @@ const TABS = [
           <div id="net-switcher-menu" class="net-menu" role="menu" aria-labelledby="net-switcher-btn"></div>
         </div>
         <button type="button" id="theme-toggle" class="icon-btn" aria-label="Theme: System" title="Theme: System (tap to change)">
-          <svg id="theme-icon-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
-          <svg id="theme-icon-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
+          <svg id="theme-icon-sun" class="ti-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg>
+          <svg id="theme-icon-moon" class="ti-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg>
         </button>
-        <div id="notif-bell-container" style="position:relative;">
+        <div id="notif-bell-container">
           <button id="notif-bell-btn" class="icon-btn notif-btn" aria-label="Notifications" aria-haspopup="true" aria-expanded="false">
             <Fragment set:html={iconSvg('bell', 20)} />
             <span id="notif-badge" class="notif-badge" hidden>0</span>
@@ -239,6 +258,7 @@ const TABS = [
       ))}
       <a href="/profile" class={`mm-link ${isActive('/profile') ? 'active' : ''}`}><Fragment set:html={iconSvg('user')} />Profile</a>
       <a href="/metrics" class={`mm-link ${isActive('/metrics') ? 'active' : ''}`}><Fragment set:html={iconSvg('chart')} />Metrics</a>
+      <button type="button" class="mm-link mm-theme" data-theme-toggle aria-label="Theme: System" title="Theme: System (tap to change)"><svg class="ti-sun" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.93 4.93l1.41 1.41M17.66 17.66l1.41 1.41M2 12h2M20 12h2M4.93 19.07l1.41-1.41M17.66 6.34l1.41-1.41"/></svg><svg class="ti-moon" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true" hidden><path d="M21 12.79A9 9 0 1 1 11.21 3 7 7 0 0 0 21 12.79z"/></svg><span class="mm-theme-label">Theme: System</span></button>
       <div class="mobile-wallet-section">
         <div class="mobile-section-label">Wallet</div>
         <div id="mobile-wallet-disconnected" hidden>
@@ -446,20 +466,23 @@ const TABS = [
       // localStorage and sets [data-theme], which tokens.css honours over the OS
       // scheme in both directions. Also lives in the mobile drawer via the same id.
       (function(){
-        const btn=document.getElementById('theme-toggle'); if(!btn) return;
-        const sun=document.getElementById('theme-icon-sun'), moon=document.getElementById('theme-icon-moon');
+        const btns=Array.from(document.querySelectorAll('#theme-toggle,[data-theme-toggle]')) as HTMLElement[]; if(!btns.length) return;
         const order=['system','light','dark'] as const;
         function current(){ try{ const t=localStorage.getItem('mw-theme'); return t==='light'||t==='dark'?t:'system'; }catch(_){ return 'system'; } }
         function apply(t: string){
           if(t==='light'||t==='dark'){ document.documentElement.dataset.theme=t; } else { delete document.documentElement.dataset.theme; }
           try{ if(t==='system') localStorage.removeItem('mw-theme'); else localStorage.setItem('mw-theme',t); }catch(_){}
           const label='Theme: '+t.charAt(0).toUpperCase()+t.slice(1);
-          btn.setAttribute('aria-label',label); btn.setAttribute('title',label+' (tap to change)');
           const dark = t==='dark' || (t==='system' && window.matchMedia('(prefers-color-scheme: dark)').matches);
-          if(sun&&moon){ (sun as HTMLElement).hidden=!dark; (moon as HTMLElement).hidden=dark; }
+          btns.forEach(function(b){
+            b.setAttribute('aria-label',label); b.setAttribute('title',label+' (tap to change)');
+            const l=b.querySelector('.mm-theme-label'); if(l) l.textContent=label;
+            b.querySelectorAll('.ti-sun').forEach(function(s){ (s as HTMLElement).hidden=!dark; });
+            b.querySelectorAll('.ti-moon').forEach(function(m){ (m as HTMLElement).hidden=dark; });
+          });
         }
         apply(current());
-        btn.addEventListener('click',function(){ const i=order.indexOf(current() as any); apply(order[(i+1)%order.length]); });
+        btns.forEach(function(b){ b.addEventListener('click',function(){ const i=order.indexOf(current() as any); apply(order[(i+1)%order.length]); }); });
       })();
     </script>
   </body>

@@ -284,6 +284,9 @@ const current = Astro.url.pathname.replace(/\/+$/, '').split('/').pop();
     border: 1px solid var(--white-10); border-radius: 0.75rem; overflow-x: auto;
   }
   .doc-body :global(.mermaid-diagram svg) { display: block; max-width: 100%; height: auto; margin: 0 auto; }
+  /* Phones: a sequence diagram shrunk to 330px is unreadable and its labels
+     spill past the shrunken svg; keep a readable width and let the figure scroll. */
+  @media (max-width: 640px) { .doc-body :global(.mermaid-diagram svg) { min-width: 560px; } }
   .doc-body :global(table) { width: 100%; border-collapse: collapse; margin: 0 0 1.25rem; font-size: 0.9375rem; display: block; overflow-x: auto; }
   .doc-body :global(th), .doc-body :global(td) {
     text-align: left; padding: 0.5rem 0.75rem;

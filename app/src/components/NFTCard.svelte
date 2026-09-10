@@ -112,6 +112,11 @@
   }
 </script>
 
+<!-- One grid cell per card: the wrapper is the containing block for the
+     absolutely-positioned badge hint. Without it the hint (a sibling of the
+     anchor) became its own grid item and, being position:absolute, landed at
+     the top-left corner of the whole section on the home/listings grids. -->
+<div class="nft-card-wrap">
 <a
   href="/token/{item.collection}/{item.token_id}"
   class="nft-card tilt-card"
@@ -177,8 +182,10 @@
   <!-- Tap-able explanation lives OUTSIDE the anchor (no nested interactive element). -->
   <span class="card-hint"><Hint text={holderIsCreator ? `${check.tip} Held and minted by the collection's creator.` : check.tip} label="About this NFT's badges" align="start" /></span>
 {/if}
+</div>
 
 <style>
+  .nft-card-wrap { position: relative; min-width: 0; }
   .nft-card {
     display: block;
     background: var(--surface);

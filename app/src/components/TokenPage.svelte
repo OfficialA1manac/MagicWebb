@@ -798,6 +798,16 @@
   .tp-list { list-style: none; margin: 0; padding: 0; display: flex; flex-direction: column; gap: 6px; }
   .tp-list li { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; padding: 10px 12px; border-radius: 12px; background: var(--surface); border: 1px solid var(--line); font-size: 13px; min-height: 44px; }
   .tp-dim { color: var(--text-3); }
+  /* The explorer arrow in each activity row was a 10×22 target; give it the
+     full 44px hit box inside the row's existing padding, pinned right. */
+  .tp-list li a.tp-dim { display: inline-flex; align-items: center; justify-content: center; min-width: var(--hit); min-height: var(--hit); margin: -10px -12px -10px auto; border-radius: var(--r-control); }
+  .tp-list li a.tp-dim:hover { color: var(--text); background: var(--white-10); }
+  @media (pointer: coarse) {
+    /* Inline metadata links (collection, creator, addresses) keep their text
+       size but get a thumb-sized invisible hit area. */
+    .tp-coll a, .tp-meta a { position: relative; }
+    .tp-coll a::after, .tp-meta a::after { content: ''; position: absolute; inset: -10px -4px; }
+  }
   .tp-tag { font-size: 12px; font-weight: 800; text-transform: uppercase; letter-spacing: .06em; color: var(--violet); background: var(--violet-12); padding: 3px 7px; border-radius: 6px; }
   .tp-traits { display: flex; flex-wrap: wrap; gap: 6px; }
   .tp-trait { padding: 4px 10px; border-radius: 999px; background: var(--violet-12); border: 1px solid var(--violet-35); font-size: 12px; color: var(--violet); }

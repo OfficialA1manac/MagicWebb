@@ -211,7 +211,7 @@
 <style>
   .sp-h1 { font-size: var(--fs-h1); line-height: var(--lh-h1); font-weight: 800; letter-spacing: -0.02em; margin: 0 0 var(--sp-4); }
   .sp-inrow { display: flex; gap: var(--sp-2); margin-bottom: var(--sp-4); }
-  .sp-input { flex: 1; min-height: 48px; padding: 0 var(--sp-4); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; }
+  .sp-input { flex: 1; min-width: 0; min-height: 48px; padding: 0 var(--sp-4); border-radius: var(--r-control); background: var(--white-10); border: 1px solid var(--line-strong); color: var(--text); font-size: 16px; font-family: inherit; }
   .sp-helper { color: var(--text-3); font-size: var(--fs-small); margin: 0 0 var(--sp-4); }
   .sp-heading { color: var(--text-2); font-size: var(--fs-small); margin: 0 0 var(--sp-4); }
   .sp-heading, .sp-helper { line-height: var(--lh-small); }
