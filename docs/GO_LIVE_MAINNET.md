@@ -26,7 +26,29 @@ changed in place) until the owner orders `renounceAdmin()` — see `UPGRADE_RUNB
 Deployer (the only key that pays for the deploy): **`0x14080c66253dfc5042ad5226c7d8730f8bc69f91`**
 — balance 0 on both networks today.
 
-## Owner steps (per network, Songbird first)
+## One-command path (2026-09-10)
+
+The owner's only action is **one transfer per network to the deployer
+`0x14080c66253dfc5042ad5226c7d8730f8bc69f91`: 62 SGB on Songbird, 62 FLR on
+Flare** (12 for the 8-CREATE deploy at ~650 gwei with headroom + 50 that the
+script forwards to that network's keeper). Then:
+
+```bash
+tools/go-live.sh songbird          # preflight → DeployV34 → record → check → fund keeper → commit → push (= deploy)
+tools/go-live.sh flare
+tools/go-live.sh songbird --dry-run   # simulate only; safe before funding
+```
+
+Defaults the script uses (override with env vars): admin =
+`0x987f10f49b35a8ef48b664a8dc457f61c6fe2105` (the same offline wallet that
+is the Coston2 admin, so one wallet holds instant-upgrade rights on all three
+networks until you order `renounceAdmin()`), fee recipient =
+`0x78993B71051de91C2D2595BC3475F07748927dc0`, keeper = the per-network
+wallet in the table above, deployer key = the repo-root `.env` (gitignored,
+never printed). To use a Safe as admin instead, deploy it first (step 1
+below) and pass `ADMIN_ADDR=<safe>`.
+
+## Manual steps (the same procedure by hand; per network, Songbird first)
 
 **0. Fund** (base fee 500 gwei, priority 150 gwei, deploy = 8 CREATEs ≈ 13M gas —
 v3.7 adds the manager's own impl + proxy so every contract is upgradeable):
