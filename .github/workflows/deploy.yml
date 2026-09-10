@@ -325,6 +325,8 @@ jobs:
           curl -fsSL -o /tmp/flyctl.tgz "https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz"
           echo "${FLYCTL_SHA256}  /tmp/flyctl.tgz" | sha256sum -c -
           mkdir -p "$HOME/.fly/bin" && tar -xzf /tmp/flyctl.tgz -C "$HOME/.fly/bin" flyctl
+          # The vendor installer also created the `fly` alias the deploy steps use.
+          ln -sf "$HOME/.fly/bin/flyctl" "$HOME/.fly/bin/fly"
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
           chmod +x "$HOME/.fly/bin/"* 2>/dev/null || true
           if ! "$HOME/.fly/bin/flyctl" version; then
@@ -450,6 +452,8 @@ jobs:
           curl -fsSL -o /tmp/flyctl.tgz "https://github.com/superfly/flyctl/releases/download/v${FLYCTL_VERSION}/flyctl_${FLYCTL_VERSION}_Linux_x86_64.tar.gz"
           echo "${FLYCTL_SHA256}  /tmp/flyctl.tgz" | sha256sum -c -
           mkdir -p "$HOME/.fly/bin" && tar -xzf /tmp/flyctl.tgz -C "$HOME/.fly/bin" flyctl
+          # The vendor installer also created the `fly` alias the deploy steps use.
+          ln -sf "$HOME/.fly/bin/flyctl" "$HOME/.fly/bin/fly"
           echo "$HOME/.fly/bin" >> "$GITHUB_PATH"
           chmod +x "$HOME/.fly/bin/"* 2>/dev/null || true
           if ! "$HOME/.fly/bin/flyctl" version; then
