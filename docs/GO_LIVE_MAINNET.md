@@ -29,9 +29,11 @@ Deployer (the only key that pays for the deploy): **`0x14080c66253dfc5042ad5226c
 ## One-command path (2026-09-10)
 
 The owner's only action is **one transfer per network to the deployer
-`0x14080c66253dfc5042ad5226c7d8730f8bc69f91`: 62 SGB on Songbird, 62 FLR on
-Flare** (12 for the 8-CREATE deploy at ~650 gwei with headroom + 50 that the
-script forwards to that network's keeper). Then:
+`0x14080c66253dfc5042ad5226c7d8730f8bc69f91`: 72 SGB on Songbird** (22 for the
+8-CREATE deploy — measured 19.46 FLR on Flare on 2026-09-11 at a 500 gwei base
+fee — + 50 that the script forwards to that network's keeper). Flare went live
+on 2026-09-11 (block 69547144) from a 63 FLR top-up: 19.46 deploy, 40 to the
+keeper, the remainder returned to the funding wallet. Then:
 
 ```bash
 tools/go-live.sh songbird          # preflight → DeployV34 → record → check → fund keeper → commit → push (= deploy)

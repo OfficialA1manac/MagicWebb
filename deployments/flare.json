@@ -3,25 +3,34 @@
   "network": "flare",
   "script": "contracts/script/DeployV34.s.sol",
   "chainId": 14,
-  "status": "read-only",
-  "deployedAt": null,
-  "indexFromBlock": null,
+  "status": "deployed",
+  "deployedAt": "2026-09-11",
+  "indexFromBlock": 69547144,
   "contracts": {
-    "marketplace": null,
-    "auctionHouse": null,
-    "offerBook": null,
-    "marketplaceManager": null,
+    "marketplace": "0xa85a798a5cfe104ff6409e649ec4937ed6b947dc",
+    "auctionHouse": "0xcb1d58454a1adda5257b34b5b492bf6859f09250",
+    "offerBook": "0x1c3d20f2ee3e61f7c0e433ada4c39f3e7aef8b78",
+    "marketplaceManager": "0x71be8838d2952e02015f594506eeee23b7ec90cc",
     "nft": null
   },
   "trackedCollections": [],
   "rpc": {
     "primary": "https://flare-api.flare.network/ext/C/rpc",
-    "fallbacks": ["https://rpc.ankr.com/flare", "https://flare.rpc.thirdweb.com"]
+    "fallbacks": [
+      "https://rpc.ankr.com/flare",
+      "https://flare.rpc.thirdweb.com"
+    ]
   },
   "explorer": "https://flare-explorer.flare.network",
   "app": {
     "flyApp": "magicwebb-flare",
     "origin": "https://magicwebb-flare.fly.dev"
   },
-  "note": "Deploy with contracts/script/DeployV34.s.sol (unsealed: PRIVATE_KEY, ADMIN_ADDR, FEE_RECIPIENT_ADDR, KEEPER_ADDR; SEAL unset). Owner directive 2026-09-02: every network deploys admin-held and INSTANTLY upgradeable; immutability is a later explicit renounceAdmin() per network. Filling these addresses + setting FLARE_ENABLED=true in CI is the entire enable procedure."
+  "impls": {
+    "marketplace": "0x9095cc8415c2e3d2958bf6a78f71a9f5b8e4c0f4",
+    "auctionHouse": "0x7ec48f6847b3a45384e40c136e178b075db032d9",
+    "offerBook": "0xa82a0fc2486644cf458439dbb373ece32202dd3b",
+    "marketplaceManager": "0x2f67fdbe1f8e44f85846925d88c3f605e7bf96b2",
+    "upgradedAt": "2026-09-11"
+  }
 }

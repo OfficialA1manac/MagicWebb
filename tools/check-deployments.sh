@@ -18,7 +18,10 @@ for(const f of files){
     if(!d.app||!d.app.flyApp||!d.app.origin) throw new Error(f+": read-only requires app.flyApp and app.origin");
   }
   for(const [k,v] of Object.entries(d.contracts)){
-    if(d.status==="deployed" && !/^0x[0-9a-fA-F]{40}$/.test(v||"")) throw new Error(f+": "+k+" missing");
+    // nft is the optional seed collection (testnet only); mainnets launch with
+    // nft: null and an empty trackedCollections (v3.6 decision, deploy.yml agrees).
+    if(d.status==="deployed" && k!=="nft" && !/^0x[0-9a-fA-F]{40}$/.test(v||"")) throw new Error(f+": "+k+" missing");
+    if(d.status==="deployed" && k==="nft" && v!==null && !/^0x[0-9a-fA-F]{40}$/.test(v)) throw new Error(f+": nft must be null or an address");
     if(d.status!=="deployed" && v!==null) throw new Error(f+": "+k+" must be null when status is "+d.status);
     if(v) known.add(v.toLowerCase());
   }
